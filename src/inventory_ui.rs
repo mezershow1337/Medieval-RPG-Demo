@@ -295,12 +295,18 @@ fn rebuild_ui(
             panel(root).with_children(|p| {
                 p.spawn(text(&fonts, "Сумка", 22.0, TITLE, true));
                 grid(p, &res, Owner::Me, inv, held_uid);
-                let gold: u32 = inv.all_items().filter(|i| i.info().shape == crate::items::ItemShape::Coins).map(|i| i.count as u32).sum();
-                let value: u32 = inv.all_items().map(Item::value).sum();
-                p.spawn(text(&fonts, format!("Золото: {gold}    Стоимость вещей: {value}"), 15.0, Color::srgb(0.9, 0.75, 0.35), false));
+                let purse = crate::economy::purse(inv);
+                let value: u32 = inv.all_items().filter(|i| crate::economy::coin_value(i.base).is_none()).map(Item::value).sum();
                 p.spawn(text(
                     &fonts,
-                    "ЛКМ — взять/положить, мимо окна — выбросить\nПКМ или Shift+ЛКМ — быстро переложить или надеть\nF — использовать (бинт, зелье), Q — выбросить, Tab — закрыть",
+                    format!("Кошель: {}\nВещи примерно на {}", crate::economy::format_money(purse), crate::economy::format_money(value)),
+                    15.0,
+                    Color::srgb(0.9, 0.75, 0.35),
+                    false,
+                ));
+                p.spawn(text(
+                    &fonts,
+                    "ЛКМ — взять/положить, мимо окна — выбросить\nПКМ или Shift+ЛКМ — быстро переложить или надеть\nF — использовать (бинт, зелье) или читать книгу, Q — выбросить, Tab — закрыть\nK — окно знаний",
                     13.0,
                     DIM,
                     false,
@@ -563,7 +569,14 @@ fn handle_input(
         return;
     }
     // F — использовать (бинт, зелье). Также ПКМ по расходнику в своей сумке, если тело не открыто.
-    let consumable = owner == Owner::Me && owner_inv(&state, owner).and_then(|i| i.find(uid)).is_some_and(|(_, it)| it.base.consumable().is_some());
+    let mine = if owner == Owner::Me { owner_inv(&state, owner).and_then(|i| i.find(uid)).map(|(_, it)| it.clone()) } else { None };
+    let lore_usable = mine.as_ref().is_some_and(|it| crate::lore_client::usable(it.base));
+    let consumable = mine.as_ref().is_some_and(|it| it.base.consumable().is_some());
+    if lore_usable && (keys.just_pressed(KeyCode::KeyF) || (state.container.is_none() && mouse.just_pressed(MouseButton::Right))) {
+        // Книги и свитки: читать.
+        crate::lore_client::try_use(client, mine.as_ref().unwrap());
+        return;
+    }
     if keys.just_pressed(KeyCode::KeyF) || (consumable && state.container.is_none() && mouse.just_pressed(MouseButton::Right)) {
         if consumable {
             send(client, &LootClientMessage::Use { uid });
@@ -671,6 +684,7 @@ fn update_tooltip(
     held: Res<Held>,
     fonts: Res<UiFonts>,
     icons: Res<crate::icons::ItemIcons>,
+    knowledge: Option<Res<crate::lore_client::MyKnowledge>>,
     hits: Query<(&Interaction, &Hit)>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut tooltip: Single<(Entity, &mut Node, &mut BorderColor), With<Tooltip>>,
@@ -698,7 +712,8 @@ fn update_tooltip(
         node.top = px(y);
     }
     node.display = Display::Flex;
-    if tooltip_for.0 == Some((owner, item.uid)) {
+    // Знания меняют имя и описание (опознали траву, выучили грамоту).
+    if tooltip_for.0 == Some((owner, item.uid)) && !knowledge.as_ref().is_some_and(|k| k.is_changed()) {
         return;
     }
     tooltip_for.0 = Some((owner, item.uid));
@@ -708,7 +723,13 @@ fn update_tooltip(
         let (w, h) = item.size();
         let scale = 40.0 / (w.max(h) as f32 / 2.0).max(1.0);
         t.spawn((ImageNode::new(icons.get(item.base)), Node { width: px(w as f32 * scale), height: px(h as f32 * scale), align_self: AlignSelf::Center, ..default() }));
-        t.spawn(text(&fonts, item.display_name(), 18.0, quality_color(item.quality), true));
+        let name = knowledge.as_ref().map(|k| k.item_name(&item)).unwrap_or_else(|| item.display_name());
+        t.spawn(text(&fonts, name, 18.0, quality_color(item.quality), true));
+        if let Some(k) = knowledge.as_ref() {
+            for line in k.0.describe(item.base) {
+                t.spawn(text(&fonts, line, 13.0, Color::srgb(0.85, 0.8, 0.68), false));
+            }
+        }
         if let Some(c) = item.base.consumable() {
             let how = if c.heal_over > 0.0 { format!("за {:.0} с после применения", c.heal_over) } else { "во время применения".to_string() };
             t.spawn(text(&fonts, format!("Лечит {:.0} здоровья {how}", c.heal), 14.0, Color::srgb(0.5, 0.9, 0.5), false));
@@ -733,7 +754,7 @@ fn update_tooltip(
         for (s, v) in &item.affixes {
             t.spawn(text(&fonts, format!("{} {}", s.format(*v), s.name()), 14.0, Color::srgb(0.55, 0.75, 1.0), false));
         }
-        t.spawn(text(&fonts, format!("Размер {}×{}   Цена {}", info.size.0, info.size.1, item.value()), 12.0, DIM, false));
+        t.spawn(text(&fonts, format!("Размер {}×{}   Цена ≈ {}", info.size.0, info.size.1, crate::economy::format_money(item.value())), 12.0, DIM, false));
         // Сравнение с надетым.
         if let (Some(slot), Some(me)) = (info.slot, state.inventory.as_ref())
             && let Some(worn) = me.equipped(slot).filter(|w| w.uid != item.uid)

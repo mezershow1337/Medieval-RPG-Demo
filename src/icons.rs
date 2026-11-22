@@ -6,51 +6,37 @@
 //! * `assets/models/items/<ключ>.glb` — та же модель с запечёнными текстурами,
 //!   уже в позе «лежит на земле» (низ на y = 0).
 //!
-//! Как добавить предмет: описать модель в `build_items.py`, запустить скрипт с её ключом
-//! и вписать пару «название из items.rs → ключ» в [`ITEM_ART`]. Предмет без записи
-//! показывается как холщовый мешочек ([`FALLBACK_ART`]).
+//! Как добавить предмет: описать модель в `build_items.py` (с названием из items.rs) и запустить
+//! скрипт с её ключом — он сам допишет пару «название → ключ» в `icons/art.rs` ([`ITEM_ART`]). Пока у предмета нет модели,
+//! в инвентаре он рисуется временной плоской иконкой (`flat.rs`), а на земле — холщовым мешочком
+//! ([`FALLBACK_ART`]).
 
 use crate::items::{ITEM_BASES, ItemBaseId};
 use bevy::prelude::*;
+
+/// Временные плоские иконки для предметов без 3D-модели.
+mod flat;
 
 /// Пикселей на клетку инвентаря в файлах иконок (в игре клетка меньше — запас под 4K).
 #[allow(dead_code)] // используется в тестах и пригодится интерфейсу
 pub const ICON_PX_PER_CELL: u32 = 128;
 
-/// Ключ модели для каждого вида предмета (название — как в `ITEM_BASES`).
-pub const ITEM_ART: &[(&str, &str)] = &[
-    ("Спата", "spatha"),
-    ("Кавалерийская спата", "cavalry_spatha"),
-    ("Булава", "mace"),
-    ("Боевой топор", "axe"),
-    ("Пехотное копьё", "spear"),
-    ("Кинжал", "dagger"),
-    ("Овальный щит", "shield_oval"),
-    ("Круглый щит", "shield_round"),
-    ("Спангенхельм", "spangenhelm"),
-    ("Гребенчатый шлем", "ridge_helmet"),
-    ("Стёганая туника", "padded_tunic"),
-    ("Кольчуга", "mail_shirt"),
-    ("Ламеллярный панцирь", "lamellar"),
-    ("Ламеллярные наручи", "vambraces"),
-    ("Кожаные перчатки", "gloves"),
-    ("Железные поножи", "greaves"),
-    ("Кожаные сапоги", "boots"),
-    ("Серебряный перстень", "signet_ring"),
-    ("Нательный крест", "pectoral_cross"),
-    ("Золотые монеты", "coins"),
-    ("Бинт", "bandage"),
-    ("Целебное зелье", "flask"),
-    ("Рубин", "ruby"),
-];
+/// Название из `ITEM_BASES` -> ключ модели (файл создаёт `build_items.py`).
+mod art;
+pub use art::ITEM_ART;
 
 /// Модель для предметов, у которых своей пока нет.
 pub const FALLBACK_ART: &str = "sack";
 
 /// Ключ 3D-модели предмета.
 pub fn art_key(base: ItemBaseId) -> &'static str {
+    own_art(base).unwrap_or(FALLBACK_ART)
+}
+
+/// Своя 3D-модель предмета, если она уже есть.
+pub fn own_art(base: ItemBaseId) -> Option<&'static str> {
     let name = base.base().name;
-    ITEM_ART.iter().find(|(n, _)| *n == name).map(|(_, k)| *k).unwrap_or(FALLBACK_ART)
+    ITEM_ART.iter().find(|(n, _)| *n == name).map(|(_, k)| *k)
 }
 
 pub fn icon_path(key: &str) -> String {
@@ -81,9 +67,16 @@ impl ItemModels {
     }
 }
 
-pub fn setup_icons(mut commands: Commands, assets: Res<AssetServer>) {
-    let ids = || (0..ITEM_BASES.len()).map(|i| art_key(ItemBaseId(i as u16)));
-    let icons = ids().map(|k| assets.load(icon_path(k))).collect();
+pub fn setup_icons(mut commands: Commands, assets: Res<AssetServer>, mut images: ResMut<Assets<Image>>) {
+    let icons = (0..ITEM_BASES.len())
+        .map(|i| {
+            let base = ItemBaseId(i as u16);
+            match own_art(base) {
+                Some(key) => assets.load(icon_path(key)),
+                None => images.add(flat::image(base)),
+            }
+        })
+        .collect();
     commands.insert_resource(ItemIcons(icons));
 }
 
@@ -114,11 +107,19 @@ mod tests {
     }
 
     #[test]
-    fn every_item_has_own_art() {
+    fn items_without_art_still_have_icons() {
         // Новые предметы без модели получают мешочек, но список здесь подскажет, что её нет.
-        let missing: Vec<_> = ITEM_BASES.iter().enumerate().filter(|(i, _)| art_key(ItemBaseId(*i as u16)) == FALLBACK_ART).map(|(_, b)| b.name).collect();
+        let missing: Vec<_> = ITEM_BASES.iter().enumerate().filter(|(i, _)| own_art(ItemBaseId(*i as u16)).is_none()).map(|(_, b)| b.name).collect();
         if !missing.is_empty() {
-            eprintln!("Предметы без своей 3D-модели (показываются мешочком): {missing:?}");
+            eprintln!("Предметы без своей 3D-модели (временная плоская иконка): {missing:?}");
+        }
+        // Плоская иконка у них должна рисоваться.
+        for i in 0..ITEM_BASES.len() {
+            let base = ItemBaseId(i as u16);
+            if own_art(base).is_none() {
+                let (w, h, data) = flat::render_icon(base);
+                assert!(w > 0 && h > 0 && data.chunks(4).any(|p| p[3] > 128), "пустая иконка «{}»", base.base().name);
+            }
         }
     }
 

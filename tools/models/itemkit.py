@@ -687,6 +687,60 @@ def liquid_mat(name, color, rough=0.05):
     return m
 
 
+def common_materials():
+    """Общие материалы: железо, бронза, золото, дерево, кожа, лён, бечёвка…"""
+    metal_mat("iron", (150, 150, 152), (92, 90, 88), rough=(0.32, 0.55), rust=0.35, dirt=0.7)
+    metal_mat("iron_dark", (110, 108, 106), (60, 58, 56), rough=(0.4, 0.62), rust=0.45, dirt=0.8)
+    metal_mat("blade_steel", (196, 198, 200), (140, 142, 146), rough=(0.18, 0.34), scratches=0.8, rust=0.12, dirt=0.4, polish_dir="Z")
+    metal_mat("bronze", (196, 146, 82), (130, 90, 46), rough=(0.3, 0.5), dirt=0.8, tarnish=((60, 92, 70), 0.7))
+    metal_mat("gilt", (235, 186, 96), (175, 125, 52), rough=(0.18, 0.32), dirt=0.6, scratches=0.3)
+    metal_mat("gold", (250, 200, 110), (200, 150, 70), rough=(0.14, 0.26), dirt=0.5, scratches=0.3)
+    metal_mat("silver", (222, 222, 226), (170, 168, 170), rough=(0.18, 0.34), dirt=0.6, tarnish=((40, 36, 34), 0.8))
+    organic_mat("wood", (118, 90, 62), (66, 48, 32), rough=(0.6, 0.85), grain="Z", grain_scale=4.0, dirt=0.7, wear=0.35, wear_color=(150, 120, 88))
+    organic_mat("wood_dark", (92, 60, 36), (52, 32, 18), rough=(0.45, 0.7), grain="Z", dirt=0.6, wear=0.5)
+    organic_mat("leather", (104, 70, 44), (58, 38, 22), rough=(0.5, 0.75), bump=0.35, cells=260.0, dirt=0.6, wear=0.6, wear_color=(150, 105, 70))
+    organic_mat("leather_dark", (72, 46, 28), (38, 24, 14), rough=(0.45, 0.7), bump=0.35, cells=260.0, dirt=0.6, wear=0.6, wear_color=(110, 76, 50))
+    organic_mat("rawhide", (196, 168, 120), (150, 120, 78), rough=(0.5, 0.7), bump=0.2, dirt=0.5)
+    organic_mat("bone", (226, 212, 184), (176, 158, 124), rough=(0.4, 0.6), bump=0.15, bump_scale=40.0, dirt=0.7, grain="Z", grain_scale=1.0)
+    cloth_mat("linen", (214, 200, 170), (176, 160, 128))
+    cloth_mat("linen_white", (232, 226, 210), (196, 186, 164), dirt=0.3)
+    cloth_mat("wool_red", (140, 36, 30), (96, 22, 20))
+    organic_mat("cord", (150, 120, 80), (100, 76, 48), rough=(0.7, 0.9), grain="Z", grain_scale=8.0, dirt=0.3)
+    gem_mat("garnet", (150, 12, 24))
+
+
+
+# =========================================================================== реестр предметов
+
+ITEMS = {}
+
+
+def item(key, cells, name=None, pose="flat", azimuth=18.0, elevation=12.0, margin=0.9, roll=0.0, squash=1.0):
+    """Регистрирует модель предмета. name — название из ITEM_BASES (None — служебная модель);
+    squash — насколько сплющить модель на земле (одежда лежит плоско)."""
+
+    def deco(fn):
+        ITEMS[key] = dict(fn=fn, cells=cells, name=name, pose=pose, azimuth=azimuth, elevation=elevation, margin=margin, roll=roll, squash=squash)
+        return fn
+
+    return deco
+
+
+def write_art_table():
+    """src/icons/art.rs: название предмета -> ключ модели (только для готовых файлов)."""
+    rows = []
+    for key, spec in ITEMS.items():
+        if not spec["name"]:
+            continue
+        if os.path.exists(os.path.join(OUT_ICONS, key + ".png")) and os.path.exists(os.path.join(OUT_MODELS, key + ".glb")):
+            rows.append(f'    ("{spec["name"]}", "{key}"),')
+    path = os.path.join(ROOT, "src", "icons", "art.rs")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("//! Создаётся tools/models/build_items.py — руками не править.\n\n")
+        f.write("/// Название предмета (как в `ITEM_BASES`) -> ключ 3D-модели и иконки.\n")
+        f.write("pub const ITEM_ART: &[(&str, &str)] = &[\n" + "\n".join(rows) + "\n];\n")
+
+
 # =========================================================================== студия и иконка
 
 
@@ -800,7 +854,7 @@ def _socket_source(nt, sock):
     return None
 
 
-def bake_and_export(key, pose, bake_size=BAKE_SIZE):
+def bake_and_export(key, pose, bake_size=BAKE_SIZE, squash=1.0):
     """Сливает непрозрачные детали в один меш, запекает цвет/шероховатость/металл/нормали
     в текстуры и сохраняет assets/models/items/<key>.glb в позе на земле."""
     scene = bpy.context.scene
@@ -937,6 +991,10 @@ def bake_and_export(key, pose, bake_size=BAKE_SIZE):
     if pose == "flat":
         for o in allobj:
             o.data.transform(Matrix.Rotation(math.radians(-90), 4, "X"))
+    if squash != 1.0:
+        lo = min(v.co.z for o in allobj for v in o.data.vertices)
+        for o in allobj:
+            o.data.transform(Matrix.Translation((0, 0, lo)) @ Matrix.Diagonal((1, 1, squash, 1)) @ Matrix.Translation((0, 0, -lo)))
     pts = [v.co for o in allobj for v in o.data.vertices]
     minz = min(p.z for p in pts)
     cx = (min(p.x for p in pts) + max(p.x for p in pts)) / 2

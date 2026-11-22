@@ -9,9 +9,10 @@
     python3 tools/models/build_items.py              # все предметы
     python3 tools/models/build_items.py spatha coins # только эти
 
-Как добавить предмет: написать функцию с декоратором @item(ключ, (ширина, высота), поза),
-запустить скрипт с этим ключом и вписать ключ в таблицу ITEM_ART в src/item_art.rs.
-Размер в клетках должен совпадать с размером предмета в src/items.rs.
+Как добавить предмет: написать функцию с декоратором
+@item(ключ, (ширина, высота), name="Название из items.rs", pose=...) и запустить скрипт с этим ключом.
+Скрипт сам обновит таблицу src/icons/art.rs (название -> ключ) для всех готовых моделей.
+Размер в клетках должен совпадать с размером предмета в src/items.rs (это проверяет cargo test).
 """
 import math
 import os
@@ -22,39 +23,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import itemkit as K  # noqa: E402
 from itemkit import Vector  # noqa: E402
 
-ITEMS = {}
-
-
-def item(key, cells, pose="flat", azimuth=18.0, elevation=12.0, margin=0.9, roll=0.0):
-    def deco(fn):
-        ITEMS[key] = dict(fn=fn, cells=cells, pose=pose, azimuth=azimuth, elevation=elevation, margin=margin, roll=roll)
-        return fn
-
-    return deco
+from itemkit import ITEMS, item  # noqa: E402
 
 
 # =========================================================================== общие материалы
 
 
 def mats_common():
-    K.metal_mat("iron", (150, 150, 152), (92, 90, 88), rough=(0.32, 0.55), rust=0.35, dirt=0.7)
-    K.metal_mat("iron_dark", (110, 108, 106), (60, 58, 56), rough=(0.4, 0.62), rust=0.45, dirt=0.8)
-    K.metal_mat("blade_steel", (196, 198, 200), (140, 142, 146), rough=(0.18, 0.34), scratches=0.8, rust=0.12, dirt=0.4, polish_dir="Z")
-    K.metal_mat("bronze", (196, 146, 82), (130, 90, 46), rough=(0.3, 0.5), dirt=0.8, tarnish=((60, 92, 70), 0.7))
-    K.metal_mat("gilt", (235, 186, 96), (175, 125, 52), rough=(0.18, 0.32), dirt=0.6, scratches=0.3)
-    K.metal_mat("gold", (250, 200, 110), (200, 150, 70), rough=(0.14, 0.26), dirt=0.5, scratches=0.3)
-    K.metal_mat("silver", (222, 222, 226), (170, 168, 170), rough=(0.18, 0.34), dirt=0.6, tarnish=((40, 36, 34), 0.8))
-    K.organic_mat("wood", (118, 90, 62), (66, 48, 32), rough=(0.6, 0.85), grain="Z", grain_scale=4.0, dirt=0.7, wear=0.35, wear_color=(150, 120, 88))
-    K.organic_mat("wood_dark", (92, 60, 36), (52, 32, 18), rough=(0.45, 0.7), grain="Z", dirt=0.6, wear=0.5)
-    K.organic_mat("leather", (104, 70, 44), (58, 38, 22), rough=(0.5, 0.75), bump=0.35, cells=260.0, dirt=0.6, wear=0.6, wear_color=(150, 105, 70))
-    K.organic_mat("leather_dark", (72, 46, 28), (38, 24, 14), rough=(0.45, 0.7), bump=0.35, cells=260.0, dirt=0.6, wear=0.6, wear_color=(110, 76, 50))
-    K.organic_mat("rawhide", (196, 168, 120), (150, 120, 78), rough=(0.5, 0.7), bump=0.2, dirt=0.5)
-    K.organic_mat("bone", (226, 212, 184), (176, 158, 124), rough=(0.4, 0.6), bump=0.15, bump_scale=40.0, dirt=0.7, grain="Z", grain_scale=1.0)
-    K.cloth_mat("linen", (214, 200, 170), (176, 160, 128))
-    K.cloth_mat("linen_white", (232, 226, 210), (196, 186, 164), dirt=0.3)
-    K.cloth_mat("wool_red", (140, 36, 30), (96, 22, 20))
-    K.organic_mat("cord", (150, 120, 80), (100, 76, 48), rough=(0.7, 0.9), grain="Z", grain_scale=8.0, dirt=0.3)
-    K.gem_mat("garnet", (150, 12, 24))
+    K.common_materials()
 
 
 # =========================================================================== детали
@@ -94,7 +70,7 @@ def spatha_blade(length, w0, w1, name="blade", mat="blade_steel", fuller_w=0.42)
 # =========================================================================== оружие
 
 
-@item("spatha", (1, 3), azimuth=24, elevation=10, margin=0.94)
+@item("spatha", (1, 3), name="Спата", azimuth=24, elevation=10, margin=0.94)
 def spatha():
     """Спата: прямой обоюдоострый меч ~90 см, маленькая гарда, костяная рукоять."""
     mats_common()
@@ -111,7 +87,7 @@ def spatha():
 
 
 
-@item("cavalry_spatha", (1, 4), azimuth=24, elevation=10, margin=0.94)
+@item("cavalry_spatha", (1, 4), name="Кавалерийская спата", azimuth=24, elevation=10, margin=0.94)
 def cavalry_spatha():
     """Длинная кавалерийская спата с золочёной гардой и гранатовыми вставками
     (как мечи из керченских погребений V–VI вв.)."""
@@ -141,7 +117,7 @@ def cavalry_spatha():
     K.mesh_obj("gem", cab, "garnet", subsurf=1)
 
 
-@item("dagger", (1, 2), azimuth=24, elevation=10, margin=0.92)
+@item("dagger", (1, 2), name="Кинжал", azimuth=24, elevation=10, margin=0.92)
 def dagger():
     """Боевой нож-кинжал: листовидный клинок, железная гарда, костяная рукоять."""
     mats_common()
@@ -156,7 +132,7 @@ def dagger():
     K.mesh_obj("pommel", K.lathe([(-0.118, 0.0001), (-0.115, 0.014, 0.01), (-0.106, 0.018, 0.012), (-0.1, 0.012, 0.009), (-0.098, 0.0001)], 20), "iron", subsurf=1)
 
 
-@item("mace", (1, 2), azimuth=25, elevation=12, margin=0.92)
+@item("mace", (1, 2), name="Булава", azimuth=25, elevation=12, margin=0.92)
 def mace():
     """Булава степного образца: железное навершие с шипами-шишками на древке."""
     mats_common()
@@ -189,7 +165,7 @@ def mace():
     K.mesh_obj("collar", K.lathe([(0.455, 0.019), (0.47, 0.023), (0.475, 0.019)], 16), "iron", bevel=0.001)
 
 
-@item("axe", (2, 3), azimuth=20, elevation=10, margin=0.92)
+@item("axe", (2, 3), name="Боевой топор", azimuth=20, elevation=10, margin=0.92)
 def axe():
     """Боевой топор-«бородовик» на прямом ясеневом топорище."""
     mats_common()
@@ -222,7 +198,7 @@ def axe():
     K.mesh_obj("butt", K.lathe([(-0.005, 0.0001), (0.0, 0.019, 0.014), (0.012, 0.018, 0.013)], 16), "iron", bevel=0.001)
 
 
-@item("spear", (1, 5), azimuth=22, elevation=10, margin=0.95)
+@item("spear", (1, 5), name="Пехотное копьё", azimuth=22, elevation=10, margin=0.95)
 def spear():
     """Пехотное копьё (контарион): листовидный наконечник с ребром, ясеневое древко, подток."""
     mats_common()
@@ -302,7 +278,7 @@ def shield(rx, rz, dome, paint, umbo_r):
         K.mesh_obj("rivet", rv, "bronze", subsurf=1)
 
 
-@item("shield_oval", (2, 3), azimuth=20, elevation=10, margin=0.93)
+@item("shield_oval", (2, 3), name="Овальный щит", azimuth=20, elevation=10, margin=0.93)
 def shield_oval():
     """Большой овальный щит (скутум позднего Рима): доски, сыромятный обод, умбон, роспись."""
     mats_common()
@@ -310,7 +286,7 @@ def shield_oval():
     shield(0.33, 0.48, 0.045, "paint_oval", 0.075)
 
 
-@item("shield_round", (2, 2), azimuth=20, elevation=10, margin=0.93)
+@item("shield_round", (2, 2), name="Круглый щит", azimuth=20, elevation=10, margin=0.93)
 def shield_round():
     """Круглый щит с расписными секторами."""
     mats_common()
@@ -341,7 +317,7 @@ def bowl_point(rings, a):
     return out
 
 
-@item("spangenhelm", (2, 2), pose="upright", azimuth=28, elevation=14, margin=0.9)
+@item("spangenhelm", (2, 2), name="Спангенхельм", pose="upright", azimuth=28, elevation=14, margin=0.9)
 def spangenhelm():
     """Спангенхельм: купол из шести железных пластин на золочёных бронзовых полосах,
     налобный обруч, нащёчники на петлях, кольчужная бармица сзади."""
@@ -388,7 +364,7 @@ def spangenhelm():
     K.mesh_obj("aventail", aw, "mail", solidify=0.004, smooth_angle=80)
 
 
-@item("ridge_helmet", (2, 2), pose="upright", azimuth=28, elevation=14, margin=0.9)
+@item("ridge_helmet", (2, 2), name="Гребенчатый шлем", pose="upright", azimuth=28, elevation=14, margin=0.9)
 def ridge_helmet():
     """Гребенчатый шлем: две половины купола на продольном гребне, нащёчники, назатыльник."""
     mats_common()
@@ -481,7 +457,7 @@ def garment(name, mat, z0, z1, sleeve_len, sleeve_r, flare=0.0, quilt=0, wrinkle
         K.mesh_obj(name + "_sleeve", sl, mat, solidify=solid, smooth_angle=80)
 
 
-@item("padded_tunic", (2, 3), azimuth=16, elevation=6, margin=0.92)
+@item("padded_tunic", (2, 3), squash=0.22, name="Стёганая туника", azimuth=16, elevation=6, margin=0.92)
 def padded_tunic():
     """Стёганая туника из льна с войлочной набивкой: вертикальные и поперечные строчки."""
     mats_common()
@@ -490,7 +466,7 @@ def padded_tunic():
     K.mesh_obj("collar", K.torus((0, 0, 0.66), 0.075, 0.012, ry=0.065), "linen")
 
 
-@item("mail_shirt", (2, 3), azimuth=16, elevation=6, margin=0.92)
+@item("mail_shirt", (2, 3), squash=0.22, name="Кольчуга", azimuth=16, elevation=6, margin=0.92)
 def mail_shirt():
     """Кольчуга (лорика хамата) с короткими рукавами до середины бедра."""
     mats_common()
@@ -500,7 +476,7 @@ def mail_shirt():
     K.mesh_obj("hem", K.torus((0, 0, -0.08), 0.2, 0.004, ry=0.14), "bronze")
 
 
-@item("lamellar", (2, 3), azimuth=16, elevation=6, margin=0.92)
+@item("lamellar", (2, 3), squash=0.35, name="Ламеллярный панцирь", azimuth=16, elevation=6, margin=0.92)
 def lamellar():
     """Ламеллярный панцирь (клибанион): ряды железных пластинок на кожаном шнуре,
     кожаные птеруги снизу и на плечах."""
@@ -577,7 +553,7 @@ def lamellar():
             K.mesh_obj("ptshoulder", b, "leather", bevel=0.0012)
 
 
-@item("vambraces", (2, 2), pose="flat", azimuth=20, elevation=10, margin=0.9)
+@item("vambraces", (2, 2), name="Ламеллярные наручи", pose="flat", azimuth=20, elevation=10, margin=0.9)
 def vambraces():
     """Пара ламеллярных наручей: железные шины на кожаной основе с ремнями."""
     mats_common()
@@ -645,7 +621,7 @@ def hand(mat, side):
     return bm, cuff
 
 
-@item("gloves", (2, 2), azimuth=12, elevation=8, margin=0.9)
+@item("gloves", (2, 2), name="Кожаные перчатки", azimuth=12, elevation=8, margin=0.9)
 def gloves():
     """Пара кожаных перчаток с раструбами."""
     mats_common()
@@ -658,7 +634,7 @@ def gloves():
         K.mesh_obj("cuff", cuff, "leather_dark", solidify=0.003, smooth_angle=80)
 
 
-@item("greaves", (2, 3), azimuth=18, elevation=8, margin=0.92)
+@item("greaves", (2, 3), name="Железные поножи", azimuth=18, elevation=8, margin=0.92)
 def greaves():
     """Пара железных поножей по форме голени с ремнями на икрах."""
     mats_common()
@@ -684,7 +660,7 @@ def greaves():
             K.mesh_obj("strap", st, "leather", solidify=0.003)
 
 
-@item("boots", (2, 2), pose="upright", azimuth=30, elevation=14, margin=0.9)
+@item("boots", (2, 2), name="Кожаные сапоги", pose="upright", azimuth=30, elevation=14, margin=0.9)
 def boots():
     """Пара кожаных сапог до середины икры с завязками (цангии)."""
     mats_common()
@@ -717,7 +693,7 @@ def boots():
 # =========================================================================== украшения и мелочь
 
 
-@item("signet_ring", (1, 1), azimuth=28, elevation=22, margin=0.82)
+@item("signet_ring", (1, 1), name="Серебряный перстень", azimuth=28, elevation=22, margin=0.82)
 def signet_ring():
     """Серебряный перстень-печатка со вставкой сердолика."""
     mats_common()
@@ -729,7 +705,7 @@ def signet_ring():
     K.mesh_obj("stone", g, "carnelian", subsurf=1)
 
 
-@item("pectoral_cross", (1, 1), azimuth=18, elevation=12, margin=0.88)
+@item("pectoral_cross", (1, 1), name="Нательный крест", azimuth=18, elevation=12, margin=0.88)
 def pectoral_cross():
     """Нательный золотой крест с расширяющимися концами и гранатом в средокрестии, на шнурке."""
     mats_common()
@@ -753,7 +729,7 @@ def pectoral_cross():
     K.mesh_obj("cord", K.loft(path, [0.0011] * len(path), 8, up=(0, 1, 0), closed=True), "leather_dark")
 
 
-@item("coins", (1, 1), pose="upright", azimuth=24, elevation=32, margin=0.88)
+@item("coins", (1, 1), name="Солид", pose="upright", azimuth=24, elevation=32, margin=0.88)
 def coins():
     """Горстка золотых солидов (диаметр ~21 мм)."""
     mats_common()
@@ -781,7 +757,7 @@ def coins():
     coin(-0.012, 0.012, 0.004, 25, -10, 20)
 
 
-@item("bandage", (1, 1), pose="upright", azimuth=24, elevation=28, margin=0.88)
+@item("bandage", (1, 1), name="Бинт", pose="upright", azimuth=24, elevation=28, margin=0.88)
 def bandage():
     """Скатка льняного бинта с размотанным концом."""
     mats_common()
@@ -808,7 +784,7 @@ def bandage():
     K.mesh_obj("band", K.torus((0, -0.0205, 0.021), 0.0148, 0.0011, plane="YZ", ry=0.0228, tube_ry=0.0045), "bandage_linen")
 
 
-@item("flask", (1, 2), pose="upright", azimuth=20, elevation=10, margin=0.9)
+@item("flask", (1, 2), name="Целебное зелье", pose="upright", azimuth=20, elevation=10, margin=0.9)
 def flask():
     """Стеклянный флакон с лекарством: шаровидное тело, длинное горло, пробка под воском."""
     mats_common()
@@ -828,7 +804,7 @@ def flask():
     K.mesh_obj("tie2", K.torus((0, 0, 0.142), 0.0116, 0.0013), "cord")
 
 
-@item("ruby", (1, 1), pose="upright", azimuth=24, elevation=30, margin=0.8)
+@item("ruby", (1, 1), name="Рубин", pose="upright", azimuth=24, elevation=30, margin=0.8)
 def ruby():
     """Полированный рубин-кабошон (огранки в VI веке ещё не знали)."""
     mats_common()
@@ -843,7 +819,7 @@ def ruby():
     K.mesh_obj("ruby", g, "ruby", subsurf=1, smooth_angle=89)
 
 
-@item("sack", (1, 1), pose="upright", azimuth=24, elevation=16, margin=0.88)
+@item("sack", (1, 1), name=None, pose="upright", azimuth=24, elevation=16, margin=0.88)
 def sack():
     """Холщовый мешочек на шнурке — запасная модель для предметов без своей."""
     mats_common()
@@ -857,6 +833,9 @@ def sack():
 # =========================================================================== запуск
 
 
+import items_goods  # noqa: E402,F401  (товары, травы, посуда, книги, снадобья)
+
+
 def build(key):
     spec = ITEMS[key]
     K.reset_scene()
@@ -865,7 +844,7 @@ def build(key):
     K.setup_studio()
     K.icon_camera(K.PARTS, spec["cells"], spec["azimuth"], spec["elevation"], spec["margin"], spec["roll"])
     K.render_icon(os.path.join(K.OUT_ICONS, key + ".png"))
-    K.bake_and_export(key, spec["pose"])
+    K.bake_and_export(key, spec["pose"], squash=spec["squash"])
     print(f"[items] {key}: готово")
 
 
@@ -876,6 +855,7 @@ def main():
         if k not in ITEMS:
             raise SystemExit(f"нет предмета {k}; есть: {', '.join(ITEMS)}")
         build(k)
+    K.write_art_table()
 
 
 if __name__ == "__main__":

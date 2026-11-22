@@ -17,6 +17,14 @@ pub struct FightSet;
 #[derive(Component)]
 pub struct LocalFighter {
     pub fighter: Fighter,
+    /// Множитель скорости ходьбы от экипировки (присылает сервер).
+    pub move_mult: f32,
+}
+
+impl LocalFighter {
+    pub fn new(fighter: Fighter) -> Self {
+        Self { fighter, move_mult: 1.0 }
+    }
 }
 
 /// Меч в руках (вид от первого лица).
@@ -81,7 +89,8 @@ impl Plugin for FightPlugin {
                 )
                     .chain()
                     .in_set(FightSet),
-            );
+            )
+            .add_systems(Update, refresh_view_weapon);
     }
 }
 
@@ -91,8 +100,23 @@ const VIEW_SHOULDER: Vec3 = Vec3::new(0.24, -0.3, 0.12);
 const VIEW_LIFT: f32 = 0.36;
 
 pub fn spawn_view_sword(parent: &mut ChildSpawnerCommands, _assets: &CharacterAssets) {
-    parent.spawn((ViewSword, crate::rig::NeedsWeapon(combat::WeaponKind::ArmingSword), Transform::default(), Visibility::default()));
+    parent.spawn((ViewSword, ShownViewWeapon(combat::WeaponKind::Spatha), crate::rig::NeedsWeapon(combat::WeaponKind::Spatha), Transform::default(), Visibility::default()));
     parent.spawn((ViewArmRoot, crate::rig::NeedsViewArm(None), Transform::default(), Visibility::default()));
+}
+
+/// Какое оружие показано от первого лица.
+#[derive(Component)]
+struct ShownViewWeapon(combat::WeaponKind);
+
+/// Сменили оружие в инвентаре — меняем модель в руке.
+fn refresh_view_weapon(mut commands: Commands, local: Query<&LocalFighter>, mut shown: Query<(Entity, &mut ShownViewWeapon)>) {
+    let Ok(f) = local.single() else { return };
+    for (e, mut w) in &mut shown {
+        if w.0 != f.fighter.weapon {
+            w.0 = f.fighter.weapon;
+            commands.entity(e).despawn_related::<Children>().insert(crate::rig::NeedsWeapon(w.0));
+        }
+    }
 }
 
 /// Рука, держащая меч (вид от первого лица).
@@ -131,9 +155,14 @@ fn combat_input(
         f.fighter.try_attack();
         client.send_message(CH_RELIABLE, encode(&ClientMessage::Attack { yaw: p.yaw, pitch: p.pitch }));
     }
+    // Защита: держим ПКМ. Оружием — парирование, щитом — блок.
     if mouse.just_pressed(MouseButton::Right) {
-        f.fighter.try_parry();
-        client.send_message(CH_RELIABLE, encode(&ClientMessage::Parry { yaw: p.yaw, pitch: p.pitch }));
+        f.fighter.set_guard(true);
+        client.send_message(CH_RELIABLE, encode(&ClientMessage::Guard { on: true, yaw: p.yaw, pitch: p.pitch }));
+    }
+    if mouse.just_released(MouseButton::Right) {
+        f.fighter.set_guard(false);
+        client.send_message(CH_RELIABLE, encode(&ClientMessage::Guard { on: false, yaw: p.yaw, pitch: p.pitch }));
     }
 }
 
@@ -148,7 +177,16 @@ fn tick_local(time: Res<Time>, mut local: Query<(&mut LocalPlayer, &mut LocalFig
 pub fn reconcile(local: &mut LocalFighter, snap: &ActorSnapshot) {
     local.fighter.hp = snap.hp;
     local.fighter.max_hp = snap.max_hp;
-    let forced = matches!(snap.action, Action::Stagger { .. } | Action::Flinch { .. } | Action::BlockRecoil { .. } | Action::Dead);
+    local.fighter.has_shield = snap.shield;
+    local.fighter.stamina = snap.stamina;
+    local.fighter.max_stamina = snap.max_stamina;
+    local.fighter.action_speed = snap.action_speed;
+    local.move_mult = snap.move_mult;
+    // Оружие меняем только вне удара, чтобы не сбить анимацию.
+    if snap.weapon != local.fighter.weapon && matches!(local.fighter.action, Action::Idle | Action::Guard { .. }) {
+        local.fighter.weapon = snap.weapon;
+    }
+    let forced = matches!(snap.action, Action::Stagger { .. } | Action::Flinch { .. } | Action::GuardStagger { .. } | Action::Dead);
     let same = std::mem::discriminant(&snap.action) == std::mem::discriminant(&local.fighter.action);
     if forced && !same {
         local.fighter.action = snap.action;
@@ -230,7 +268,9 @@ fn feedback_effects(
             CombatFeedback::Hit { attacker, target, outcome, at } => {
                 let (count, mat, speed) = match outcome {
                     HitOutcome::Parried => (18, sparks.gold.clone(), 4.0),
-                    HitOutcome::Blocked => (10, sparks.white.clone(), 3.0),
+                    HitOutcome::Blocked { .. } => (10, sparks.white.clone(), 3.0),
+                    HitOutcome::Bounced => (8, sparks.white.clone(), 2.5),
+                    HitOutcome::GuardBroken => (14, sparks.gold.clone(), 3.0),
                     HitOutcome::Damage { .. } => (12, sparks.blood.clone(), 2.0),
                 };
                 // Свою кровь не рисуем — вместо неё красная вспышка экрана.
@@ -245,23 +285,48 @@ fn feedback_effects(
                     banner.time_left = 1.2;
                 };
                 match outcome {
-                    HitOutcome::Parried if Some(target) == me => say("PARRY! Strike back!", Color::srgb(1.0, 0.85, 0.3)),
+                    HitOutcome::Parried if Some(target) == me => say("PARRY! Riposte now (LMB)", Color::srgb(1.0, 0.85, 0.3)),
                     HitOutcome::Parried if Some(attacker) == me => {
                         say("PARRIED - you are staggered", Color::srgb(1.0, 0.4, 0.3));
                         shake.0 = 0.8;
                         if let Ok(mut f) = local.single_mut() {
-                            f.fighter.action = Action::Stagger { t: 0.0 };
+                            f.fighter.action = Action::Stagger { t: 0.0, dur: 1.0 };
+                            f.fighter.reset_combo();
                         }
                     }
-                    HitOutcome::Blocked if Some(attacker) == me => {
+                    HitOutcome::Blocked { tier } if Some(attacker) == me => {
                         say("Blocked by shield", Color::srgb(0.8, 0.8, 0.85));
+                        if tier != combat::ImpactTier::Heavy
+                            && let Ok(mut f) = local.single_mut()
+                        {
+                            f.fighter.action = Action::Stagger { t: 0.0, dur: combat::BLOCK_BOUNCE };
+                            f.fighter.reset_combo();
+                        }
+                    }
+                    HitOutcome::Blocked { .. } if Some(target) == me => shake.0 = shake.0.max(0.25),
+                    HitOutcome::GuardBroken if Some(target) == me => {
+                        say("Guard broken - out of stamina", Color::srgb(1.0, 0.45, 0.3));
+                        shake.0 = 0.8;
                         if let Ok(mut f) = local.single_mut() {
-                            f.fighter.action = Action::BlockRecoil { t: 0.0 };
+                            f.fighter.action = Action::Stagger { t: 0.0, dur: combat::GUARD_BREAK_STAGGER };
+                        }
+                    }
+                    HitOutcome::GuardBroken if Some(attacker) == me => say("Guard broken!", Color::srgb(1.0, 0.85, 0.3)),
+                    HitOutcome::Bounced if Some(target) == me => {
+                        say("Your blade hit the wall", Color::srgb(0.8, 0.8, 0.85));
+                        shake.0 = shake.0.max(0.4);
+                        if let Ok(mut f) = local.single_mut() {
+                            f.fighter.action = Action::Stagger { t: 0.0, dur: combat::WALL_BOUNCE };
+                            f.fighter.reset_combo();
                         }
                     }
                     HitOutcome::Damage { amount, .. } if Some(target) == me => {
-                        flash.0 = (0.35 + amount / 100.0).min(0.8);
+                        flash.0 = (0.3 + amount / 150.0).min(0.8);
                         shake.0 = 0.6;
+                    }
+                    HitOutcome::Damage { head: true, .. } if Some(attacker) == me => {
+                        say("Headshot!", Color::srgb(1.0, 0.6, 0.3));
+                        shake.0 = shake.0.max(0.25);
                     }
                     HitOutcome::Damage { .. } if Some(attacker) == me && is_npc(target) => shake.0 = shake.0.max(0.2),
                     _ => {}

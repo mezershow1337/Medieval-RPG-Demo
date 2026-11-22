@@ -2,7 +2,9 @@
 //! проверяет перемещения игроков и рассылает снимки мира.
 
 use crate::collision::{Body, LevelColliders};
-use crate::combat::{self, Fighter, HitOutcome, Pose, Swing, TickEvent};
+use crate::combat::{self, Arrow, ArrowStep, Contact, Fighter, HitOutcome, Pose, Swing, TickEvent};
+use crate::items::{EquipSlot, ItemShape, Stat};
+use crate::loot_server::LootWorld;
 use crate::level;
 use crate::npc::{self, Brain, NpcSpawn, Rng, Seen};
 use crate::protocol::*;
@@ -37,6 +39,10 @@ pub struct Actor {
     spawn: Option<NpcSpawn>,
     /// Участок траектории удара, пройденный за текущий кадр: (удар, от, до).
     sweep: Option<(Swing, f32, f32)>,
+    /// Множитель скорости ходьбы от экипировки (для своего клиента).
+    move_mult: f32,
+    /// В этом кадре выпущена стрела.
+    shoot: bool,
 }
 
 /// Тело на земле. Предметы для обыска добавит система лута.
@@ -59,6 +65,8 @@ pub struct GameWorld {
     npc_respawns: Vec<(f64, NpcSpawn)>,
     next_npc_id: u64,
     rng: Rng,
+    arrows: Vec<Arrow>,
+    next_arrow_id: u64,
 }
 
 #[derive(Resource)]
@@ -97,6 +105,8 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         npc_respawns: Vec::new(),
         next_npc_id: NPC_ID_BASE,
         rng: Rng::new(now.as_nanos() as u64),
+        arrows: Vec::new(),
+        next_arrow_id: 1,
     };
     for spawn in npc::npc_spawns() {
         spawn_npc(&mut world, &level, spawn, 0.0);
@@ -109,6 +119,8 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .insert_resource(SnapshotTimer { timer: Timer::from_seconds((1.0 / SNAPSHOT_RATE_HZ) as f32, TimerMode::Repeating), tick: 0 })
         .add_observer(on_server_event)
         .add_plugins(crate::loot_server::LootServerPlugin)
+        .add_plugins(crate::trade_server::TradeServerPlugin)
+        .add_plugins(crate::knowledge::KnowledgeServerPlugin)
         .add_systems(Update, (receive_client_messages, run_npcs, combat_tick, respawns, send_snapshots).chain());
     info!("Сервер слушает {addr}");
     app.run();
@@ -132,6 +144,8 @@ fn spawn_npc(world: &mut GameWorld, level: &LevelColliders, spawn: NpcSpawn, now
             brain: Some(Brain::new(&spawn)),
             spawn: Some(spawn),
             sweep: None,
+            move_mult: 1.0,
+            shoot: false,
         },
     );
 }
@@ -162,6 +176,8 @@ fn on_server_event(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>,
                     brain: None,
                     spawn: None,
                     sweep: None,
+                    move_mult: 1.0,
+                    shoot: false,
                 },
             );
         }
@@ -189,17 +205,17 @@ fn receive_client_messages(mut server: ResMut<RenetServer>, mut world: ResMut<Ga
                     actor.pose.pitch = pitch.clamp(-1.6, 1.6);
                     actor.fighter.try_attack();
                 }
-                ClientMessage::Parry { yaw, pitch } => {
+                ClientMessage::Guard { on, yaw, pitch } => {
                     actor.pose.yaw = yaw;
                     actor.pose.pitch = pitch.clamp(-1.6, 1.6);
-                    actor.fighter.try_parry();
+                    actor.fighter.set_guard(on);
                 }
                 ClientMessage::PlayerState { .. } => {}
             }
         }
         // Положение.
         while let Some(bytes) = server.receive_message(id, CH_UNRELIABLE) {
-            let Some(ClientMessage::PlayerState { pos, yaw, pitch, crouching }) = decode::<ClientMessage>(&bytes) else {
+            let Some(ClientMessage::PlayerState { pos, yaw, pitch, crouching, sprinting }) = decode::<ClientMessage>(&bytes) else {
                 continue;
             };
             let Some(player) = world.actors.get_mut(&id) else { continue };
@@ -219,6 +235,7 @@ fn receive_client_messages(mut server: ResMut<RenetServer>, mut world: ResMut<Ga
                 continue;
             }
             player.pose = Pose { feet: new_pos, yaw, pitch: pitch.clamp(-1.6, 1.6), crouching };
+            player.fighter.sprinting = sprinting && player.fighter.can_sprint();
             player.last_update = now;
         }
     }
@@ -230,7 +247,16 @@ fn run_npcs(mut world: ResMut<GameWorld>, level: Res<LevelColliders>, time: Res<
     let seen: Vec<Seen> = world
         .actors
         .iter()
-        .map(|(id, a)| Seen { id: *id, kind: a.kind, pose: a.pose, action: a.fighter.action, weapon: a.fighter.weapon, alive: a.alive, targetable: now >= a.protected_until })
+        .map(|(id, a)| Seen {
+            id: *id,
+            kind: a.kind,
+            pose: a.pose,
+            action: a.fighter.action,
+            weapon: a.fighter.weapon,
+            shield: a.fighter.has_shield,
+            alive: a.alive,
+            targetable: now >= a.protected_until,
+        })
         .collect();
     let GameWorld { actors, rng, .. } = &mut *world;
     for actor in actors.values_mut() {
@@ -261,9 +287,115 @@ fn run_npcs(mut world: ResMut<GameWorld>, level: Res<LevelColliders>, time: Res<
     }
 }
 
-fn combat_tick(mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, level: Res<LevelColliders>, time: Res<Time>) {
+/// Базовое здоровье игрока (плюс «Здоровье» с вещей).
+pub const PLAYER_BASE_HP: f32 = 150.0;
+/// Урон оружия игрока = «Урон оружия» предмета × этот множитель + «Доп. урон».
+const PLAYER_WEAPON_DAMAGE_SCALE: f32 = 0.75;
+
+/// Экипировка игроков влияет на бой: здоровье, оружие, щит, скорость ударов, выносливость.
+fn sync_equipment(world: &mut GameWorld, loot: Option<&LootWorld>) {
+    let Some(loot) = loot else { return };
+    for (id, actor) in world.actors.iter_mut() {
+        if actor.kind != ActorKind::Player || !actor.alive {
+            continue;
+        }
+        let stats = loot.equipped_stats(*id);
+        let max_hp = PLAYER_BASE_HP + stats.get(Stat::MaxHealth);
+        if (max_hp - actor.fighter.max_hp).abs() > 0.01 {
+            let k = actor.fighter.hp / actor.fighter.max_hp.max(1.0);
+            actor.fighter.max_hp = max_hp;
+            actor.fighter.hp = (max_hp * k).min(max_hp);
+        }
+        let inv = loot.inventories.get(id);
+        actor.fighter.riposte_bonus = stats.get(Stat::ParryWindow) / 1000.0;
+        actor.fighter.has_shield = inv.and_then(|inv| inv.equipped(EquipSlot::OffHand)).is_some_and(|item| item.info().shape == ItemShape::Shield);
+        // Оружие в руке определяет темп, длину и силу ударов. Менять можно только вне удара.
+        let weapon = inv
+            .and_then(|inv| inv.equipped(EquipSlot::MainHand))
+            .map(|item| combat::WeaponKind::from_item_name(item.info().name))
+            .unwrap_or(combat::WeaponKind::Spatha);
+        if weapon != actor.fighter.weapon && matches!(actor.fighter.action, combat::Action::Idle | combat::Action::Guard { .. }) {
+            actor.fighter.weapon = weapon;
+            if !weapon.can_guard() {
+                actor.fighter.set_guard(false);
+            }
+        }
+        let e = gear_effects(&stats);
+        actor.fighter.action_speed = e.action_speed;
+        actor.fighter.block_stability = e.block_stability;
+        actor.fighter.stamina_regen_mult = e.stamina_regen;
+        actor.fighter.max_stamina = e.max_stamina;
+        actor.fighter.stamina = actor.fighter.stamina.min(e.max_stamina);
+        actor.move_mult = e.move_mult;
+    }
+}
+
+/// Как вещи меняют бой и выносливость.
+pub struct GearEffects {
+    pub action_speed: f32,
+    pub block_stability: f32,
+    pub stamina_regen: f32,
+    pub max_stamina: f32,
+    pub move_mult: f32,
+}
+
+pub fn gear_effects(stats: &crate::items::StatTotals) -> GearEffects {
+    let armor = stats.get(Stat::Armor).max(0.0);
+    // Тяжёлый доспех: медленнее ходишь и дольше переводишь дух (100 брони ≈ −8% скорости, −25% отдыха).
+    let weight = armor / (armor + 300.0);
+    GearEffects {
+        action_speed: 1.0 + stats.get(Stat::ActionSpeed) / 100.0,
+        block_stability: (stats.get(Stat::BlockStability) / 100.0).clamp(0.0, 0.8),
+        stamina_regen: ((1.0 - weight) * (1.0 + stats.get(Stat::Agility) * 0.01)).max(0.3),
+        max_stamina: combat::STAMINA_MAX + stats.get(Stat::Strength) * 2.0,
+        move_mult: ((1.0 + stats.get(Stat::MoveSpeed) / 100.0) * (1.0 - weight * 0.32)).clamp(0.6, 1.3),
+    }
+}
+
+/// Урон оружия атакующего до брони цели.
+fn base_damage(world: &GameWorld, loot: Option<&LootWorld>, attacker: u64) -> f32 {
+    let Some(a) = world.actors.get(&attacker) else { return 0.0 };
+    if a.kind == ActorKind::Player {
+        let stats = loot.map(|l| l.equipped_stats(attacker)).unwrap_or_default();
+        let weapon = stats.get(Stat::WeaponDamage);
+        let weapon = if weapon > 0.0 { weapon * PLAYER_WEAPON_DAMAGE_SCALE } else { a.fighter.weapon.stats().damage };
+        weapon + stats.get(Stat::BonusDamage)
+    } else {
+        a.fighter.weapon.stats().damage * npc::damage_mult(a.kind)
+    }
+}
+
+/// Урон после брони цели.
+fn mitigate(world: &GameWorld, loot: Option<&LootWorld>, target: u64, base: f32, head: bool) -> f32 {
+    let Some(t) = world.actors.get(&target) else { return 0.0 };
+    let (armor, head_reduction) = if t.kind == ActorKind::Player {
+        let stats = loot.map(|l| l.equipped_stats(target)).unwrap_or_default();
+        (stats.get(Stat::Armor), stats.get(Stat::HeadshotReduction))
+    } else {
+        (npc::armor(t.kind), 0.0)
+    };
+    let mut dmg = base * (1.0 - combat::armor_reduction(armor));
+    if head {
+        dmg *= 1.0 - (head_reduction / 100.0).clamp(0.0, 0.8);
+    }
+    dmg
+}
+
+/// Урон удара с учётом оружия атакующего и брони цели.
+fn hit_damage(world: &GameWorld, loot: Option<&LootWorld>, attacker: u64, target: u64, head: bool) -> f32 {
+    mitigate(world, loot, target, base_damage(world, loot, attacker), head)
+}
+
+enum Strike {
+    Contact { attacker: u64, target: u64, contact: Contact, point: Vec3 },
+    Wall { attacker: u64, point: Vec3 },
+}
+
+fn combat_tick(mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, level: Res<LevelColliders>, loot: Option<Res<LootWorld>>, time: Res<Time>) {
     let dt = time.delta_secs().min(0.1);
     let now = time.elapsed_secs_f64();
+    let loot = loot.as_deref();
+    sync_equipment(&mut world, loot);
 
     // 1. Таймеры и участок траектории удара за этот кадр.
     for actor in world.actors.values_mut() {
@@ -274,6 +406,7 @@ fn combat_tick(mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, le
         let before = actor.fighter.strike_progress();
         let event = actor.fighter.tick(dt);
         let after = actor.fighter.strike_progress();
+        actor.shoot = actor.fighter.weapon.ranged() && event == Some(TickEvent::StrikeStarted);
         actor.sweep = match (before, after, event) {
             (_, Some((swing, p)), Some(TickEvent::StrikeStarted)) => Some((swing, 0.0, p)),
             (Some((swing, a)), Some((_, b)), _) => Some((swing, a, b)),
@@ -282,52 +415,127 @@ fn combat_tick(mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, le
         };
     }
 
-    // 2. Поиск попаданий: клинок против тел.
-    let mut hits: Vec<(u64, u64, Vec3)> = Vec::new();
+    // 2. Ведём клинок по траектории: защита и тела целей, потом стены.
+    let mut strikes: Vec<Strike> = Vec::new();
     for (&aid, a) in &world.actors {
         let Some((swing, from, to)) = a.sweep else { continue };
-        for (&tid, t) in &world.actors {
-            if tid == aid || !t.alive || a.fighter.hit_this_swing.contains(&tid) {
-                continue;
-            }
-            // Враги не бьют друг друга.
-            if a.kind.is_npc() && t.kind.is_npc() {
-                continue;
-            }
-            if a.pose.feet.distance(t.pose.feet) > 4.0 {
-                continue;
-            }
-            for k in 0..=4 {
-                let p = from + (to - from) * k as f32 / 4.0;
-                let (hilt, tip) = combat::blade_segment(&a.pose, a.fighter.weapon, swing, p);
-                if let Some(point) = combat::blade_hits_body(hilt, tip, &t.pose) {
-                    if combat::line_of_sight(&level, a.pose.shoulder(), point) {
-                        hits.push((aid, tid, point));
-                    }
-                    break;
+        let mut done: Vec<u64> = a.fighter.hit_this_swing.clone();
+        'samples: for k in 0..=4 {
+            let p = from + (to - from) * k as f32 / 4.0;
+            let (hilt, tip) = combat::blade_segment(&a.pose, a.fighter.weapon, swing, p);
+            for (&tid, t) in &world.actors {
+                if tid == aid || !t.alive || done.contains(&tid) {
+                    continue;
                 }
+                // Свои своих не бьют.
+                if !a.kind.hostile(t.kind) {
+                    continue;
+                }
+                if a.pose.feet.distance(t.pose.feet) > 4.0 {
+                    continue;
+                }
+                if let Some(contact) = combat::trace_blade(hilt, tip, &a.pose, &t.fighter, &t.pose) {
+                    let point = match contact {
+                        Contact::Guard(p) => p,
+                        Contact::Body { point, .. } => point,
+                    };
+                    if combat::line_of_sight(&level, a.pose.shoulder(), point) {
+                        done.push(tid);
+                        strikes.push(Strike::Contact { attacker: aid, target: tid, contact, point });
+                        // Отражённый удар дальше не идёт.
+                        if matches!(contact, Contact::Guard(_)) {
+                            break 'samples;
+                        }
+                    }
+                }
+            }
+            if let Some(point) = combat::blade_hits_wall(&level, hilt, tip, a.pose.feet) {
+                strikes.push(Strike::Wall { attacker: aid, point });
+                break;
             }
         }
     }
 
-    // 3. Применяем попадания.
-    for (aid, tid, point) in hits {
-        let Some(mut attacker) = world.actors.remove(&aid) else { continue };
-        let still_striking = matches!(attacker.fighter.action, combat::Action::Strike { .. });
-        let outcome = match world.actors.get_mut(&tid) {
-            Some(target) if still_striking && target.alive => {
-                attacker.fighter.hit_this_swing.push(tid);
-                let outcome = combat::resolve_hit(&mut attacker.fighter, &attacker.pose, &mut target.fighter, &target.pose, npc::damage_mult(attacker.kind));
-                Some(outcome)
+    // 3. Стрелы: новые и летящие.
+    let shooters: Vec<u64> = world.actors.iter().filter(|(_, a)| a.shoot && a.alive).map(|(id, _)| *id).collect();
+    for id in shooters {
+        let damage = base_damage(&world, loot, id);
+        let a = &world.actors[&id];
+        let mut pose = a.pose;
+        // Небольшой разброс: стрелы не летят в одну точку.
+        pose.yaw += (world.rng.next_f32() - 0.5) * 0.04;
+        pose.pitch += (world.rng.next_f32() - 0.5) * 0.03;
+        let (pos, vel) = combat::arrow_launch(&pose);
+        let arrow_id = world.next_arrow_id;
+        world.next_arrow_id += 1;
+        world.arrows.push(Arrow { id: arrow_id, owner: id, pos, vel, damage, life: 4.0 });
+    }
+    let targets: Vec<(u64, Pose)> = world.actors.iter().filter(|(_, a)| a.alive).map(|(id, a)| (*id, a.pose)).collect();
+    let mut arrows = std::mem::take(&mut world.arrows);
+    let mut arrow_hits = Vec::new();
+    arrows.retain_mut(|arrow| {
+        // Свои по своим не стреляют: стрела пролетает мимо союзников.
+        let owner_kind = world.actors.get(&arrow.owner).map(|a| a.kind);
+        let valid: Vec<(u64, Pose)> = targets
+            .iter()
+            .filter(|(id, _)| *id == arrow.owner || owner_kind.is_none_or(|k| world.actors.get(id).is_some_and(|t| k.hostile(t.kind))))
+            .copied()
+            .collect();
+        match combat::step_arrow(arrow, dt, &level, &valid) {
+            ArrowStep::Flying => true,
+            ArrowStep::Hit { index, point, head, shield_facing } => {
+                arrow_hits.push((*arrow, valid[index].0, point, head, shield_facing));
+                false
             }
-            _ => None,
-        };
-        world.actors.insert(aid, attacker);
-        let Some(outcome) = outcome else { continue };
-        debug!("Попадание {aid} -> {tid}: {outcome:?}");
-        server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: aid, target: tid, outcome, at: point.into() }));
+            ArrowStep::Stuck | ArrowStep::Expired => false,
+        }
+    });
+    world.arrows = arrows;
+    for (arrow, tid, point, head, shield_facing) in arrow_hits {
+        let damage = mitigate(&world, loot, tid, arrow.damage, head);
+        let Some(t) = world.actors.get_mut(&tid) else { continue };
+        if !t.alive {
+            continue;
+        }
+        let outcome = combat::resolve_arrow(&mut t.fighter, shield_facing, head, damage);
+        server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: arrow.owner, target: tid, outcome, at: point.into() }));
         if let HitOutcome::Damage { killed: true, .. } = outcome {
-            kill(&mut server, &mut world, tid, Some(aid), now);
+            kill(&mut server, &mut world, tid, Some(arrow.owner), now);
+        }
+    }
+
+    // 4. Применяем удары.
+    for strike in strikes {
+        match strike {
+            Strike::Wall { attacker, point } => {
+                let Some(a) = world.actors.get_mut(&attacker) else { continue };
+                if !matches!(a.fighter.action, combat::Action::Strike { .. }) {
+                    continue;
+                }
+                a.fighter.action = combat::Action::Stagger { t: 0.0, dur: combat::WALL_BOUNCE };
+                a.fighter.reset_combo();
+                server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker, target: attacker, outcome: HitOutcome::Bounced, at: point.into() }));
+            }
+            Strike::Contact { attacker: aid, target: tid, contact, point } => {
+                let head = matches!(contact, Contact::Body { head: true, .. });
+                let damage = hit_damage(&world, loot, aid, tid, head);
+                let Some(mut attacker) = world.actors.remove(&aid) else { continue };
+                let still_striking = matches!(attacker.fighter.action, combat::Action::Strike { .. });
+                let outcome = match world.actors.get_mut(&tid) {
+                    Some(target) if still_striking && target.alive => {
+                        attacker.fighter.hit_this_swing.push(tid);
+                        Some(combat::resolve_contact(&mut attacker.fighter, &mut target.fighter, contact, damage))
+                    }
+                    _ => None,
+                };
+                world.actors.insert(aid, attacker);
+                let Some(outcome) = outcome else { continue };
+                debug!("Попадание {aid} -> {tid}: {outcome:?}");
+                server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: aid, target: tid, outcome, at: point.into() }));
+                if let HitOutcome::Damage { killed: true, .. } = outcome {
+                    kill(&mut server, &mut world, tid, Some(aid), now);
+                }
+            }
         }
     }
 }
@@ -400,8 +608,14 @@ fn send_snapshots(mut server: ResMut<RenetServer>, world: Res<GameWorld>, mut ti
                 action: a.fighter.action,
                 hp: a.fighter.hp,
                 max_hp: a.fighter.max_hp,
+                shield: a.fighter.has_shield,
+                stamina: a.fighter.stamina,
+                max_stamina: a.fighter.max_stamina,
+                action_speed: a.fighter.action_speed,
+                move_mult: a.move_mult,
             })
             .collect(),
+        arrows: world.arrows.iter().map(|a| ArrowSnapshot { id: a.id, pos: a.pos.into(), vel: a.vel.into() }).collect(),
     };
     let bytes = encode(&snapshot);
     server.broadcast_message(CH_UNRELIABLE, bytes);
