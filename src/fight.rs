@@ -85,9 +85,19 @@ impl Plugin for FightPlugin {
     }
 }
 
-pub fn spawn_view_sword(parent: &mut ChildSpawnerCommands, assets: &CharacterAssets) {
-    crate::client::spawn_sword(parent, assets, combat::WeaponKind::ArmingSword, ViewSword);
+/// Плечо руки от первого лица в пространстве камеры (за краем экрана справа внизу).
+const VIEW_SHOULDER: Vec3 = Vec3::new(0.24, -0.3, 0.12);
+/// Насколько меч от первого лица выше, чем в мире (только внешний вид).
+const VIEW_LIFT: f32 = 0.36;
+
+pub fn spawn_view_sword(parent: &mut ChildSpawnerCommands, _assets: &CharacterAssets) {
+    parent.spawn((ViewSword, crate::rig::NeedsWeapon(combat::WeaponKind::ArmingSword), Transform::default(), Visibility::default()));
+    parent.spawn((ViewArmRoot, crate::rig::NeedsViewArm(None), Transform::default(), Visibility::default()));
 }
+
+/// Рука, держащая меч (вид от первого лица).
+#[derive(Component)]
+struct ViewArmRoot;
 
 fn setup_sparks(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
     let glow = |materials: &mut Assets<StandardMaterial>, c: Color, e: LinearRgba| materials.add(StandardMaterial { base_color: c, emissive: e, unlit: true, ..default() });
@@ -146,14 +156,18 @@ pub fn reconcile(local: &mut LocalFighter, snap: &ActorSnapshot) {
     }
 }
 
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn animate_view_sword(
     time: Res<Time>,
     assets: Res<CharacterAssets>,
+    models: Option<Res<crate::rig::CharacterModels>>,
     shake: Res<Shake>,
     local: Query<(&LocalPlayer, &LocalFighter)>,
     mut camera: Query<&mut Transform, (With<PlayerCamera>, Without<ViewSword>)>,
-    mut sword: Query<(&mut Transform, &mut Visibility, &Children), With<ViewSword>>,
+    mut sword: Query<(&mut Transform, &mut Visibility, &Children), (With<ViewSword>, Without<PlayerCamera>)>,
     mut blades: Query<&mut MeshMaterial3d<StandardMaterial>, With<Blade>>,
+    mut arm: Query<(&crate::rig::ViewArm, &mut Visibility), (With<ViewArmRoot>, Without<ViewSword>)>,
+    mut joints: Query<&mut Transform, (Without<ViewSword>, Without<PlayerCamera>, Without<ViewArmRoot>)>,
 ) {
     let Ok((p, f)) = local.single() else { return };
     // Поворот камеры по вертикали и тряска.
@@ -167,11 +181,24 @@ fn animate_view_sword(
     let (hilt, dir) = combat::weapon_pose(&f.fighter.action, f.fighter.weapon, time.elapsed_secs());
     // Удар в мире наклонён на 0.6 от взгляда, а камера — на весь взгляд; компенсируем разницу.
     let fix = Quat::from_rotation_x(-p.pitch * 0.4);
-    st.translation = Vec3::new(0.0, -0.25, 0.0) + fix * hilt;
+    // Меч от первого лица чуть приподнят, чтобы в кадре была рука с рукоятью.
+    st.translation = Vec3::new(-0.06, -0.25 + VIEW_LIFT, -0.04) + fix * hilt;
     st.rotation = Quat::from_rotation_arc(Vec3::Y, (fix * dir).normalize());
+    let blade = assets.blade(models.as_deref());
     for c in children.iter() {
         if let Ok(mut m) = blades.get_mut(c) {
-            m.0 = assets.steel.clone();
+            m.0 = blade.clone();
+        }
+    }
+    // Рука держит рукоять.
+    if let Ok((arm, mut arm_vis)) = arm.single_mut() {
+        *arm_vis = *vis;
+        let grip = st.transform_point(Vec3::new(0.0, -0.06, 0.0));
+        for (joint, (pos, rot)) in arm.joints().into_iter().zip(crate::rig::view_arm_pose(VIEW_SHOULDER, grip)) {
+            if let Ok(mut t) = joints.get_mut(joint) {
+                t.translation = pos;
+                t.rotation = rot;
+            }
         }
     }
 }
