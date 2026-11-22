@@ -38,6 +38,7 @@ pub struct LootServerPlugin;
 impl Plugin for LootServerPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(LootWorld::default())
+            .add_plugins(crate::consumables::ConsumablesPlugin)
             .add_observer(on_connection)
             .add_observer(on_character_died)
             .add_observer(on_spawn_ground_item)
@@ -353,6 +354,7 @@ fn receive_loot_messages(
     game: Res<GameWorld>,
     level: Res<LevelColliders>,
     mut world: ResMut<LootWorld>,
+    mut healing: ResMut<crate::consumables::Healing>,
 ) {
     for pid in server.clients_id() {
         while let Some(bytes) = server.receive_message(pid, CH_LOOT) {
@@ -456,6 +458,8 @@ fn receive_loot_messages(
                 LootClientMessage::Close => {
                     world.open.remove(&pid);
                 }
+                LootClientMessage::Use { uid } => healing.requests.push((pid, Some(uid))),
+                LootClientMessage::CancelUse => healing.requests.push((pid, None)),
                 LootClientMessage::DebugSpawnCorpse => {
                     let dir = forward(yaw, 0.0);
                     let table = [LootTableId::Footman, LootTableId::Knight, LootTableId::KnightCaptain][world.rng.range_u32(0, 2) as usize];

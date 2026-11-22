@@ -8,9 +8,11 @@
 mod client;
 mod collision;
 mod combat;
+mod consumables;
 mod fight;
 mod graphics;
 mod hud;
+mod icons;
 mod inventory;
 mod inventory_ui;
 mod items;

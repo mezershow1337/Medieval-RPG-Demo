@@ -281,7 +281,8 @@ pub enum ItemShape {
 #[derive(Debug, Clone, Copy)]
 pub struct ItemBase {
     pub name: &'static str,
-    /// Короткая подпись для клетки инвентаря.
+    /// Короткая подпись (сейчас в клетках иконки, подпись пригодится торговцу).
+    #[allow(dead_code)]
     pub short: &'static str,
     pub slot: Option<EquipSlot>,
     /// Размер в клетках сетки (ширина, высота).
@@ -469,6 +470,34 @@ pub fn roll_item(base_id: ItemBaseId, quality: Quality, count: u16, rng: &mut Rn
         affixes.push((stat, value));
     }
     Item { uid: uids.next(), base: base_id, quality, affixes, count: count.clamp(1, base.max_stack) }
+}
+
+// ---------------------------------------------------------------------------
+// Расходники
+// ---------------------------------------------------------------------------
+
+/// Как действует расходник.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Consumable {
+    /// Сколько секунд длится применение (удар или новое действие прерывают его).
+    pub use_time: f32,
+    /// Сколько здоровья лечит всего.
+    pub heal: f32,
+    /// 0 — лечит постепенно во время применения (бинт);
+    /// больше 0 — лечит постепенно столько секунд после применения (зелье).
+    pub heal_over: f32,
+    /// Подпись полоски: «Перевязка», «Пьёте зелье».
+    pub verb: &'static str,
+}
+
+impl ItemBaseId {
+    pub fn consumable(self) -> Option<Consumable> {
+        match self.base().name {
+            "Бинт" => Some(Consumable { use_time: 3.0, heal: 30.0, heal_over: 0.0, verb: "Перевязка" }),
+            "Целебное зелье" => Some(Consumable { use_time: 1.0, heal: 50.0, heal_over: 10.0, verb: "Пьёте зелье" }),
+            _ => None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
