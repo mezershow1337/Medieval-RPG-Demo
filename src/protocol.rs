@@ -6,7 +6,7 @@ use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendTyp
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_0002;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_0003;
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -53,8 +53,8 @@ pub enum ClientMessage {
     PlayerState { pos: NetPos, yaw: f32, pitch: f32, crouching: bool },
     /// Начать удар (надёжный канал).
     Attack { yaw: f32, pitch: f32 },
-    /// Парировать (надёжный канал).
-    Parry { yaw: f32, pitch: f32 },
+    /// Зажать / отпустить защиту (надёжный канал).
+    Guard { on: bool, yaw: f32, pitch: f32 },
 }
 
 /// Кто это: игрок или враг какого типа.
@@ -103,6 +103,8 @@ pub struct ActorSnapshot {
     pub action: Action,
     pub hp: f32,
     pub max_hp: f32,
+    /// Защищается щитом (а не оружием).
+    pub shield: bool,
 }
 
 /// Сервер -> клиент (ненадёжный канал), рассылается SNAPSHOT_RATE_HZ раз в секунду.

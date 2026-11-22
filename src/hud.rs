@@ -63,7 +63,7 @@ fn setup_hud(mut commands: Commands) {
         .spawn(Node {
             width: percent(100),
             position_type: PositionType::Absolute,
-            bottom: px(40),
+            bottom: px(96),
             justify_content: JustifyContent::Center,
             ..default()
         })
@@ -85,7 +85,7 @@ fn setup_hud(mut commands: Commands) {
     ));
     commands.spawn((
         text(
-            "Click - capture mouse | Esc - release\nWASD - move | Shift - sprint | Space - jump | Ctrl/C - crouch\nLMB - attack | RMB - parry (just before the enemy blade lands)",
+            "Click - capture mouse | Esc - release\nWASD - move | Shift - sprint | Space - jump | Ctrl/C - crouch\nLMB - attack | RMB (hold) - guard: parry with weapon / block with shield\nAfter a successful parry press LMB for a fast riposte",
             14.0,
             Color::srgba(1.0, 1.0, 1.0, 0.75),
         ),
