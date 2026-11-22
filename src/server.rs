@@ -248,9 +248,19 @@ fn receive_client_messages(mut server: ResMut<RenetServer>, mut world: ResMut<Ga
     }
 }
 
-fn run_npcs(mut world: ResMut<GameWorld>, level: Res<LevelColliders>, time: Res<Time>) {
+fn run_npcs(mut world: ResMut<GameWorld>, level: Res<LevelColliders>, time: Res<Time>, trade: Option<Res<crate::trade_server::TradeWorld>>) {
     let dt = time.delta_secs().min(0.1);
     let now = time.elapsed_secs_f64();
+    // Кого из игроков фракции считают врагами (по репутации).
+    let players: Vec<u64> = world.actors.iter().filter(|(_, a)| a.kind == ActorKind::Player).map(|(id, _)| *id).collect();
+    for actor in world.actors.values_mut() {
+        let Some(brain) = actor.brain.as_mut() else { continue };
+        brain.hostile_players.clear();
+        if let (Some(f), Some(trade)) = (brain.faction, trade.as_deref()) {
+            brain.hostile_players.extend(players.iter().copied().filter(|p| trade.standing(*p, f) == crate::factions::Standing::Hostile));
+        }
+        brain.provoked.retain(|p| players.contains(p));
+    }
     let seen: Vec<Seen> = world
         .actors
         .iter()
@@ -399,7 +409,37 @@ enum Strike {
     Wall { attacker: u64, point: Vec3 },
 }
 
-fn combat_tick(mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, level: Res<LevelColliders>, loot: Option<Res<LootWorld>>, time: Res<Time>) {
+/// Игрок напал на человека фракции: тот и его товарищи рядом дают отпор, фракция злится.
+/// На разбойников можно нападать без последствий.
+fn on_player_attacks(world: &mut GameWorld, trade: Option<&mut crate::trade_server::TradeWorld>, attacker: u64, target: u64, killed: bool) {
+    let (Some(a), Some(t)) = (world.actors.get(&attacker), world.actors.get(&target)) else { return };
+    if a.kind != ActorKind::Player {
+        return;
+    }
+    let Some(faction) = t.brain.as_ref().and_then(|b| b.faction) else { return };
+    let at = t.pose.feet;
+    for other in world.actors.values_mut() {
+        if let Some(b) = other.brain.as_mut()
+            && b.faction == Some(faction)
+            && other.pose.feet.distance(at) < 30.0
+        {
+            b.provoke(attacker);
+        }
+    }
+    if let Some(trade) = trade {
+        trade.change_rep(attacker, faction, if killed { -20.0 } else { -4.0 });
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn combat_tick(
+    mut server: ResMut<RenetServer>,
+    mut world: ResMut<GameWorld>,
+    level: Res<LevelColliders>,
+    loot: Option<Res<LootWorld>>,
+    mut trade: Option<ResMut<crate::trade_server::TradeWorld>>,
+    time: Res<Time>,
+) {
     let dt = time.delta_secs().min(0.1);
     let now = time.elapsed_secs_f64();
     let loot = loot.as_deref();
@@ -517,7 +557,9 @@ fn combat_tick(mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, le
             world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon: combat::WeaponKind::Bow, amount, head });
         }
         server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: arrow.owner, target: tid, outcome, at: point.into() }));
-        if let HitOutcome::Damage { killed: true, .. } = outcome {
+        let killed = matches!(outcome, HitOutcome::Damage { killed: true, .. });
+        on_player_attacks(&mut world, trade.as_deref_mut(), arrow.owner, tid, killed);
+        if killed {
             kill(&mut server, &mut world, tid, Some(arrow.owner), now);
         }
     }
@@ -556,7 +598,9 @@ fn combat_tick(mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, le
                     world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon, amount, head });
                 }
                 server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: aid, target: tid, outcome, at: point.into() }));
-                if let HitOutcome::Damage { killed: true, .. } = outcome {
+                let killed = matches!(outcome, HitOutcome::Damage { killed: true, .. });
+                on_player_attacks(&mut world, trade.as_deref_mut(), aid, tid, killed);
+                if killed {
                     kill(&mut server, &mut world, tid, Some(aid), now);
                 }
             }
