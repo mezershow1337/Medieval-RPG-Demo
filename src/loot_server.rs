@@ -537,10 +537,11 @@ fn sync_combat_corpses(mut server: ResMut<RenetServer>, game: Res<GameWorld>, mu
                 ("Тело игрока", old)
             }
             kind => {
-                let (name, table) = match kind {
-                    ActorKind::HeavyKnight => ("Тяжёлый рыцарь", LootTableId::KnightCaptain),
-                    _ => ("Рыцарь", LootTableId::Knight),
+                let table = match kind {
+                    ActorKind::Bucellarius => LootTableId::KnightCaptain,
+                    _ => LootTableId::Knight,
                 };
+                let name = kind.name_ru();
                 let luck = c.killer.map(|k| world.equipped_stats(k).get(Stat::Luck)).unwrap_or(0.0);
                 let items = world.roll(table, luck);
                 let mut inv = Inventory::new(CORPSE_GRID);

@@ -148,7 +148,8 @@ impl Outfit {
                     trousers: Color::srgb(0.24, 0.2, 0.16),
                 }
             }
-            ActorKind::Swordsman => Outfit {
+            // Временно на старых деталях, пока нет моделей эпохи.
+            ActorKind::Stratiotes | ActorKind::GothWarrior | ActorKind::HunArcher => Outfit {
                 head: HeadGear::NasalHelm,
                 chest: ChestGear::MailAndTabard,
                 hands: HandGear::Gauntlets,
@@ -157,7 +158,7 @@ impl Outfit {
                 colors: Color::srgb(0.13, 0.22, 0.55),
                 trousers: Color::srgb(0.2, 0.18, 0.17),
             },
-            ActorKind::HeavyKnight => Outfit {
+            ActorKind::Bucellarius | ActorKind::AlanLancer => Outfit {
                 head: HeadGear::GreatHelm,
                 chest: ChestGear::PlateAndTabard,
                 hands: HandGear::Gauntlets,
@@ -387,8 +388,9 @@ pub struct ViewArm {
 
 pub fn weapon_mesh(weapon: WeaponKind) -> &'static str {
     match weapon {
-        WeaponKind::ArmingSword => "arming_sword",
-        WeaponKind::Greatsword => "greatsword",
+        // Временно на старых мешах, пока нет моделей эпохи.
+        WeaponKind::Spatha | WeaponKind::Axe | WeaponKind::Seax | WeaponKind::Bow => "arming_sword",
+        WeaponKind::Spear => "greatsword",
     }
 }
 
@@ -728,7 +730,7 @@ mod tests {
             "body", "belt", "gambeson", "mail", "tabard", "surcoat", "faulds", "cuirass", "kettle_hat", "coif", "nasal_helm", "great_helm", "pauldron", "rerebrace", "glove_cuff", "vambrace",
             "gauntlet_cuff", "glove", "gauntlet", "cuisse", "boot_cuff", "greave", "boot", "sabaton",
         ];
-        for kind in [ActorKind::Player, ActorKind::Swordsman, ActorKind::HeavyKnight] {
+        for kind in std::iter::once(ActorKind::Player).chain(ActorKind::ENEMIES) {
             let o = Outfit::for_actor(kind, 1);
             for bone in 0..BONES {
                 for l in o.layers(bone) {

@@ -6,7 +6,7 @@ use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendTyp
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_0003;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_0005;
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -58,26 +58,73 @@ impl From<NetPos> for Vec3 {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ClientMessage {
     /// Состояние своего персонажа (ненадёжный канал). Сервер проверяет, что скорость правдоподобная.
-    PlayerState { pos: NetPos, yaw: f32, pitch: f32, crouching: bool },
+    PlayerState { pos: NetPos, yaw: f32, pitch: f32, crouching: bool, sprinting: bool },
     /// Начать удар (надёжный канал).
     Attack { yaw: f32, pitch: f32 },
-    /// Парировать (надёжный канал).
-    Parry { yaw: f32, pitch: f32 },
+    /// Зажать / отпустить защиту (надёжный канал).
+    Guard { on: bool, yaw: f32, pitch: f32 },
 }
 
-/// Кто это: игрок или враг какого типа.
+/// Кто это: игрок или враг какого типа. Люди Херсонеса и его округи около 510 г.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ActorKind {
     Player,
-    /// Рыцарь с мечом и щитом.
-    Swordsman,
-    /// Тяжёлый рыцарь с двуручным мечом.
-    HeavyKnight,
+    /// Стратиот гарнизона: спата и большой овальный щит, кольчуга, шлем-спангенхельм.
+    Stratiotes,
+    /// Букелларий: тяжёлый воин из личной дружины, ламеллярный доспех, спата и овальный щит.
+    Bucellarius,
+    /// Крымский гот: бородовидный топор и круглый щит, почти без доспеха.
+    GothWarrior,
+    /// Алан: копьё-контос двумя руками, ламеллярный доспех.
+    AlanLancer,
+    /// Гунно-булгарский кочевник: составной лук, вблизи — нож-сакс.
+    HunArcher,
+}
+
+/// Чьи это люди. Кто кому враг, решает система фракций; пока все, кроме игроков, нападают на игроков.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Faction {
+    Players,
+    /// Византийский гарнизон Херсона.
+    Garrison,
+    Goths,
+    Alans,
+    /// Гунно-булгарские кочевники.
+    Nomads,
 }
 
 impl ActorKind {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub const ENEMIES: [ActorKind; 5] = [ActorKind::Stratiotes, ActorKind::Bucellarius, ActorKind::GothWarrior, ActorKind::AlanLancer, ActorKind::HunArcher];
+
     pub fn is_npc(self) -> bool {
         !matches!(self, ActorKind::Player)
+    }
+    pub fn faction(self) -> Faction {
+        match self {
+            ActorKind::Player => Faction::Players,
+            ActorKind::Stratiotes | ActorKind::Bucellarius => Faction::Garrison,
+            ActorKind::GothWarrior => Faction::Goths,
+            ActorKind::AlanLancer => Faction::Alans,
+            ActorKind::HunArcher => Faction::Nomads,
+        }
+    }
+    /// Враги ли эти двое. Пока все люди мира против игроков, а игроки — против всех
+    /// (система фракций заменит это отношениями фракций).
+    pub fn hostile(self, other: ActorKind) -> bool {
+        let (a, b) = (self.faction(), other.faction());
+        a != b && (a == Faction::Players || b == Faction::Players) || (a == Faction::Players && b == Faction::Players)
+    }
+    /// Название для интерфейса.
+    pub fn name_ru(self) -> &'static str {
+        match self {
+            ActorKind::Player => "Игрок",
+            ActorKind::Stratiotes => "Стратиот",
+            ActorKind::Bucellarius => "Букелларий",
+            ActorKind::GothWarrior => "Готский воин",
+            ActorKind::AlanLancer => "Аланский копейщик",
+            ActorKind::HunArcher => "Кочевник-лучник",
+        }
     }
 }
 
@@ -111,6 +158,22 @@ pub struct ActorSnapshot {
     pub action: Action,
     pub hp: f32,
     pub max_hp: f32,
+    /// Защищается щитом (а не оружием).
+    pub shield: bool,
+    pub stamina: f32,
+    pub max_stamina: f32,
+    /// Множитель скорости ударов (экипировка).
+    pub action_speed: f32,
+    /// Множитель скорости ходьбы (экипировка и вес доспеха), нужен своему клиенту.
+    pub move_mult: f32,
+}
+
+/// Летящая стрела.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct ArrowSnapshot {
+    pub id: u64,
+    pub pos: NetPos,
+    pub vel: NetPos,
 }
 
 /// Сервер -> клиент (ненадёжный канал), рассылается SNAPSHOT_RATE_HZ раз в секунду.
@@ -118,6 +181,7 @@ pub struct ActorSnapshot {
 pub struct Snapshot {
     pub tick: u32,
     pub actors: Vec<ActorSnapshot>,
+    pub arrows: Vec<ArrowSnapshot>,
 }
 
 pub fn encode<T: Serialize>(value: &T) -> Vec<u8> {

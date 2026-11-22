@@ -54,9 +54,28 @@ struct CorpseFall {
 #[derive(Component)]
 struct RemoteSword;
 
-/// Щит в руке рыцаря.
+/// Щит в руке.
 #[derive(Component)]
 struct RemoteShield;
+
+/// Какое оружие сейчас показано (лучник меняет лук на нож).
+#[derive(Component)]
+struct ShownWeapon(WeaponKind);
+
+/// Летящая стрела: двигаем её сами между снимками.
+#[derive(Component)]
+struct ArrowVisual {
+    vel: Vec3,
+}
+
+#[derive(Resource, Default)]
+struct ArrowIndex(HashMap<u64, Entity>);
+
+#[derive(Resource)]
+struct ArrowAssets {
+    mesh: Handle<Mesh>,
+    material: Handle<StandardMaterial>,
+}
 
 /// Лезвие меча (меняет материал, когда удар нельзя парировать).
 #[derive(Component, Clone)]
@@ -117,6 +136,7 @@ pub fn run(server_addr: SocketAddr) {
         .insert_resource(level::level_colliders())
         .insert_resource(RemoteIndex::default())
         .insert_resource(CorpseIndex::default())
+        .insert_resource(ArrowIndex::default())
         .insert_resource(SendTimer(Timer::from_seconds(1.0 / 30.0, TimerMode::Repeating)))
         .insert_resource(ClearColor(Color::srgb(0.55, 0.5, 0.48)))
         .insert_resource(GlobalAmbientLight { color: Color::srgb(0.7, 0.72, 0.85), brightness: 250.0, ..default() })
@@ -127,6 +147,7 @@ pub fn run(server_addr: SocketAddr) {
             ((receive_reliable, receive_snapshots).chain(), send_state, animate_remote).run_if(client_connected).before(fight::FightSet).in_set(rig::PoseSet),
         )
         .add_systems(Update, animate_corpses.in_set(rig::PoseSet))
+        .add_systems(Update, (fly_arrows, refresh_remote_weapons))
         .run();
 }
 
@@ -143,7 +164,12 @@ fn spawn_waiting_camera(mut commands: Commands) {
     commands.spawn((WaitingCamera, Camera3d::default(), Transform::from_xyz(0.0, 25.0, 70.0).looking_at(Vec3::new(0.0, 5.0, 0.0), Vec3::Y)));
 }
 
-fn setup_character_assets(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
+fn setup_character_assets(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>, mut meshes: ResMut<Assets<Mesh>>) {
+    // Стрела: тонкое древко вдоль -Z длиной 75 см.
+    commands.insert_resource(ArrowAssets {
+        mesh: meshes.add(Cuboid::new(0.012, 0.012, 0.75)),
+        material: materials.add(StandardMaterial { base_color: Color::srgb(0.45, 0.33, 0.2), perceptual_roughness: 0.8, ..default() }),
+    });
     commands.insert_resource(CharacterAssets {
         steel: materials.add(StandardMaterial { base_color: Color::srgb(0.72, 0.74, 0.78), metallic: 0.9, perceptual_roughness: 0.3, ..default() }),
         blade_red: materials.add(StandardMaterial {
@@ -157,8 +183,11 @@ fn setup_character_assets(mut commands: Commands, mut materials: ResMut<Assets<S
 /// Где рука держит оружие: (правая, левая) — центр кулака в координатах оружия.
 fn weapon_grips(weapon: WeaponKind) -> (Vec3, Option<Vec3>) {
     match weapon {
-        WeaponKind::ArmingSword => (Vec3::new(0.0, -0.06, 0.0), None),
-        WeaponKind::Greatsword => (Vec3::new(0.0, -0.07, 0.0), Some(Vec3::new(0.0, -0.19, 0.0))),
+        WeaponKind::Spatha | WeaponKind::Axe | WeaponKind::Seax => (Vec3::new(0.0, -0.06, 0.0), None),
+        // Копьё: начало координат — передняя (левая) рука, правая сзади на древке.
+        WeaponKind::Spear => (Vec3::new(0.0, -0.6, 0.0), Some(Vec3::ZERO)),
+        // Лук держат за середину.
+        WeaponKind::Bow => (Vec3::ZERO, None),
     }
 }
 
@@ -167,7 +196,7 @@ const SHIELD_GRIP: Vec3 = Vec3::new(0.0, -0.02, 0.07);
 
 fn spawn_remote(commands: &mut Commands, index: &mut RemoteIndex, snap: &ActorSnapshot) {
     let pos: Vec3 = snap.pos.into();
-    let mut fighter = Fighter::new(snap.weapon, snap.max_hp, snap.kind == ActorKind::Swordsman);
+    let mut fighter = Fighter::new(snap.weapon, snap.max_hp, snap.shield);
     fighter.action = snap.action;
     fighter.hp = snap.hp;
     let entity = commands
@@ -190,8 +219,8 @@ fn spawn_remote(commands: &mut Commands, index: &mut RemoteIndex, snap: &ActorSn
         ))
         .with_children(|p| {
             p.spawn((BodyRig, NeedsRig(Outfit::for_actor(snap.kind, snap.id)), Transform::default(), Visibility::default()));
-            p.spawn((RemoteSword, NeedsWeapon(snap.weapon), Transform::from_xyz(0.3, 1.0, -0.4), Visibility::default()));
-            if snap.kind == ActorKind::Swordsman {
+            p.spawn((RemoteSword, ShownWeapon(snap.weapon), NeedsWeapon(snap.weapon), Transform::from_xyz(0.3, 1.0, -0.4), Visibility::default()));
+            if snap.shield {
                 p.spawn((RemoteShield, NeedsShield, Transform::from_xyz(-0.42, 1.05, -0.1), Visibility::default()));
             }
         })
@@ -200,7 +229,8 @@ fn spawn_remote(commands: &mut Commands, index: &mut RemoteIndex, snap: &ActorSn
 }
 
 fn spawn_corpse(commands: &mut Commands, index: &mut CorpseIndex, corpse_id: u64, kind: ActorKind, pos: Vec3, yaw: f32, animate: bool) {
-    let weapon = crate::npc::fighter_for(kind).weapon;
+    let proto = crate::npc::fighter_for(kind);
+    let weapon = proto.weapon;
     let entity = commands
         .spawn((CorpseMarker { corpse_id, kind }, Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)), Visibility::default()))
         .with_children(|c| {
@@ -212,7 +242,7 @@ fn spawn_corpse(commands: &mut Commands, index: &mut CorpseIndex, corpse_id: u64
                 Transform::from_xyz(0.5, 0.025, 0.35).with_rotation(Quat::from_rotation_y(0.35) * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
                 Visibility::default(),
             ));
-            if kind == ActorKind::Swordsman {
+            if proto.has_shield {
                 c.spawn((
                     NeedsShield,
                     Transform::from_xyz(-0.6, 0.06, 0.55).with_rotation(Quat::from_rotation_y(-0.5) * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
@@ -330,6 +360,9 @@ fn receive_snapshots(
     mut index: ResMut<RemoteIndex>,
     mut remotes: Query<&mut RemoteActor>,
     mut local: Query<&mut LocalFighter>,
+    mut arrow_index: ResMut<ArrowIndex>,
+    mut arrows: Query<(&mut ArrowVisual, &mut Transform)>,
+    arrow_assets: Res<ArrowAssets>,
 ) {
     let mut latest: Option<Snapshot> = None;
     while let Some(bytes) = client.receive_message(CH_UNRELIABLE) {
@@ -358,16 +391,48 @@ fn receive_snapshots(
                 r.pitch = a.pitch;
                 r.crouching = a.crouching;
                 // Берём действие с сервера, но не откатываем таймер назад внутри того же действия.
-                if std::mem::discriminant(&r.fighter.action) != std::mem::discriminant(&a.action) || action_time(&a.action) > action_time(&r.fighter.action) {
+                if std::mem::discriminant(&r.fighter.action) != std::mem::discriminant(&a.action) || a.action.time() > r.fighter.action.time() {
                     r.fighter.action = a.action;
                 }
                 r.fighter.hp = a.hp;
                 r.fighter.max_hp = a.max_hp;
+                r.fighter.has_shield = a.shield;
+                r.fighter.weapon = a.weapon;
+                r.fighter.stamina = a.stamina;
+                r.fighter.max_stamina = a.max_stamina;
+                r.fighter.action_speed = a.action_speed;
             }
             None if !index.0.contains_key(&a.id) => spawn_remote(&mut commands, &mut index, a),
             None => {}
         }
     }
+    // Стрелы: обновляем, создаём новые, убираем упавшие.
+    let mut alive_arrows = Vec::with_capacity(snapshot.arrows.len());
+    for a in &snapshot.arrows {
+        alive_arrows.push(a.id);
+        let (pos, vel): (Vec3, Vec3) = (a.pos.into(), a.vel.into());
+        let rot = Transform::default().looking_to(vel.normalize_or(Vec3::NEG_Z), Vec3::Y).rotation;
+        match arrow_index.0.get(&a.id).and_then(|e| arrows.get_mut(*e).ok()) {
+            Some((mut v, mut t)) => {
+                v.vel = vel;
+                // Плавно подтягиваем к серверной точке.
+                t.translation = t.translation.lerp(pos, 0.5);
+            }
+            None => {
+                let e = commands
+                    .spawn((ArrowVisual { vel }, Mesh3d(arrow_assets.mesh.clone()), MeshMaterial3d(arrow_assets.material.clone()), Transform::from_translation(pos).with_rotation(rot)))
+                    .id();
+                arrow_index.0.insert(a.id, e);
+            }
+        }
+    }
+    arrow_index.0.retain(|id, e| {
+        let keep = alive_arrows.contains(id);
+        if !keep {
+            commands.entity(*e).despawn();
+        }
+        keep
+    });
     // Те, кого больше нет в снимке, ушли или погибли.
     let gone: Vec<u64> = index.0.keys().copied().filter(|id| !seen.contains(id)).collect();
     for id in gone {
@@ -377,17 +442,29 @@ fn receive_snapshots(
     }
 }
 
-fn action_time(a: &Action) -> f32 {
-    match *a {
-        Action::Windup { t, .. }
-        | Action::Strike { t, .. }
-        | Action::Recovery { t, .. }
-        | Action::Parry { t }
-        | Action::ParryRecovery { t }
-        | Action::BlockRecoil { t }
-        | Action::Stagger { t }
-        | Action::Flinch { t } => t,
-        Action::Idle | Action::Block | Action::Dead => 0.0,
+/// Стрелы летят по той же баллистике, что и на сервере.
+fn fly_arrows(time: Res<Time>, mut arrows: Query<(&mut ArrowVisual, &mut Transform)>) {
+    let dt = time.delta_secs().min(0.1);
+    for (mut a, mut t) in &mut arrows {
+        a.vel.y -= combat::ARROW_GRAVITY * dt;
+        t.translation += a.vel * dt;
+        if a.vel.length_squared() > 0.01 {
+            t.look_to(a.vel, Vec3::Y);
+        }
+    }
+}
+
+/// Если боец сменил оружие (лучник взялся за нож), меняем модель в руке.
+fn refresh_remote_weapons(mut commands: Commands, remotes: Query<(&RemoteActor, &Children)>, mut shown: Query<(Entity, &mut ShownWeapon)>) {
+    for (r, children) in &remotes {
+        for child in children.iter() {
+            if let Ok((e, mut w)) = shown.get_mut(child)
+                && w.0 != r.fighter.weapon
+            {
+                w.0 = r.fighter.weapon;
+                commands.entity(e).despawn_related::<Children>().insert(NeedsWeapon(w.0));
+            }
+        }
     }
 }
 
@@ -396,7 +473,7 @@ fn send_state(mut client: ResMut<RenetClient>, mut timer: ResMut<SendTimer>, tim
         return;
     }
     let Ok((p, t)) = local.single() else { return };
-    let msg = ClientMessage::PlayerState { pos: t.translation.into(), yaw: p.yaw, pitch: p.pitch, crouching: p.crouching };
+    let msg = ClientMessage::PlayerState { pos: t.translation.into(), yaw: p.yaw, pitch: p.pitch, crouching: p.crouching, sprinting: p.sprinting };
     client.send_message(CH_UNRELIABLE, encode(&msg));
 }
 
@@ -441,15 +518,17 @@ fn animate_remote(
         let eye = 1.65 - 0.6 * r.crouch;
         let aim = Quat::from_rotation_x(r.pitch * 0.6);
         let (hilt, dir) = combat::weapon_pose(&r.fighter.action, r.fighter.weapon, now);
-        let unparryable = matches!(r.fighter.action, Action::Windup { unparryable: true, .. } | Action::Strike { unparryable: true, .. });
+        // Ответный удар после парирования подсвечиваем.
+        let riposte = matches!(r.fighter.action, Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. });
         let (twist, lean) = match r.fighter.action {
             Action::Windup { swing, .. } | Action::Strike { swing, .. } | Action::Recovery { swing, .. } => {
                 let lean = if swing == combat::Swing::Overhead { -0.25 * (aim * dir).z.abs().min(1.0) } else { -0.05 };
                 (-(aim * dir).x * 0.55, lean)
             }
-            Action::Stagger { t } | Action::BlockRecoil { t } => (0.0, 0.32 + (now * 25.0).sin() * 0.05 * (1.0 - t).max(0.0)),
+            Action::Stagger { t, .. } => (0.0, 0.32 + (now * 25.0).sin() * 0.05 * (1.0 - t).max(0.0)),
+            Action::GuardStagger { .. } => (0.15, 0.12),
             Action::Flinch { .. } => (0.1, 0.15),
-            Action::Parry { .. } | Action::ParryRecovery { .. } => (0.2, 0.05),
+            Action::Guard { .. } => (0.2, 0.05),
             _ => (0.0, 0.0),
         };
 
@@ -472,7 +551,7 @@ fn animate_remote(
         if let Some(e) = shield_entity
             && let Ok(mut shield) = shields.get_mut(e)
         {
-            let (pos, rot) = if matches!(r.fighter.action, Action::Block) {
+            let (pos, rot) = if matches!(r.fighter.action, Action::Guard { .. } | Action::GuardStagger { .. }) {
                 (Vec3::new(-0.05, 1.25, -0.5), Quat::IDENTITY)
             } else {
                 (Vec3::new(-0.38, 1.0, -0.22), Quat::from_rotation_y(1.0))
@@ -523,7 +602,7 @@ fn animate_remote(
             *sword = sword_tf;
             for bc in blade_children.iter() {
                 if let Ok(mut m) = blades.get_mut(bc) {
-                    m.0 = if unparryable { assets.blade_red.clone() } else { blade_mat.clone() };
+                    m.0 = if riposte { assets.blade_red.clone() } else { blade_mat.clone() };
                 }
             }
         }
