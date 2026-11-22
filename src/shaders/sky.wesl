@@ -40,6 +40,39 @@ fn fbm(p: vec2<f32>) -> f32 {
     return v;
 }
 
+/// Ясный летний день над морем: голубое небо, белые кучевые облака,
+/// на юго-востоке (+X, +Z) — голубые в дымке Крымские горы.
+fn day_sky(dir: vec3<f32>, sun: vec3<f32>, t: f32) -> vec3<f32> {
+    let e = dir.y;
+    let sd = max(dot(dir, sun), 0.0);
+    let h = clamp(e, 0.0, 1.0);
+    let zenith = vec3<f32>(0.07, 0.2, 0.62);
+    let mid = vec3<f32>(0.24, 0.45, 0.85);
+    let horizon = vec3<f32>(0.62, 0.74, 0.9);
+    var col = mix(horizon, mid, smoothstep(0.0, 0.18, h));
+    col = mix(col, zenith, smoothstep(0.15, 0.85, h));
+    col += vec3<f32>(1.0, 0.9, 0.7) * pow(sd, 8.0) * 0.5;
+    col += vec3<f32>(30.0, 27.0, 22.0) * smoothstep(0.9993, 0.9997, sd);
+    if e > 0.0 {
+        let cp = dir.xz / (e + 0.1) * 1.1 + vec2<f32>(t * 0.003, t * 0.0015);
+        let n = fbm(cp);
+        let cover = smoothstep(0.46, 0.66, n) * smoothstep(0.0, 0.1, e);
+        let thick = smoothstep(0.58, 0.85, n);
+        let cloud = mix(vec3<f32>(1.25, 1.24, 1.22), vec3<f32>(0.72, 0.76, 0.84), thick * 0.8) + vec3<f32>(0.6, 0.5, 0.35) * pow(sd, 10.0) * (1.0 - thick);
+        col = mix(col, cloud, cover * 0.9);
+    }
+    // Горы: только на юго-восточной половине горизонта.
+    let az = atan2(dir.z, dir.x);
+    let toward = smoothstep(-0.2, 0.5, dot(normalize(vec2<f32>(dir.x, dir.z) + 1e-5), normalize(vec2<f32>(0.45, 1.0))));
+    let ridge = (0.012 + 0.05 * fbm(vec2<f32>(az * 3.0, 1.0)) + 0.02 * fbm(vec2<f32>(az * 12.0, 5.0))) * toward;
+    let far = vec3<f32>(0.52, 0.60, 0.72);
+    col = mix(col, far, (1.0 - smoothstep(ridge - 0.002, ridge + 0.002, e)) * 0.9);
+    if e < 0.0 {
+        col = vec3<f32>(0.55, 0.64, 0.78);
+    }
+    return col;
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let dir = normalize(in.world_position.xyz - view.world_position);
@@ -50,6 +83,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Насколько направление «со стороны солнца» по азимуту.
     let az_sun = max(dot(normalize(vec2<f32>(dir.x, dir.z) + 1e-5), normalize(sun.xz)), 0.0);
 
+    if sky.sun.w > 0.5 {
+        return vec4<f32>(day_sky(dir, sun, t), 1.0);
+    }
     // Градиент неба.
     let zenith = vec3<f32>(0.09, 0.11, 0.27);
     let mid = vec3<f32>(0.36, 0.29, 0.46);

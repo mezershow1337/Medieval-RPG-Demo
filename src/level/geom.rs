@@ -221,6 +221,30 @@ impl MeshBuilder {
         }
     }
 
+    /// Только скаты двускатной крыши (без треугольных торцов).
+    pub fn gable_roof_slopes(&mut self, min: Vec2, max: Vec2, eave_y: f32, ridge_y: f32, ridge_x: bool) {
+        let mut tmp = MeshBuilder::default();
+        tmp.gable_roof(min, max, eave_y, ridge_y, ridge_x);
+        // Последние два треугольника (6 индексов, 6 вершин) — торцы; отрезаем их.
+        let tri_verts = 6;
+        tmp.pos.truncate(tmp.pos.len() - tri_verts);
+        tmp.nrm.truncate(tmp.nrm.len() - tri_verts);
+        tmp.uv.truncate(tmp.uv.len() - tri_verts);
+        tmp.idx.truncate(tmp.idx.len() - 6);
+        self.append(tmp);
+    }
+
+    /// Та же геометрия, но лицом в другую сторону (изнанка крыши, потолок).
+    pub fn flipped(mut self) -> MeshBuilder {
+        for n in &mut self.nrm {
+            *n = [-n[0], -n[1], -n[2]];
+        }
+        for t in self.idx.chunks_mut(3) {
+            t.swap(1, 2);
+        }
+        self
+    }
+
     /// Односкатная крыша: верхний край над линией `high`, нижний — над `low` (обе вдоль одной оси).
     pub fn lean_roof(&mut self, high: [Vec3; 2], low: [Vec3; 2]) {
         let along = (high[1] - high[0]).length();
@@ -234,6 +258,158 @@ impl MeshBuilder {
             [Vec2::new(0.0, 0.0), Vec2::new(along, 0.0), Vec2::new(along, slope), Vec2::new(0.0, slope)],
             facing,
         );
+    }
+
+    /// Вершина с явной нормалью (для гладких тел вращения и рельефа).
+    pub fn vert(&mut self, p: Vec3, n: Vec3, uv: Vec2) -> u32 {
+        self.pos.push(p.to_array());
+        self.nrm.push(n.to_array());
+        self.uv.push(uv.to_array());
+        self.pos.len() as u32 - 1
+    }
+
+    pub fn index_tri(&mut self, a: u32, b: u32, c: u32) {
+        self.idx.extend_from_slice(&[a, b, c]);
+    }
+
+    pub fn append(&mut self, other: MeshBuilder) {
+        let base = self.pos.len() as u32;
+        self.pos.extend(other.pos);
+        self.nrm.extend(other.nrm);
+        self.uv.extend(other.uv);
+        self.idx.extend(other.idx.into_iter().map(|i| i + base));
+    }
+
+    /// Сдвигает всю геометрию.
+    pub fn translate(&mut self, d: Vec3) {
+        for p in &mut self.pos {
+            *p = (Vec3::from(*p) + d).to_array();
+        }
+    }
+
+    /// Тело вращения вокруг вертикали через `base`: профиль (радиус, высота) снизу вверх.
+    /// Нормали сглажены, кроме резких изломов профиля (> 40°). Полный круг.
+    pub fn lathe(&mut self, base: Vec3, profile: &[(f32, f32)], sides: usize) {
+        self.lathe_arc(base, profile, 0.0, std::f32::consts::TAU, sides, false);
+    }
+
+    /// Часть тела вращения от угла `a0` до `a1` (угол 0 — +X, растёт к +Z).
+    /// `inward` — лицевая сторона внутрь (апсида, чаша, свод изнутри).
+    pub fn lathe_arc(&mut self, base: Vec3, profile: &[(f32, f32)], a0: f32, a1: f32, segs: usize, inward: bool) {
+        if profile.len() < 2 || segs == 0 {
+            return;
+        }
+        // Нормаль каждого отрезка профиля в плоскости (радиус, y).
+        let seg_n: Vec<Vec2> = profile
+            .windows(2)
+            .map(|w| {
+                let t = Vec2::new(w[1].0 - w[0].0, w[1].1 - w[0].1);
+                Vec2::new(t.y, -t.x).normalize_or(Vec2::X)
+            })
+            .collect();
+        let crease = 40f32.to_radians().cos();
+        for (k, w) in profile.windows(2).enumerate() {
+            let n_here = seg_n[k];
+            let end_normal = |other: Option<&Vec2>| match other {
+                Some(o) if o.dot(n_here) > crease => (n_here + *o).normalize(),
+                _ => n_here,
+            };
+            let na = end_normal(if k > 0 { seg_n.get(k - 1) } else { None });
+            let nb = end_normal(seg_n.get(k + 1));
+            let ((ra, ya), (rb, yb)) = (w[0], w[1]);
+            let len = Vec2::new(rb - ra, yb - ya).length();
+            let mut ring = Vec::with_capacity((segs + 1) * 2);
+            for i in 0..=segs {
+                let a = a0 + (a1 - a0) * i as f32 / segs as f32;
+                let dir = Vec3::new(a.cos(), 0.0, a.sin());
+                let u = a * ra.max(rb).max(0.05);
+                let sign = if inward { -1.0 } else { 1.0 };
+                let nva = (dir * na.x + Vec3::Y * na.y) * sign;
+                let nvb = (dir * nb.x + Vec3::Y * nb.y) * sign;
+                ring.push(self.vert(base + dir * ra + Vec3::Y * ya, nva, Vec2::new(u, ya)));
+                ring.push(self.vert(base + dir * rb + Vec3::Y * yb, nvb, Vec2::new(u, ya + len)));
+            }
+            for i in 0..segs {
+                let (a, b, c, d) = (ring[i * 2], ring[i * 2 + 2], ring[i * 2 + 3], ring[i * 2 + 1]);
+                // При обходе по углу вверх лицевая сторона смотрит наружу для порядка a, d, c / a, c, b.
+                if inward {
+                    self.idx.extend_from_slice(&[a, b, c, a, c, d]);
+                } else {
+                    self.idx.extend_from_slice(&[a, c, b, a, d, c]);
+                }
+            }
+        }
+    }
+
+    /// Плоский диск (крышка, вода в цистерне).
+    pub fn disc(&mut self, c: Vec3, r: f32, sides: usize, up: bool) {
+        let n = if up { Vec3::Y } else { Vec3::NEG_Y };
+        let center = self.vert(c, n, Vec2::new(c.x, c.z));
+        let ring: Vec<u32> = (0..=sides)
+            .map(|i| {
+                let a = i as f32 / sides as f32 * std::f32::consts::TAU;
+                let p = c + Vec3::new(a.cos() * r, 0.0, a.sin() * r);
+                self.vert(p, n, Vec2::new(p.x, p.z))
+            })
+            .collect();
+        for i in 0..sides {
+            if up {
+                self.idx.extend_from_slice(&[center, ring[i + 1], ring[i]]);
+            } else {
+                self.idx.extend_from_slice(&[center, ring[i], ring[i + 1]]);
+            }
+        }
+    }
+
+    /// Коробка, повёрнутая вокруг вертикали на `yaw` (радианы, от +X к +Z).
+    pub fn obox(&mut self, center: Vec3, half: Vec3, yaw: f32) {
+        let (s, c) = yaw.sin_cos();
+        let ax = Vec3::new(c, 0.0, s) * half.x;
+        let az = Vec3::new(-s, 0.0, c) * half.z;
+        let ay = Vec3::Y * half.y;
+        for (n, u, v) in [(ax, az, ay), (-ax, ay, az), (az, ay, ax), (-az, ax, ay), (ay, ax, az), (-ay, az, ax)] {
+            let f = center + n;
+            self.quad([f - u - v, f + u - v, f + u + v, f - u + v], n);
+        }
+    }
+
+    /// Цилиндрический (полукруглый) свод над прямоугольником: ось вдоль X (`along_x`) или Z.
+    /// Рисуется внутренняя сторона (интрадос) и наружная (экстрадос) толщиной `thick`.
+    pub fn barrel_vault(&mut self, min: Vec2, max: Vec2, spring: f32, along_x: bool, thick: f32) {
+        const N: usize = 16;
+        let (span, len) = if along_x { (max.y - min.y, max.x - min.x) } else { (max.x - min.x, max.y - min.y) };
+        let r = span / 2.0;
+        let c = (min + max) / 2.0;
+        let p = |k: usize, t: f32, rr: f32| {
+            let a = std::f32::consts::PI * k as f32 / N as f32;
+            let off = -a.cos() * rr;
+            let y = spring + a.sin() * rr;
+            if along_x { Vec3::new(min.x + len * t, y, c.y + off) } else { Vec3::new(c.x + off, y, min.y + len * t) }
+        };
+        let axis_c = |t: f32| if along_x { Vec3::new(min.x + len * t, spring, c.y) } else { Vec3::new(c.x, spring, min.y + len * t) };
+        for k in 0..N {
+            let inner = [p(k, 0.0, r), p(k + 1, 0.0, r), p(k + 1, 1.0, r), p(k, 1.0, r)];
+            let mid = (inner[0] + inner[2]) / 2.0;
+            self.quad(inner, axis_c(0.5) - mid);
+            let outer = [p(k, 0.0, r + thick), p(k + 1, 0.0, r + thick), p(k + 1, 1.0, r + thick), p(k, 1.0, r + thick)];
+            let mid = (outer[0] + outer[2]) / 2.0;
+            self.quad(outer, mid - axis_c(0.5));
+        }
+    }
+
+    /// Купол-полусфера (или её часть по углу `a0..a1` — конха апсиды), изнутри и снаружи.
+    pub fn dome(&mut self, c: Vec3, r: f32, a0: f32, a1: f32, segs: usize, thick: f32) {
+        const RINGS: usize = 8;
+        let prof = |rr: f32| -> Vec<(f32, f32)> {
+            (0..=RINGS)
+                .map(|k| {
+                    let t = k as f32 / RINGS as f32 * std::f32::consts::FRAC_PI_2;
+                    (t.cos() * rr, t.sin() * rr)
+                })
+                .collect()
+        };
+        self.lathe_arc(c, &prof(r), a0, a1, segs, true);
+        self.lathe_arc(c, &prof(r + thick), a0, a1, segs, false);
     }
 
     pub fn build(self) -> Mesh {

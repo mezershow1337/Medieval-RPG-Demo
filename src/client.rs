@@ -128,6 +128,7 @@ pub fn run(server_addr: SocketAddr) {
         .add_plugins(crate::loot_client::LootClientPlugin)
         .add_plugins(crate::trade_client::TradeClientPlugin)
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin))
+        .add_systems(Update, hide_ui_for_shots.run_if(|| std::env::var("MRPG_CAM").is_ok()))
         .insert_resource(RenetClient::new(connection_config()))
         .insert_resource(transport)
         .insert_resource(NetState { server_addr: Some(server_addr), ..default() })
@@ -158,8 +159,24 @@ fn on_netcode_error(event: On<NetcodeErrorEvent>, mut state: ResMut<NetState>) {
 #[derive(Component)]
 struct WaitingCamera;
 
+/// Снимки уровня (MRPG_CAM): прячем интерфейс.
+fn hide_ui_for_shots(mut roots: Query<&mut Visibility, (With<Node>, Without<ChildOf>)>) {
+    for mut v in &mut roots {
+        *v = Visibility::Hidden;
+    }
+}
+
 fn spawn_waiting_camera(mut commands: Commands) {
-    commands.spawn((WaitingCamera, Camera3d::default(), Transform::from_xyz(0.0, 25.0, 70.0).looking_at(Vec3::new(0.0, 5.0, 0.0), Vec3::Y)));
+    // Для снимков уровня: MRPG_CAM="x,y,z,tx,ty,tz" — откуда и куда смотрит камера ожидания.
+    let cam = std::env::var("MRPG_CAM").ok().and_then(|s| {
+        let v: Vec<f32> = s.split(',').filter_map(|t| t.trim().parse().ok()).collect();
+        (v.len() == 6).then(|| Transform::from_xyz(v[0], v[1], v[2]).looking_at(Vec3::new(v[3], v[4], v[5]), Vec3::Y))
+    });
+    let tf = cam.unwrap_or_else(|| {
+        let p = crate::level::spawn_point(0);
+        Transform::from_translation(p + Vec3::new(-40.0, 30.0, 60.0)).looking_at(p + Vec3::Y * 4.0, Vec3::Y)
+    });
+    commands.spawn((WaitingCamera, Camera3d::default(), Projection::Perspective(PerspectiveProjection { fov: 70f32.to_radians(), ..default() }), tf));
 }
 
 fn setup_character_assets(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>, mut meshes: ResMut<Assets<Mesh>>) {

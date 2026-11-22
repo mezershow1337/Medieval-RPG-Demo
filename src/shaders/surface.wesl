@@ -166,6 +166,112 @@ fn slate(uv: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(h, id, clamp(joint, 0.0, 1.0), id);
 }
 
+// Бутовая кладка: неровные камни разного размера в толстых швах раствора.
+fn rubble(p: vec2<f32>) -> vec4<f32> {
+    let q = p * vec2<f32>(2.4, 3.4) + vec2<f32>(fbm(p * 1.3), fbm(p * 1.3 + 4.0)) * 0.5;
+    let v = voronoi(q);
+    let edge = v.y - v.x;
+    let joint = 1.0 - smoothstep(0.06, 0.2, edge);
+    let n = fbm(p * 9.0 + v.z * 11.0);
+    let h = smoothstep(0.02, 0.4, edge) * (0.8 + 0.2 * n);
+    return vec4<f32>(h, v.z * 0.65 + n * 0.35, joint, v.z);
+}
+
+// Плинфа: тонкий кирпич в толстом слое раствора (византийская кладка).
+fn bricks(p: vec2<f32>) -> vec4<f32> {
+    let course = 0.085;
+    let row = floor(p.y / course);
+    let len = 0.37;
+    let u = p.x / len + fract(row * 0.5) * 1.0;
+    let cell = vec2<f32>(floor(u), row);
+    let fu = fract(u) * len;
+    let fv = fract(p.y / course) * course;
+    let e = min(min(fu, len - fu) * 0.6, min(fv, course - fv - 0.032));
+    let joint = 1.0 - smoothstep(0.0, 0.006, e);
+    let id = hash21(cell);
+    let n = fbm(p * 14.0 + id * 9.0);
+    return vec4<f32>((1.0 - joint) * (0.85 + 0.15 * n), id * 0.7 + n * 0.3, joint, id);
+}
+
+// Смешанная кладка (opus mixtum): ряды тёсаного камня, через каждые 1,6 м — пояс из пяти рядов плинфы.
+// Кирпич помечен id > 1.
+fn opus_mixtum(p: vec2<f32>) -> vec4<f32> {
+    let band = fract(p.y / 1.6);
+    if band < 0.27 {
+        let b = bricks(p);
+        return vec4<f32>(b.x, b.y, b.z, 2.0 + b.w);
+    }
+    return ashlar(p, vec2<f32>(0.5, 0.29));
+}
+
+fn marble(p: vec2<f32>, top: bool) -> vec4<f32> {
+    let warp = fbm(p * 1.7) * 5.0 + fbm(p * 6.0) * 0.8;
+    let vein = pow(1.0 - abs(sin(p.x * 2.3 + p.y * 1.1 + warp)), 18.0);
+    var joint = 0.0;
+    var id = 0.0;
+    if top {
+        let f = flagstone(p * 0.8);
+        joint = f.z;
+        id = f.w;
+    }
+    return vec4<f32>(1.0 - joint * 0.6, clamp(vein + fbm(p * 3.0) * 0.15, 0.0, 1.0), joint, id);
+}
+
+// Мозаичный пол: тессеры по 2,5 см, круги-«плетёнка» в квадратах 1,2 м и кайма.
+fn mosaic(p: vec2<f32>) -> vec4<f32> {
+    let t = 0.025;
+    let cell = floor(p / t);
+    let f = fract(p / t);
+    let e = min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y));
+    let joint = 1.0 - smoothstep(0.04, 0.14, e);
+    let c = (cell + 0.5) * t;
+    let q = fract(c / 1.2) - 0.5;
+    let r = length(q);
+    let ring = step(abs(r - 0.36), 0.035) + step(abs(r - 0.22), 0.03);
+    let cross = step(abs(q.x), 0.03) * step(r, 0.18) + step(abs(q.y), 0.03) * step(r, 0.18);
+    let frame = step(0.47, max(abs(q.x), abs(q.y)));
+    // tone: 0 — белый фон, 0.5 — красный узор, 1 — тёмная кайма.
+    var tone = 0.0;
+    if ring + cross > 0.5 {
+        tone = 0.5;
+    }
+    if frame > 0.5 {
+        tone = 1.0;
+    }
+    let id = hash21(cell);
+    return vec4<f32>(1.0 - joint, tone, joint, id);
+}
+
+// Утоптанная земля с мелким щебнем.
+fn earth(p: vec2<f32>) -> vec4<f32> {
+    let v = voronoi(p * 9.0);
+    let pebble = 1.0 - smoothstep(0.18, 0.32, v.x);
+    let big = fbm(p * 0.6);
+    let n = fbm(p * 4.0);
+    let peb = pebble * step(0.55, v.z);
+    return vec4<f32>(peb * 0.8 + n * 0.2, big * 0.6 + n * 0.4, peb * 0.4, v.z + peb);
+}
+
+fn tile(uv: vec2<f32>) -> vec4<f32> {
+    let w = 0.44;
+    let course = 0.58;
+    let col = floor(uv.x / w);
+    let row = floor(uv.y / course);
+    let fu = fract(uv.x / w) * w;
+    let fv = fract(uv.y / course);
+    // Калиптер — полуцилиндр шириной 0.16 м над стыком тегул.
+    let d = min(fu, w - fu);
+    let cover = 1.0 - smoothstep(0.07, 0.085, d);
+    let cyl = sqrt(max(0.0, 1.0 - pow(d / 0.08, 2.0)));
+    // Тегула: плоская, нижний край чуть ниже следующего ряда (нахлёст).
+    let flat_h = 0.25 + fv * 0.25;
+    let step_edge = smoothstep(0.93, 1.0, fv);
+    let h = mix(flat_h, 0.7 + cyl * 0.3, cover);
+    let id = hash21(vec2<f32>(col, row));
+    let joint = clamp(step_edge * (1.0 - cover) + (1.0 - smoothstep(0.0, 0.012, abs(d - 0.08))) * 0.5, 0.0, 1.0);
+    return vec4<f32>(h, id, joint, id);
+}
+
 // Узор в 2D-проекции.
 fn pattern2d(kind: i32, p: vec2<f32>, top: bool) -> vec4<f32> {
     let s = surface.params.y;
@@ -195,6 +301,47 @@ fn pattern2d(kind: i32, p: vec2<f32>, top: bool) -> vec4<f32> {
             let n = fbm(p * 0.35);
             let blades = fbm(p * 12.0);
             return vec4<f32>(blades, smoothstep(0.35, 0.75, n), 0.0, n);
+        }
+        case 11: {
+            return rubble(p * s);
+        }
+        case 13: {
+            let n = fbm(p * 1.1 * s);
+            let fine = fbm(p * 9.0 * s);
+            return vec4<f32>(fine * 0.4, n * 0.7 + fine * 0.3, 0.0, n);
+        }
+        case 14: {
+            return bricks(p * s);
+        }
+        case 15: {
+            if top {
+                return ashlar(p * s, vec2<f32>(0.6, 0.45));
+            }
+            return opus_mixtum(p * s);
+        }
+        case 16: {
+            return marble(p * s, top);
+        }
+        case 17: {
+            if top {
+                return mosaic(p);
+            }
+            return vec4<f32>(fbm(p * 3.0), fbm(p * 1.5), 0.0, 0.0);
+        }
+        case 18: {
+            return earth(p * s);
+        }
+        case 19: {
+            if top {
+                let n = fbm(p * 0.05);
+                let blades = fbm(p * 9.0);
+                let e = earth(p * 0.7);
+                return vec4<f32>(blades * 0.6 + e.x * 0.4, n, 0.0, fbm(p * 0.6));
+            }
+            // Скальные выходы известняка: слоистость.
+            let layers = fract(p.y * 0.9 + fbm(p * 0.3) * 1.5);
+            let r = rubble(p * 0.35);
+            return vec4<f32>(r.x * 0.7 + layers * 0.3, r.y, r.z * 0.5 + step(0.92, layers) * 0.5, 3.0);
         }
         case 10: {
             let v = voronoi(p * 5.0);
@@ -284,7 +431,7 @@ fn fragment(
     var N = pbr_input.N;
     var emissive = vec3<f32>(0.0);
 
-    if kind == 5 || kind == 6 || kind == 7 || kind == 8 || kind == 9 {
+    if kind == 5 || kind == 6 || kind == 7 || kind == 8 || kind == 9 || kind == 12 {
         // Узоры, завязанные на UV или особые.
         var uv = vec2<f32>(0.0);
         @if(VERTEX_UVS_A) {
@@ -324,6 +471,22 @@ fn fragment(
                 let t = normalize(cross(n, vec3<f32>(0.0, 1.0, 0.0)) + vec3<f32>(1e-4, 0.0, 0.0));
                 let b = cross(t, n);
                 N = perturb(N, (t * hu + b * hv) / e, bump);
+            }
+            case 12: {
+                // Керамическая черепица: плоские тегулы с бортиками и полукруглые калиптеры
+                // над стыками. u — вдоль карниза, v — вниз по скату.
+                let t = tile(uv);
+                color = mix(base_a, base_a * vec3<f32>(1.25, 1.1, 1.0), t.y * variation * 2.5);
+                color = mix(color, base_b, t.z * 0.85);
+                let lichen = smoothstep(0.66, 0.82, fbm(uv * 0.9 + t.w * 3.0));
+                color = mix(color, vec3<f32>(0.36, 0.36, 0.22), lichen * moss_amount);
+                rough = mix(0.55, 0.9, t.z + lichen);
+                let e = 0.01;
+                let hu = tile(uv + vec2<f32>(e, 0.0)).x - t.x;
+                let hv = tile(uv + vec2<f32>(0.0, e)).x - t.x;
+                let tt = normalize(cross(n, vec3<f32>(0.0, 1.0, 0.0)) + vec3<f32>(1e-4, 0.0, 0.0));
+                let bb = cross(tt, n);
+                N = perturb(N, (tt * hu + bb * hv) / e, bump);
             }
             case 7: {
                 // Металл: кованые пятна и потёртости.
@@ -372,7 +535,45 @@ fn fragment(
         if kind == 10 {
             color = mix(base_a, base_b, tone) * (0.7 + 0.5 * (1.0 - s.joint));
         }
-        color = mix(color, base_b, s.joint * 0.9);
+        if kind == 15 && s.id > 1.5 {
+            // Пояс плинфы.
+            color = vec3<f32>(0.42, 0.17, 0.09) * (0.8 + 0.5 * fract(s.id * 3.7));
+        }
+        if kind == 16 {
+            color = mix(base_a * (0.95 + 0.1 * fbm(wp.xz * 2.0)), base_b, s.tone);
+        }
+        if kind == 17 {
+            if s.tone > 0.75 {
+                color = vec3<f32>(0.06, 0.05, 0.05);
+            } else if s.tone > 0.25 {
+                color = base_b * (0.85 + 0.3 * fract(s.id * 5.1));
+            } else {
+                color = base_a * (0.9 + 0.15 * fract(s.id * 3.3));
+            }
+        }
+        if kind == 18 {
+            color = mix(base_a, base_a * 0.75, s.tone) * (1.0 + (fract(s.id) - 0.5) * 0.15);
+            color = mix(color, base_b, clamp(s.id - 1.0, 0.0, 1.0) * 0.8);
+        }
+        if kind == 19 {
+            // Трава на пологом, камень на крутом.
+            let slope = 1.0 - clamp(n.y, 0.0, 1.0);
+            let dry = vec3<f32>(0.45, 0.40, 0.22);
+            let green = base_a;
+            let soil = vec3<f32>(0.33, 0.27, 0.19);
+            var c = mix(green, dry, smoothstep(0.3, 0.7, s.tone));
+            c = mix(c, soil, smoothstep(0.55, 0.85, fract(s.id * 1.0)) * 0.6);
+            c *= 0.85 + 0.3 * fbm(wp.xz * 0.9);
+            let rock = base_b * (0.8 + 0.4 * fbm(wp.xz * 0.5 + wp.y));
+            color = mix(c, rock, smoothstep(0.35, 0.6, slope + (fbm(wp.xz * 0.08) - 0.5) * 0.3));
+            // Галька у воды.
+            color = mix(color, vec3<f32>(0.55, 0.52, 0.46), (1.0 - smoothstep(-1.0, 0.3, wp.y)) * 0.7);
+        }
+        if kind == 17 {
+            color *= 1.0 - s.joint * 0.45;
+        } else {
+            color = mix(color, base_b, s.joint * 0.9);
+        }
         rough = clamp(rough + s.joint * 0.15 + (tone - 0.5) * 0.15, 0.05, 1.0);
         N = perturb(N, s.grad, bump);
 

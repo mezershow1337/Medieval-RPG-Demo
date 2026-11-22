@@ -515,7 +515,7 @@ mod tests {
         let mut brain = Brain::new(&spawn);
         let mut pose = Pose { feet: find_free_spot(&level, spawn.pos), yaw: 0.0, pitch: 0.0, crouching: false };
         let mut knight = fighter_for(ActorKind::Stratiotes);
-        let player_pose = Pose { feet: find_free_spot(&level, Vec3::new(10.0, 0.0, 6.0)), yaw: 0.0, pitch: 0.0, crouching: false };
+        let player_pose = Pose { feet: find_free_spot(&level, Vec3::new(16.0, 0.0, 0.0)), yaw: 0.0, pitch: 0.0, crouching: false };
         let mut player = fighter_for(ActorKind::Player);
         let mut rng = Rng::new(42);
         let dt = 1.0 / 60.0;
@@ -554,11 +554,12 @@ mod tests {
         use crate::combat::{Arrow, ArrowStep, arrow_launch, resolve_arrow, step_arrow};
         let level = crate::level::level_colliders();
         for shield in [false, true] {
-            let spawn = NpcSpawn { kind: ActorKind::HunArcher, pos: Vec3::new(10.0, 0.0, -6.0), yaw: PI_ };
+            // Главная улица Херсонеса: открытая прямая вдоль X.
+            let spawn = NpcSpawn { kind: ActorKind::HunArcher, pos: Vec3::new(4.0, 0.0, 0.0), yaw: -PI_ / 2.0 };
             let mut brain = Brain::new(&spawn);
             let mut pose = Pose { feet: find_free_spot(&level, spawn.pos), yaw: 0.0, pitch: 0.0, crouching: false };
             let mut archer = fighter_for(ActorKind::HunArcher);
-            let player_pose = Pose { feet: find_free_spot(&level, Vec3::new(10.0, 0.0, 6.0)), yaw: 0.0, pitch: 0.0, crouching: false };
+            let player_pose = Pose { feet: find_free_spot(&level, Vec3::new(16.0, 0.0, 0.0)), yaw: 0.0, pitch: 0.0, crouching: false };
             let mut player = Fighter::new(WeaponKind::Spatha, 150.0, shield);
             let mut rng = Rng::new(3);
             let dt = 1.0 / 60.0;
