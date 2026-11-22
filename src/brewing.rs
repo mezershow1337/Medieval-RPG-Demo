@@ -9,6 +9,7 @@
 //! Времена сжаты: час варки — несколько секунд, сутки брожения — меньше минуты.
 
 use crate::lore::{Knowledge, Lore, Technique};
+use crate::medicine::Toxin;
 use serde::{Deserialize, Serialize};
 
 /// Котила (κοτύλη) — около четверти литра; по весу воды примерно 80 драхм.
@@ -67,6 +68,14 @@ pub enum Vessel {
     CopperKettle,
     /// Ступка с пестиком: растирать, без огня.
     Mortar,
+    /// Алембик (кукурбита с амбиком): перегонка. Стеклянный — лопается от рывка жара.
+    Alembic,
+    /// Стеклянная реторта: перегонка, ещё капризнее к сильному огню.
+    Retort,
+    /// Керотакис Зосима: закрытый прибор для возгонки — паров наружу выходит меньше.
+    Kerotakis,
+    /// Тигель: обжиг на сильном огне.
+    Crucible,
 }
 
 impl Vessel {
@@ -75,6 +84,10 @@ impl Vessel {
             "Глиняный горшок" => Some(Vessel::ClayPot),
             "Медный котелок" => Some(Vessel::CopperKettle),
             "Ступка с пестиком" => Some(Vessel::Mortar),
+            "Алембик" => Some(Vessel::Alembic),
+            "Стеклянная реторта" => Some(Vessel::Retort),
+            "Керотакис" => Some(Vessel::Kerotakis),
+            "Тигель" => Some(Vessel::Crucible),
             _ => None,
         }
     }
@@ -84,7 +97,26 @@ impl Vessel {
             Vessel::ClayPot => "Глиняный горшок",
             Vessel::CopperKettle => "Медный котелок",
             Vessel::Mortar => "Ступка с пестиком",
+            Vessel::Alembic => "Алембик",
+            Vessel::Retort => "Стеклянная реторта",
+            Vessel::Kerotakis => "Керотакис",
+            Vessel::Crucible => "Тигель",
         }
+    }
+
+    /// Стекло: лопается от сильного огня.
+    pub fn glass(self) -> bool {
+        matches!(self, Vessel::Alembic | Vessel::Retort)
+    }
+
+    /// Перегонный прибор (воды не льют, пары собираются в приёмнике).
+    pub fn still(self) -> bool {
+        matches!(self, Vessel::Alembic | Vessel::Retort | Vessel::Kerotakis)
+    }
+
+    /// Нужна ли вода в этом сосуде вообще.
+    pub fn takes_water(self) -> bool {
+        matches!(self, Vessel::ClayPot | Vessel::CopperKettle)
     }
 }
 
@@ -109,6 +141,11 @@ pub fn mass(item: &str) -> Option<f32> {
         "Кувшин оливкового масла" => 100.0,
         "Кувшин вина" => 120.0,
         "Винный уксус" | "Щёлок" => 20.0,
+        // Алхимия и краски.
+        "Сосновая смола" | "Негашёная известь" | "Медный лом" => 15.0,
+        "Киноварь" | "Свинцовые белила" => 8.0,
+        "Свинец" => 20.0,
+        "Нефть" => 30.0,
         _ => return None,
     })
 }
@@ -134,6 +171,9 @@ const fn opt(any_of: &'static [&'static str], share: f32, tol: f32) -> Part {
 enum VesselNeed {
     Pot,
     Mortar,
+    /// Алембик, реторта или керотакис.
+    Still,
+    Crucible,
 }
 
 /// Как делают снадобье (по Диоскориду, Галену, Орибасию; доли округлены).
@@ -155,6 +195,12 @@ pub struct Recipe {
     acidic: bool,
     /// Подсказка для знающего приём (то, что написано в книгах).
     pub hint: &'static str,
+    /// Ядовитые пары при работе (доз), если не в закрытом приборе.
+    fumes: Option<(Toxin, f32)>,
+    /// Готовое — сам сосуд (зажигательный горшок).
+    consumes_vessel: bool,
+    /// С этого огня смесь вспыхивает.
+    ignites: Option<Heat>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -168,7 +214,10 @@ enum Yield {
 impl Recipe {
     /// Жидкое — разливают во флаконы.
     pub fn bottled(&self) -> bool {
-        !matches!(self.product, "Кровоостанавливающая припарка" | "Мыло")
+        !matches!(
+            self.product,
+            "Кровоостанавливающая припарка" | "Мыло" | "Ярь-медянка" | "Свинцовые белила" | "Сурик" | "Мареновый лак" | "Вайдовая синь" | "Зажигательный горшок"
+        )
     }
 }
 
@@ -187,6 +236,9 @@ pub static RECIPES: &[Recipe] = &[
         yield_per: Yield::PerKotyle(2.0),
         acidic: false,
         hint: "Отвар: горсть травы на две котилы воды, томить на слабом огне около часа, уварить наполовину-на две трети.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
     },
     Recipe {
         product: "Отвар чабреца",
@@ -200,6 +252,9 @@ pub static RECIPES: &[Recipe] = &[
         yield_per: Yield::PerKotyle(2.0),
         acidic: false,
         hint: "Чабрец варят так же, как шалфей.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
     },
     Recipe {
         product: "Маковый отвар",
@@ -213,6 +268,9 @@ pub static RECIPES: &[Recipe] = &[
         yield_per: Yield::PerKotyle(2.0),
         acidic: false,
         hint: "Маковые головки томить на слабом огне часа два; чем гуще, тем сильнее — а значит, опаснее.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
     },
     Recipe {
         product: "Оксимель",
@@ -226,6 +284,9 @@ pub static RECIPES: &[Recipe] = &[
         yield_per: Yield::PerDrachms(30.0),
         acidic: true,
         hint: "Оксимель: мёда втрое больше, чем уксуса, немного воды, уварить до сиропа. Только в глине — уксус ест медь.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
     },
     Recipe {
         product: "Зверобойное масло",
@@ -239,6 +300,9 @@ pub static RECIPES: &[Recipe] = &[
         yield_per: Yield::PerDrachms(50.0),
         acidic: false,
         hint: "Цветы зверобоя в оливковом масле: две горсти на кувшин, томить на водяной бане несколько часов, пока масло не покраснеет. Воды не лить.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
     },
     Recipe {
         product: "Ранозаживляющая мазь",
@@ -252,6 +316,9 @@ pub static RECIPES: &[Recipe] = &[
         yield_per: Yield::PerDrachms(40.0),
         acidic: false,
         hint: "Керат Галена: воск и масло как один к четырём, растопить на слабом огне; для ран добавить щепоть мирры или ладана.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
     },
     Recipe {
         product: "Кровоостанавливающая припарка",
@@ -265,6 +332,9 @@ pub static RECIPES: &[Recipe] = &[
         yield_per: Yield::PerDrachms(8.0),
         acidic: false,
         hint: "Растереть в ступке тысячелистник с подорожником, можно с щепотью квасцов.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
     },
     Recipe {
         product: "Винный уксус",
@@ -278,6 +348,9 @@ pub static RECIPES: &[Recipe] = &[
         yield_per: Yield::PerDrachms(20.0),
         acidic: true,
         hint: "Вино в открытом горшке в тепле, без огня; через несколько дней скиснет в уксус.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
     },
     Recipe {
         product: "Щёлок",
@@ -291,6 +364,9 @@ pub static RECIPES: &[Recipe] = &[
         yield_per: Yield::PerKotyle(1.0),
         acidic: false,
         hint: "Золу залить водой (по весу втрое больше), настоять полдня и слить щёлок.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
     },
     Recipe {
         product: "Мыло",
@@ -304,6 +380,9 @@ pub static RECIPES: &[Recipe] = &[
         yield_per: Yield::PerDrachms(25.0),
         acidic: false,
         hint: "Щёлок с жиром поровну по весу, варить на сильном огне, пока не загустеет.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
     },
     Recipe {
         product: "Чернила",
@@ -317,6 +396,9 @@ pub static RECIPES: &[Recipe] = &[
         yield_per: Yield::PerKotyle(2.0),
         acidic: false,
         hint: "Толчёные галлы настоять в воде, добавить купорос и камедь: галлов вдвое больше камеди.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
     },
     Recipe {
         product: "Териак",
@@ -338,6 +420,156 @@ pub static RECIPES: &[Recipe] = &[
         yield_per: Yield::PerDrachms(20.0),
         acidic: false,
         hint: "Териак Андромаха по Галену: опий, мирра, можжевельник, корица, перец и шафран растереть и замесить на мёде (мёда втрое больше по весу, чем порошков), долго томить.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
+    },
+    // ----- Краски и пигменты (Феофраст, Плиний, папирусы красильщиков) -----
+    Recipe {
+        product: "Ярь-медянка",
+        technique: Technique::Fermentation,
+        vessel: VesselNeed::Pot,
+        parts: &[part(&["Медный лом"], 0.45, 0.25), part(&["Винный уксус"], 0.55, 0.25)],
+        water: (0.0, 0.0),
+        heat: &[Heat::None],
+        reduce: (0.0, 1.0),
+        hours: (48.0, 72.0, 0.0),
+        yield_per: Yield::PerDrachms(12.0),
+        acidic: true,
+        hint: "Медные пластины над крепким уксусом в закрытом горшке, без огня; через несколько дней соскрести зелень.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
+    },
+    Recipe {
+        product: "Свинцовые белила",
+        technique: Technique::Calcination,
+        vessel: VesselNeed::Pot,
+        parts: &[part(&["Свинец"], 0.5, 0.25), part(&["Винный уксус"], 0.5, 0.25)],
+        water: (0.0, 0.0),
+        heat: &[Heat::None],
+        reduce: (0.0, 1.0),
+        hours: (48.0, 72.0, 0.0),
+        yield_per: Yield::PerDrachms(12.0),
+        acidic: true,
+        hint: "Свинец над уксусом в закрытом горшке, в тепле без огня; белый налёт соскрести — это белила.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
+    },
+    Recipe {
+        product: "Сурик",
+        technique: Technique::Calcination,
+        vessel: VesselNeed::Crucible,
+        parts: &[part(&["Свинцовые белила"], 1.0, 0.0)],
+        water: (0.0, 0.0),
+        heat: &[Heat::High],
+        reduce: (0.0, 1.0),
+        hours: (2.0, 4.0, 10.0),
+        yield_per: Yield::PerDrachms(8.0),
+        acidic: false,
+        hint: "Белила, обожжённые в тигле на сильном огне, краснеют и становятся суриком.",
+        fumes: Some((Toxin::Lead, 0.25)),
+        consumes_vessel: false,
+        ignites: None,
+    },
+    Recipe {
+        product: "Мареновый лак",
+        technique: Technique::Mordanting,
+        vessel: VesselNeed::Pot,
+        parts: &[part(&["Корень марены"], 0.6, 0.2), part(&["Квасцы"], 0.28, 0.15), opt(&["Натр", "Щёлок"], 0.12, 0.1)],
+        water: (4.0, 3.0),
+        heat: &[Heat::Low, Heat::Medium],
+        reduce: (0.0, 1.0),
+        hours: (1.0, 2.0, 5.0),
+        yield_per: Yield::PerDrachms(10.0),
+        acidic: false,
+        hint: "Толчёный корень марены варить с квасцами, добавить натра: красная краска осядет на дно.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
+    },
+    Recipe {
+        product: "Вайдовая синь",
+        technique: Technique::VatDyeing,
+        vessel: VesselNeed::Pot,
+        parts: &[part(&["Вайда"], 0.7, 0.2), part(&["Щёлок", "Древесная зола"], 0.3, 0.2)],
+        water: (4.0, 3.0),
+        heat: &[Heat::Low],
+        reduce: (0.0, 1.0),
+        hours: (48.0, 96.0, 200.0),
+        yield_per: Yield::PerDrachms(10.0),
+        acidic: false,
+        hint: "Листья вайды в щелочном чане держать в тепле несколько дней, пока не забродят и не пойдёт синь.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
+    },
+    // ----- Перегонка и возгонка (Диоскорид, Зосим) -----
+    Recipe {
+        product: "Серная вода",
+        technique: Technique::Distillation,
+        vessel: VesselNeed::Pot,
+        parts: &[part(&["Сера"], 0.4, 0.2), part(&["Негашёная известь"], 0.6, 0.2)],
+        water: (10.0, 7.0),
+        heat: &[Heat::Medium],
+        reduce: (0.4, 0.3),
+        hours: (1.0, 2.0, 4.0),
+        yield_per: Yield::PerKotyle(1.0),
+        acidic: false,
+        hint: "«Божественная вода» Зосима: серу с известью кипятить в воде, пока не станет красно-жёлтой. Смердит тухлыми яйцами — работать на ветру.",
+        fumes: Some((Toxin::Caustic, 0.3)),
+        consumes_vessel: false,
+        ignites: None,
+    },
+    Recipe {
+        product: "Смоляное масло",
+        technique: Technique::Distillation,
+        vessel: VesselNeed::Still,
+        parts: &[part(&["Сосновая смола"], 1.0, 0.0)],
+        water: (0.0, 0.0),
+        heat: &[Heat::Medium],
+        reduce: (0.0, 1.0),
+        hours: (1.0, 2.0, 5.0),
+        yield_per: Yield::PerDrachms(15.0),
+        acidic: false,
+        hint: "Смолу греть ровным средним огнём под амбиком: пары стекают в приёмник маслом.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: Some(Heat::High),
+    },
+    Recipe {
+        product: "Ртуть",
+        technique: Technique::Sublimation,
+        vessel: VesselNeed::Still,
+        parts: &[part(&["Киноварь"], 1.0, 0.0)],
+        water: (0.0, 0.0),
+        heat: &[Heat::Medium, Heat::High],
+        reduce: (0.0, 1.0),
+        hours: (1.0, 2.0, 6.0),
+        yield_per: Yield::PerDrachms(10.0),
+        acidic: false,
+        hint: "Диоскорид: киноварь в железной ложке под амбиком, обмазанным глиной, угли снизу; осевшую на крышке сажу соскрести — это ртуть. Пары смертельны.",
+        fumes: Some((Toxin::Mercury, 0.9)),
+        consumes_vessel: false,
+        ignites: None,
+    },
+    // ----- Огонь (Эней Тактик) -----
+    Recipe {
+        product: "Зажигательный горшок",
+        technique: Technique::Incendiary,
+        vessel: VesselNeed::Pot,
+        parts: &[part(&["Сосновая смола"], 0.6, 0.25), part(&["Сера"], 0.18, 0.12), opt(&["Ладан"], 0.08, 0.08), opt(&["Нефть"], 0.3, 0.3)],
+        water: (0.0, 0.0),
+        heat: &[Heat::Low],
+        reduce: (0.0, 1.0),
+        hours: (0.3, 0.5, 2.0),
+        yield_per: Yield::PerDrachms(1000.0),
+        acidic: false,
+        hint: "Эней Тактик: смолу, серу и толчёный ладан растопить на слабом огне прямо в горшке, добавить нефти; огонь сильнее слабого — вспыхнет.",
+        fumes: None,
+        consumes_vessel: true,
+        ignites: Some(Heat::Medium),
     },
 ];
 
@@ -376,6 +608,10 @@ pub struct BrewResult {
     pub text: String,
     /// Какой приём практиковали (для роста навыка).
     pub technique: Option<Technique>,
+    /// Надышался: (яд, доз).
+    pub poison: Option<(Toxin, f32)>,
+    /// Сосуд ушёл в изделие.
+    pub vessel_used: bool,
 }
 
 /// Насколько значение похоже на идеал: 1 — точно, 0 — за допуском.
@@ -394,10 +630,13 @@ fn match_recipe(r: &Recipe, spec: &BrewSpec, vessel: Vessel) -> (f32, Vec<&'stat
         return (0.0, notes);
     }
     let vessel_ok = match r.vessel {
-        VesselNeed::Pot => vessel != Vessel::Mortar,
+        VesselNeed::Pot => matches!(vessel, Vessel::ClayPot | Vessel::CopperKettle),
         VesselNeed::Mortar => vessel == Vessel::Mortar,
+        VesselNeed::Still => vessel.still(),
+        VesselNeed::Crucible => vessel == Vessel::Crucible,
     };
-    if !vessel_ok {
+    // Зажигательная смесь делается прямо в глиняном горшке, который потом и бросают.
+    if !vessel_ok || (r.consumes_vessel && vessel != Vessel::ClayPot) {
         return (0.0, notes);
     }
     // Всё, что положено, должно быть из рецепта.
@@ -429,7 +668,7 @@ fn match_recipe(r: &Recipe, spec: &BrewSpec, vessel: Vessel) -> (f32, Vec<&'stat
             if c <= 0.0 && !p.optional {
                 return (0.0, notes);
             }
-            score *= 0.5 + 0.5 * c;
+            score *= 0.6 + 0.4 * c;
         }
     }
     if !any_present {
@@ -449,7 +688,7 @@ fn match_recipe(r: &Recipe, spec: &BrewSpec, vessel: Vessel) -> (f32, Vec<&'stat
             notes.push(if water / dry > wi { "слишком жидко" } else { "слишком густо" });
             score *= 0.3;
         } else {
-            score *= 0.4 + 0.6 * c;
+            score *= 0.5 + 0.5 * c;
         }
     }
     // Огонь.
@@ -491,8 +730,9 @@ fn quality_index(score: f32, skill: f32) -> Option<usize> {
 }
 
 /// Сварить. `flasks` — сколько пустых флаконов в сумке.
-pub fn brew(spec: &BrewSpec, vessel: Vessel, k: &Knowledge, flasks: u16) -> BrewResult {
-    let mut result = BrewResult { product: None, flasks_used: 0, vessel_broken: false, burn: 0.0, text: String::new(), technique: None };
+/// `roll` 0..1 — случай (лопнет ли стекло).
+pub fn brew(spec: &BrewSpec, vessel: Vessel, k: &Knowledge, flasks: u16, roll: f32) -> BrewResult {
+    let mut result = BrewResult { product: None, flasks_used: 0, vessel_broken: false, burn: 0.0, text: String::new(), technique: None, poison: None, vessel_used: false };
     let water = spec.water as f32;
     let left = (water - spec.heat.boil_off() * spec.hours).max(0.0);
     // Всухую на огне: пригорает, глина лопается.
@@ -500,6 +740,34 @@ pub fn brew(spec: &BrewSpec, vessel: Vessel, k: &Knowledge, flasks: u16) -> Brew
     let only_fat = spec.items.iter().all(|(n, _)| matches!(n.as_str(), "Воск" | "Бараний жир" | "Кувшин оливкового масла" | "Щёлок"));
     if vessel == Vessel::Mortar && spec.heat != Heat::None {
         result.text = "Ступку на огонь не ставят".into();
+        return result;
+    }
+    if !vessel.takes_water() && spec.water > 0 {
+        result.text = format!("В {} воду не льют", vessel.name().to_lowercase());
+        return result;
+    }
+    // Стекло боится сильного огня: знающий разогревает постепенно.
+    if vessel.glass() && spec.heat == Heat::High {
+        let careful = k.knows(Lore::Technique(Technique::Distillation));
+        let chance = if vessel == Vessel::Retort { 0.6 } else { 0.45 } * if careful { 0.5 } else { 1.0 };
+        if roll < chance {
+            result.vessel_broken = true;
+            result.burn = 0.25;
+            result.text = "Стекло не выдержало жара и лопнуло, горячее брызнуло на руки".into();
+            if spec.items.iter().any(|(n, _)| n == "Киноварь") {
+                result.poison = Some((Toxin::Mercury, 1.2));
+                result.text.push_str(". Пары ртути!");
+            }
+            return result;
+        }
+    }
+    // Тигель и перегонный прибор стоят на огне всухую — так и надо.
+    let dry_fire = dry_fire && vessel.takes_water();
+    let flammable = spec.items.iter().any(|(n, _)| matches!(n.as_str(), "Сосновая смола" | "Сера" | "Нефть" | "Ладан"));
+    if dry_fire && flammable {
+        result.burn = 0.4;
+        result.product = Some((SPOILED, 1, 0));
+        result.text = "Смесь вспыхнула на сильном огне! Вы обожглись".into();
         return result;
     }
     if dry_fire && !only_fat {
@@ -523,6 +791,23 @@ pub fn brew(spec: &BrewSpec, vessel: Vessel, k: &Knowledge, flasks: u16) -> Brew
         return result;
     };
     result.technique = Some(recipe.technique);
+    if let Some(at) = recipe.ignites
+        && spec.heat >= at
+    {
+        result.burn = 0.4;
+        result.product = Some((SPOILED, 1, 0));
+        result.text = "Смесь вспыхнула! Всё сгорело, вы обожглись".into();
+        if vessel == Vessel::ClayPot && recipe.consumes_vessel {
+            result.vessel_broken = true;
+        }
+        return result;
+    }
+    if let Some((t, d)) = recipe.fumes {
+        // Закрытый керотакис и знание, что работать надо на ветру, берегут лёгкие.
+        let closed = if vessel == Vessel::Kerotakis { 0.3 } else { 1.0 };
+        let knows = if k.knows(Lore::Technique(recipe.technique)) { 0.35 } else { 1.0 };
+        result.poison = Some((t, d * closed * knows));
+    }
     if recipe.acidic && vessel == Vessel::CopperKettle {
         result.product = Some((SPOILED, 1, 0));
         result.text = "Кислое разъело медь: варево позеленело, пить его — яд".into();
@@ -546,6 +831,10 @@ pub fn brew(spec: &BrewSpec, vessel: Vessel, k: &Knowledge, flasks: u16) -> Brew
             count = flasks;
         }
         result.flasks_used = count;
+    }
+    if recipe.consumes_vessel {
+        count = 1;
+        result.vessel_used = true;
     }
     result.product = Some((recipe.product, count, q));
     let mut text = format!("Готово: {} ×{}", recipe.product, count);
@@ -597,7 +886,7 @@ mod tests {
     fn real_recipe_works_without_knowledge() {
         // Гален: воск к маслу 1:4, на слабом огне — и неуч сварит мазь.
         let k = Knowledge::default();
-        let r = brew(&spec(&[("Воск", 1), ("Кувшин оливкового масла", 1), ("Мирра", 1)], 0, Heat::Low, 1.0), Vessel::ClayPot, &k, 5);
+        let r = brew(&spec(&[("Воск", 1), ("Кувшин оливкового масла", 1), ("Мирра", 1)], 0, Heat::Low, 1.0), Vessel::ClayPot, &k, 5, 0.9);
         let (name, n, q) = r.product.expect("что-то вышло");
         assert_eq!(name, "Ранозаживляющая мазь", "{}", r.text);
         assert!(n >= 2);
@@ -608,38 +897,38 @@ mod tests {
     fn wrong_proportions_fail() {
         let k = Knowledge::default();
         // Воска больше, чем масла.
-        let r = brew(&spec(&[("Воск", 4), ("Кувшин оливкового масла", 1)], 0, Heat::Low, 1.0), Vessel::ClayPot, &k, 5);
+        let r = brew(&spec(&[("Воск", 4), ("Кувшин оливкового масла", 1)], 0, Heat::Low, 1.0), Vessel::ClayPot, &k, 5, 0.9);
         assert_eq!(r.product.map(|p| p.0), Some(SPOILED), "{}", r.text);
     }
 
     #[test]
     fn decoction_needs_water_and_gentle_fire() {
         let k = Knowledge::default();
-        let good = brew(&spec(&[("Шалфей", 2)], 4, Heat::Low, 1.5), Vessel::ClayPot, &k, 5);
+        let good = brew(&spec(&[("Шалфей", 2)], 4, Heat::Low, 1.5), Vessel::ClayPot, &k, 5, 0.9);
         assert_eq!(good.product.map(|p| p.0), Some("Отвар шалфея"), "{}", good.text);
         // Без воды на сильном огне глина лопается.
-        let burnt = brew(&spec(&[("Шалфей", 2)], 0, Heat::High, 1.0), Vessel::ClayPot, &k, 5);
+        let burnt = brew(&spec(&[("Шалфей", 2)], 0, Heat::High, 1.0), Vessel::ClayPot, &k, 5, 0.9);
         assert!(burnt.vessel_broken);
         // Выкипело всё.
-        let dry = brew(&spec(&[("Шалфей", 2)], 2, Heat::High, 2.0), Vessel::ClayPot, &k, 5);
+        let dry = brew(&spec(&[("Шалфей", 2)], 2, Heat::High, 2.0), Vessel::ClayPot, &k, 5, 0.9);
         assert_eq!(dry.product.map(|p| p.0), Some(SPOILED));
     }
 
     #[test]
     fn vinegar_eats_copper() {
         let k = Knowledge::default();
-        let r = brew(&spec(&[("Горшок мёда", 1), ("Винный уксус", 1)], 1, Heat::Low, 1.0), Vessel::CopperKettle, &k, 5);
+        let r = brew(&spec(&[("Горшок мёда", 1), ("Винный уксус", 1)], 1, Heat::Low, 1.0), Vessel::CopperKettle, &k, 5, 0.9);
         assert_eq!(r.product.map(|p| p.0), Some(SPOILED), "{}", r.text);
-        let r = brew(&spec(&[("Горшок мёда", 1), ("Винный уксус", 1)], 1, Heat::Low, 1.0), Vessel::ClayPot, &k, 5);
+        let r = brew(&spec(&[("Горшок мёда", 1), ("Винный уксус", 1)], 1, Heat::Low, 1.0), Vessel::ClayPot, &k, 5, 0.9);
         assert_eq!(r.product.map(|p| p.0), Some("Оксимель"), "{}", r.text);
     }
 
     #[test]
     fn liquids_need_flasks() {
         let k = Knowledge::default();
-        let r = brew(&spec(&[("Шалфей", 2)], 4, Heat::Low, 1.5), Vessel::ClayPot, &k, 0);
+        let r = brew(&spec(&[("Шалфей", 2)], 4, Heat::Low, 1.5), Vessel::ClayPot, &k, 0, 0.9);
         assert!(r.product.is_none());
-        let r = brew(&spec(&[("Шалфей", 2)], 4, Heat::Low, 1.5), Vessel::ClayPot, &k, 1);
+        let r = brew(&spec(&[("Шалфей", 2)], 4, Heat::Low, 1.5), Vessel::ClayPot, &k, 1, 0.9);
         assert_eq!(r.product.map(|p| p.1), Some(1));
         assert_eq!(r.flasks_used, 1);
     }
@@ -647,7 +936,7 @@ mod tests {
     #[test]
     fn poultice_in_mortar() {
         let k = Knowledge::default();
-        let r = brew(&spec(&[("Тысячелистник", 1), ("Подорожник", 1)], 0, Heat::None, 0.25), Vessel::Mortar, &k, 0);
+        let r = brew(&spec(&[("Тысячелистник", 1), ("Подорожник", 1)], 0, Heat::None, 0.25), Vessel::Mortar, &k, 0, 0.9);
         assert_eq!(r.product.map(|p| p.0), Some("Кровоостанавливающая припарка"), "{}", r.text);
     }
 
@@ -659,8 +948,8 @@ mod tests {
             master.practice(Skill::Herbalism, 1.0);
         }
         let s = spec(&[("Шалфей", 2)], 4, Heat::Low, 1.5);
-        let a = brew(&s, Vessel::ClayPot, &novice, 5).product.unwrap().2;
-        let b = brew(&s, Vessel::ClayPot, &master, 5).product.unwrap().2;
+        let a = brew(&s, Vessel::ClayPot, &novice, 5, 0.9).product.unwrap().2;
+        let b = brew(&s, Vessel::ClayPot, &master, 5, 0.9).product.unwrap().2;
         assert!(b > a, "{a} {b}");
     }
 
@@ -672,9 +961,65 @@ mod tests {
             Vessel::ClayPot,
             &k,
             5,
+            0.9,
         );
         assert_eq!(t.product.map(|p| p.0), Some("Териак"), "{}", t.text);
-        let v = brew(&spec(&[("Кувшин вина", 1)], 0, Heat::None, 72.0), Vessel::ClayPot, &k, 10);
+        let v = brew(&spec(&[("Кувшин вина", 1)], 0, Heat::None, 72.0), Vessel::ClayPot, &k, 10, 0.9);
         assert_eq!(v.product.map(|p| p.0), Some("Винный уксус"), "{}", v.text);
+    }
+
+    #[test]
+    fn mercury_from_cinnabar_poisons_unless_careful() {
+        let k = Knowledge::default();
+        let s = spec(&[("Киноварь", 3)], 0, Heat::Medium, 2.0);
+        let r = brew(&s, Vessel::Alembic, &k, 5, 0.9);
+        assert_eq!(r.product.map(|p| p.0), Some("Ртуть"), "{}", r.text);
+        let (_, d) = r.poison.expect("пары");
+        let mut sage = Knowledge::default();
+        sage.learn(Lore::Technique(Technique::Sublimation));
+        let careful = brew(&s, Vessel::Kerotakis, &sage, 5, 0.9).poison.unwrap().1;
+        assert!(careful < d * 0.2, "{careful} {d}");
+    }
+
+    #[test]
+    fn glass_bursts_on_strong_fire() {
+        let k = Knowledge::default();
+        let s = spec(&[("Сосновая смола", 2)], 0, Heat::High, 1.0);
+        let r = brew(&s, Vessel::Retort, &k, 5, 0.1);
+        assert!(r.vessel_broken && r.burn > 0.0, "{}", r.text);
+        // Ровный средний огонь — масло.
+        let ok = brew(&spec(&[("Сосновая смола", 2)], 0, Heat::Medium, 2.0), Vessel::Alembic, &k, 5, 0.1);
+        assert_eq!(ok.product.map(|p| p.0), Some("Смоляное масло"), "{}", ok.text);
+    }
+
+    #[test]
+    fn pigments_and_dyes() {
+        let k = Knowledge::default();
+        let lead = brew(&spec(&[("Свинец", 1), ("Винный уксус", 1)], 0, Heat::None, 72.0), Vessel::ClayPot, &k, 0, 0.9);
+        assert_eq!(lead.product.map(|p| p.0), Some("Свинцовые белила"), "{}", lead.text);
+        let red = brew(&spec(&[("Свинцовые белила", 3)], 0, Heat::High, 3.0), Vessel::Crucible, &k, 0, 0.9);
+        assert_eq!(red.product.map(|p| p.0), Some("Сурик"), "{}", red.text);
+        let verd = brew(&spec(&[("Медный лом", 1), ("Винный уксус", 1)], 0, Heat::None, 72.0), Vessel::ClayPot, &k, 0, 0.9);
+        assert_eq!(verd.product.map(|p| p.0), Some("Ярь-медянка"), "{}", verd.text);
+        let madder = brew(&spec(&[("Корень марены", 3), ("Квасцы", 2), ("Натр", 1)], 2, Heat::Low, 2.0), Vessel::ClayPot, &k, 0, 0.9);
+        assert_eq!(madder.product.map(|p| p.0), Some("Мареновый лак"), "{}", madder.text);
+    }
+
+    #[test]
+    fn incendiary_pot_ignites_on_strong_fire() {
+        let k = Knowledge::default();
+        let good = brew(&spec(&[("Сосновая смола", 2), ("Сера", 1), ("Ладан", 1)], 0, Heat::Low, 0.5), Vessel::ClayPot, &k, 0, 0.9);
+        assert_eq!(good.product.map(|p| (p.0, p.1)), Some(("Зажигательный горшок", 1)), "{}", good.text);
+        assert!(good.vessel_used);
+        let bad = brew(&spec(&[("Сосновая смола", 2), ("Сера", 1)], 0, Heat::Medium, 0.5), Vessel::ClayPot, &k, 0, 0.9);
+        assert!(bad.burn > 0.0, "{}", bad.text);
+    }
+
+    #[test]
+    fn sulfur_water_smells() {
+        let k = Knowledge::default();
+        let r = brew(&spec(&[("Сера", 1), ("Негашёная известь", 1)], 4, Heat::Medium, 1.0), Vessel::ClayPot, &k, 5, 0.9);
+        assert_eq!(r.product.map(|p| p.0), Some("Серная вода"), "{}", r.text);
+        assert!(r.poison.is_some());
     }
 }
