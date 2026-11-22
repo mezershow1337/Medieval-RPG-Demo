@@ -13,7 +13,7 @@ use crate::inventory_ui::UiFonts;
 use crate::loot_client::LootState;
 use crate::player::PlayerCamera;
 use crate::protocol::{ActorKind, decode, encode};
-use crate::rig::{ChestGear, FootGear, HandGear, HeadGear, LegGear, NeedsRig, Outfit, RigPose};
+use crate::rig::{Beard, FootGear, Hair, HeadGear, LegGear, NeedsRig, Outfit, RigPose, Tunic};
 use crate::trade::MerchantId;
 use crate::trade_net::*;
 use bevy::prelude::*;
@@ -93,21 +93,26 @@ pub struct MerchantNpc {
 }
 
 fn outfit_for(info: &MerchantInfo) -> Outfit {
+    use crate::factions::Faction;
     let c = |v: [f32; 3]| Color::srgb(v[0], v[1], v[2]);
+    // Облик по народу: ромеи в туниках, готы с длинными волосами, аланы и кочевники в кафтанах.
+    let base = Outfit::for_actor(ActorKind::Player, info.id.0 as u64);
+    let (tunic, hair, head) = match info.faction {
+        Faction::Goths => (Tunic::Gothic, Hair::Long, HeadGear::Spangenhelm),
+        Faction::Alans => (Tunic::Kaftan, Hair::Short, HeadGear::Conical),
+        Faction::Nomads => (Tunic::Kaftan, Hair::Shaved, HeadGear::FeltCap),
+        _ => (Tunic::Byzantine, Hair::Short, HeadGear::Spangenhelm),
+    };
     Outfit {
-        // Шапки и шлемы у стражи и степняков; у горожан — непокрытая голова.
-        head: if info.look.helmet {
-            HeadGear::NasalHelm
-        } else {
-            HeadGear::Bare
-        },
-        // Стёганка в цвет туники — ближе всего к хитону/тунике среди готовых деталей.
-        chest: ChestGear::Gambeson,
-        hands: HandGear::Bare,
-        legs: LegGear::Cloth,
-        feet: FootGear::Boots,
-        colors: c(info.look.tunic),
+        head: if info.look.helmet { head } else { HeadGear::Bare },
+        tunic,
+        hair,
+        beard: if info.id.0.is_multiple_of(3) { Beard::Short } else { Beard::Full },
+        legs: if info.id.0.is_multiple_of(2) { LegGear::Wrapped } else { LegGear::Trousers },
+        feet: if info.look.helmet { FootGear::Boots } else { FootGear::Shoes },
+        tunic_color: c(info.look.tunic),
         trousers: c(info.look.trousers),
+        ..base
     }
 }
 
