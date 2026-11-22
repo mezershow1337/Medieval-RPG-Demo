@@ -1,5 +1,6 @@
 //! Общий сетевой протокол: сообщения между клиентом и сервером.
 
+use crate::combat::{Action, HitOutcome, WeaponKind};
 use bevy::math::Vec3;
 use bevy_renet::renet::{ConnectionConfig, DefaultChannel};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -39,8 +40,28 @@ impl From<NetPos> for Vec3 {
 /// Клиент -> сервер.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ClientMessage {
-    /// Состояние своего персонажа. Сервер проверяет, что скорость правдоподобная.
+    /// Состояние своего персонажа (ненадёжный канал). Сервер проверяет, что скорость правдоподобная.
     PlayerState { pos: NetPos, yaw: f32, pitch: f32, crouching: bool },
+    /// Начать удар (надёжный канал).
+    Attack { yaw: f32, pitch: f32 },
+    /// Парировать (надёжный канал).
+    Parry { yaw: f32, pitch: f32 },
+}
+
+/// Кто это: игрок или враг какого типа.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ActorKind {
+    Player,
+    /// Рыцарь с мечом и щитом.
+    Swordsman,
+    /// Тяжёлый рыцарь с двуручным мечом.
+    HeavyKnight,
+}
+
+impl ActorKind {
+    pub fn is_npc(self) -> bool {
+        !matches!(self, ActorKind::Player)
+    }
 }
 
 /// Сервер -> клиент (надёжный канал).
@@ -51,22 +72,35 @@ pub enum ServerMessage {
     PlayerLeft { id: u64 },
     /// Сервер отклонил перемещение и возвращает игрока в эту точку.
     Correction { pos: NetPos },
+    /// Результат попадания клинка.
+    Hit { attacker: u64, target: u64, outcome: HitOutcome, at: NetPos },
+    Died { id: u64, killer: Option<u64> },
+    /// Ваш персонаж возрождён в этой точке.
+    Respawned { pos: NetPos },
+    /// На земле появилось тело (его можно будет обыскать).
+    CorpseSpawned { corpse_id: u64, kind: ActorKind, pos: NetPos, yaw: f32 },
+    CorpseRemoved { corpse_id: u64 },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct PlayerSnapshot {
+pub struct ActorSnapshot {
     pub id: u64,
+    pub kind: ActorKind,
     pub pos: NetPos,
     pub yaw: f32,
     pub pitch: f32,
     pub crouching: bool,
+    pub weapon: WeaponKind,
+    pub action: Action,
+    pub hp: f32,
+    pub max_hp: f32,
 }
 
 /// Сервер -> клиент (ненадёжный канал), рассылается SNAPSHOT_RATE_HZ раз в секунду.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Snapshot {
     pub tick: u32,
-    pub players: Vec<PlayerSnapshot>,
+    pub actors: Vec<ActorSnapshot>,
 }
 
 pub fn encode<T: Serialize>(value: &T) -> Vec<u8> {

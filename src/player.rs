@@ -17,13 +17,21 @@ const EYE_STANDING: f32 = 1.65;
 const EYE_CROUCHING: f32 = 1.05;
 
 /// Свой персонаж. Transform этой сущности — точка у ног, поворот только по горизонтали.
-#[derive(Component, Default)]
+#[derive(Component)]
 pub struct LocalPlayer {
     pub yaw: f32,
     pub pitch: f32,
     pub velocity: Vec3,
     pub grounded: bool,
     pub crouching: bool,
+    /// Замедление во время ударов и оглушения (0 — не может двигаться).
+    pub speed_mult: f32,
+}
+
+impl Default for LocalPlayer {
+    fn default() -> Self {
+        Self { yaw: 0.0, pitch: 0.0, velocity: Vec3::ZERO, grounded: false, crouching: false, speed_mult: 1.0 }
+    }
 }
 
 /// Камера игрока (дочерняя сущность персонажа).
@@ -38,9 +46,14 @@ impl Plugin for PlayerPlugin {
     }
 }
 
-pub fn spawn_local_player(commands: &mut Commands, pos: Vec3) {
+pub fn spawn_local_player(commands: &mut Commands, pos: Vec3, assets: &crate::client::CharacterAssets) {
     commands
-        .spawn((LocalPlayer::default(), Transform::from_translation(pos), Visibility::default()))
+        .spawn((
+            LocalPlayer::default(),
+            crate::fight::LocalFighter { fighter: crate::npc::fighter_for(crate::protocol::ActorKind::Player) },
+            Transform::from_translation(pos),
+            Visibility::default(),
+        ))
         .with_children(|p| {
             p.spawn((
                 PlayerCamera,
@@ -53,7 +66,8 @@ pub fn spawn_local_player(commands: &mut Commands, pos: Vec3) {
                     directional_light_exponent: 20.0,
                     falloff: FogFalloff::from_visibility(160.0),
                 },
-            ));
+            ))
+            .with_children(|cam| crate::fight::spawn_view_sword(cam, assets));
         });
 }
 
@@ -61,7 +75,7 @@ fn cursor_locked(cursor: &CursorOptions) -> bool {
     cursor.grab_mode != CursorGrabMode::None
 }
 
-fn grab_cursor(mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>, mouse: Res<ButtonInput<MouseButton>>, keys: Res<ButtonInput<KeyCode>>) {
+pub fn grab_cursor(mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>, mouse: Res<ButtonInput<MouseButton>>, keys: Res<ButtonInput<KeyCode>>) {
     if mouse.just_pressed(MouseButton::Left) {
         cursor.grab_mode = CursorGrabMode::Locked;
         cursor.visible = false;
@@ -93,6 +107,7 @@ fn movement(
     level: Res<LevelColliders>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     mut player: Query<(&mut LocalPlayer, &mut Transform)>,
+    others: Query<&Transform, (With<crate::client::RemoteActor>, Without<LocalPlayer>)>,
 ) {
     let dt = time.delta_secs().min(1.0 / 20.0);
     let controls = cursor_locked(&cursor);
@@ -131,7 +146,7 @@ fn movement(
             WALK_SPEED
         };
 
-        let target = wish * speed;
+        let target = wish * speed * p.speed_mult;
         let accel = if p.grounded { GROUND_ACCEL } else { AIR_ACCEL };
         let horizontal = Vec3::new(p.velocity.x, 0.0, p.velocity.z);
         let diff = target - horizontal;
@@ -139,7 +154,7 @@ fn movement(
         p.velocity.x += change.x;
         p.velocity.z += change.z;
 
-        if p.grounded && pressed(KeyCode::Space) && !p.crouching {
+        if p.grounded && pressed(KeyCode::Space) && !p.crouching && p.speed_mult > 0.5 {
             p.velocity.y = JUMP_SPEED;
             p.grounded = false;
         }
@@ -162,6 +177,21 @@ fn movement(
             p.velocity.z = 0.0;
         }
 
+        // Не проходим сквозь других бойцов.
+        for other in &others {
+            let d = feet - other.translation;
+            let flat = Vec2::new(d.x, d.z);
+            let dist = flat.length();
+            const MIN_DIST: f32 = 0.7;
+            if dist < MIN_DIST && d.y.abs() < 1.5 {
+                let push = if dist > 1e-3 { flat / dist } else { Vec2::X } * (MIN_DIST - dist);
+                let candidate = feet + Vec3::new(push.x, 0.0, push.y);
+                if level.body_is_free(&body, candidate) {
+                    feet = candidate;
+                }
+            }
+        }
+
         // Упали за пределы мира — возвращаемся во двор.
         if feet.y < -30.0 {
             feet = crate::level::spawn_point(0);
@@ -178,5 +208,5 @@ fn update_camera(time: Res<Time>, player: Query<&LocalPlayer>, mut camera: Query
     // Плавно меняем высоту глаз (приседание, ступеньки).
     let t = 1.0 - (-14.0 * time.delta_secs()).exp();
     cam.translation.y += (eye - cam.translation.y) * t;
-    cam.rotation = Quat::from_rotation_x(p.pitch);
+    // Поворот камеры по вертикали (с тряской) задаёт fight.rs.
 }

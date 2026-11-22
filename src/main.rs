@@ -7,9 +7,12 @@
 
 mod client;
 mod collision;
+mod combat;
+mod fight;
 mod graphics;
 mod hud;
 mod level;
+mod npc;
 mod player;
 mod protocol;
 mod server;
