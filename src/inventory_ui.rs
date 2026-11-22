@@ -295,9 +295,15 @@ fn rebuild_ui(
             panel(root).with_children(|p| {
                 p.spawn(text(&fonts, "Сумка", 22.0, TITLE, true));
                 grid(p, &res, Owner::Me, inv, held_uid);
-                let gold: u32 = inv.all_items().filter(|i| i.info().shape == crate::items::ItemShape::Coins).map(|i| i.count as u32).sum();
-                let value: u32 = inv.all_items().map(Item::value).sum();
-                p.spawn(text(&fonts, format!("Золото: {gold}    Стоимость вещей: {value}"), 15.0, Color::srgb(0.9, 0.75, 0.35), false));
+                let purse = crate::economy::purse(inv);
+                let value: u32 = inv.all_items().filter(|i| crate::economy::coin_value(i.base).is_none()).map(Item::value).sum();
+                p.spawn(text(
+                    &fonts,
+                    format!("Кошель: {}\nВещи примерно на {}", crate::economy::format_money(purse), crate::economy::format_money(value)),
+                    15.0,
+                    Color::srgb(0.9, 0.75, 0.35),
+                    false,
+                ));
                 p.spawn(text(
                     &fonts,
                     "ЛКМ — взять/положить, мимо окна — выбросить\nПКМ или Shift+ЛКМ — быстро переложить или надеть\nF — использовать (бинт, зелье), Q — выбросить, Tab — закрыть",
@@ -733,7 +739,7 @@ fn update_tooltip(
         for (s, v) in &item.affixes {
             t.spawn(text(&fonts, format!("{} {}", s.format(*v), s.name()), 14.0, Color::srgb(0.55, 0.75, 1.0), false));
         }
-        t.spawn(text(&fonts, format!("Размер {}×{}   Цена {}", info.size.0, info.size.1, item.value()), 12.0, DIM, false));
+        t.spawn(text(&fonts, format!("Размер {}×{}   Цена ≈ {}", info.size.0, info.size.1, crate::economy::format_money(item.value())), 12.0, DIM, false));
         // Сравнение с надетым.
         if let (Some(slot), Some(me)) = (info.slot, state.inventory.as_ref())
             && let Some(worn) = me.equipped(slot).filter(|w| w.uid != item.uid)

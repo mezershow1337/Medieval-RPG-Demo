@@ -4,6 +4,9 @@
 //! Координаты фигур — в клетках инвентаря: у меча 1×3 холст 1 клетка в ширину и 3 в высоту.
 
 use crate::items::{ITEM_BASES, ItemBaseId};
+
+#[path = "trade_icons.rs"]
+mod trade_icons;
 use bevy::asset::RenderAssetUsages;
 use bevy::image::Image;
 use bevy::prelude::*;
@@ -337,7 +340,7 @@ fn draw(base: ItemBaseId, c: &mut Canvas) {
             c.poly(&[(0.28, 0.5), (0.72, 0.5), (0.7, 0.72), (0.5, 0.92), (0.3, 0.72)], GOLD);
             c.rect(0.46, 0.55, 0.54, 0.82, RED);
         }
-        "Золотые монеты" => {
+        "Солид" => {
             for (x, y) in [(0.36, 0.72), (0.64, 0.72), (0.5, 0.55), (0.5, 0.36)] {
                 c.circle(x, y, 0.2, GOLD_DARK);
                 c.circle(x, y - 0.02, 0.16, GOLD);
@@ -363,6 +366,8 @@ fn draw(base: ItemBaseId, c: &mut Canvas) {
             c.poly(&[(0.35, 0.2), (0.65, 0.2), (0.6, 0.4), (0.4, 0.4)], RED_LIGHT);
             c.poly(&[(0.2, 0.4), (0.4, 0.4), (0.5, 0.85)], [0.5, 0.05, 0.08, 1.0]);
         }
+        // Монеты и товары торговли рисует trade_icons.rs.
+        _ if trade_icons::draw(name, c) => {}
         _ => {
             c.circle(0.5, 0.5, 0.3, STEEL);
         }
