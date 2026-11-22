@@ -341,10 +341,121 @@ pub const ITEM_BASES: &[ItemBase] = &[
     base!("Серебряное кольцо", "Кольцо", Some(S::Ring), (1, 1), None, 1, JEWEL_AFFIXES, Sh::Small, true),
     base!("Амулет с гербом", "Амулет", Some(S::Necklace), (1, 1), None, 1, JEWEL_AFFIXES, Sh::Small, true),
     // Расходники и ценности
-    base!("Золотые монеты", "Золото", None, (1, 1), None, 100, &[], Sh::Coins, false),
+    // Золотой солид (номисма) Анастасия: 1/72 римского фунта золота, 4,5 г. См. economy.rs.
+    base!("Солид", "Солид", None, (1, 1), None, 100, &[], Sh::Coins, false),
     base!("Бинт", "Бинт", None, (1, 1), None, 5, &[], Sh::Small, false),
     base!("Целебное зелье", "Зелье", None, (1, 2), None, 3, &[], Sh::Flask, false),
     base!("Рубин", "Рубин", None, (1, 1), None, 1, &[], Sh::Small, false),
+    // --- Торговля (economy.rs, trade.rs): монеты реформы Анастасия 498 г. и товары Херсона ---
+    base!("Тремисс", "Тремисс", None, (1, 1), None, 100, &[], Sh::Coins, false),
+    base!("Фоллис", "Фоллис", None, (1, 1), None, 100, &[], Sh::Coins, false),
+    base!("Декануммий", "Декан.", None, (1, 1), None, 100, &[], Sh::Coins, false),
+    base!("Амфора вина", "Вино", None, (2, 3), None, 1, &[], Sh::Flask, false),
+    base!("Амфора оливкового масла", "Масло", None, (2, 3), None, 1, &[], Sh::Flask, false),
+    base!("Стеклянная чаша", "Чаша", None, (1, 1), None, 4, &[], Sh::Small, false),
+    base!("Отрез льна", "Лён", None, (2, 2), None, 3, &[], Sh::Small, false),
+    base!("Отрез шерсти", "Шерсть", None, (2, 2), None, 3, &[], Sh::Small, false),
+    base!("Солёная рыба", "Рыба", None, (1, 2), None, 5, &[], Sh::Small, false),
+    base!("Мешок соли", "Соль", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Сырая шкура", "Шкура", None, (2, 2), None, 3, &[], Sh::Small, false),
+    base!("Овчина", "Овчина", None, (2, 2), None, 3, &[], Sh::Small, false),
+    base!("Войлок", "Войлок", None, (2, 2), None, 3, &[], Sh::Small, false),
+    base!("Воск", "Воск", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Горшок мёда", "Мёд", None, (1, 1), None, 5, &[], Sh::Flask, false),
+    // -----------------------------------------------------------------------
+    // Травничество, медицина и алхимия (данные о свойствах — в src/lore.rs).
+    // Новые предметы добавляйте ниже; ищите всегда по имени.
+    // -----------------------------------------------------------------------
+    // Местные травы (собираются за стенами).
+    base!("Шалфей", "Шалфей", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Чабрец", "Чабрец", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Зверобой", "Зверобой", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Белена", "Белена", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Ягоды можжевельника", "Можжевельник", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Полынь", "Полынь", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Тысячелистник", "Тысячелистник", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Подорожник", "Подорожник", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Шиповник", "Шиповник", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Просвирник", "Просвирник", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Маковые коробочки", "Мак", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Мята", "Мята", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Корень марены", "Марена", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Вайда", "Вайда", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Дубовые галлы", "Галлы", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Корень окопника", "Окопник", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Корень девясила", "Девясил", None, (1, 1), None, 10, &[], Sh::Small, false),
+    // Степь (бартер у кочевников).
+    base!("Солодковый корень", "Солодка", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Ревень понтийский", "Ревень", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Бараний жир", "Жир", None, (1, 1), None, 5, &[], Sh::Small, false),
+    // Привозное (порт).
+    base!("Мирра", "Мирра", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Ладан", "Ладан", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Сера", "Сера", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Квасцы", "Квасцы", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Киноварь", "Киноварь", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Опий", "Опий", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Перец", "Перец", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Шафран", "Шафран", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Корица", "Корица", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Хиосская мастика", "Мастика", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Нефть", "Нефть", None, (1, 2), None, 3, &[], Sh::Flask, false),
+    base!("Натр", "Натр", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Камедь", "Камедь", None, (1, 1), None, 10, &[], Sh::Small, false),
+    // Материалы.
+    base!("Сосновая смола", "Смола", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Негашёная известь", "Известь", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Медный купорос", "Купорос", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Свинец", "Свинец", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Медный лом", "Медь", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Древесная зола", "Зола", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Кувшин вина", "Вино", None, (1, 2), None, 2, &[], Sh::Flask, false),
+    base!("Кувшин оливкового масла", "Масло", None, (1, 2), None, 2, &[], Sh::Flask, false),
+    // Посуда и инструменты.
+    base!("Ступка с пестиком", "Ступка", None, (2, 2), None, 1, &[], Sh::Blunt, false),
+    base!("Глиняный горшок", "Горшок", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Медный котелок", "Котелок", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Весы с гирями", "Весы", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Пустой флакон", "Флакон", None, (1, 1), None, 5, &[], Sh::Flask, false),
+    base!("Тигель", "Тигель", None, (1, 1), None, 1, &[], Sh::Small, false),
+    base!("Алембик", "Алембик", None, (2, 3), None, 1, &[], Sh::Flask, false),
+    base!("Стеклянная реторта", "Реторта", None, (2, 2), None, 1, &[], Sh::Flask, false),
+    base!("Керотакис", "Керотакис", None, (2, 3), None, 1, &[], Sh::Small, false),
+    // Тексты.
+    base!("Обрывок травника", "Обрывок", None, (1, 1), None, 1, &[], Sh::Small, false),
+    base!("Диоскорид. О лекарственных веществах", "Диоскорид", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Иллюстрированный травник", "Травник", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Гиппократ. О язвах", "Гиппократ", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Гален. О простых лекарствах", "Гален", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Гален. О противоядиях", "Гален", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Орибасий. Синопсис", "Орибасий", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Зосим. О приборах и печах", "Зосим", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Книга красильщика", "Красильщик", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Эней Тактик. Об обороне городов", "Эней", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Феофраст. О камнях", "Феофраст", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Цельс. О медицине", "Цельс", None, (2, 2), None, 1, &[], Sh::Small, false),
+    // Снадобья и продукты (качество = мастерство изготовителя).
+    base!("Кровоостанавливающая припарка", "Припарка", None, (1, 1), None, 5, &[], Sh::Small, true),
+    base!("Отвар шалфея", "Шалфей", None, (1, 2), None, 3, &[], Sh::Flask, true),
+    base!("Отвар чабреца", "Чабрец", None, (1, 2), None, 3, &[], Sh::Flask, true),
+    base!("Маковый отвар", "Мак", None, (1, 2), None, 3, &[], Sh::Flask, true),
+    base!("Зверобойное масло", "Масло", None, (1, 2), None, 3, &[], Sh::Flask, true),
+    base!("Ранозаживляющая мазь", "Мазь", None, (1, 1), None, 5, &[], Sh::Small, true),
+    base!("Оксимель", "Оксимель", None, (1, 2), None, 3, &[], Sh::Flask, true),
+    base!("Териак", "Териак", None, (1, 1), None, 3, &[], Sh::Small, true),
+    base!("Винный уксус", "Уксус", None, (1, 2), None, 2, &[], Sh::Flask, true),
+    base!("Ртуть", "Ртуть", None, (1, 1), None, 5, &[], Sh::Flask, false),
+    base!("Серная вода", "Серн. вода", None, (1, 2), None, 3, &[], Sh::Flask, true),
+    base!("Смоляное масло", "Смол. масло", None, (1, 2), None, 3, &[], Sh::Flask, true),
+    base!("Ярь-медянка", "Ярь", None, (1, 1), None, 10, &[], Sh::Small, true),
+    base!("Свинцовые белила", "Белила", None, (1, 1), None, 10, &[], Sh::Small, true),
+    base!("Сурик", "Сурик", None, (1, 1), None, 10, &[], Sh::Small, true),
+    base!("Мареновый лак", "Марена", None, (1, 1), None, 10, &[], Sh::Small, true),
+    base!("Вайдовая синь", "Синь", None, (1, 1), None, 10, &[], Sh::Small, true),
+    base!("Чернила", "Чернила", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Щёлок", "Щёлок", None, (1, 2), None, 3, &[], Sh::Flask, false),
+    base!("Мыло", "Мыло", None, (1, 1), None, 5, &[], Sh::Small, true),
+    base!("Зажигательный горшок", "Огонь", None, (2, 2), None, 1, &[], Sh::Small, true),
 ];
 
 /// Номер вида предмета в [`ITEM_BASES`].
@@ -354,6 +465,12 @@ pub struct ItemBaseId(pub u16);
 impl ItemBaseId {
     pub fn base(self) -> &'static ItemBase {
         &ITEM_BASES[self.0 as usize]
+    }
+
+    /// Вид предмета по имени, если такой есть (торговцы пропускают ещё не добавленные товары;
+    /// другие части игры тоже не должны паниковать).
+    pub fn find(name: &str) -> Option<ItemBaseId> {
+        ITEM_BASES.iter().position(|b| b.name == name).map(|i| ItemBaseId(i as u16))
     }
 
     pub fn by_name(name: &str) -> ItemBaseId {
@@ -409,16 +526,10 @@ impl Item {
         totals
     }
 
-    /// Приблизительная цена в золоте (пригодится торговцу).
+    /// Справочная цена всей стопки в нуммиях (1 фоллис = 40 нуммиев, 1 солид = 7200).
+    /// Настоящую цену у торговца считает `trade.rs`: она зависит от лавки, запаса и репутации.
     pub fn value(&self) -> u32 {
-        let base = match self.info().shape {
-            ItemShape::Coins => return self.count as u32,
-            ItemShape::Small if self.info().slot.is_none() => 40,
-            ItemShape::Flask => 15,
-            _ => 20,
-        };
-        let q = [0.5, 1.0, 2.0, 4.0, 9.0, 20.0][self.quality.index()];
-        (base as f32 * q) as u32 * self.count.max(1) as u32
+        crate::economy::item_value(self)
     }
 
     pub fn can_stack_with(&self, other: &Item) -> bool {
@@ -524,7 +635,7 @@ pub struct LootTable {
     pub entries: &'static [(&'static str, f32)],
     /// Веса качеств: Ветхое..Легендарное.
     pub quality_weights: [f32; 6],
-    /// Золото: от и до (0 — не выпадает).
+    /// Деньги в нуммиях: от и до (0 — не выпадают). Выдаются монетами (economy::coins_for).
     pub gold: (u32, u32),
 }
 
@@ -543,9 +654,12 @@ impl LootTableId {
                     ("Кожаные перчатки", 2.0),
                     ("Кожаные сапоги", 2.0),
                     ("Бинт", 4.0),
+                    ("Обрывок травника", 1.0),
+                    ("Подорожник", 1.0),
                 ],
                 quality_weights: [30.0, 45.0, 18.0, 6.0, 1.0, 0.0],
-                gold: (2, 15),
+                // Пара фоллисов и мелочь: жалованье солдата — несколько солидов в год.
+                gold: (60, 480),
             },
             LootTableId::Knight => LootTable {
                 rolls: (2, 3),
@@ -563,9 +677,12 @@ impl LootTableId {
                     ("Серебряное кольцо", 1.0),
                     ("Целебное зелье", 2.0),
                     ("Бинт", 2.0),
+                    ("Обрывок травника", 1.0),
+                    ("Гиппократ. О язвах", 0.3),
+                    ("Эней Тактик. Об обороне городов", 0.2),
                 ],
                 quality_weights: [10.0, 40.0, 30.0, 14.0, 5.0, 1.0],
-                gold: (10, 40),
+                gold: (400, 3200),
             },
             LootTableId::KnightCaptain => LootTable {
                 rolls: (3, 4),
@@ -581,9 +698,12 @@ impl LootTableId {
                     ("Амулет с гербом", 2.0),
                     ("Рубин", 1.0),
                     ("Целебное зелье", 2.0),
+                    ("Цельс. О медицине", 0.4),
+                    ("Эней Тактик. Об обороне городов", 0.4),
+                    ("Мирра", 0.6),
                 ],
                 quality_weights: [0.0, 15.0, 35.0, 30.0, 15.0, 5.0],
-                gold: (40, 100),
+                gold: (2400, 12000),
             },
             LootTableId::Chest => LootTable {
                 rolls: (1, 3),
@@ -595,9 +715,23 @@ impl LootTableId {
                     ("Бинт", 3.0),
                     ("Кинжал", 1.0),
                     ("Длинный меч", 1.0),
+                    // Книги и редкие вещества: свитки часто хранили в сундуках.
+                    ("Обрывок травника", 2.0),
+                    ("Диоскорид. О лекарственных веществах", 0.6),
+                    ("Гиппократ. О язвах", 0.4),
+                    ("Орибасий. Синопсис", 0.3),
+                    ("Гален. О простых лекарствах", 0.3),
+                    ("Гален. О противоядиях", 0.1),
+                    ("Зосим. О приборах и печах", 0.2),
+                    ("Феофраст. О камнях", 0.3),
+                    ("Книга красильщика", 0.3),
+                    ("Иллюстрированный травник", 0.15),
+                    ("Мирра", 1.0),
+                    ("Ладан", 1.0),
+                    ("Пустой флакон", 1.0),
                 ],
                 quality_weights: [5.0, 35.0, 30.0, 20.0, 8.0, 2.0],
-                gold: (15, 60),
+                gold: (1200, 9000),
             },
         }
     }
@@ -624,8 +758,10 @@ pub fn roll_loot(table: LootTableId, luck: f32, rng: &mut Rng, uids: &mut UidGen
         items.push(roll_item(base, quality, count, rng, uids));
     }
     if t.gold.1 > 0 {
-        let gold = rng.range_u32(t.gold.0, t.gold.1) as u16;
-        items.push(roll_item(ItemBaseId::by_name("Золотые монеты"), Quality::Common, gold, rng, uids));
+        let nummi = rng.range_u32(t.gold.0, t.gold.1);
+        for (base, count) in crate::economy::coins_for(nummi) {
+            items.push(roll_item(base, Quality::Common, count, rng, uids));
+        }
     }
     items
 }
