@@ -14,6 +14,7 @@ mod level;
 mod npc;
 mod player;
 mod protocol;
+mod rig;
 mod server;
 
 use protocol::DEFAULT_PORT;

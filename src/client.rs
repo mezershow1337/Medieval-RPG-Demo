@@ -4,6 +4,7 @@ use crate::combat::{self, Action, Fighter, WeaponKind};
 use crate::fight::{self, CombatFeedback, LocalFighter};
 use crate::player::{LocalPlayer, PlayerPlugin, spawn_local_player};
 use crate::protocol::*;
+use crate::rig::{self, CharacterModels, NeedsRig, NeedsShield, NeedsWeapon, Outfit, PoseInput, RigPose};
 use crate::{hud, level};
 use bevy::prelude::*;
 use bevy_renet::netcode::{ClientAuthentication, NetcodeClientPlugin, NetcodeClientTransport, NetcodeErrorEvent};
@@ -31,11 +32,23 @@ pub struct RemoteActor {
     target_pos: Vec3,
     target_yaw: f32,
     crouching: bool,
+    /// Для анимации: фаза и сила шага, доля приседа, прошлое положение.
+    walk_phase: f32,
+    walk: f32,
+    crouch: f32,
+    last_pos: Vec3,
 }
 
-/// Часть модели, которая сжимается при приседании и наклоняется при оглушении.
+/// Скелет с телом (дочерняя сущность бойца или тела на земле).
 #[derive(Component)]
-struct RemoteBody;
+struct BodyRig;
+
+/// Тело падает навзничь после смерти.
+#[derive(Component)]
+struct CorpseFall {
+    t: f32,
+    seed: u64,
+}
 
 /// Меч в руке другого бойца.
 #[derive(Component)]
@@ -46,7 +59,7 @@ struct RemoteSword;
 struct RemoteShield;
 
 /// Лезвие меча (меняет материал, когда удар нельзя парировать).
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct Blade;
 
 /// Тело на земле.
@@ -66,24 +79,20 @@ struct CorpseIndex(HashMap<u64, Entity>);
 #[derive(Resource)]
 struct SendTimer(Timer);
 
+/// Общие материалы персонажей. Сами модели — в `rig::CharacterModels` (загружаются из glb).
 #[derive(Resource, Clone)]
 pub struct CharacterAssets {
-    body: Handle<Mesh>,
-    head: Handle<Mesh>,
-    helmet: Handle<Mesh>,
-    visor: Handle<Mesh>,
-    shield: Handle<Mesh>,
-    pub blade_short: Handle<Mesh>,
-    pub blade_long: Handle<Mesh>,
-    pub guard: Handle<Mesh>,
-    pub grip: Handle<Mesh>,
+    /// Клинок, пока модели не загрузились.
     pub steel: Handle<StandardMaterial>,
+    /// Светящийся клинок: этот удар нельзя парировать.
     pub blade_red: Handle<StandardMaterial>,
-    pub leather: Handle<StandardMaterial>,
-    dark: Handle<StandardMaterial>,
-    swordsman_cloth: Handle<StandardMaterial>,
-    heavy_cloth: Handle<StandardMaterial>,
-    shield_paint: Handle<StandardMaterial>,
+}
+
+impl CharacterAssets {
+    /// Обычный материал клинка.
+    pub fn blade(&self, models: Option<&CharacterModels>) -> Handle<StandardMaterial> {
+        models.map(|m| m.blade.clone()).unwrap_or_else(|| self.steel.clone())
+    }
 }
 
 pub fn run(server_addr: SocketAddr) {
@@ -99,6 +108,7 @@ pub fn run(server_addr: SocketAddr) {
             ..default()
         }))
         .add_plugins((RenetClientPlugin, NetcodeClientPlugin, PlayerPlugin, fight::FightPlugin, hud::HudPlugin))
+        .add_plugins(rig::RigPlugin)
         .insert_resource(RenetClient::new(connection_config()))
         .insert_resource(transport)
         .insert_resource(NetState { server_addr: Some(server_addr), ..default() })
@@ -112,8 +122,9 @@ pub fn run(server_addr: SocketAddr) {
         .add_systems(Startup, (level::spawn_level, setup_character_assets, spawn_waiting_camera))
         .add_systems(
             Update,
-            ((receive_reliable, receive_snapshots).chain(), send_state, animate_remote).run_if(client_connected).before(fight::FightSet),
+            ((receive_reliable, receive_snapshots).chain(), send_state, animate_remote).run_if(client_connected).before(fight::FightSet).in_set(rig::PoseSet),
         )
+        .add_systems(Update, animate_corpses.in_set(rig::PoseSet))
         .run();
 }
 
@@ -130,103 +141,101 @@ fn spawn_waiting_camera(mut commands: Commands) {
     commands.spawn((WaitingCamera, Camera3d::default(), Transform::from_xyz(0.0, 25.0, 70.0).looking_at(Vec3::new(0.0, 5.0, 0.0), Vec3::Y)));
 }
 
-fn setup_character_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
-    let steel = materials.add(StandardMaterial { base_color: Color::srgb(0.72, 0.74, 0.78), metallic: 0.9, perceptual_roughness: 0.3, ..default() });
+fn setup_character_assets(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
     commands.insert_resource(CharacterAssets {
-        body: meshes.add(Capsule3d::new(0.3, 0.9)),
-        head: meshes.add(Sphere::new(0.2)),
-        helmet: meshes.add(Cylinder::new(0.23, 0.36)),
-        visor: meshes.add(Cuboid::new(0.3, 0.05, 0.1)),
-        shield: meshes.add(Cuboid::new(0.6, 0.8, 0.06)),
-        blade_short: meshes.add(Cuboid::new(0.05, WeaponKind::ArmingSword.stats().reach, 0.012)),
-        blade_long: meshes.add(Cuboid::new(0.07, WeaponKind::Greatsword.stats().reach, 0.015)),
-        guard: meshes.add(Cuboid::new(0.24, 0.035, 0.04)),
-        grip: meshes.add(Cuboid::new(0.035, 0.2, 0.035)),
-        steel: steel.clone(),
+        steel: materials.add(StandardMaterial { base_color: Color::srgb(0.72, 0.74, 0.78), metallic: 0.9, perceptual_roughness: 0.3, ..default() }),
         blade_red: materials.add(StandardMaterial {
             base_color: Color::srgb(0.9, 0.2, 0.1),
             emissive: LinearRgba::rgb(6.0, 0.6, 0.2),
             ..default()
         }),
-        leather: materials.add(Color::srgb(0.25, 0.15, 0.08)),
-        dark: materials.add(Color::srgb(0.08, 0.08, 0.08)),
-        swordsman_cloth: materials.add(StandardMaterial { base_color: Color::srgb(0.12, 0.2, 0.45), perceptual_roughness: 0.9, ..default() }),
-        heavy_cloth: materials.add(StandardMaterial { base_color: Color::srgb(0.4, 0.05, 0.05), perceptual_roughness: 0.9, ..default() }),
-        shield_paint: materials.add(StandardMaterial { base_color: Color::srgb(0.85, 0.8, 0.65), perceptual_roughness: 0.7, ..default() }),
     });
 }
 
-fn color_for(id: u64) -> Color {
-    let hue = (id.wrapping_mul(2654435761) % 360) as f32;
-    Color::hsl(hue, 0.6, 0.5)
+/// Где рука держит оружие: (правая, левая) — центр кулака в координатах оружия.
+fn weapon_grips(weapon: WeaponKind) -> (Vec3, Option<Vec3>) {
+    match weapon {
+        WeaponKind::ArmingSword => (Vec3::new(0.0, -0.06, 0.0), None),
+        WeaponKind::Greatsword => (Vec3::new(0.0, -0.07, 0.0), Some(Vec3::new(0.0, -0.19, 0.0))),
+    }
 }
 
-/// Создаёт меч: корень в рукояти, клинок вдоль +Y.
-pub fn spawn_sword(parent: &mut ChildSpawnerCommands, assets: &CharacterAssets, weapon: WeaponKind, marker: impl Bundle) {
-    let reach = weapon.stats().reach;
-    let blade = if weapon == WeaponKind::Greatsword { assets.blade_long.clone() } else { assets.blade_short.clone() };
-    parent.spawn((marker, Transform::default(), Visibility::default())).with_children(|s| {
-        s.spawn((Blade, Mesh3d(blade), MeshMaterial3d(assets.steel.clone()), Transform::from_xyz(0.0, reach / 2.0 + 0.02, 0.0)));
-        s.spawn((Mesh3d(assets.guard.clone()), MeshMaterial3d(assets.steel.clone()), Transform::default()));
-        s.spawn((Mesh3d(assets.grip.clone()), MeshMaterial3d(assets.leather.clone()), Transform::from_xyz(0.0, -0.11, 0.0)));
-    });
-}
+/// Где левая рука держит щит (ремни на обратной стороне).
+const SHIELD_GRIP: Vec3 = Vec3::new(0.0, -0.02, 0.07);
 
-fn spawn_remote(commands: &mut Commands, assets: &CharacterAssets, materials: &mut Assets<StandardMaterial>, index: &mut RemoteIndex, snap: &ActorSnapshot) {
+fn spawn_remote(commands: &mut Commands, index: &mut RemoteIndex, snap: &ActorSnapshot) {
     let pos: Vec3 = snap.pos.into();
-    let cloth = match snap.kind {
-        ActorKind::Player => materials.add(color_for(snap.id)),
-        ActorKind::Swordsman => assets.swordsman_cloth.clone(),
-        ActorKind::HeavyKnight => assets.heavy_cloth.clone(),
-    };
-    let scale = if snap.kind == ActorKind::HeavyKnight { 1.12 } else { 1.0 };
     let mut fighter = Fighter::new(snap.weapon, snap.max_hp, snap.kind == ActorKind::Swordsman);
     fighter.action = snap.action;
     fighter.hp = snap.hp;
     let entity = commands
         .spawn((
-            RemoteActor { id: snap.id, kind: snap.kind, fighter, pitch: snap.pitch, target_pos: pos, target_yaw: snap.yaw, crouching: snap.crouching },
+            RemoteActor {
+                id: snap.id,
+                kind: snap.kind,
+                fighter,
+                pitch: snap.pitch,
+                target_pos: pos,
+                target_yaw: snap.yaw,
+                crouching: snap.crouching,
+                walk_phase: 0.0,
+                walk: 0.0,
+                crouch: if snap.crouching { 1.0 } else { 0.0 },
+                last_pos: pos,
+            },
             Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(snap.yaw)),
             Visibility::default(),
         ))
         .with_children(|p| {
-            p.spawn((RemoteBody, Transform::from_scale(Vec3::splat(scale)), Visibility::default())).with_children(|b| {
-                b.spawn((Mesh3d(assets.body.clone()), MeshMaterial3d(cloth.clone()), Transform::from_xyz(0.0, 0.75, 0.0)));
-                if snap.kind == ActorKind::Player {
-                    b.spawn((Mesh3d(assets.head.clone()), MeshMaterial3d(cloth.clone()), Transform::from_xyz(0.0, 1.6, 0.0)));
-                } else {
-                    // Латы: стальной шлем-ведро и плечи.
-                    b.spawn((Mesh3d(assets.helmet.clone()), MeshMaterial3d(assets.steel.clone()), Transform::from_xyz(0.0, 1.6, 0.0)));
-                    b.spawn((Mesh3d(assets.body.clone()), MeshMaterial3d(assets.steel.clone()), Transform::from_xyz(0.0, 1.05, 0.0).with_scale(Vec3::new(1.08, 0.35, 1.05))));
-                }
-                b.spawn((Mesh3d(assets.visor.clone()), MeshMaterial3d(assets.dark.clone()), Transform::from_xyz(0.0, 1.63, -0.2)));
-            });
-            spawn_sword(p, assets, snap.weapon, RemoteSword);
+            p.spawn((BodyRig, NeedsRig(Outfit::for_actor(snap.kind, snap.id)), Transform::default(), Visibility::default()));
+            p.spawn((RemoteSword, NeedsWeapon(snap.weapon), Transform::from_xyz(0.3, 1.0, -0.4), Visibility::default()));
             if snap.kind == ActorKind::Swordsman {
-                p.spawn((RemoteShield, Mesh3d(assets.shield.clone()), MeshMaterial3d(assets.shield_paint.clone()), Transform::from_xyz(-0.4, 1.1, -0.1)));
+                p.spawn((RemoteShield, NeedsShield, Transform::from_xyz(-0.42, 1.05, -0.1), Visibility::default()));
             }
         })
         .id();
     index.0.insert(snap.id, entity);
 }
 
-fn spawn_corpse(commands: &mut Commands, assets: &CharacterAssets, index: &mut CorpseIndex, corpse_id: u64, kind: ActorKind, pos: Vec3, yaw: f32) {
-    let cloth = match kind {
-        ActorKind::Player => assets.leather.clone(),
-        ActorKind::Swordsman => assets.swordsman_cloth.clone(),
-        ActorKind::HeavyKnight => assets.heavy_cloth.clone(),
-    };
+fn spawn_corpse(commands: &mut Commands, index: &mut CorpseIndex, corpse_id: u64, kind: ActorKind, pos: Vec3, yaw: f32, animate: bool) {
+    let weapon = crate::npc::fighter_for(kind).weapon;
     let entity = commands
         .spawn((CorpseMarker { corpse_id, kind }, Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)), Visibility::default()))
         .with_children(|c| {
-            // Лежит на спине: тело повёрнуто на 90 градусов.
-            c.spawn((Mesh3d(assets.body.clone()), MeshMaterial3d(cloth), Transform::from_xyz(0.0, 0.3, 0.4).with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))));
-            let head = if kind == ActorKind::Player { assets.head.clone() } else { assets.helmet.clone() };
-            let head_mat = if kind == ActorKind::Player { assets.leather.clone() } else { assets.steel.clone() };
-            c.spawn((Mesh3d(head), MeshMaterial3d(head_mat), Transform::from_xyz(0.0, 0.25, 1.25).with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))));
+            // Лежит на спине; упавшее оружие и щит — рядом.
+            let t = if animate { 0.0 } else { 1.0 };
+            c.spawn((BodyRig, CorpseFall { t, seed: corpse_id }, NeedsRig(Outfit::for_actor(kind, corpse_id)), rig::fall_transform(t), Visibility::default()));
+            c.spawn((
+                NeedsWeapon(weapon),
+                Transform::from_xyz(0.5, 0.025, 0.35).with_rotation(Quat::from_rotation_y(0.35) * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                Visibility::default(),
+            ));
+            if kind == ActorKind::Swordsman {
+                c.spawn((
+                    NeedsShield,
+                    Transform::from_xyz(-0.6, 0.06, 0.55).with_rotation(Quat::from_rotation_y(-0.5) * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                    Visibility::default(),
+                ));
+            }
         })
         .id();
     index.0.insert(corpse_id, entity);
+}
+
+/// Падение тела: поза из стойки в лежачую, корень скелета заваливается назад.
+fn animate_corpses(time: Res<Time>, mut corpses: Query<(&mut CorpseFall, &mut Transform, Option<&mut RigPose>)>) {
+    const FALL_TIME: f32 = 0.8;
+    for (mut fall, mut transform, pose) in &mut corpses {
+        let Some(mut pose) = pose else { continue };
+        if fall.t >= 1.0 && pose.pelvis.y > 0.0 && pose.rot[3] != Quat::IDENTITY {
+            continue;
+        }
+        fall.t = (fall.t + time.delta_secs() / FALL_TIME).min(1.0);
+        let k = fall.t;
+        *transform = rig::fall_transform(k);
+        let standing = rig::solve_pose(&PoseInput { time: time.elapsed_secs(), ..default() }).pose;
+        *pose = rig::blend(&standing, &rig::dead_pose(fall.seed), (k * 1.3).min(1.0));
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -240,6 +249,8 @@ fn receive_reliable(
     mut feedback: MessageWriter<CombatFeedback>,
     mut local: Query<(&mut LocalPlayer, &mut Transform, Option<&mut LocalFighter>)>,
     waiting: Query<Entity, With<WaitingCamera>>,
+    time: Res<Time>,
+    mut welcomed_at: Local<Option<f32>>,
 ) {
     while let Some(bytes) = client.receive_message(CH_RELIABLE) {
         let Some(msg) = decode::<ServerMessage>(&bytes) else { continue };
@@ -248,6 +259,7 @@ fn receive_reliable(
                 info!("Подключились к серверу, наш id {your_id}");
                 state.my_id = Some(your_id);
                 state.error = None;
+                *welcomed_at = Some(time.elapsed_secs());
                 for e in &waiting {
                     commands.entity(e).despawn();
                 }
@@ -294,7 +306,9 @@ fn receive_reliable(
             }
             ServerMessage::CorpseSpawned { corpse_id, kind, pos, yaw } => {
                 if !corpses.0.contains_key(&corpse_id) {
-                    spawn_corpse(&mut commands, &assets, &mut corpses, corpse_id, kind, pos.into(), yaw);
+                    // Тела, которые уже лежали, когда мы вошли, не падают заново.
+                    let fresh = welcomed_at.is_some_and(|t| time.elapsed_secs() - t > 1.5);
+                    spawn_corpse(&mut commands, &mut corpses, corpse_id, kind, pos.into(), yaw, fresh);
                 }
             }
             ServerMessage::CorpseRemoved { corpse_id } => {
@@ -311,8 +325,6 @@ fn receive_snapshots(
     mut commands: Commands,
     mut client: ResMut<RenetClient>,
     state: Res<NetState>,
-    assets: Res<CharacterAssets>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     mut index: ResMut<RemoteIndex>,
     mut remotes: Query<&mut RemoteActor>,
     mut local: Query<&mut LocalFighter>,
@@ -350,7 +362,7 @@ fn receive_snapshots(
                 r.fighter.hp = a.hp;
                 r.fighter.max_hp = a.max_hp;
             }
-            None if !index.0.contains_key(&a.id) => spawn_remote(&mut commands, &assets, &mut materials, &mut index, a),
+            None if !index.0.contains_key(&a.id) => spawn_remote(&mut commands, &mut index, a),
             None => {}
         }
     }
@@ -386,57 +398,131 @@ fn send_state(mut client: ResMut<RenetClient>, mut timer: ResMut<SendTimer>, tim
     client.send_message(CH_UNRELIABLE, encode(&msg));
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn animate_remote(
     time: Res<Time>,
     assets: Res<CharacterAssets>,
-    mut remotes: Query<(&mut RemoteActor, &mut Transform, &Children), (Without<RemoteBody>, Without<RemoteSword>, Without<RemoteShield>)>,
-    mut bodies: Query<&mut Transform, (With<RemoteBody>, Without<RemoteSword>, Without<RemoteShield>)>,
-    mut swords: Query<(&mut Transform, &Children), (With<RemoteSword>, Without<RemoteBody>, Without<RemoteShield>)>,
-    mut shields: Query<&mut Transform, (With<RemoteShield>, Without<RemoteBody>, Without<RemoteSword>)>,
+    models: Option<Res<CharacterModels>>,
+    mut remotes: Query<(&mut RemoteActor, &mut Transform, &Children), (Without<RemoteSword>, Without<RemoteShield>)>,
+    mut swords: Query<(&mut Transform, &Children), (With<RemoteSword>, Without<RemoteActor>, Without<RemoteShield>)>,
+    mut shields: Query<&mut Transform, (With<RemoteShield>, Without<RemoteActor>, Without<RemoteSword>)>,
+    mut rigs: Query<&mut RigPose, With<BodyRig>>,
     mut blades: Query<&mut MeshMaterial3d<StandardMaterial>, With<Blade>>,
 ) {
     let dt = time.delta_secs();
+    let now = time.elapsed_secs();
     let t = 1.0 - (-15.0 * dt).exp();
+    let blade_mat = assets.blade(models.as_deref());
     for (mut r, mut transform, children) in &mut remotes {
         r.fighter.tick(dt);
         if transform.translation.distance(r.target_pos) > 5.0 {
             transform.translation = r.target_pos;
+            r.last_pos = r.target_pos;
         } else {
             transform.translation = transform.translation.lerp(r.target_pos, t);
         }
         transform.rotation = transform.rotation.slerp(Quat::from_rotation_y(r.target_yaw), t);
 
-        let stagger = matches!(r.fighter.action, Action::Stagger { .. } | Action::BlockRecoil { .. });
-        let eye = if r.crouching { 1.05 } else { 1.65 };
+        // Шаг: фаза идёт по пройденному пути, назад — в обратную сторону.
+        let moved = transform.translation - r.last_pos;
+        r.last_pos = transform.translation;
+        let flat = Vec3::new(moved.x, 0.0, moved.z);
+        let local = transform.rotation.inverse() * flat;
+        let speed = if dt > 0.0 { flat.length() / dt } else { 0.0 };
+        let back = if local.z > 0.3 * flat.length() { -1.0 } else { 1.0 };
+        r.walk_phase += back * flat.length() / 1.5 * std::f32::consts::TAU;
+        let walk_target = (speed / crate::player::WALK_SPEED).min(1.2);
+        r.walk += (walk_target - r.walk) * (1.0 - (-8.0 * dt).exp());
+        let crouch_target = if r.crouching { 1.0 } else { 0.0 };
+        r.crouch += (crouch_target - r.crouch) * (1.0 - (-10.0 * dt).exp());
+
+        let eye = 1.65 - 0.6 * r.crouch;
         let aim = Quat::from_rotation_x(r.pitch * 0.6);
-        let (hilt, dir) = combat::weapon_pose(&r.fighter.action, r.fighter.weapon, time.elapsed_secs());
+        let (hilt, dir) = combat::weapon_pose(&r.fighter.action, r.fighter.weapon, now);
         let unparryable = matches!(r.fighter.action, Action::Windup { unparryable: true, .. } | Action::Strike { unparryable: true, .. });
+        let (twist, lean) = match r.fighter.action {
+            Action::Windup { swing, .. } | Action::Strike { swing, .. } | Action::Recovery { swing, .. } => {
+                let lean = if swing == combat::Swing::Overhead { -0.25 * (aim * dir).z.abs().min(1.0) } else { -0.05 };
+                (-(aim * dir).x * 0.55, lean)
+            }
+            Action::Stagger { t } | Action::BlockRecoil { t } => (0.0, 0.32 + (now * 25.0).sin() * 0.05 * (1.0 - t).max(0.0)),
+            Action::Flinch { .. } => (0.1, 0.15),
+            Action::Parry { .. } | Action::ParryRecovery { .. } => (0.2, 0.05),
+            _ => (0.0, 0.0),
+        };
+
+        let mut sword_entity = None;
+        let mut shield_entity = None;
+        let mut rig_entity = None;
         for child in children.iter() {
-            if let Ok(mut body) = bodies.get_mut(child) {
-                let target_scale = if r.crouching { 0.68 } else { 1.0 };
-                let base = body.scale.x;
-                body.scale.y += (target_scale * base - body.scale.y) * t;
-                let tilt = if stagger { 0.3 } else { 0.0 };
-                body.rotation = body.rotation.slerp(Quat::from_rotation_x(tilt), t);
+            if swords.contains(child) {
+                sword_entity = Some(child);
+            } else if shields.contains(child) {
+                shield_entity = Some(child);
+            } else if rigs.contains(child) {
+                rig_entity = Some(child);
             }
-            if let Ok((mut sword, blade_children)) = swords.get_mut(child) {
-                sword.translation = Vec3::Y * (eye - 0.25) + aim * hilt;
-                sword.rotation = Quat::from_rotation_arc(Vec3::Y, aim * dir);
-                for bc in blade_children.iter() {
-                    if let Ok(mut m) = blades.get_mut(bc) {
-                        m.0 = if unparryable { assets.blade_red.clone() } else { assets.steel.clone() };
-                    }
+        }
+
+        // Меч и щит ставятся как раньше (по ним считается бой), руки тянутся к ним.
+        let mut sword_tf = Transform::from_translation(Vec3::Y * (eye - 0.25) + aim * hilt).with_rotation(Quat::from_rotation_arc(Vec3::Y, aim * dir));
+        let mut shield_tf = None;
+        if let Some(e) = shield_entity
+            && let Ok(mut shield) = shields.get_mut(e)
+        {
+            let (pos, rot) = if matches!(r.fighter.action, Action::Block) {
+                (Vec3::new(-0.05, 1.25, -0.5), Quat::IDENTITY)
+            } else {
+                (Vec3::new(-0.38, 1.0, -0.22), Quat::from_rotation_y(1.0))
+            };
+            let pos = pos - Vec3::Y * 0.6 * r.crouch;
+            shield.translation = shield.translation.lerp(pos, t * 1.5);
+            shield.rotation = shield.rotation.slerp(rot, t * 1.5);
+            shield_tf = Some(*shield);
+        }
+        let (right, left) = weapon_grips(r.fighter.weapon);
+        let mut input = PoseInput {
+            crouch: r.crouch,
+            walk_phase: r.walk_phase,
+            walk: r.walk,
+            pitch: r.pitch,
+            twist,
+            lean,
+            time: now + r.id as f32,
+            right_grip: Some(sword_tf.transform_point(right)),
+            left_grip: left.map(|l| sword_tf.transform_point(l)).or(shield_tf.map(|s| s.transform_point(SHIELD_GRIP))),
+        };
+        let mut solved = rig::solve_pose(&input);
+        // Если руки не дотягиваются до рукояти, меч придвигается к ним (только внешний вид,
+        // бой считается по исходному положению).
+        for _ in 0..4 {
+            let mut miss = solved.right_grip - input.right_grip.unwrap_or_default();
+            if left.is_some() {
+                miss = (miss + solved.left_grip - input.left_grip.unwrap_or_default()) * 0.6;
+            }
+            if miss.length() < 0.005 {
+                break;
+            }
+            sword_tf.translation += miss;
+            input.right_grip = Some(sword_tf.transform_point(right));
+            if let Some(l) = left {
+                input.left_grip = Some(sword_tf.transform_point(l));
+            }
+            solved = rig::solve_pose(&input);
+        }
+        if let Some(e) = rig_entity
+            && let Ok(mut pose) = rigs.get_mut(e)
+        {
+            *pose = solved.pose;
+        }
+        if let Some(e) = sword_entity
+            && let Ok((mut sword, blade_children)) = swords.get_mut(e)
+        {
+            *sword = sword_tf;
+            for bc in blade_children.iter() {
+                if let Ok(mut m) = blades.get_mut(bc) {
+                    m.0 = if unparryable { assets.blade_red.clone() } else { blade_mat.clone() };
                 }
-            }
-            if let Ok(mut shield) = shields.get_mut(child) {
-                let (pos, rot) = if matches!(r.fighter.action, Action::Block) {
-                    (Vec3::new(-0.05, 1.25, -0.5), Quat::IDENTITY)
-                } else {
-                    (Vec3::new(-0.42, 1.05, -0.1), Quat::from_rotation_y(1.2))
-                };
-                shield.translation = shield.translation.lerp(pos, t * 1.5);
-                shield.rotation = shield.rotation.slerp(rot, t * 1.5);
             }
         }
     }
