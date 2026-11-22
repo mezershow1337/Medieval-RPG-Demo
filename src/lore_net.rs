@@ -2,6 +2,7 @@
 
 use crate::items::ItemUid;
 use crate::lore::{Knowledge, Substance, Teacher};
+use crate::brewing::BrewSpec;
 use crate::medicine::Body;
 use crate::protocol::NetPos;
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,8 @@ pub struct PatchView {
     pub charges: u8,
     /// Рисовать ли куст самим (false — его рисует уровень).
     pub draw: bool,
+    /// Радиус заросли: собирать можно, стоя в ней.
+    pub radius: f32,
 }
 
 /// Временный мастер, пока в городе нет настоящих NPC.
@@ -50,6 +53,8 @@ pub enum LoreClientMessage {
     Apprentice { master: u32 },
     /// Приложить к ране или выпить (лекарство, а то и яд).
     Treat { uid: ItemUid },
+    /// Варить в сосуде из своей сумки.
+    Brew { vessel: ItemUid, spec: BrewSpec },
     /// Прервать текущее занятие.
     Stop,
 }

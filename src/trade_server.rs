@@ -232,9 +232,9 @@ impl TradeWorld {
 // Расстановка
 // ---------------------------------------------------------------------------
 
-/// Точка места по ключу. Когда тред города добавит `level::place(id)`, здесь надо вернуть её позицию.
-fn place_pos(_key: &str) -> Option<Vec3> {
-    None
+/// Точка места по ключу (см. `level::places`); на уровне-замке мест нет — тогда запасная расстановка.
+fn place_pos(key: &str) -> Option<Vec3> {
+    crate::level::place(key).map(|p| p.pos)
 }
 
 /// Пока мест города нет: ставим лавки полукругом у точки появления, каждое место — своя «лавка».
@@ -243,6 +243,28 @@ fn fallback_pos(place_index: usize, places: usize) -> Vec3 {
     let a = std::f32::consts::PI * (0.15 + 0.7 * place_index as f32 / places.max(1) as f32);
     let r = 11.0 + (place_index % 2) as f32 * 3.5;
     center + Vec3::new(a.cos() * r, 0.0, -a.sin() * r)
+}
+
+/// Куда повернуть торговца: в сторону, где больше всего свободного места (на улицу, а не в стену),
+/// чтобы прилавок встал перед ним. При равенстве — к точке появления.
+fn open_yaw(level: &LevelColliders, pos: Vec3) -> f32 {
+    let to_spawn = (crate::level::spawn_point(0) - pos).with_y(0.0).normalize_or_zero();
+    let mut best = (f32::MIN, Vec3::NEG_Z);
+    for i in 0..16 {
+        let a = i as f32 / 16.0 * std::f32::consts::TAU;
+        let dir = Vec3::new(a.cos(), 0.0, a.sin());
+        let mut free = 0.0;
+        let mut d = 0.5;
+        while d <= 6.0 && level.body_is_free(&crate::collision::Body::STANDING, pos + dir * d + Vec3::Y * 0.1) {
+            free = d;
+            d += 0.5;
+        }
+        let score = free + dir.dot(to_spawn) * 0.25;
+        if score > best.0 {
+            best = (score, dir);
+        }
+    }
+    f32::atan2(-best.1.x, -best.1.z)
 }
 
 fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
@@ -271,8 +293,7 @@ fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
             );
             *slot += 1;
             let pos = crate::npc::find_free_spot(&level, anchor + side);
-            let to_center = crate::level::spawn_point(0) - pos;
-            let yaw = f32::atan2(-to_center.x, -to_center.z);
+            let yaw = open_yaw(&level, pos);
             let mut m = MerchantState {
                 id: MerchantId(i as u16),
                 pos,

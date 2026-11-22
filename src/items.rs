@@ -456,6 +456,8 @@ pub const ITEM_BASES: &[ItemBase] = &[
     base!("Щёлок", "Щёлок", None, (1, 2), None, 3, &[], Sh::Flask, false),
     base!("Мыло", "Мыло", None, (1, 1), None, 5, &[], Sh::Small, true),
     base!("Зажигательный горшок", "Огонь", None, (2, 2), None, 1, &[], Sh::Small, true),
+    // Неудачная варка (brewing.rs).
+    base!("Испорченное варево", "Бурда", None, (1, 1), None, 3, &[], Sh::Flask, false),
 ];
 
 /// Старое название → новое (предметы переименованы под VI век).

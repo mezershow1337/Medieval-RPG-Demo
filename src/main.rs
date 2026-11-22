@@ -5,6 +5,8 @@
 //!   cargo run -- join 192.168.1.5 — подключиться к другу (порт по умолчанию 5000)
 //!   cargo run -- server           — только сервер, без окна
 
+mod brewing;
+mod brewing_client;
 mod client;
 mod collision;
 mod combat;

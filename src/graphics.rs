@@ -22,6 +22,48 @@ pub const SUN_DIR: Vec3 = Vec3::new(-0.78, 0.42, 0.40);
 /// Цвет тумана — совпадает с горизонтом неба.
 const FOG_COLOR: Color = Color::srgb(0.40, 0.38, 0.46);
 
+/// Освещение уровня: готический замок — в закатной дымке; Херсонес — ясный летний день
+/// у моря (послеполуденное солнце с запада-юго-запада, морская дымка у горизонта).
+#[derive(Clone, Copy)]
+struct Mood {
+    sun: Vec3,
+    sun_color: Color,
+    lux: f32,
+    ambient: (Color, f32),
+    fog: Color,
+    fog_far: (Color, Color),
+    visibility: f32,
+    shadow_distance: f32,
+    day: bool,
+}
+
+fn mood() -> Mood {
+    match crate::level::active() {
+        crate::level::LevelKind::Castle => Mood {
+            sun: SUN_DIR,
+            sun_color: Color::srgb(1.0, 0.84, 0.66),
+            lux: 11_000.0,
+            ambient: (Color::srgb(0.62, 0.62, 0.8), 420.0),
+            fog: FOG_COLOR,
+            fog_far: (Color::srgb(0.36, 0.36, 0.46), Color::srgb(0.62, 0.56, 0.60)),
+            visibility: 380.0,
+            shadow_distance: 160.0,
+            day: false,
+        },
+        crate::level::LevelKind::Chersonesus => Mood {
+            sun: Vec3::new(-0.72, 0.62, 0.22),
+            sun_color: Color::srgb(1.0, 0.93, 0.8),
+            lux: 15_000.0,
+            ambient: (Color::srgb(0.6, 0.7, 0.9), 650.0),
+            fog: Color::srgb(0.66, 0.74, 0.84),
+            fog_far: (Color::srgb(0.55, 0.64, 0.78), Color::srgb(0.80, 0.78, 0.72)),
+            visibility: 1100.0,
+            shadow_distance: 220.0,
+            day: true,
+        },
+    }
+}
+
 pub struct GraphicsPlugin;
 
 impl Plugin for GraphicsPlugin {
@@ -84,6 +126,16 @@ const P_METAL: f32 = 7.0;
 const P_WATER: f32 = 8.0;
 const P_COALS: f32 = 9.0;
 const P_LEAVES: f32 = 10.0;
+const P_RUBBLE: f32 = 11.0;
+const P_TILE: f32 = 12.0;
+const P_PLASTER: f32 = 13.0;
+const P_BRICK: f32 = 14.0;
+const P_MIXTUM: f32 = 15.0;
+const P_MARBLE: f32 = 16.0;
+const P_MOSAIC: f32 = 17.0;
+const P_EARTH: f32 = 18.0;
+const P_TERRAIN: f32 = 19.0;
+const P_PLAIN: f32 = 30.0;
 
 fn lin(c: Color) -> Vec4 {
     let l = c.to_linear();
@@ -106,8 +158,33 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         Mat::Roof => (Color::srgb(0.20, 0.22, 0.27), Color::srgb(0.08, 0.09, 0.11), P_SLATE, 1.0, 0.3, 1.0, 0.6, 0.0, 0.25, 0.0, 0.0),
         Mat::Iron => (Color::srgb(0.22, 0.21, 0.20), Color::srgb(0.35, 0.20, 0.12), P_METAL, 1.0, 0.3, 0.3, 0.45, 0.9, 0.0, 0.0, 0.0),
         Mat::Coals => (Color::srgb(0.08, 0.05, 0.04), Color::srgb(1.0, 0.35, 0.08), P_COALS, 1.0, 0.5, 0.5, 0.9, 0.0, 0.0, 0.0, 6.0),
-        Mat::Water => (Color::srgb(0.05, 0.09, 0.10), Color::srgb(0.10, 0.16, 0.16), P_WATER, 1.0, 0.0, 0.3, 0.05, 0.0, 0.0, 0.0, 0.0),
+        Mat::Water => (Color::srgb(0.06, 0.13, 0.16), Color::srgb(0.10, 0.2, 0.22), P_WATER, 1.0, 0.0, 0.3, 0.05, 0.0, 0.0, 0.0, 0.0),
         Mat::Leaves => (Color::srgb(0.07, 0.15, 0.07), Color::srgb(0.16, 0.24, 0.09), P_LEAVES, 1.0, 0.4, 1.0, 0.9, 0.0, 0.0, 0.0, 0.0),
+        Mat::Paving => (Color::srgb(0.66, 0.61, 0.52), Color::srgb(0.36, 0.33, 0.28), P_FLAGSTONE, 0.8, 0.3, 0.9, 0.8, 0.0, 0.1, 0.0, 0.0),
+        Mat::Limestone => (Color::srgb(0.70, 0.64, 0.52), Color::srgb(0.42, 0.38, 0.31), P_ASHLAR, 0.62, 0.22, 1.0, 0.9, 0.0, 0.25, 0.55, 0.0),
+        Mat::Rubble => (Color::srgb(0.62, 0.57, 0.47), Color::srgb(0.55, 0.50, 0.42), P_RUBBLE, 1.0, 0.35, 1.2, 0.92, 0.0, 0.15, 0.6, 0.0),
+        Mat::Plaster => (Color::srgb(0.86, 0.83, 0.76), Color::srgb(0.66, 0.60, 0.50), P_PLASTER, 1.0, 0.18, 0.3, 0.9, 0.0, 0.05, 0.8, 0.0),
+        Mat::Tile => (Color::srgb(0.62, 0.30, 0.17), Color::srgb(0.30, 0.15, 0.09), P_TILE, 1.0, 0.25, 1.2, 0.7, 0.0, 0.35, 0.0, 0.0),
+        Mat::Brick => (Color::srgb(0.55, 0.25, 0.14), Color::srgb(0.68, 0.63, 0.55), P_BRICK, 1.0, 0.25, 0.8, 0.9, 0.0, 0.0, 0.5, 0.0),
+        Mat::OpusMixtum => (Color::srgb(0.68, 0.63, 0.53), Color::srgb(0.62, 0.58, 0.50), P_MIXTUM, 1.0, 0.25, 1.0, 0.9, 0.0, 0.1, 0.55, 0.0),
+        Mat::Marble => (Color::srgb(0.88, 0.87, 0.84), Color::srgb(0.52, 0.55, 0.60), P_MARBLE, 1.0, 0.1, 0.25, 0.3, 0.0, 0.0, 0.2, 0.0),
+        Mat::Mosaic => (Color::srgb(0.85, 0.80, 0.70), Color::srgb(0.58, 0.18, 0.12), P_MOSAIC, 1.0, 0.1, 0.4, 0.55, 0.0, 0.0, 0.0, 0.0),
+        Mat::Earth => (Color::srgb(0.48, 0.41, 0.32), Color::srgb(0.66, 0.62, 0.55), P_EARTH, 1.0, 0.3, 0.7, 0.95, 0.0, 0.0, 0.0, 0.0),
+        Mat::Terrain => (Color::srgb(0.30, 0.33, 0.15), Color::srgb(0.60, 0.57, 0.50), P_TERRAIN, 1.0, 0.3, 0.8, 0.95, 0.0, 0.0, 0.0, 0.0),
+        Mat::Signinum => (Color::srgb(0.68, 0.45, 0.38), Color::srgb(0.50, 0.33, 0.28), P_PLASTER, 1.6, 0.25, 0.4, 0.8, 0.0, 0.1, 0.6, 0.0),
+        Mat::Canvas => (Color::srgb(0.78, 0.72, 0.60), Color::srgb(0.6, 0.55, 0.45), P_PLAIN, 1.0, 0.15, 0.2, 0.95, 0.0, 0.0, 0.0, 0.0),
+        Mat::Felt => (Color::srgb(0.62, 0.56, 0.47), Color::srgb(0.4, 0.34, 0.28), P_PLAIN, 1.0, 0.25, 0.4, 1.0, 0.0, 0.0, 0.4, 0.0),
+        Mat::Thatch => (Color::srgb(0.55, 0.45, 0.28), Color::srgb(0.33, 0.27, 0.16), P_WOOD, 0.5, 0.4, 1.0, 1.0, 0.0, 0.3, 0.0, 0.0),
+        Mat::Ceramic => (Color::srgb(0.66, 0.40, 0.26), Color::srgb(0.5, 0.3, 0.2), P_PLAIN, 1.0, 0.2, 0.15, 0.75, 0.0, 0.0, 0.3, 0.0),
+        Mat::Bronze => (Color::srgb(0.55, 0.40, 0.22), Color::srgb(0.25, 0.42, 0.33), P_METAL, 1.0, 0.25, 0.3, 0.4, 0.9, 0.0, 0.0, 0.0),
+        Mat::Conifer => (Color::srgb(0.08, 0.15, 0.10), Color::srgb(0.12, 0.2, 0.12), P_LEAVES, 1.6, 0.35, 1.0, 0.9, 0.0, 0.0, 0.0, 0.0),
+        Mat::HerbGreen => (Color::srgb(0.16, 0.30, 0.10), Color::srgb(0.25, 0.36, 0.14), P_LEAVES, 3.0, 0.35, 0.6, 0.85, 0.0, 0.0, 0.0, 0.0),
+        Mat::HerbSilver => (Color::srgb(0.42, 0.48, 0.40), Color::srgb(0.55, 0.58, 0.50), P_LEAVES, 3.0, 0.25, 0.6, 0.9, 0.0, 0.0, 0.0, 0.0),
+        Mat::PetalYellow => (Color::srgb(0.95, 0.75, 0.10), Color::srgb(0.8, 0.6, 0.1), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
+        Mat::PetalPurple => (Color::srgb(0.50, 0.30, 0.65), Color::srgb(0.4, 0.2, 0.5), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
+        Mat::PetalWhite => (Color::srgb(0.92, 0.90, 0.84), Color::srgb(0.8, 0.8, 0.7), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
+        Mat::PetalRed => (Color::srgb(0.80, 0.08, 0.05), Color::srgb(0.6, 0.05, 0.03), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
+        Mat::PetalPink => (Color::srgb(0.85, 0.50, 0.65), Color::srgb(0.7, 0.4, 0.5), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
     };
     ExtendedMaterial {
         base: StandardMaterial { base_color: a, perceptual_roughness: rough, metallic: metal, reflectance: 0.4, ..default() },
@@ -246,13 +323,14 @@ fn sky_mesh(radius: f32) -> Mesh {
 }
 
 fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut skies: ResMut<Assets<SkyMaterial>>) {
-    commands.insert_resource(ClearColor(FOG_COLOR));
-    commands.insert_resource(GlobalAmbientLight { color: Color::srgb(0.62, 0.62, 0.8), brightness: 420.0, ..default() });
+    let m = mood();
+    commands.insert_resource(ClearColor(m.fog));
+    commands.insert_resource(GlobalAmbientLight { color: m.ambient.0, brightness: m.ambient.1, ..default() });
 
-    let sun = SUN_DIR.normalize();
+    let sun = m.sun.normalize();
     commands.spawn((
         Mesh3d(meshes.add(sky_mesh(900.0))),
-        MeshMaterial3d(skies.add(SkyMaterial { sun: sun.extend(0.0) })),
+        MeshMaterial3d(skies.add(SkyMaterial { sun: sun.extend(if m.day { 1.0 } else { 0.0 }) })),
         Transform::IDENTITY,
         SkyDome,
         NotShadowCaster,
@@ -261,23 +339,25 @@ fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
 
     // Закатное солнце.
     commands.spawn((
-        DirectionalLight { color: Color::srgb(1.0, 0.84, 0.66), illuminance: 11_000.0, shadow_maps_enabled: true, ..default() },
+        DirectionalLight { color: m.sun_color, illuminance: m.lux, shadow_maps_enabled: true, ..default() },
         Transform::from_translation(sun * 100.0).looking_at(Vec3::ZERO, Vec3::Y),
-        CascadeShadowConfigBuilder { num_cascades: 4, first_cascade_far_bound: 12.0, maximum_distance: 160.0, ..default() }.build(),
+        CascadeShadowConfigBuilder { num_cascades: 4, first_cascade_far_bound: 12.0, maximum_distance: m.shadow_distance, ..default() }.build(),
         VolumetricLight,
     ));
-    // Лёгкая дымка над замком — в ней видны лучи из окон и от факелов.
-    commands.spawn((
-        FogVolume {
-            fog_color: Color::srgb(0.85, 0.8, 0.8),
-            density_factor: 0.03,
-            absorption: 0.0,
-            scattering: 0.25,
-            scattering_asymmetry: 0.6,
-            ..default()
-        },
-        Transform::from_xyz(0.0, 20.0, 0.0).with_scale(Vec3::new(600.0, 40.0, 600.0)),
-    ));
+    // Лёгкая дымка над замком — в ней видны лучи из окон и от факелов (днём у моря её нет).
+    if !m.day {
+        commands.spawn((
+            FogVolume {
+                fog_color: Color::srgb(0.85, 0.8, 0.8),
+                density_factor: 0.03,
+                absorption: 0.0,
+                scattering: 0.25,
+                scattering_asymmetry: 0.6,
+                ..default()
+            },
+            Transform::from_xyz(0.0, 20.0, 0.0).with_scale(Vec3::new(600.0, 40.0, 600.0)),
+        ));
+    }
 }
 
 fn follow_sky(cameras: Query<&GlobalTransform, With<Camera3d>>, mut sky: Query<&mut Transform, With<SkyDome>>) {
@@ -290,6 +370,7 @@ fn follow_sky(cameras: Query<&GlobalTransform, With<Camera3d>>, mut sky: Query<&
 // ---------- Камера и пост-обработка ----------
 
 fn setup_camera(event: On<Add<Camera3d>>, mut commands: Commands, settings: Res<GraphicsSettings>) {
+    let m = mood();
     let mut e = commands.entity(event.entity);
     e.insert((
         Hdr,
@@ -300,10 +381,10 @@ fn setup_camera(event: On<Add<Camera3d>>, mut commands: Commands, settings: Res<
             ..default()
         },
         DistanceFog {
-            color: FOG_COLOR,
-            directional_light_color: Color::srgba(1.0, 0.62, 0.35, 0.5),
+            color: m.fog,
+            directional_light_color: if m.day { Color::srgba(1.0, 0.9, 0.7, 0.3) } else { Color::srgba(1.0, 0.62, 0.35, 0.5) },
             directional_light_exponent: 18.0,
-            falloff: FogFalloff::from_visibility_colors(380.0, Color::srgb(0.36, 0.36, 0.46), Color::srgb(0.62, 0.56, 0.60)),
+            falloff: FogFalloff::from_visibility_colors(m.visibility, m.fog_far.0, m.fog_far.1),
         },
         Msaa::Off,
         TemporalAntiAliasing::default(),

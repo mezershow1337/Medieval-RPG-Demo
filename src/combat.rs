@@ -733,7 +733,7 @@ pub fn line_of_sight(level: &LevelColliders, from: Vec3, to: Vec3) -> bool {
     let steps = (len / 0.15).ceil().max(1.0) as usize;
     for i in 1..steps {
         let p = from + d * (i as f32 / steps as f32);
-        if level.0.iter().any(|c| p.cmpgt(c.min).all() && p.cmplt(c.max).all()) {
+        if level.point_solid(p) {
             return false;
         }
     }
@@ -790,7 +790,7 @@ pub fn trace_blade(hilt: Vec3, tip: Vec3, attacker_pose: &Pose, defender: &Fight
 pub fn blade_hits_wall(level: &LevelColliders, hilt: Vec3, tip: Vec3, feet: Vec3) -> Option<Vec3> {
     for i in 3..=8 {
         let p = hilt.lerp(tip, i as f32 / 8.0);
-        let inside = level.0.iter().any(|c| c.max.y > feet.y + 0.3 && p.cmpgt(c.min).all() && p.cmplt(c.max).all());
+        let inside = level.boxes_near(p).any(|c| c.max.y > feet.y + 0.3);
         if inside {
             return Some(p);
         }
@@ -1176,7 +1176,7 @@ mod tests {
 
     #[test]
     fn arrow_hits_and_shield_blocks() {
-        let level = LevelColliders(Vec::new());
+        let level = LevelColliders::new(Vec::new(), None);
         let shooter = pose(0.0, 0.0, 0.0);
         let target = pose(0.0, -15.0, PI);
         let (pos, _) = arrow_launch(&shooter);

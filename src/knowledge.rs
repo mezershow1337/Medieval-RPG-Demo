@@ -22,6 +22,7 @@ use crate::inventory::{Inventory, Target};
 use crate::items::{ItemBaseId, ItemUid, Quality, Rng, roll_item};
 use crate::loot_net::{CH_LOOT, LootServerMessage};
 use crate::loot_server::LootWorld;
+use crate::brewing::{self, BrewSpec, Vessel};
 use crate::lore::*;
 use crate::medicine::{self, Body, Treated};
 use crate::medicine_server::Bodies;
@@ -55,7 +56,7 @@ impl Plugin for KnowledgeServerPlugin {
             .add_observer(on_grant)
             .add_observer(on_trade_lesson)
             .add_systems(Startup, setup_world)
-            .add_systems(Update, (receive_lore_messages, tick_activities, regrow_patches).chain());
+            .add_systems(Update, (debug_kit, receive_lore_messages, tick_activities, regrow_patches).chain());
     }
 }
 
@@ -87,6 +88,10 @@ pub struct Patch {
     pub substance: Substance,
     pub pos: Vec3,
     pub charges: u8,
+    /// Сколько можно собрать с полной заросли.
+    pub max_charges: u8,
+    /// Радиус заросли (у временных кустов — полметра).
+    pub radius: f32,
     regrow: f32,
     draw: bool,
 }
@@ -100,12 +105,13 @@ pub struct Master {
 }
 
 /// Чем занят игрок.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum Task {
     Read { uid: ItemUid, text: Book },
     Gather { patch: u32 },
     Lesson { master: u32, mode: LessonMode },
     Treat { uid: ItemUid },
+    Brew { vessel: ItemUid, spec: BrewSpec },
 }
 
 struct Activity {
@@ -143,7 +149,7 @@ impl KnowledgeWorld {
 
     fn patch_views(&self) -> Vec<PatchView> {
         let mut v: Vec<PatchView> =
-            self.patches.iter().map(|(id, p)| PatchView { id: *id, substance: p.substance, pos: p.pos.into(), charges: p.charges, draw: p.draw }).collect();
+            self.patches.iter().map(|(id, p)| PatchView { id: *id, substance: p.substance, pos: p.pos.into(), charges: p.charges, draw: p.draw, radius: p.radius }).collect();
         v.sort_by_key(|p| p.id);
         v
     }
@@ -191,9 +197,30 @@ fn give(inv: &mut Inventory, item: crate::items::Item) -> Option<crate::items::I
 // Мир: временные места сбора и мастера
 // ---------------------------------------------------------------------------
 
-/// Пока в уровне нет своих точек сбора и мастеров, ставим их у места появления.
+/// Заросли и мастера: в Херсонесе — по местам города, на других уровнях — у места появления.
 fn setup_world(mut world: ResMut<KnowledgeWorld>, level: Res<LevelColliders>) {
     let origin = crate::level::spawn_point(0);
+    let city = crate::level::herb_patches();
+    for (i, h) in city.iter().enumerate() {
+        let Some(s) = Substance::from_latin(h.herb) else { continue };
+        let max = (PATCH_CHARGES as f32 + h.radius * 0.8).round().clamp(3.0, 12.0) as u8;
+        world.patches.insert(i as u32 + 1, Patch { substance: s, pos: h.pos, charges: max, max_charges: max, radius: h.radius, regrow: 0.0, draw: false });
+    }
+    if city.is_empty() {
+        place_demo_patches(&mut world, &level, origin);
+    }
+    // Врача, ризотома, аптекаря и прочих ведёт торговля (лавки в trade.rs). Здесь — только те,
+    // кого там нет: церковный писец (грамота) и деревенская знахарка. Цены в нуммиях.
+    let masters = [(Teacher::Scribe, 2 * NUMMI_PER_FOLLIS, 10, "church_west"), (Teacher::Wisewoman, NUMMI_PER_FOLLIS, 0, "goth_village")];
+    for (i, (teacher, price, wage, place)) in masters.into_iter().enumerate() {
+        let pos = crate::level::place_pos(place).unwrap_or(origin + Vec3::new(-2.0 + i as f32 * 4.0, 0.0, 5.0));
+        let pos = crate::npc::find_free_spot(&level, pos);
+        world.masters.insert(i as u32 + 1, Master { teacher, pos, yaw: 0.0, price, wage });
+    }
+}
+
+/// Временные кусты полукругом у места появления (уровень без своих зарослей).
+fn place_demo_patches(world: &mut KnowledgeWorld, level: &LevelColliders, origin: Vec3) {
     let herbs = [
         Substance::Plantain,
         Substance::Yarrow,
@@ -212,16 +239,8 @@ fn setup_world(mut world: ResMut<KnowledgeWorld>, level: Res<LevelColliders>) {
         // Полукруг перед воротами, в паре метров друг от друга.
         let a = -1.2 + i as f32 * (2.4 / (herbs.len() - 1) as f32);
         let pos = origin + Vec3::new(a.sin() * 9.0, 0.0, -a.cos() * 9.0 + 2.0);
-        let pos = crate::npc::find_free_spot(&level, pos);
-        world.patches.insert(i as u32 + 1, Patch { substance: s, pos: Vec3::new(pos.x, pos.y.max(0.0), pos.z), charges: PATCH_CHARGES, regrow: 0.0, draw: true });
-    }
-    // Врача, ризотома, аптекаря и прочих ведёт торговля (лавки в trade.rs). Здесь — только те,
-    // кого там нет: церковный писец (грамота) и деревенская знахарка. Цены в нуммиях.
-    let masters = [(Teacher::Scribe, 2 * NUMMI_PER_FOLLIS, 10), (Teacher::Wisewoman, NUMMI_PER_FOLLIS, 0)];
-    for (i, (teacher, price, wage)) in masters.into_iter().enumerate() {
-        let pos = origin + Vec3::new(-2.0 + i as f32 * 4.0, 0.0, 5.0);
-        let pos = crate::npc::find_free_spot(&level, pos);
-        world.masters.insert(i as u32 + 1, Master { teacher, pos, yaw: 0.0, price, wage });
+        let pos = crate::npc::find_free_spot(level, pos);
+        world.patches.insert(i as u32 + 1, Patch { substance: s, pos: Vec3::new(pos.x, pos.y.max(0.0), pos.z), charges: PATCH_CHARGES, max_charges: PATCH_CHARGES, radius: 0.5, regrow: 0.0, draw: true });
     }
 }
 
@@ -367,7 +386,8 @@ fn receive_lore_messages(mut server: ResMut<RenetServer>, game: Res<GameWorld>, 
                 }
                 LoreClientMessage::Gather { patch } => {
                     let Some(p) = world.patches.get(&patch) else { continue };
-                    if !in_reach(feet, p.pos) {
+                    let d = p.pos - feet;
+                    if Vec2::new(d.x, d.z).length() > p.radius + LORE_REACH * 0.5 || d.y.abs() > 3.0 {
                         notice(&mut server, pid, "Слишком далеко");
                         continue;
                     }
@@ -416,6 +436,24 @@ fn receive_lore_messages(mut server: ResMut<RenetServer>, game: Res<GameWorld>, 
                         None => notice(&mut server, pid, "Это не лекарство"),
                     }
                 }
+                LoreClientMessage::Brew { vessel, spec } => {
+                    let Some(inv) = loot.inventories.get(&pid) else { continue };
+                    match check_brew(inv, vessel, &spec).and_then(|v| need_fire(&spec, feet).map(|_| v)) {
+                        Ok(v) => {
+                            let what = match v {
+                                Vessel::Mortar => "растираете",
+                                Vessel::Crucible => "обжигаете",
+                                v if v.still() => "перегоняете",
+                                _ if spec.heat == brewing::Heat::None => "настаиваете",
+                                _ => "варите",
+                            };
+                            let verb = format!("{}: {what}", v.name());
+                            let secs = spec.real_secs();
+                            start(&mut server, &mut world, pid, Task::Brew { vessel, spec }, verb, 0.0, secs, feet, hp);
+                        }
+                        Err(e) => notice(&mut server, pid, e),
+                    }
+                }
                 LoreClientMessage::Stop => {}
             }
         }
@@ -435,7 +473,9 @@ fn apprentice_chore(teacher: Teacher) -> &'static str {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn tick_activities(
+    mut commands: Commands,
     time: Res<Time>,
     mut server: ResMut<RenetServer>,
     mut game: ResMut<GameWorld>,
@@ -486,6 +526,10 @@ fn tick_activities(
             Task::Read { uid, text } => finish_reading(&mut server, &mut world, &mut loot, pid, uid, text),
             Task::Gather { patch } => finish_gathering(&mut server, &mut world, &mut loot, pid, patch),
             Task::Treat { uid } => finish_treatment(&mut server, &mut world, &mut loot, &mut game, &mut bodies, pid, uid),
+            Task::Brew { vessel, spec } => {
+                let feet = game.actors.get(&pid).map(|a| a.pose.feet).unwrap_or_default();
+                finish_brewing(&mut server, &mut commands, &mut world, &mut loot, &mut bodies, pid, vessel, &spec, feet)
+            }
             Task::Lesson { master, mode } => {
                 let Some(m) = world.masters.get(&master) else { continue };
                 let (teacher, wage) = (m.teacher, m.wage);
@@ -615,7 +659,7 @@ fn finish_gathering(server: &mut RenetServer, world: &mut KnowledgeWorld, loot: 
 fn regrow_patches(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMut<KnowledgeWorld>) {
     let dt = time.delta_secs();
     for (id, p) in world.patches.iter_mut() {
-        if p.charges >= PATCH_CHARGES {
+        if p.charges >= p.max_charges {
             p.regrow = 0.0;
             continue;
         }
@@ -679,5 +723,160 @@ fn finish_treatment(server: &mut RenetServer, world: &mut KnowledgeWorld, loot: 
     sync_knowledge(server, world, pid);
     if result.consumes_item() {
         sync_inventory(server, loot, pid);
+    }
+}
+
+/// Сколько штук предмета с таким именем в сумке.
+fn count_named(inv: &Inventory, name: &str) -> u32 {
+    inv.all_items().filter(|i| i.info().name == name).map(|i| i.count as u32).sum()
+}
+
+/// Забрать столько-то штук по имени (из разных стопок).
+fn take_named(inv: &mut Inventory, name: &str, mut n: u32) {
+    let stacks: Vec<ItemUid> = inv.all_items().filter(|i| i.info().name == name).map(|i| i.uid).collect();
+    for uid in stacks {
+        if n == 0 {
+            break;
+        }
+        let Some((mut item, loc)) = inv.take(uid) else { continue };
+        let used = (item.count as u32).min(n);
+        n -= used;
+        item.count -= used as u16;
+        if item.count > 0 {
+            let _ = inv.place(item, loc.into());
+        }
+    }
+}
+
+/// На огне варят у очага или костра (если на уровне они есть).
+pub const HEARTH_REACH: f32 = 3.0;
+
+fn need_fire(spec: &BrewSpec, feet: Vec3) -> Result<(), String> {
+    let hearths = crate::level::hearths();
+    if spec.heat == brewing::Heat::None || hearths.is_empty() {
+        return Ok(());
+    }
+    if hearths.iter().any(|h| Vec2::new(h.x - feet.x, h.z - feet.z).length() <= HEARTH_REACH && (h.y - feet.y).abs() < 2.5) {
+        Ok(())
+    } else {
+        Err("Для огня нужен очаг или костёр рядом".into())
+    }
+}
+
+/// Можно ли начать варку: сосуд и всё положенное есть в сумке.
+fn check_brew(inv: &Inventory, vessel: ItemUid, spec: &BrewSpec) -> Result<Vessel, String> {
+    let v = inv.find(vessel).and_then(|(_, i)| Vessel::from_item(i.info().name)).ok_or("Нет сосуда")?;
+    if spec.items.is_empty() {
+        return Err("Сосуд пуст".into());
+    }
+    if spec.water > brewing::MAX_WATER || !(0.1..=96.0).contains(&spec.hours) {
+        return Err("Так не сварить".into());
+    }
+    for (name, n) in &spec.items {
+        if brewing::mass(name).is_none() {
+            return Err(format!("«{name}» в сосуд не кладут"));
+        }
+        if *n == 0 || count_named(inv, name) < *n as u32 {
+            return Err(format!("Не хватает: {name}"));
+        }
+    }
+    Ok(v)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_brewing(
+    server: &mut RenetServer,
+    commands: &mut Commands,
+    world: &mut KnowledgeWorld,
+    loot: &mut LootWorld,
+    bodies: &mut Bodies,
+    pid: u64,
+    vessel: ItemUid,
+    spec: &BrewSpec,
+    feet: Vec3,
+) {
+    let Some(k) = world.players.get_mut(&pid) else { return };
+    let Some(inv) = loot.inventories.get_mut(&pid) else { return };
+    let v = match check_brew(inv, vessel, spec) {
+        Ok(v) => v,
+        Err(e) => {
+            notice(server, pid, e);
+            return;
+        }
+    };
+    let flasks = count_named(inv, brewing::FLASK).min(u16::MAX as u32) as u16;
+    let roll = bodies.rng.f32();
+    let result = brewing::brew(spec, v, k, flasks, roll);
+    // Ничего не вышло (например, некуда разлить) — всё остаётся в сумке.
+    if result.product.is_none() && !result.vessel_broken {
+        notice(server, pid, result.text);
+        return;
+    }
+    for (name, n) in &spec.items {
+        take_named(inv, name, *n as u32);
+    }
+    take_named(inv, brewing::FLASK, result.flasks_used as u32);
+    if result.vessel_broken || result.vessel_used {
+        let _ = inv.take(vessel);
+    }
+    if let Some((name, count, q)) = result.product
+        && let Some(base) = ItemBaseId::find(name)
+    {
+        let quality = if base.base().has_quality { Quality::ALL[q.min(5)] } else { Quality::Common };
+        let item = roll_item(base, quality, count, &mut world.rng, &mut loot.uids);
+        let inv = loot.inventories.get_mut(&pid).expect("есть");
+        if let Some(rest) = give(inv, item) {
+            commands.trigger(crate::loot_server::SpawnGroundItem { pos: feet + Vec3::Y * 0.8, vel: Vec3::new(0.0, 1.0, 0.0), item: rest });
+            notice(server, pid, "Не влезло в сумку — поставили на землю");
+        }
+    }
+    if result.burn > 0.0 {
+        bodies.body(pid).burn(result.burn);
+        bodies.touch(pid);
+    }
+    if let Some((toxin, doses)) = result.poison {
+        bodies.body(pid).poison(toxin, doses);
+        bodies.touch(pid);
+    }
+    if let Some(t) = result.technique {
+        let q = result.product.map_or(0, |p| p.2) as f32;
+        k.practice(t.skill(), 0.8 + q * 0.3);
+    }
+    notice(server, pid, result.text);
+    sync_knowledge(server, world, pid);
+    sync_inventory(server, loot, pid);
+}
+
+/// Для проверки: `MRPG_DEBUG_KIT=1` — каждый вошедший получает горшок, ступку, травы и флаконы.
+fn debug_kit(mut server: ResMut<RenetServer>, mut loot: ResMut<LootWorld>, mut given: Local<std::collections::HashSet<u64>>, mut rng: Local<Option<Rng>>) {
+    if std::env::var("MRPG_DEBUG_KIT").is_err() {
+        return;
+    }
+    let rng = rng.get_or_insert_with(Rng::from_time);
+    let loot = &mut *loot;
+    let ids: Vec<u64> = loot.inventories.keys().copied().filter(|id| !given.contains(id)).collect();
+    for id in ids {
+        given.insert(id);
+        let kit = [
+            ("Глиняный горшок", 1),
+            ("Ступка с пестиком", 1),
+            ("Шалфей", 3),
+            ("Тысячелистник", 2),
+            ("Подорожник", 2),
+            ("Пустой флакон", 4),
+            ("Воск", 1),
+            ("Кувшин оливкового масла", 1),
+            ("Мирра", 1),
+            ("Бинт", 2),
+            ("Кувшин вина", 1),
+        ];
+        for (name, n) in kit {
+            let Some(base) = ItemBaseId::find(name) else { continue };
+            let item = roll_item(base, Quality::Common, n, rng, &mut loot.uids);
+            if let Some(inv) = loot.inventories.get_mut(&id) {
+                let _ = give(inv, item);
+            }
+        }
+        sync_inventory(&mut server, loot, id);
     }
 }
