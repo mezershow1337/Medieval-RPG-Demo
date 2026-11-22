@@ -51,10 +51,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let az_sun = max(dot(normalize(vec2<f32>(dir.x, dir.z) + 1e-5), normalize(sun.xz)), 0.0);
 
     // Градиент неба.
-    let zenith = vec3<f32>(0.05, 0.06, 0.17);
-    let mid = vec3<f32>(0.22, 0.17, 0.32);
+    let zenith = vec3<f32>(0.09, 0.11, 0.27);
+    let mid = vec3<f32>(0.36, 0.29, 0.46);
     let horizon_warm = vec3<f32>(1.25, 0.55, 0.28);
-    let horizon_cool = vec3<f32>(0.42, 0.33, 0.42);
+    let horizon_cool = vec3<f32>(0.62, 0.48, 0.55);
     let horizon = mix(horizon_cool, horizon_warm, pow(az_sun, 3.0));
     let h = clamp(e, 0.0, 1.0);
     var col = mix(horizon, mid, smoothstep(0.0, 0.25, h));
@@ -96,7 +96,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     col = mix(col, haze, (1.0 - smoothstep(ridge - 0.003, ridge + 0.003, e)) * 0.85);
     col = mix(col, haze * 0.55, 1.0 - smoothstep(near_ridge - 0.003, near_ridge + 0.003, e));
     if e < 0.0 {
-        col = haze * 0.4;
+        // Ниже горизонта — цвет тумана, чтобы земля плавно уходила в дымку.
+        col = vec3<f32>(0.133, 0.119, 0.181);
     }
     return vec4<f32>(col, 1.0);
 }

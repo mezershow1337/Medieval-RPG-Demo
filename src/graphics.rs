@@ -18,9 +18,9 @@ use bevy::render::view::{ColorGrading, ColorGradingGlobal};
 use bevy::shader::ShaderRef;
 
 /// Направление на солнце (низкое закатное солнце с запада-юго-запада).
-pub const SUN_DIR: Vec3 = Vec3::new(-0.78, 0.30, 0.42);
+pub const SUN_DIR: Vec3 = Vec3::new(-0.78, 0.42, 0.40);
 /// Цвет тумана — совпадает с горизонтом неба.
-const FOG_COLOR: Color = Color::srgb(0.42, 0.36, 0.40);
+const FOG_COLOR: Color = Color::srgb(0.40, 0.38, 0.46);
 
 pub struct GraphicsPlugin;
 
@@ -94,10 +94,10 @@ fn lin(c: Color) -> Vec4 {
 pub fn surface_material(mat: Mat) -> SurfaceMaterial {
     // (основной цвет, второй цвет, узор, масштаб, разброс, рельеф, шероховатость, металл, мох, грязь, свечение)
     let (a, b, pattern, scale, var, bump, rough, metal, moss, grime, glow) = match mat {
-        Mat::Grass => (Color::srgb(0.20, 0.27, 0.12), Color::srgb(0.33, 0.30, 0.17), P_GRASS, 1.0, 0.5, 0.4, 0.95, 0.0, 0.0, 0.0, 0.0),
+        Mat::Grass => (Color::srgb(0.13, 0.22, 0.08), Color::srgb(0.24, 0.26, 0.12), P_GRASS, 1.0, 0.5, 0.4, 0.95, 0.0, 0.0, 0.0, 0.0),
         Mat::Cobble => (Color::srgb(0.36, 0.34, 0.32), Color::srgb(0.12, 0.11, 0.10), P_COBBLE, 1.0, 0.35, 1.0, 0.85, 0.0, 0.35, 0.0, 0.0),
-        Mat::Stone => (Color::srgb(0.56, 0.53, 0.48), Color::srgb(0.24, 0.22, 0.20), P_ASHLAR, 1.0, 0.25, 1.0, 0.88, 0.0, 0.5, 0.6, 0.0),
-        Mat::DarkStone => (Color::srgb(0.36, 0.35, 0.36), Color::srgb(0.13, 0.12, 0.13), P_ASHLAR, 1.15, 0.25, 1.0, 0.85, 0.0, 0.4, 0.6, 0.0),
+        Mat::Stone => (Color::srgb(0.52, 0.51, 0.49), Color::srgb(0.22, 0.21, 0.20), P_ASHLAR, 0.8, 0.25, 1.0, 0.88, 0.0, 0.5, 0.6, 0.0),
+        Mat::DarkStone => (Color::srgb(0.38, 0.37, 0.38), Color::srgb(0.14, 0.13, 0.14), P_ASHLAR, 0.9, 0.25, 1.0, 0.85, 0.0, 0.4, 0.6, 0.0),
         Mat::Floor => (Color::srgb(0.42, 0.38, 0.34), Color::srgb(0.16, 0.14, 0.13), P_FLAGSTONE, 1.0, 0.3, 0.8, 0.55, 0.0, 0.0, 0.2, 0.0),
         Mat::Wood => (Color::srgb(0.34, 0.22, 0.12), Color::srgb(0.18, 0.11, 0.06), P_WOOD, 1.0, 0.35, 0.6, 0.75, 0.0, 0.0, 0.0, 0.0),
         Mat::Banner => (Color::srgb(0.50, 0.04, 0.05), Color::srgb(0.85, 0.62, 0.20), P_CLOTH, 1.0, 0.2, 0.3, 0.9, 0.0, 0.0, 0.0, 0.0),
@@ -247,7 +247,7 @@ fn sky_mesh(radius: f32) -> Mesh {
 
 fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut skies: ResMut<Assets<SkyMaterial>>) {
     commands.insert_resource(ClearColor(FOG_COLOR));
-    commands.insert_resource(GlobalAmbientLight { color: Color::srgb(0.55, 0.55, 0.75), brightness: 180.0, ..default() });
+    commands.insert_resource(GlobalAmbientLight { color: Color::srgb(0.62, 0.62, 0.8), brightness: 420.0, ..default() });
 
     let sun = SUN_DIR.normalize();
     commands.spawn((
@@ -261,7 +261,7 @@ fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
 
     // Закатное солнце.
     commands.spawn((
-        DirectionalLight { color: Color::srgb(1.0, 0.72, 0.48), illuminance: 9_000.0, shadow_maps_enabled: true, ..default() },
+        DirectionalLight { color: Color::srgb(1.0, 0.84, 0.66), illuminance: 11_000.0, shadow_maps_enabled: true, ..default() },
         Transform::from_translation(sun * 100.0).looking_at(Vec3::ZERO, Vec3::Y),
         CascadeShadowConfigBuilder { num_cascades: 4, first_cascade_far_bound: 12.0, maximum_distance: 160.0, ..default() }.build(),
         VolumetricLight,
@@ -270,13 +270,13 @@ fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
     commands.spawn((
         FogVolume {
             fog_color: Color::srgb(0.85, 0.8, 0.8),
-            density_factor: 0.035,
-            absorption: 0.15,
-            scattering: 0.35,
+            density_factor: 0.03,
+            absorption: 0.0,
+            scattering: 0.25,
             scattering_asymmetry: 0.6,
             ..default()
         },
-        Transform::from_xyz(0.0, 14.0, -12.0).with_scale(Vec3::new(130.0, 28.0, 150.0)),
+        Transform::from_xyz(0.0, 20.0, 0.0).with_scale(Vec3::new(600.0, 40.0, 600.0)),
     ));
 }
 
@@ -303,7 +303,7 @@ fn setup_camera(event: On<Add<Camera3d>>, mut commands: Commands, settings: Res<
             color: FOG_COLOR,
             directional_light_color: Color::srgba(1.0, 0.62, 0.35, 0.5),
             directional_light_exponent: 18.0,
-            falloff: FogFalloff::from_visibility_colors(280.0, Color::srgb(0.45, 0.38, 0.42), Color::srgb(0.75, 0.62, 0.55)),
+            falloff: FogFalloff::from_visibility_colors(380.0, Color::srgb(0.36, 0.36, 0.46), Color::srgb(0.62, 0.56, 0.60)),
         },
         Msaa::Off,
         TemporalAntiAliasing::default(),

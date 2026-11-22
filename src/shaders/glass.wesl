@@ -80,7 +80,7 @@ fn lancet(uv: vec2<f32>) -> vec4<f32> {
     if in_border {
         let k = floor(uv.y * 26.0);
         col = select(vec3<f32>(0.70, 0.04, 0.06), vec3<f32>(0.04, 0.12, 0.65), fract(k * 0.5) > 0.25);
-        lead = max(lead, 1.0 - smoothstep(0.0, 0.02, abs(fract(uv.y * 26.0) - 0.5) - 0.46));
+        lead = max(lead, smoothstep(0.43, 0.48, abs(fract(uv.y * 26.0) - 0.5)));
     } else {
         // Медальоны по высоте окна.
         let m = vec2<f32>(0.5, (floor(p.y * 1.1) + 0.5) / 1.1);
@@ -105,7 +105,7 @@ fn lancet(uv: vec2<f32>) -> vec4<f32> {
         lead = max(lead, 1.0 - smoothstep(0.0, 0.02, abs(edge - 0.12)));
     }
     // Горизонтальные прутья-стяжки.
-    lead = max(lead, 1.0 - smoothstep(0.0, 0.012, abs(fract(uv.y * 5.0) - 0.5) - 0.488));
+    lead = max(lead, smoothstep(0.475, 0.492, abs(fract(uv.y * 5.0) - 0.5)));
     return vec4<f32>(col, lead);
 }
 
@@ -143,7 +143,7 @@ fn rose(uv: vec2<f32>) -> vec4<f32> {
         col = select(vec3<f32>(0.70, 0.04, 0.06), vec3<f32>(0.85, 0.55, 0.08), fract(floor(a * 24.0) * 0.5) > 0.25);
         col = select(vec3<f32>(0.04, 0.12, 0.65), col, d < 0.38);
         lead = 1.0 - smoothstep(0.0, 0.06, abs(d - 0.38));
-        lead = max(lead, 1.0 - smoothstep(0.0, 0.03, abs(fract(a * 24.0) - 0.5) - 0.47));
+        lead = max(lead, smoothstep(0.44, 0.48, abs(fract(a * 24.0) - 0.5)));
     }
     return vec4<f32>(col, lead);
 }

@@ -315,7 +315,7 @@ impl Builder {
 
     /// Восьмигранная башенка-турель (коллизия — квадрат).
     fn turret(&mut self, cx: f32, cz: f32, r: f32, height: f32, spire_h: f32) {
-        let h = r * 0.9;
+        let h = r * 0.65;
         self.solid([cx - h, 0.0, cz - h], [cx + h, height, cz + h], Mat::DarkStone);
         let m = self.mesh(Mat::DarkStone);
         m.prism(Vec3::new(cx, 0.0, cz), r, height, 8);
@@ -342,7 +342,7 @@ impl Builder {
 
     /// Деревянный столб со скобой и факелом наверху.
     fn lamp_post(&mut self, x: f32, z: f32) {
-        self.solid([x - 0.15, 0.0, z - 0.15], [x + 0.15, 3.0, z + 0.15], Mat::Wood);
+        self.solid([x - 0.1, 0.0, z - 0.1], [x + 0.1, 3.0, z + 0.1], Mat::Iron);
         let m = self.mesh(Mat::Iron);
         m.prism(Vec3::new(x, 2.9, z), 0.25, 0.12, 8);
         m.prism(Vec3::new(x, 3.0, z), 0.12, 0.25, 8);
@@ -449,7 +449,7 @@ pub fn castle_layout() -> Layout {
 
 fn ground_and_curtain(b: &mut Builder) {
     let h = WALL_HEIGHT;
-    b.solid([-250.0, -1.0, -250.0], [250.0, 0.0, 250.0], Mat::Grass);
+    b.solid([-900.0, -1.0, -900.0], [900.0, 0.0, 900.0], Mat::Grass);
     // Двор и площадь мощёные.
     b.decor([-CURTAIN_IN, 0.0, INNER_WALL.1], [CURTAIN_IN, 0.02, SOUTH_IN], Mat::Cobble);
     b.decor([-CURTAIN_IN, 0.0, -17.0], [CURTAIN_IN, 0.02, INNER_WALL.0], Mat::Cobble);
@@ -569,7 +569,7 @@ fn gatehouse(b: &mut Builder) {
 fn courtyard(b: &mut Builder) {
     // Фонтан в центре двора.
     let (fx, fz) = (0.0, 14.0);
-    b.solid([fx - 2.4, 0.0, fz - 2.4], [fx + 2.4, 0.8, fz + 2.4], Mat::Trim);
+    b.solid([fx - 1.8, 0.0, fz - 1.8], [fx + 1.8, 0.8, fz + 1.8], Mat::Trim);
     let m = b.mesh(Mat::Trim);
     m.prism(Vec3::new(fx, 0.0, fz), 2.8, 0.8, 8);
     m.prism(Vec3::new(fx, 0.8, fz), 2.95, 0.12, 8);
@@ -578,7 +578,7 @@ fn courtyard(b: &mut Builder) {
     m.prism(Vec3::new(fx, 2.45, fz), 0.3, 1.2, 8);
     b.pinnacle(Vec3::new(fx, 3.65, fz), 0.35, 2.2);
     b.mesh(Mat::Water).prism(Vec3::new(fx, 0.62, fz), 2.55, 0.1, 8);
-    b.solid([fx - 0.5, 0.8, fz - 0.5], [fx + 0.5, 3.6, fz + 0.5], Mat::Trim);
+    b.solid([fx - 0.29, 0.8, fz - 0.29], [fx + 0.29, 3.6, fz + 0.29], Mat::Trim);
 
     // Колодец.
     let (wx, wz) = (-20.0, 30.0);
@@ -651,9 +651,9 @@ fn courtyard(b: &mut Builder) {
     for (x, z) in [(22.0, 18.6), (23.0, 19.4), (-40.0, 32.0), (40.0, -2.0), (41.0, -2.8)] {
         b.barrel_at(x, z);
     }
-    // Сено.
-    for (x, z) in [(14.0, 24.0), (15.3, 24.2), (14.6, 25.3)] {
-        b.solid([x - 0.6, 0.0, z - 0.45], [x + 0.6, 0.8, z + 0.45], Mat::Leaves);
+    // Ящики у дороги.
+    for (x, z, sz) in [(14.0, 24.0, 1.0), (15.2, 24.2, 0.8), (14.5, 25.2, 0.9)] {
+        b.crate_at(x, z, sz);
     }
 }
 
@@ -849,7 +849,7 @@ fn cathedral(b: &mut Builder) {
         b.wall(fx, back_in, front_in, 10.0, nave_h, d0, d1, &clerestory, Mat::DarkStone);
         // Колонны аркады (декор поверх опор).
         for &z in COLUMN_Z.iter() {
-            b.column(sx * (NAVE_HALF - 0.5), z, 0.55, 5.6);
+            b.column(sx * (NAVE_HALF - 0.5), z, 0.8, 5.6);
             // Служебные колонки до пят свода нефа.
             b.mesh(Mat::Trim).prism(Vec3::new(sx * (NAVE_HALF - 1.12), 5.6, z), 0.16, 4.4, 6);
         }
@@ -982,10 +982,11 @@ fn cloister(b: &mut Builder) {
     b.decor([gx0 + 0.6, 0.0, gz0 + 0.6], [gx1 - 0.6, 0.05, gz1 - 0.6], Mat::Grass);
     // Колодец-фонтан в центре сада и кипарисы.
     let (cx, cz) = ((gx0 + gx1) / 2.0, (gz0 + gz1) / 2.0);
-    b.solid([cx - 1.8, 0.0, cz - 1.8], [cx + 1.8, 0.7, cz + 1.8], Mat::Trim);
+    b.solid([cx - 1.35, 0.0, cz - 1.35], [cx + 1.35, 0.7, cz + 1.35], Mat::Trim);
     b.mesh(Mat::Trim).prism(Vec3::new(cx, 0.0, cz), 2.1, 0.7, 8);
     b.mesh(Mat::Water).prism(Vec3::new(cx, 0.55, cz), 1.9, 0.1, 8);
-    b.solid([cx - 0.3, 0.7, cz - 0.3], [cx + 0.3, 2.6, cz + 0.3], Mat::Trim);
+    b.solid([cx - 0.2, 0.7, cz - 0.2], [cx + 0.2, 2.6, cz + 0.2], Mat::Trim);
+    b.mesh(Mat::Trim).prism(Vec3::new(cx, 0.7, cz), 0.3, 1.9, 8);
     b.pinnacle(Vec3::new(cx, 2.6, cz), 0.3, 1.8);
     for (tx, tz) in [(gx0 + 3.0, gz0 + 4.0), (gx1 - 3.0, gz0 + 4.0), (gx0 + 3.0, gz1 - 4.0), (gx1 - 3.0, gz1 - 4.0), (cx, gz0 + 9.0), (cx, gz1 - 9.0)] {
         cypress(b, tx, tz, 5.5);
