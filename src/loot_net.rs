@@ -36,6 +36,10 @@ pub enum LootClientMessage {
     Drop { uid: ItemUid, from: Owner },
     /// Закрыть окно обыска.
     Close,
+    /// Применить расходник (бинт, зелье) из своего инвентаря.
+    Use { uid: ItemUid },
+    /// Прервать применение.
+    CancelUse,
     /// Отладка, пока нет врагов: положить перед игроком тело рыцаря с добычей (F8).
     DebugSpawnCorpse,
 }
@@ -56,6 +60,10 @@ pub enum LootServerMessage {
     /// Предмет падает на землю: из точки `start` со скоростью `vel`, остановится в `rest`.
     GroundSpawned { id: LootId, start: NetPos, vel: NetPos, rest: NetPos, base: ItemBaseId, quality: Quality, count: u16 },
     Removed { id: LootId },
+    /// Началось применение расходника: подпись и длительность полоски.
+    UseStarted { verb: String, duration: f32 },
+    /// Применение закончилось (`ok == false` — прервано).
+    UseFinished { ok: bool },
     /// Короткое сообщение игроку («Нет места»).
     Notice(String),
 }

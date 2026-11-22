@@ -50,7 +50,7 @@ impl Plugin for InventoryUiPlugin {
         app.insert_resource(Held::default())
             .insert_resource(Built::default())
             .insert_resource(TooltipFor::default())
-            .add_systems(Startup, (setup_fonts, setup_tooltip).chain())
+            .add_systems(Startup, (setup_fonts, crate::icons::setup_icons, setup_tooltip).chain())
             .add_systems(Update, (toggle_inventory, rebuild_ui, handle_input, highlight_cells, update_tooltip, move_ghost).chain())
             .add_systems(PostUpdate, free_cursor_while_open);
     }
@@ -178,11 +178,13 @@ fn free_cursor_while_open(state: Res<LootState>, mut cursor: Single<&mut CursorO
 // Построение окна
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn rebuild_ui(
     mut commands: Commands,
     state: Res<LootState>,
     held: Res<Held>,
     fonts: Res<UiFonts>,
+    icons: Res<crate::icons::ItemIcons>,
     mut built: ResMut<Built>,
     roots: Query<Entity, With<InventoryRoot>>,
     mut tooltip_for: ResMut<TooltipFor>,
@@ -198,6 +200,7 @@ fn rebuild_ui(
     tooltip_for.0 = None;
     let Some(inv) = state.inventory.as_ref().filter(|_| state.ui_open) else { return };
     let held_uid = held.0.as_ref().map(|h| h.item.uid);
+    let res = UiRes { fonts: fonts.clone(), icons: icons.0.clone() };
 
     commands
         .spawn((
@@ -225,11 +228,11 @@ fn rebuild_ui(
                     p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: px(4), row_gap: px(4), max_width: px(c.inv.grid.w as f32 * CELL), ..default() })
                         .with_children(|row| {
                             for slot in EquipSlot::ALL {
-                                equip_slot(row, &fonts, Owner::Container(c.id), slot, c.inv.equipped(slot), SMALL_SLOT, held_uid);
+                                equip_slot(row, &res, Owner::Container(c.id), slot, c.inv.equipped(slot), SMALL_SLOT, held_uid);
                             }
                         });
                     p.spawn(text(&fonts, "Сумка", 14.0, DIM, false));
-                    grid(p, &fonts, Owner::Container(c.id), &c.inv, held_uid);
+                    grid(p, &res, Owner::Container(c.id), &c.inv, held_uid);
                     if !c.inv.is_empty() {
                         p.spawn((
                             Hit::TakeAll,
@@ -261,7 +264,7 @@ fn rebuild_ui(
                 .with_children(|g| {
                     use EquipSlot::*;
                     for slot in [Necklace, Head, Ring, MainHand, Chest, OffHand, Hands, Legs, Feet] {
-                        equip_slot(g, &fonts, Owner::Me, slot, inv.equipped(slot), SLOT, held_uid);
+                        equip_slot(g, &res, Owner::Me, slot, inv.equipped(slot), SLOT, held_uid);
                     }
                 });
                 p.spawn(text(&fonts, "Характеристики", 16.0, DIM, false));
@@ -291,13 +294,13 @@ fn rebuild_ui(
             // Сумка.
             panel(root).with_children(|p| {
                 p.spawn(text(&fonts, "Сумка", 22.0, TITLE, true));
-                grid(p, &fonts, Owner::Me, inv, held_uid);
+                grid(p, &res, Owner::Me, inv, held_uid);
                 let gold: u32 = inv.all_items().filter(|i| i.info().shape == crate::items::ItemShape::Coins).map(|i| i.count as u32).sum();
                 let value: u32 = inv.all_items().map(Item::value).sum();
                 p.spawn(text(&fonts, format!("Золото: {gold}    Стоимость вещей: {value}"), 15.0, Color::srgb(0.9, 0.75, 0.35), false));
                 p.spawn(text(
                     &fonts,
-                    "ЛКМ — взять/положить, мимо окна — выбросить\nПКМ или Shift+ЛКМ — быстро переложить или надеть\nQ — выбросить, Tab — закрыть",
+                    "ЛКМ — взять/положить, мимо окна — выбросить\nПКМ или Shift+ЛКМ — быстро переложить или надеть\nF — использовать (бинт, зелье), Q — выбросить, Tab — закрыть",
                     13.0,
                     DIM,
                     false,
@@ -318,7 +321,7 @@ fn rebuild_ui(
                     FocusPolicy::Pass,
                     GlobalZIndex(50),
                 ))
-                .with_children(|g| item_body(g, &fonts, &h.item, 0.9));
+                .with_children(|g| item_body(g, &res, &h.item, 0.9));
             }
         });
 }
@@ -341,8 +344,14 @@ fn panel<'a>(root: &'a mut ChildSpawnerCommands) -> EntityCommands<'a> {
     ))
 }
 
-/// Внешний вид предмета (фон и рамка по качеству, название, количество).
-fn item_body(p: &mut ChildSpawnerCommands, fonts: &UiFonts, item: &Item, alpha: f32) {
+/// Шрифты и иконки для построения окна.
+struct UiRes {
+    fonts: UiFonts,
+    icons: Vec<Handle<Image>>,
+}
+
+/// Внешний вид предмета (фон и рамка по качеству, иконка, количество).
+fn item_body(p: &mut ChildSpawnerCommands, fonts: &UiRes, item: &Item, alpha: f32) {
     let q = item.quality;
     p.spawn((
         Node {
@@ -360,20 +369,24 @@ fn item_body(p: &mut ChildSpawnerCommands, fonts: &UiFonts, item: &Item, alpha: 
         FocusPolicy::Pass,
     ))
     .with_children(|b| {
-        // В узкую клетку — шрифт поменьше, чтобы название влезло.
-        let narrow = item.size().0 == 1;
-        let size = if narrow { 10.0 } else { 13.0 };
-        b.spawn((text(fonts, item.info().short, size, quality_color(q).with_alpha(alpha), true), TextLayout::justify(Justify::Center)));
+        // Иконка вписывается в рамку с сохранением пропорций.
+        let (w, h) = item.size();
+        b.spawn((
+            ImageNode::new(fonts.icons[item.base.0 as usize].clone()).with_color(Color::WHITE.with_alpha(alpha)),
+            Node { height: percent(100), aspect_ratio: Some(w as f32 / h as f32), max_width: percent(100), ..default() },
+            FocusPolicy::Pass,
+        ));
         if item.count > 1 {
             b.spawn((
-                text(fonts, item.count.to_string(), 11.0, Color::WHITE.with_alpha(alpha), true),
+                text(&fonts.fonts, item.count.to_string(), 13.0, Color::WHITE.with_alpha(alpha), true),
+                TextShadow::default(),
                 Node { position_type: PositionType::Absolute, right: px(3), bottom: px(0), ..default() },
             ));
         }
     });
 }
 
-fn grid(p: &mut ChildSpawnerCommands, fonts: &UiFonts, owner: Owner, inv: &Inventory, held: Option<ItemUid>) {
+fn grid(p: &mut ChildSpawnerCommands, fonts: &UiRes, owner: Owner, inv: &Inventory, held: Option<ItemUid>) {
     let g = &inv.grid;
     p.spawn(Node { width: px(g.w as f32 * CELL), height: px(g.h as f32 * CELL), ..default() }).with_children(|n| {
         for y in 0..g.h {
@@ -417,7 +430,7 @@ fn grid(p: &mut ChildSpawnerCommands, fonts: &UiFonts, owner: Owner, inv: &Inven
     });
 }
 
-fn equip_slot(p: &mut ChildSpawnerCommands, fonts: &UiFonts, owner: Owner, slot: EquipSlot, item: Option<&Item>, size: f32, held: Option<ItemUid>) {
+fn equip_slot(p: &mut ChildSpawnerCommands, fonts: &UiRes, owner: Owner, slot: EquipSlot, item: Option<&Item>, size: f32, held: Option<ItemUid>) {
     p.spawn((
         Hit::Equip { owner, slot },
         Interaction::default(),
@@ -441,7 +454,7 @@ fn equip_slot(p: &mut ChildSpawnerCommands, fonts: &UiFonts, owner: Owner, slot:
         }
         None => {
             let size = if size < SLOT { 10.0 } else { 12.0 };
-            s.spawn((text(fonts, slot.name(), size, Color::srgba(0.6, 0.56, 0.5, 0.6), false), TextLayout::justify(Justify::Center)));
+            s.spawn((text(&fonts.fonts, slot.name(), size, Color::srgba(0.6, 0.56, 0.5, 0.6), false), TextLayout::justify(Justify::Center)));
         }
     });
 }
@@ -549,6 +562,16 @@ fn handle_input(
         send(client, &LootClientMessage::Drop { uid, from: owner });
         return;
     }
+    // F — использовать (бинт, зелье). Также ПКМ по расходнику в своей сумке, если тело не открыто.
+    let consumable = owner == Owner::Me && owner_inv(&state, owner).and_then(|i| i.find(uid)).is_some_and(|(_, it)| it.base.consumable().is_some());
+    if keys.just_pressed(KeyCode::KeyF) || (consumable && state.container.is_none() && mouse.just_pressed(MouseButton::Right)) {
+        if consumable {
+            send(client, &LootClientMessage::Use { uid });
+        } else {
+            state.notify("Это нельзя использовать", time.elapsed_secs());
+        }
+        return;
+    }
     let quick = mouse.just_pressed(MouseButton::Right) || (shift && mouse.just_pressed(MouseButton::Left));
     if quick {
         match quick_move(&state, owner, uid) {
@@ -631,7 +654,7 @@ fn setup_tooltip(mut commands: Commands) {
             padding: UiRect::all(px(10)),
             row_gap: px(3),
             border: UiRect::all(px(2)),
-            max_width: px(320),
+            width: px(300),
             ..default()
         },
         BackgroundColor(Color::srgba(0.05, 0.04, 0.03, 0.97)),
@@ -647,6 +670,7 @@ fn update_tooltip(
     state: Res<LootState>,
     held: Res<Held>,
     fonts: Res<UiFonts>,
+    icons: Res<crate::icons::ItemIcons>,
     hits: Query<(&Interaction, &Hit)>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut tooltip: Single<(Entity, &mut Node, &mut BorderColor), With<Tooltip>>,
@@ -681,7 +705,15 @@ fn update_tooltip(
     border.set_all(quality_color(item.quality));
     let info = item.info();
     commands.entity(entity).despawn_children().with_children(|t| {
+        let (w, h) = item.size();
+        let scale = 40.0 / (w.max(h) as f32 / 2.0).max(1.0);
+        t.spawn((ImageNode::new(icons.get(item.base)), Node { width: px(w as f32 * scale), height: px(h as f32 * scale), align_self: AlignSelf::Center, ..default() }));
         t.spawn(text(&fonts, item.display_name(), 18.0, quality_color(item.quality), true));
+        if let Some(c) = item.base.consumable() {
+            let how = if c.heal_over > 0.0 { format!("за {:.0} с после применения", c.heal_over) } else { "во время применения".to_string() };
+            t.spawn(text(&fonts, format!("Лечит {:.0} здоровья {how}", c.heal), 14.0, Color::srgb(0.5, 0.9, 0.5), false));
+            t.spawn(text(&fonts, format!("Применение {:.0} с · F или ПКМ", c.use_time), 13.0, Color::srgb(0.5, 0.9, 0.5), false));
+        }
         let mut kind = String::new();
         if info.has_quality {
             kind.push_str(item.quality.name());

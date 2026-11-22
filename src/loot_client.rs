@@ -20,9 +20,9 @@ impl Plugin for LootClientPlugin {
             .insert_resource(LootState::default())
             .insert_resource(LootIndex::default())
             .insert_resource(PendingCorpses::default())
-            .add_systems(Startup, (setup_loot_assets, setup_prompt).chain().after(crate::inventory_ui::setup_fonts))
+            .add_systems(Startup, (setup_loot_assets, setup_prompt, setup_use_bar).chain().after(crate::inventory_ui::setup_fonts))
             .add_systems(Update, (receive_loot, attach_corpse_views, interact_input).chain().run_if(client_connected))
-            .add_systems(Update, (animate_drops, aim_target, update_prompt, update_notices).chain());
+            .add_systems(Update, (animate_drops, aim_target, update_prompt, update_notices, update_use_bar).chain());
     }
 }
 
@@ -44,6 +44,8 @@ pub struct LootState {
     pub target: Option<LootId>,
     /// Сообщения игроку и время их появления.
     pub notices: Vec<(String, f32)>,
+    /// Что сейчас применяем: подпись, время начала, длительность.
+    pub using: Option<(String, f32, f32)>,
     /// Растёт при каждом изменении инвентаря или тела (окно перестраивается).
     pub rev: u64,
 }
@@ -321,6 +323,13 @@ fn receive_loot(
                 }
             }
             LootServerMessage::Notice(text) => state.notify(text, now),
+            LootServerMessage::UseStarted { verb, duration } => state.using = Some((verb, now, duration)),
+            LootServerMessage::UseFinished { ok } => {
+                if !ok && state.using.is_some() {
+                    state.notify("Прервано", now);
+                }
+                state.using = None;
+            }
         }
     }
 }
@@ -383,17 +392,96 @@ fn aim_target(
     state.target = best.map(|(_, id)| id);
 }
 
-fn interact_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, state: Res<LootState>) {
+fn interact_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, mut state: ResMut<LootState>, time: Res<Time>) {
     if state.ui_open {
         return;
     }
+    let mut notices = Vec::new();
     if keys.just_pressed(KeyCode::KeyE)
         && let Some(id) = state.target
     {
         send(&mut client, &LootClientMessage::Interact { id });
     }
+    // Быстрое лечение: 4 — бинт, 5 — зелье (первый найденный в сумке).
+    for (key, name) in [(KeyCode::Digit4, "Бинт"), (KeyCode::Digit5, "Целебное зелье")] {
+        if keys.just_pressed(key) {
+            let base = ItemBaseId::by_name(name);
+            match state.inventory.as_ref().and_then(|inv| inv.all_items().find(|i| i.base == base)) {
+                Some(item) => send(&mut client, &LootClientMessage::Use { uid: item.uid }),
+                None => notices.push(format!("Нет предмета: {name}")),
+            }
+        }
+    }
     if keys.just_pressed(KeyCode::F8) {
         send(&mut client, &LootClientMessage::DebugSpawnCorpse);
+    }
+    for n in notices {
+        state.notify(n, time.elapsed_secs());
+    }
+}
+
+#[derive(Component)]
+struct UseBar;
+
+#[derive(Component)]
+struct UseBarFill;
+
+#[derive(Component)]
+struct UseBarText;
+
+fn setup_use_bar(mut commands: Commands, fonts: Res<UiFonts>) {
+    commands
+        .spawn((
+            UseBar,
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                bottom: px(110),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: px(4),
+                display: Display::None,
+                ..default()
+            },
+        ))
+        .with_children(|p| {
+            p.spawn((
+                UseBarText,
+                Text::new(""),
+                TextFont { font: fonts.bold.clone().into(), font_size: bevy::text::FontSize::Px(17.0), ..default() },
+                TextColor(Color::srgb(0.95, 0.9, 0.8)),
+                TextShadow::default(),
+            ));
+            p.spawn((
+                Node { width: px(260), height: px(10), border: UiRect::all(px(1)), ..default() },
+                BorderColor::all(Color::srgb(0.45, 0.36, 0.22)),
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+            ))
+            .with_children(|b| {
+                b.spawn((UseBarFill, Node { width: percent(0), height: percent(100), ..default() }, BackgroundColor(Color::srgb(0.45, 0.8, 0.4))));
+            });
+        });
+}
+
+/// Полоска «Перевязка…» с ходом применения.
+fn update_use_bar(
+    time: Res<Time>,
+    state: Res<LootState>,
+    mut bar: Single<&mut Node, (With<UseBar>, Without<UseBarFill>)>,
+    mut fill: Single<&mut Node, (With<UseBarFill>, Without<UseBar>)>,
+    mut text: Single<&mut Text, With<UseBarText>>,
+) {
+    match &state.using {
+        Some((verb, start, duration)) => {
+            let t = ((time.elapsed_secs() - start) / duration.max(0.01)).clamp(0.0, 1.0);
+            bar.display = Display::Flex;
+            fill.width = percent(t * 100.0);
+            let line = format!("{verb}… (удар или парирование прервут)");
+            if text.0 != line {
+                text.0 = line;
+            }
+        }
+        None => bar.display = Display::None,
     }
 }
 
