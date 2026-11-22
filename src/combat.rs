@@ -433,7 +433,7 @@ pub fn line_of_sight(level: &LevelColliders, from: Vec3, to: Vec3) -> bool {
     let steps = (len / 0.15).ceil().max(1.0) as usize;
     for i in 1..steps {
         let p = from + d * (i as f32 / steps as f32);
-        if level.0.iter().any(|c| p.cmpgt(c.min).all() && p.cmplt(c.max).all()) {
+        if level.point_solid(p) {
             return false;
         }
     }
