@@ -89,18 +89,6 @@ pub enum ActorKind {
     HunArcher,
 }
 
-/// Чьи это люди. Кто кому враг, решает система фракций; пока все, кроме игроков, нападают на игроков.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Faction {
-    Players,
-    /// Византийский гарнизон Херсона.
-    Garrison,
-    Goths,
-    Alans,
-    /// Гунно-булгарские кочевники.
-    Nomads,
-}
-
 impl ActorKind {
     #[cfg_attr(not(test), allow(dead_code))]
     pub const ENEMIES: [ActorKind; 5] = [ActorKind::Stratiotes, ActorKind::Bucellarius, ActorKind::GothWarrior, ActorKind::AlanLancer, ActorKind::HunArcher];
@@ -108,20 +96,10 @@ impl ActorKind {
     pub fn is_npc(self) -> bool {
         !matches!(self, ActorKind::Player)
     }
-    pub fn faction(self) -> Faction {
-        match self {
-            ActorKind::Player => Faction::Players,
-            ActorKind::Stratiotes | ActorKind::Bucellarius => Faction::Garrison,
-            ActorKind::GothWarrior => Faction::Goths,
-            ActorKind::AlanLancer => Faction::Alans,
-            ActorKind::HunArcher => Faction::Nomads,
-        }
-    }
-    /// Враги ли эти двое. Пока все люди мира против игроков, а игроки — против всех
-    /// (система фракций заменит это отношениями фракций).
+    /// Могут ли эти двое задеть друг друга оружием. Люди мира между собой не дерутся;
+    /// на кого из игроков нападать, решает ИИ по репутации фракции (см. `npc::Brain`).
     pub fn hostile(self, other: ActorKind) -> bool {
-        let (a, b) = (self.faction(), other.faction());
-        a != b && (a == Faction::Players || b == Faction::Players) || (a == Faction::Players && b == Faction::Players)
+        self == ActorKind::Player || other == ActorKind::Player
     }
     /// Название для интерфейса.
     pub fn name_ru(self) -> &'static str {

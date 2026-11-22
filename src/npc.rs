@@ -6,6 +6,8 @@
 
 use crate::collision::{Body, LevelColliders};
 use crate::combat::{self, Action, Fighter, Pose, WeaponKind, line_of_sight};
+use crate::factions::Faction;
+use crate::level::NpcGroup;
 use crate::protocol::ActorKind;
 use bevy::prelude::*;
 
@@ -35,11 +37,26 @@ pub struct NpcSpawn {
     pub kind: ActorKind,
     pub pos: Vec3,
     pub yaw: f32,
+    /// Чей это человек. `None` — разбойник, нападает на всех.
+    pub faction: Option<Faction>,
+    /// Насколько далеко бродит вокруг поста.
+    pub wander: f32,
+}
+
+impl NpcSpawn {
+    /// Разбойник без фракции, стоит на месте.
+    pub fn brigand(kind: ActorKind, pos: Vec3, yaw: f32) -> Self {
+        Self { kind, pos, yaw, faction: None, wander: 0.0 }
+    }
 }
 
 /// Где стоят враги в начале и куда возрождаются.
 pub fn npc_spawns() -> Vec<NpcSpawn> {
-    // Места берём из уровня, типы раздаём по кругу; последний — букелларий (самый опасный).
+    let posts = crate::level::npc_posts();
+    if !posts.is_empty() {
+        return spawns_from_posts(&posts);
+    }
+    // Старый уровень без постов: типы раздаём по кругу; последний — букелларий (самый опасный).
     const ORDER: [ActorKind; 5] = [ActorKind::Stratiotes, ActorKind::GothWarrior, ActorKind::AlanLancer, ActorKind::HunArcher, ActorKind::GothWarrior];
     let hints = crate::level::npc_spawn_hints();
     let last = hints.len().saturating_sub(1);
@@ -49,7 +66,33 @@ pub fn npc_spawns() -> Vec<NpcSpawn> {
         .map(|(i, pos)| {
             let kind = if i == last && i > 0 { ActorKind::Bucellarius } else { ORDER[i % ORDER.len()] };
             let (dx, dz) = (0.0 - pos.x, 32.0 - pos.z);
-            NpcSpawn { kind, pos, yaw: (-dx).atan2(-dz) }
+            NpcSpawn::brigand(kind, pos, (-dx).atan2(-dz))
+        })
+        .collect()
+}
+
+/// Кто стоит на постах уровня: гарнизон — стратиоты (на больших обходах — букелларии),
+/// готы — воины с топорами, аланы — копейщики, кочевники — лучники, разбойники — сброд всех народов.
+fn spawns_from_posts(posts: &[crate::level::NpcPost]) -> Vec<NpcSpawn> {
+    const BRIGANDS: [ActorKind; 3] = [ActorKind::GothWarrior, ActorKind::HunArcher, ActorKind::AlanLancer];
+    let (mut garrison, mut brigands) = (0usize, 0usize);
+    posts
+        .iter()
+        .map(|p| {
+            let kind = match p.group {
+                NpcGroup::Garrison => {
+                    garrison += 1;
+                    if p.wander >= 10.0 && garrison % 2 == 1 { ActorKind::Bucellarius } else { ActorKind::Stratiotes }
+                }
+                NpcGroup::Goths => ActorKind::GothWarrior,
+                NpcGroup::Alans => ActorKind::AlanLancer,
+                NpcGroup::Nomads => ActorKind::HunArcher,
+                NpcGroup::Brigands => {
+                    brigands += 1;
+                    BRIGANDS[(brigands - 1) % BRIGANDS.len()]
+                }
+            };
+            NpcSpawn { kind, pos: p.pos, yaw: p.yaw, faction: p.group.faction(), wander: p.wander }
         })
         .collect()
 }
@@ -224,11 +267,40 @@ pub struct Brain {
     guard_linger: f32,
     /// Сколько уже ждём, пока цель держит защиту.
     patience: f32,
+    /// Чей человек (None — разбойник, враг всем игрокам).
+    pub faction: Option<Faction>,
+    /// Игроки, с которыми у фракции вражда (обновляет сервер по репутации).
+    pub hostile_players: Vec<u64>,
+    /// Игроки, напавшие на этого человека или его товарищей.
+    pub provoked: Vec<u64>,
+    wander: f32,
+    stroll_to: Option<Vec3>,
+    stroll_timer: f32,
 }
 
 impl Brain {
     pub fn new(spawn: &NpcSpawn) -> Self {
-        Self { home: spawn.pos, home_yaw: spawn.yaw, attack_cooldown: 1.5, ..default() }
+        Self {
+            home: spawn.pos,
+            home_yaw: spawn.yaw,
+            attack_cooldown: 1.5,
+            faction: spawn.faction,
+            wander: spawn.wander,
+            stroll_timer: 3.0,
+            ..default()
+        }
+    }
+
+    /// Нападать ли на этого игрока.
+    pub fn hostile_to(&self, player: u64) -> bool {
+        self.faction.is_none() || self.provoked.contains(&player) || self.hostile_players.contains(&player)
+    }
+
+    /// На него или его товарищей напали.
+    pub fn provoke(&mut self, player: u64) {
+        if !self.provoked.contains(&player) {
+            self.provoked.push(player);
+        }
     }
 }
 
@@ -286,11 +358,15 @@ pub fn think(
     // --- Выбор цели ---
     let eye = pose.shoulder();
     let current = brain.target.and_then(|id| others.iter().find(|o| o.id == id && o.alive));
+    let current = current.filter(|t| t.kind != ActorKind::Player || brain.hostile_to(t.id));
+    // Далеко от поста не уходит: стража не гонится за вами через полгорода.
+    let leash = brain.wander.max(10.0) + 25.0;
+    let current = current.filter(|_| pose.feet.distance(brain.home) < leash);
     let target = match current {
         Some(t) if t.pose.feet.distance(pose.feet) < LOSE_RANGE.max(prof.aggro + 8.0) => Some(*t),
         _ => others
             .iter()
-            .filter(|o| o.alive && o.targetable && kind.hostile(o.kind))
+            .filter(|o| o.alive && o.targetable && o.kind == ActorKind::Player && brain.hostile_to(o.id))
             .filter(|o| o.pose.feet.distance(pose.feet) < prof.aggro.max(AGGRO_RANGE * 0.5))
             .filter(|o| line_of_sight(level, eye, o.pose.shoulder()))
             .min_by(|a, b| a.pose.feet.distance(pose.feet).total_cmp(&b.pose.feet.distance(pose.feet)))
@@ -406,11 +482,20 @@ pub fn think(
         if fighter.guard_held {
             fighter.set_guard(false);
         }
-        let to_home = brain.home - pose.feet;
-        if Vec2::new(to_home.x, to_home.z).length() > 1.0 {
-            pose.yaw = turn_towards(pose.yaw, yaw_towards(pose.feet, brain.home), 3.0 * dt);
-            wish = pose.forward_flat() * 0.6;
-        } else {
+        // Без цели: обход вокруг поста (если пост позволяет) или стоим на месте.
+        brain.stroll_timer -= dt;
+        if brain.wander > 2.0 && brain.stroll_timer <= 0.0 {
+            let a = rng.range(0.0, std::f32::consts::TAU);
+            let r = rng.range(0.0, brain.wander);
+            brain.stroll_to = Some(brain.home + Vec3::new(a.cos() * r, 0.0, a.sin() * r));
+            brain.stroll_timer = rng.range(8.0, 16.0);
+        }
+        let goal = brain.stroll_to.unwrap_or(brain.home);
+        let to_goal = goal - pose.feet;
+        if Vec2::new(to_goal.x, to_goal.z).length() > 1.0 {
+            pose.yaw = turn_towards(pose.yaw, yaw_towards(pose.feet, goal), 3.0 * dt);
+            wish = pose.forward_flat() * if brain.stroll_to.is_some() { 0.45 } else { 0.6 };
+        } else if brain.stroll_to.take().is_none() {
             pose.yaw = turn_towards(pose.yaw, brain.home_yaw, 1.5 * dt);
         }
     }
@@ -443,7 +528,7 @@ mod tests {
     /// Прогоняет поединок игрока со стратегией `player_brain` против врага. Возвращает статистику.
     fn fight(kind: ActorKind, player_guard: bool, seconds: f32) -> (Fighter, Fighter, [u32; 3]) {
         let level = crate::level::level_colliders();
-        let spawn = NpcSpawn { kind, pos: Vec3::new(10.0, 0.0, 0.0), yaw: 0.0 };
+        let spawn = NpcSpawn::brigand(kind, Vec3::new(10.0, 0.0, 0.0), 0.0);
         let mut brain = Brain::new(&spawn);
         let mut npc_pose = Pose { feet: find_free_spot(&level, spawn.pos), yaw: 0.0, pitch: 0.0, crouching: false };
         let mut npc = fighter_for(kind);
@@ -511,7 +596,7 @@ mod tests {
     #[test]
     fn knight_hits_idle_player() {
         let level = crate::level::level_colliders();
-        let spawn = NpcSpawn { kind: ActorKind::Stratiotes, pos: Vec3::new(10.0, 0.0, 0.0), yaw: 0.0 };
+        let spawn = NpcSpawn::brigand(ActorKind::Stratiotes, Vec3::new(10.0, 0.0, 0.0), 0.0);
         let mut brain = Brain::new(&spawn);
         let mut pose = Pose { feet: find_free_spot(&level, spawn.pos), yaw: 0.0, pitch: 0.0, crouching: false };
         let mut knight = fighter_for(ActorKind::Stratiotes);
@@ -555,7 +640,7 @@ mod tests {
         let level = crate::level::level_colliders();
         for shield in [false, true] {
             // Главная улица Херсонеса: открытая прямая вдоль X.
-            let spawn = NpcSpawn { kind: ActorKind::HunArcher, pos: Vec3::new(4.0, 0.0, 0.0), yaw: -PI_ / 2.0 };
+            let spawn = NpcSpawn::brigand(ActorKind::HunArcher, Vec3::new(4.0, 0.0, 0.0), -PI_ / 2.0);
             let mut brain = Brain::new(&spawn);
             let mut pose = Pose { feet: find_free_spot(&level, spawn.pos), yaw: 0.0, pitch: 0.0, crouching: false };
             let mut archer = fighter_for(ActorKind::HunArcher);
@@ -603,6 +688,65 @@ mod tests {
                 assert!(hits > 0, "ни одна стрела не попала");
             }
         }
+    }
+
+    #[test]
+    fn posts_get_era_people() {
+        use crate::level::{NpcGroup, NpcPost};
+        let post = |group, wander| NpcPost { pos: Vec3::ZERO, group, yaw: 0.0, wander };
+        let posts = [post(NpcGroup::Garrison, 2.0), post(NpcGroup::Garrison, 15.0), post(NpcGroup::Goths, 12.0), post(NpcGroup::Alans, 12.0), post(NpcGroup::Nomads, 12.0), post(NpcGroup::Brigands, 20.0), post(NpcGroup::Brigands, 20.0)];
+        let kinds: Vec<_> = spawns_from_posts(&posts).iter().map(|s| (s.kind, s.faction.is_some())).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                (ActorKind::Stratiotes, true),
+                (ActorKind::Stratiotes, true),
+                (ActorKind::GothWarrior, true),
+                (ActorKind::AlanLancer, true),
+                (ActorKind::HunArcher, true),
+                (ActorKind::GothWarrior, false),
+                (ActorKind::HunArcher, false),
+            ]
+        );
+        // Каждый тип есть на уровне Херсонеса.
+        let all: Vec<_> = npc_spawns().iter().map(|s| s.kind).collect();
+        for k in ActorKind::ENEMIES {
+            assert!(all.contains(&k) || crate::level::npc_posts().is_empty(), "нет {k:?} на уровне");
+        }
+    }
+
+    /// Стражник не трогает игрока, пока тот не нападёт или не станет врагом фракции.
+    #[test]
+    fn garrison_is_peaceful_until_provoked() {
+        let level = crate::level::level_colliders();
+        let mut spawn = NpcSpawn::brigand(ActorKind::Stratiotes, Vec3::new(10.0, 0.0, 0.0), 0.0);
+        spawn.faction = Some(Faction::Garrison);
+        let mut brain = Brain::new(&spawn);
+        let mut pose = Pose { feet: find_free_spot(&level, spawn.pos), yaw: 0.0, pitch: 0.0, crouching: false };
+        let mut guard = fighter_for(ActorKind::Stratiotes);
+        let player_pose = Pose { feet: find_free_spot(&level, Vec3::new(12.0, 0.0, 0.0)), yaw: 0.0, pitch: 0.0, crouching: false };
+        let player = fighter_for(ActorKind::Player);
+        let mut rng = Rng::new(5);
+        let seen = [Seen { id: 1, kind: ActorKind::Player, pose: player_pose, action: player.action, weapon: player.weapon, shield: false, alive: true, targetable: true }];
+        let mut attacked = |brain: &mut Brain, guard: &mut Fighter, pose: &mut Pose| {
+            for _ in 0..(60 * 10) {
+                think(brain, ActorKind::Stratiotes, pose, guard, &seen, &level, &mut rng, 1.0 / 60.0);
+                guard.tick(1.0 / 60.0);
+                if matches!(guard.action, Action::Windup { .. }) {
+                    return true;
+                }
+            }
+            false
+        };
+        assert!(!attacked(&mut brain, &mut guard, &mut pose), "стражник напал без причины");
+        brain.provoke(1);
+        assert!(attacked(&mut brain, &mut guard, &mut pose), "стражник не ответил на нападение");
+        // Вражда по репутации тоже повод.
+        let mut brain = Brain::new(&spawn);
+        brain.hostile_players.push(1);
+        let mut guard = fighter_for(ActorKind::Stratiotes);
+        let mut pose = Pose { feet: find_free_spot(&level, spawn.pos), yaw: 0.0, pitch: 0.0, crouching: false };
+        assert!(attacked(&mut brain, &mut guard, &mut pose));
     }
 
     /// Игрок держит стойку и отвечает после парирования: копейщик должен проиграть.
