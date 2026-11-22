@@ -1,20 +1,48 @@
-//! Замок-заготовка из простых блоков (greybox). Позже блоки заменим моделями из Blender.
+//! Готический замок: планировка, коллизии и процедурная геометрия.
 //!
-//! Оси: X — восток, Z — юг (ворота на юге), Y — вверх. 1 единица = 1 метр.
+//! Оси: X — восток, Z — юг (главные ворота на юге), Y — вверх. 1 единица = 1 метр.
+//!
+//! План (с юга на север):
+//! - надвратная башня с проездом (узкое место) → большой двор (колодец, фонтан, кузница,
+//!   конюшня, тренировочная площадка, лестницы на стены);
+//! - внутренняя стена с главными воротами и двумя узкими калитками → площадь перед собором;
+//! - большой зал-собор: неф со стрельчатым сводом, боковые нефы за аркадой, витражи, хоры с троном;
+//! - слева клуатр (крытая галерея с аркадой вокруг сада), справа казармы с коридорами и комнатами;
+//! - между ними и собором — узкие проходы между контрфорсами, сзади — коридор вдоль северной стены.
+//!
+//! Коллизии — по-прежнему простые коробки (AABB). Сложные декоративные детали (арки, своды,
+//! шпили, крыши) рисуются отдельными мешами и в физике не участвуют.
+
+mod geom;
 
 use crate::collision::{Aabb, LevelColliders};
+use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
+use geom::{MeshBuilder, WallFrame, arch_height};
+use std::collections::HashMap;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Mat {
     Grass,
     Cobble,
+    /// Светлая тёсаная кладка.
     Stone,
+    /// Тёмная кладка (башни, собор).
     DarkStone,
+    /// Каменные плиты пола.
     Floor,
     Wood,
     Banner,
     Gold,
+    /// Резной камень: колонны, обрамления, нервюры.
+    Trim,
+    /// Сланцевая черепица.
+    Roof,
+    Iron,
+    /// Тлеющие угли горна.
+    Coals,
+    Water,
+    Leaves,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -26,256 +54,1288 @@ pub struct Block {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Torch {
+    /// Положение пламени.
     pub pos: Vec3,
+    /// Направление от стены (куда смотрит факел). Ноль — факел на столбе.
+    pub out: Vec3,
+}
+
+/// Дополнительный источник света (люстры, горн).
+#[derive(Clone, Copy, Debug)]
+pub struct Lamp {
+    pub pos: Vec3,
+    pub color: Color,
+    pub intensity: f32,
+    pub range: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GlassKind {
+    Lancet,
+    Rose,
+}
+
+/// Витраж: плоский многоугольник с UV 0..1, виден с обеих сторон.
+#[derive(Clone, Debug)]
+pub struct GlassPane {
+    pub kind: GlassKind,
+    pub pts: Vec<Vec3>,
+    pub uvs: Vec<Vec2>,
+    pub normal: Vec3,
 }
 
 pub struct Layout {
     pub blocks: Vec<Block>,
     pub torches: Vec<Torch>,
+    pub lamps: Vec<Lamp>,
+    pub glass: Vec<GlassPane>,
+    /// Декоративная геометрия по материалам (без коллизий).
+    pub decor: HashMap<Mat, MeshBuilder>,
+    /// Невидимые преграды (стёкла окон и т. п.).
+    pub invisible: Vec<Aabb>,
+}
+
+/// Проём в стене: дверь (sill = низ стены) или окно (sill выше, со стеклом).
+#[derive(Clone, Copy, Debug)]
+struct Opening {
+    s: f32,
+    width: f32,
+    sill: f32,
+    spring: f32,
+    rise: f32,
+    glass: bool,
+}
+
+impl Opening {
+    fn door(s: f32, width: f32, spring: f32, rise: f32) -> Self {
+        Self { s, width, sill: f32::NEG_INFINITY, spring, rise, glass: false }
+    }
+    fn window(s: f32, width: f32, sill: f32, spring: f32, rise: f32) -> Self {
+        Self { s, width, sill, spring, rise, glass: true }
+    }
+    fn apex(&self) -> f32 {
+        self.spring + arch_height(0.0, self.width, self.rise)
+    }
 }
 
 struct Builder {
     blocks: Vec<Block>,
     torches: Vec<Torch>,
+    lamps: Vec<Lamp>,
+    glass: Vec<GlassPane>,
+    decor: HashMap<Mat, MeshBuilder>,
+    invisible: Vec<Aabb>,
 }
 
 impl Builder {
+    fn new() -> Self {
+        Self { blocks: Vec::new(), torches: Vec::new(), lamps: Vec::new(), glass: Vec::new(), decor: HashMap::new(), invisible: Vec::new() }
+    }
+
     fn solid(&mut self, min: [f32; 3], max: [f32; 3], mat: Mat) {
         self.blocks.push(Block { aabb: Aabb::new(Vec3::from(min), Vec3::from(max)), mat, solid: true });
+    }
+    fn solid_v(&mut self, (min, max): (Vec3, Vec3), mat: Mat) {
+        if (max - min).min_element() > 0.001 {
+            self.blocks.push(Block { aabb: Aabb::new(min, max), mat, solid: true });
+        }
     }
     fn decor(&mut self, min: [f32; 3], max: [f32; 3], mat: Mat) {
         self.blocks.push(Block { aabb: Aabb::new(Vec3::from(min), Vec3::from(max)), mat, solid: false });
     }
-    fn torch(&mut self, x: f32, y: f32, z: f32) {
-        self.torches.push(Torch { pos: Vec3::new(x, y, z) });
+    fn mesh(&mut self, mat: Mat) -> &mut MeshBuilder {
+        self.decor.entry(mat).or_default()
+    }
+    fn invisible(&mut self, (min, max): (Vec3, Vec3)) {
+        self.invisible.push(Aabb::new(min, max));
+    }
+    fn torch(&mut self, x: f32, y: f32, z: f32, out: Vec3) {
+        self.torches.push(Torch { pos: Vec3::new(x, y, z), out });
+    }
+    fn lamp(&mut self, pos: Vec3, color: Color, intensity: f32, range: f32) {
+        self.lamps.push(Lamp { pos, color, intensity, range });
     }
 
-    /// Зубцы вдоль линии от a до b (по X или по Z) на высоте y.
+    /// Зубцы вдоль X на высоте y.
     fn merlons_x(&mut self, x0: f32, x1: f32, y: f32, z0: f32, z1: f32) {
         let mut x = x0;
-        while x + 1.0 <= x1 {
-            self.solid([x, y, z0], [x + 1.0, y + 1.4, z1], Mat::Stone);
+        while x + 1.0 <= x1 + 0.01 {
+            self.solid([x, y, z0], [x + 1.0, y + 1.5, z1], Mat::Stone);
             x += 2.0;
         }
     }
     fn merlons_z(&mut self, z0: f32, z1: f32, y: f32, x0: f32, x1: f32) {
         let mut z = z0;
-        while z + 1.0 <= z1 {
-            self.solid([x0, y, z], [x1, y + 1.4, z + 1.0], Mat::Stone);
+        while z + 1.0 <= z1 + 0.01 {
+            self.solid([x0, y, z], [x1, y + 1.5, z + 1.0], Mat::Stone);
             z += 2.0;
         }
     }
 
-    /// Лестница из ступенек 0.4 м вдоль оси Z (от z_start в сторону dir).
-    fn stairs_z(&mut self, x0: f32, x1: f32, z_start: f32, dir: f32, count: usize) {
+    /// Лестница из ступенек 0.4 м вдоль X (от x_start в сторону dir).
+    fn stairs_x(&mut self, x_start: f32, dir: f32, z0: f32, z1: f32, count: usize) {
         for i in 0..count {
             let top = 0.4 * (i as f32 + 1.0);
-            let a = z_start + dir * 0.6 * i as f32;
-            let b = z_start + dir * 0.6 * (i as f32 + 1.0);
-            self.solid([x0, 0.0, a.min(b)], [x1, top, a.max(b)], Mat::Stone);
+            let a = x_start + dir * 0.6 * i as f32;
+            let b = x_start + dir * 0.6 * (i as f32 + 1.0);
+            self.solid([a.min(b), 0.0, z0], [a.max(b), top, z1], Mat::Stone);
         }
     }
 
     fn crate_at(&mut self, x: f32, z: f32, size: f32) {
         self.solid([x - size / 2.0, 0.0, z - size / 2.0], [x + size / 2.0, size, z + size / 2.0], Mat::Wood);
+        // Окованные рёбра.
+        let m = self.mesh(Mat::Iron);
+        let h = size / 2.0 + 0.01;
+        m.cuboid(Vec3::new(x - h, size * 0.15, z - h), Vec3::new(x + h, size * 0.22, z + h));
+        m.cuboid(Vec3::new(x - h, size * 0.78, z - h), Vec3::new(x + h, size * 0.85, z + h));
+    }
+
+    fn barrel_at(&mut self, x: f32, z: f32) {
+        self.solid([x - 0.4, 0.0, z - 0.4], [x + 0.4, 1.1, z + 0.4], Mat::Wood);
+        let m = self.mesh(Mat::Iron);
+        for y in [0.15, 0.85] {
+            m.prism(Vec3::new(x, y, z), 0.47, 0.08, 8);
+        }
+    }
+
+    /// Стена с проёмами. `f` задаёт ориентацию; s — вдоль стены, d — толщина.
+    fn wall(&mut self, f: WallFrame, s0: f32, s1: f32, y0: f32, y1: f32, d0: f32, d1: f32, openings: &[Opening], mat: Mat) {
+        let mut ops: Vec<Opening> = openings.iter().copied().filter(|o| o.s > s0 && o.s < s1).collect();
+        ops.sort_by(|a, b| a.s.total_cmp(&b.s));
+        let mut cursor = s0;
+        let dm = (d0 + d1) / 2.0;
+        for o in ops {
+            let (l, r) = (o.s - o.width / 2.0, o.s + o.width / 2.0);
+            self.solid_v(f.bounds((cursor, l), (y0, y1), (d0, d1)), mat);
+            let apex = o.apex();
+            let sill = o.sill.max(y0);
+            if sill > y0 {
+                self.solid_v(f.bounds((l, r), (y0, sill), (d0, d1)), mat);
+                // Подоконник.
+                let (a, b) = f.bounds((l - 0.15, r + 0.15), (sill - 0.12, sill), (d0 - 0.12, d1 + 0.12));
+                self.mesh(Mat::Trim).cuboid(a, b);
+            }
+            if apex < y1 {
+                self.solid_v(f.bounds((l, r), (apex, y1), (d0, d1)), mat);
+            }
+            // Коллизия в зоне арки: по краям проёма.
+            let q = o.width / 4.0;
+            let band_bottom = o.spring + arch_height(q, o.width, o.rise);
+            self.solid_v(f.bounds((l, l + q * 0.6), (band_bottom, apex.min(y1)), (d0, d1)), mat);
+            self.solid_v(f.bounds((r - q * 0.6, r), (band_bottom, apex.min(y1)), (d0, d1)), mat);
+            {
+                let mut infill = std::mem::take(self.mesh(mat));
+                let mut trim = std::mem::take(self.mesh(Mat::Trim));
+                geom::arch_infill(&mut infill, &mut trim, f, o.s, o.width, o.spring, o.rise, apex.min(y1), d0, d1);
+                // Откосы проёма ниже пяты арки — обрамление.
+                for s in [l, r] {
+                    let (a, b) = f.bounds((s - 0.12, s + 0.12), (sill, o.spring), (d0 - 0.06, d1 + 0.06));
+                    trim.cuboid(a, b);
+                }
+                *self.mesh(mat) = infill;
+                *self.mesh(Mat::Trim) = trim;
+            }
+            if o.glass {
+                let (pts, uvs) = geom::lancet_outline(f, o.s, dm, o.width, sill, o.spring, o.rise);
+                self.glass.push(GlassPane { kind: GlassKind::Lancet, pts, uvs, normal: f.d_axis() });
+                self.invisible(f.bounds((l, r), (sill, apex), (dm - 0.1, dm + 0.1)));
+                // Средник для широких окон.
+                if o.width > 1.9 {
+                    let (a, b) = f.bounds((o.s - 0.07, o.s + 0.07), (sill, apex - 0.2), (dm - 0.12, dm + 0.12));
+                    self.mesh(Mat::Trim).cuboid(a, b);
+                }
+            }
+            cursor = r;
+        }
+        self.solid_v(f.bounds((cursor, s1), (y0, y1), (d0, d1)), mat);
+    }
+
+    /// Ступенчатый контрфорс у стены с пинаклем наверху.
+    /// `face` — координата грани стены по d, `dir` — куда выступает (+1/−1).
+    fn buttress(&mut self, f: WallFrame, s: f32, face: f32, dir: f32, depth: f32, height: f32, width: f32) {
+        let tiers = [(1.0, 0.55), (0.75, 0.8), (0.5, 1.0)];
+        let mut y = 0.0;
+        for (dk, hk) in tiers {
+            let top = height * hk;
+            let d_out = face + dir * depth * dk;
+            let (a, b) = f.bounds((s - width / 2.0, s + width / 2.0), (y, top), (face.min(d_out), face.max(d_out)));
+            self.solid_v((a, b), Mat::DarkStone);
+            // Слив-карниз.
+            let (a2, b2) = f.bounds((s - width / 2.0 - 0.08, s + width / 2.0 + 0.08), (top - 0.15, top), (face.min(d_out + dir * 0.1), face.max(d_out + dir * 0.1)));
+            self.mesh(Mat::Trim).cuboid(a2, b2);
+            y = top;
+        }
+        let pc = f.p(s, height, face + dir * depth * 0.25);
+        self.pinnacle(pc, width * 0.45, 3.2);
+    }
+
+    /// Пинакль: маленькая башенка со шпилем.
+    fn pinnacle(&mut self, base: Vec3, r: f32, h: f32) {
+        let m = self.mesh(Mat::Trim);
+        m.prism(base, r, h * 0.35, 4);
+        m.spire(base + Vec3::Y * h * 0.35, r * 1.1, h * 0.65, 4);
+        m.prism(base + Vec3::Y * (h - 0.05), r * 0.25, 0.25, 4);
+    }
+
+    /// Квадратная башня со шпилем, зубцами и окнами-бойницами.
+    fn tower(&mut self, cx: f32, cz: f32, half: f32, height: f32, spire_h: f32) {
+        self.solid([cx - half, 0.0, cz - half], [cx + half, height, cz + half], Mat::DarkStone);
+        // Пояс-карниз.
+        self.mesh(Mat::Trim).cuboid(Vec3::new(cx - half - 0.2, height - 0.5, cz - half - 0.2), Vec3::new(cx + half + 0.2, height, cz + half + 0.2));
+        self.mesh(Mat::Trim).cuboid(Vec3::new(cx - half - 0.15, 2.0, cz - half - 0.15), Vec3::new(cx + half + 0.15, 2.4, cz + half + 0.15));
+        // Зубцы.
+        self.merlons_x(cx - half, cx + half, height, cz - half, cz - half + 0.6);
+        self.merlons_x(cx - half, cx + half, height, cz + half - 0.6, cz + half);
+        self.merlons_z(cx - half + 1.0, cx + half - 1.0, height, cx - half, cx - half + 0.6);
+        self.merlons_z(cx - half + 1.0, cx + half - 1.0, height, cx + half - 0.6, cx + half);
+        // Восьмигранный шпиль с барабаном.
+        let r = half * 0.72;
+        self.mesh(Mat::DarkStone).prism(Vec3::new(cx, height, cz), r, 2.5, 8);
+        self.mesh(Mat::Roof).spire(Vec3::new(cx, height + 2.5, cz), r * 1.08, spire_h, 8);
+        self.mesh(Mat::Gold).prism(Vec3::new(cx, height + 2.5 + spire_h - 0.3, cz), 0.12, 1.6, 4);
+        self.mesh(Mat::Gold).cuboid(Vec3::new(cx - 0.5, height + 2.5 + spire_h + 0.7, cz - 0.06), Vec3::new(cx + 0.5, height + 2.5 + spire_h + 0.85, cz + 0.06));
+        // Пинакли по углам.
+        for (sx, sz) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+            self.pinnacle(Vec3::new(cx + sx * (half - 0.4), height, cz + sz * (half - 0.4)), 0.35, 3.0);
+        }
+        // Узкие светящиеся окна на всех гранях.
+        for (n, along_x) in [(Vec3::Z, true), (Vec3::NEG_Z, true), (Vec3::X, false), (Vec3::NEG_X, false)] {
+            let f = WallFrame { along_x };
+            let d = if along_x { cz + n.z * (half + 0.03) } else { cx + n.x * (half + 0.03) };
+            let sc = if along_x { cx } else { cz };
+            for y in [height * 0.45, height * 0.72] {
+                let (pts, uvs) = geom::lancet_outline(f, sc, d, 0.8, y, y + 1.6, 0.6);
+                self.glass.push(GlassPane { kind: GlassKind::Lancet, pts, uvs, normal: n });
+                let (a, b) = f.bounds((sc - 0.6, sc + 0.6), (y - 0.15, y), (d - 0.1, d + 0.1));
+                self.mesh(Mat::Trim).cuboid(a, b);
+            }
+        }
+    }
+
+    /// Восьмигранная башенка-турель (коллизия — квадрат).
+    fn turret(&mut self, cx: f32, cz: f32, r: f32, height: f32, spire_h: f32) {
+        let h = r * 0.9;
+        self.solid([cx - h, 0.0, cz - h], [cx + h, height, cz + h], Mat::DarkStone);
+        let m = self.mesh(Mat::DarkStone);
+        m.prism(Vec3::new(cx, 0.0, cz), r, height, 8);
+        self.mesh(Mat::Trim).prism(Vec3::new(cx, height - 0.4, cz), r + 0.2, 0.4, 8);
+        self.mesh(Mat::Roof).spire(Vec3::new(cx, height, cz), r + 0.25, spire_h, 8);
+        self.mesh(Mat::Gold).prism(Vec3::new(cx, height + spire_h - 0.2, cz), 0.1, 1.0, 4);
+    }
+
+    /// Колонна: база, восьмигранный ствол, капитель. Коллизия — квадрат.
+    fn column(&mut self, x: f32, z: f32, r: f32, height: f32) {
+        self.solid([x - r * 0.8, 0.0, z - r * 0.8], [x + r * 0.8, height, z + r * 0.8], Mat::Trim);
+        let m = self.mesh(Mat::Trim);
+        m.prism(Vec3::new(x, 0.0, z), r * 1.3, 0.5, 8);
+        m.prism(Vec3::new(x, 0.5, z), r * 1.1, 0.2, 8);
+        m.prism(Vec3::new(x, 0.0, z), r, height, 8);
+        m.prism(Vec3::new(x, height - 0.6, z), r * 1.25, 0.3, 8);
+        m.prism(Vec3::new(x, height - 0.3, z), r * 1.45, 0.3, 4);
+        // Тонкие колонки-«пучок» по сторонам ствола.
+        for k in 0..4 {
+            let a = k as f32 * std::f32::consts::FRAC_PI_2;
+            m.prism(Vec3::new(x + a.cos() * r, 0.5, z + a.sin() * r), r * 0.28, height - 1.1, 6);
+        }
+    }
+
+    /// Деревянный столб со скобой и факелом наверху.
+    fn lamp_post(&mut self, x: f32, z: f32) {
+        self.solid([x - 0.15, 0.0, z - 0.15], [x + 0.15, 3.0, z + 0.15], Mat::Wood);
+        let m = self.mesh(Mat::Iron);
+        m.prism(Vec3::new(x, 2.9, z), 0.25, 0.12, 8);
+        m.prism(Vec3::new(x, 3.0, z), 0.12, 0.25, 8);
+        self.torch(x, 3.35, z, Vec3::ZERO);
+    }
+
+    /// Люстра: железное кольцо со свечами на цепях.
+    fn chandelier(&mut self, c: Vec3, top: f32) {
+        let r = 1.3;
+        let ring: Vec<Vec3> = (0..=16)
+            .map(|i| {
+                let a = i as f32 / 16.0 * std::f32::consts::TAU;
+                c + Vec3::new(a.cos() * r, 0.0, a.sin() * r)
+            })
+            .collect();
+        let m = self.mesh(Mat::Iron);
+        m.beam_path(&ring, 0.05, 0.05, Vec3::Y);
+        for k in 0..4 {
+            let a = k as f32 * std::f32::consts::FRAC_PI_2;
+            let p = c + Vec3::new(a.cos() * r, 0.0, a.sin() * r);
+            m.beam(p, c + Vec3::Y * 1.6, 0.02, 0.02, Vec3::X);
+        }
+        m.beam(c + Vec3::Y * 1.6, Vec3::new(c.x, top, c.z), 0.03, 0.03, Vec3::X);
+        let candles: Vec<Vec3> = (0..8)
+            .map(|i| {
+                let a = (i as f32 + 0.5) / 8.0 * std::f32::consts::TAU;
+                c + Vec3::new(a.cos() * r, 0.0, a.sin() * r)
+            })
+            .collect();
+        for p in candles {
+            self.mesh(Mat::Trim).prism(p, 0.05, 0.3, 6);
+            self.mesh(Mat::Coals).prism(p + Vec3::Y * 0.3, 0.025, 0.08, 4);
+        }
+        self.lamp(c + Vec3::Y * 0.4, Color::srgb(1.0, 0.72, 0.42), 120_000.0, 22.0);
+    }
+
+    /// Знамя (ткань с узором по UV) на стене.
+    fn banner(&mut self, f: WallFrame, s: f32, d: f32, out: f32, y0: f32, y1: f32, width: f32) {
+        let m = self.mesh(Mat::Banner);
+        let n = f.d_axis() * out;
+        let p = |ss: f32, y: f32| f.p(s + ss, y, d);
+        m.quad_uv(
+            [p(-width / 2.0, y0), p(width / 2.0, y0), p(width / 2.0, y1), p(-width / 2.0, y1)],
+            [Vec2::new(0.0, 1.0), Vec2::new(1.0, 1.0), Vec2::new(1.0, 0.0), Vec2::new(0.0, 0.0)],
+            n,
+        );
+        // Перекладина.
+        let (a, b) = f.bounds((s - width / 2.0 - 0.15, s + width / 2.0 + 0.15), (y1, y1 + 0.1), (d - 0.06, d + 0.06));
+        self.mesh(Mat::Wood).cuboid(a, b);
+    }
+
+    /// Треугольный щипец (фронтон) над стеной.
+    fn gable(&mut self, f: WallFrame, s0: f32, s1: f32, y0: f32, y1: f32, d0: f32, d1: f32, mat: Mat) {
+        let sm = (s0 + s1) / 2.0;
+        let m = self.mesh(mat);
+        for (d, sign) in [(d0, -1.0f32), (d1, 1.0)] {
+            m.tri(f.p(s0, y0, d), f.p(s1, y0, d), f.p(sm, y1, d), f.d_axis() * sign);
+        }
+        for (sa, sb) in [(s0, sm), (sm, s1)] {
+            let (ya, yb) = if sa == s0 { (y0, y1) } else { (y1, y0) };
+            let up = Vec3::Y + f.s_axis() * if sa == s0 { -1.0 } else { 1.0 };
+            m.quad([f.p(sa, ya, d0), f.p(sb, yb, d0), f.p(sb, yb, d1), f.p(sa, ya, d1)], up);
+        }
+        // Обрамление по скатам и крест-фиал на вершине.
+        let t = self.mesh(Mat::Trim);
+        let dd = (d0 + d1) / 2.0;
+        t.beam(f.p(s0, y0 + 0.2, dd), f.p(sm, y1 + 0.2, dd), (d1 - d0) / 2.0 + 0.15, 0.2, f.d_axis());
+        t.beam(f.p(sm, y1 + 0.2, dd), f.p(s1, y0 + 0.2, dd), (d1 - d0) / 2.0 + 0.15, 0.2, f.d_axis());
+        self.pinnacle(f.p(sm, y1, dd), 0.4, 3.0);
     }
 }
 
-pub const WALL_HEIGHT: f32 = 10.0;
+/// Высота крепостной стены.
+pub const WALL_HEIGHT: f32 = 12.0;
+
+// Границы основных частей замка.
+const CURTAIN_IN: f32 = 45.0; // внутренняя грань восточной/западной стены
+const NORTH_IN: f32 = -67.0; // внутренняя грань северной стены
+const SOUTH_IN: f32 = 43.0; // внутренняя грань южной стены
+const INNER_WALL: (f32, f32) = (-8.0, -5.0); // внутренняя стена (z)
+const HALL_FRONT: f32 = -20.0; // фасад собора (наружная грань)
+const HALL_BACK: f32 = -65.0; // северная стена собора (наружная грань)
+const HALL_HALF: f32 = 13.0; // полуширина собора по наружным стенам
+const NAVE_HALF: f32 = 6.5; // полуширина нефа по наружным граням его стен
+/// Линии колонн нефа (z).
+const COLUMN_Z: [f32; 6] = [-27.0, -33.0, -39.0, -45.0, -51.0, -57.0];
+/// Двери из собора в боковые проходы, в клуатр и казармы.
+const SIDE_DOOR_Z: f32 = -42.0;
 
 pub fn castle_layout() -> Layout {
-    let mut b = Builder { blocks: Vec::new(), torches: Vec::new() };
+    let mut b = Builder::new();
 
-    // --- Земля и двор ---
-    b.solid([-150.0, -1.0, -150.0], [150.0, 0.0, 150.0], Mat::Grass);
-    b.decor([-28.0, 0.0, -28.0], [28.0, 0.02, 28.0], Mat::Cobble);
-    // Дорога к воротам.
-    b.decor([-3.0, 0.0, 30.0], [3.0, 0.02, 70.0], Mat::Cobble);
+    ground_and_curtain(&mut b);
+    gatehouse(&mut b);
+    courtyard(&mut b);
+    inner_wall(&mut b);
+    cathedral(&mut b);
+    cloister(&mut b);
+    barracks(&mut b);
+    surroundings(&mut b);
 
-    // --- Крепостные стены (60 x 60, толщина 2) ---
+    Layout { blocks: b.blocks, torches: b.torches, lamps: b.lamps, glass: b.glass, decor: b.decor, invisible: b.invisible }
+}
+
+fn ground_and_curtain(b: &mut Builder) {
     let h = WALL_HEIGHT;
-    b.solid([-30.0, 0.0, -30.0], [30.0, h, -28.0], Mat::Stone); // север
-    b.solid([-30.0, 0.0, -28.0], [-28.0, h, 28.0], Mat::Stone); // запад
-    b.solid([28.0, 0.0, -28.0], [30.0, h, 28.0], Mat::Stone); // восток
-    b.solid([-30.0, 0.0, 28.0], [-3.0, h, 30.0], Mat::Stone); // юг, слева от ворот
-    b.solid([3.0, 0.0, 28.0], [30.0, h, 30.0], Mat::Stone); // юг, справа от ворот
-    b.solid([-3.0, 6.0, 28.0], [3.0, h, 30.0], Mat::Stone); // арка над воротами
+    b.solid([-250.0, -1.0, -250.0], [250.0, 0.0, 250.0], Mat::Grass);
+    // Двор и площадь мощёные.
+    b.decor([-CURTAIN_IN, 0.0, INNER_WALL.1], [CURTAIN_IN, 0.02, SOUTH_IN], Mat::Cobble);
+    b.decor([-CURTAIN_IN, 0.0, -17.0], [CURTAIN_IN, 0.02, INNER_WALL.0], Mat::Cobble);
+    b.decor([-20.0, 0.0, -67.0], [20.0, 0.02, -17.0], Mat::Cobble);
+    b.decor([-CURTAIN_IN, 0.0, NORTH_IN], [CURTAIN_IN, 0.02, -63.0], Mat::Cobble);
 
-    // Деревянные галереи с внутренней стороны стен (по ним ходят наверху).
-    let gy = h - 0.3;
-    b.solid([-26.0, gy, -28.0], [26.0, h, -26.5], Mat::Wood);
-    b.solid([-28.0, gy, -26.0], [-26.5, h, 26.0], Mat::Wood);
-    b.solid([26.5, gy, -26.0], [28.0, h, 26.0], Mat::Wood);
-    b.solid([-26.0, gy, 26.5], [26.0, h, 28.0], Mat::Wood);
+    // Крепостные стены (толщина 3, по верху можно ходить).
+    b.solid([-48.0, 0.0, -70.0], [48.0, h, NORTH_IN], Mat::Stone);
+    b.solid([-48.0, 0.0, NORTH_IN], [-CURTAIN_IN, h, SOUTH_IN], Mat::Stone);
+    b.solid([CURTAIN_IN, 0.0, NORTH_IN], [48.0, h, SOUTH_IN], Mat::Stone);
+    b.solid([-48.0, 0.0, SOUTH_IN], [-8.0, h, 46.0], Mat::Stone);
+    b.solid([8.0, 0.0, SOUTH_IN], [48.0, h, 46.0], Mat::Stone);
 
-    // Зубцы по внешнему краю стен.
-    b.merlons_x(-26.0, 26.0, h, -30.0, -29.4);
-    b.merlons_x(-26.0, 26.0, h, 29.4, 30.0);
-    b.merlons_z(-26.0, 26.0, h, -30.0, -29.4);
-    b.merlons_z(-26.0, 26.0, h, 29.4, 30.0);
+    // Зубцы по внешнему краю и низкий парапет по внутреннему.
+    b.merlons_x(-41.0, 41.0, h, -70.0, -69.4);
+    b.merlons_x(-41.0, -10.0, h, 45.4, 46.0);
+    b.merlons_x(10.0, 41.0, h, 45.4, 46.0);
+    for (x0, x1) in [(-48.0, -47.4), (47.4, 48.0)] {
+        b.merlons_z(-62.0, -18.0, h, x0, x1);
+        b.merlons_z(-6.0, 38.0, h, x0, x1);
+    }
+    // Карниз-пояс под зубцами снаружи.
+    let t = b.mesh(Mat::Trim);
+    t.cuboid(Vec3::new(-48.3, h - 0.6, -70.3), Vec3::new(48.3, h - 0.2, -69.9));
+    t.cuboid(Vec3::new(-48.3, h - 0.6, 45.9), Vec3::new(48.3, h - 0.2, 46.3));
+    t.cuboid(Vec3::new(-48.3, h - 0.6, -70.3), Vec3::new(-47.9, h - 0.2, 46.3));
+    t.cuboid(Vec3::new(47.9, h - 0.6, -70.3), Vec3::new(48.3, h - 0.2, 46.3));
 
-    // Лестницы на стены (западная и восточная), 25 ступенек по 0.4 м.
-    b.stairs_z(-26.5, -24.0, 22.0, -1.0, 25);
-    b.stairs_z(24.0, 26.5, 22.0, -1.0, 25);
-
-    // --- Угловые башни ---
-    for (cx, cz) in [(-30.0, -30.0), (30.0, -30.0), (-30.0, 30.0), (30.0, 30.0)] {
-        b.solid([cx - 4.0, 0.0, cz - 4.0], [cx + 4.0, 16.0, cz + 4.0], Mat::DarkStone);
-        b.merlons_x(cx - 4.0, cx + 4.0, 16.0, cz - 4.0, cz - 3.4);
-        b.merlons_x(cx - 4.0, cx + 4.0, 16.0, cz + 3.4, cz + 4.0);
-        b.merlons_z(cx - 3.0, cx + 3.0, 16.0, cx - 4.0, cx - 3.4);
-        b.merlons_z(cx - 3.0, cx + 3.0, 16.0, cx + 3.4, cx + 4.0);
+    // Контрфорсы снаружи стен.
+    let fx = WallFrame { along_x: false };
+    let fz = WallFrame { along_x: true };
+    for z in [-50.0, -30.0, 8.0, 26.0] {
+        b.buttress(fx, z, -48.0, -1.0, 2.2, 10.0, 1.6);
+        b.buttress(fx, z, 48.0, 1.0, 2.2, 10.0, 1.6);
+    }
+    for x in [-32.0, -16.0, 16.0, 32.0] {
+        b.buttress(fz, x, -70.0, -1.0, 2.2, 10.0, 1.6);
+    }
+    for x in [-30.0, -18.0, 18.0, 30.0] {
+        b.buttress(fz, x, 46.0, 1.0, 2.2, 10.0, 1.6);
     }
 
-    // --- Надвратные башни ---
-    b.solid([-7.0, 0.0, 28.0], [-3.0, 13.0, 34.0], Mat::DarkStone);
-    b.solid([3.0, 0.0, 28.0], [7.0, 13.0, 34.0], Mat::DarkStone);
-    b.solid([-3.0, 7.0, 30.0], [3.0, 13.0, 34.0], Mat::DarkStone);
-    b.decor([-3.0, 6.2, 33.6], [3.0, 7.0, 33.8], Mat::Wood); // поднятая решётка
-    b.torch(-3.3, 3.2, 35.0);
-    b.torch(3.3, 3.2, 35.0);
-    b.torch(-2.7, 3.2, 27.6);
-    b.torch(2.7, 3.2, 27.6);
+    // Угловые и средние башни.
+    for (cx, cz) in [(-46.5, -68.5), (46.5, -68.5), (-46.5, 44.5), (46.5, 44.5)] {
+        b.tower(cx, cz, 5.5, 20.0, 15.0);
+    }
+    for cx in [-46.5, 46.5] {
+        b.tower(cx, -12.0, 4.5, 17.0, 12.0);
+    }
 
-    // --- Донжон (главная башня с тронным залом) ---
-    let kh = 14.0;
-    b.solid([-14.0, 0.0, -28.0], [14.0, kh, -26.5], Mat::DarkStone); // задняя стена
-    b.solid([-14.0, 0.0, -26.5], [-12.5, kh, -10.5], Mat::DarkStone); // запад
-    b.solid([12.5, 0.0, -26.5], [14.0, kh, -10.5], Mat::DarkStone); // восток
-    b.solid([-14.0, 0.0, -10.5], [-2.5, kh, -9.0], Mat::DarkStone); // фасад слева
-    b.solid([2.5, 0.0, -10.5], [14.0, kh, -9.0], Mat::DarkStone); // фасад справа
-    b.solid([-2.5, 5.0, -10.5], [2.5, kh, -9.0], Mat::DarkStone); // над дверью
-    b.solid([-14.0, kh, -28.0], [14.0, kh + 1.0, -9.0], Mat::DarkStone); // крыша
-    b.merlons_x(-14.0, 14.0, kh + 1.0, -9.6, -9.0);
-    b.merlons_x(-14.0, 14.0, kh + 1.0, -28.0, -27.4);
-    b.decor([-12.5, 0.0, -26.5], [12.5, 0.03, -10.5], Mat::Floor);
-    b.torch(-3.0, 3.5, -8.6);
-    b.torch(3.0, 3.5, -8.6);
+    // Лестницы на стены у южной стены (30 ступенек по 0.4 м = 12 м).
+    b.stairs_x(-10.0, -1.0, 40.5, SOUTH_IN, 30);
+    b.stairs_x(10.0, 1.0, 40.5, SOUTH_IN, 30);
+    // Факелы на стенах двора.
+    for z in [-0.0, 16.0, 30.0] {
+        b.torch(-CURTAIN_IN + 0.35, 3.2, z, Vec3::X);
+        b.torch(CURTAIN_IN - 0.35, 3.2, z, Vec3::NEG_X);
+    }
+}
 
-    // Колонны тронного зала.
-    for z in [-13.5, -17.5, -21.5] {
-        for x in [-5.0, 5.0] {
-            b.solid([x - 0.5, 0.0, z - 0.5], [x + 0.5, kh, z + 0.5], Mat::Stone);
+fn gatehouse(b: &mut Builder) {
+    let (z0, z1) = (40.0, 50.0);
+    let top = 16.0;
+    let (w, spring, rise) = (5.0, 3.4, 3.0);
+    let apex = spring + arch_height(0.0, w, rise);
+    b.solid([-8.0, 0.0, z0], [-w / 2.0, top, z1], Mat::DarkStone);
+    b.solid([w / 2.0, 0.0, z0], [8.0, top, z1], Mat::DarkStone);
+    b.solid([-w / 2.0, apex, z0], [w / 2.0, top, z1], Mat::DarkStone);
+    let f = WallFrame { along_x: true };
+    for (d0, d1) in [(z1 - 0.6, z1), (z0, z0 + 0.6)] {
+        let mut infill = std::mem::take(b.mesh(Mat::DarkStone));
+        let mut trim = std::mem::take(b.mesh(Mat::Trim));
+        geom::arch_infill(&mut infill, &mut trim, f, 0.0, w, spring, rise, apex, d0, d1);
+        *b.mesh(Mat::DarkStone) = infill;
+        *b.mesh(Mat::Trim) = trim;
+    }
+    // Свод проезда.
+    {
+        let mut web = std::mem::take(b.mesh(Mat::DarkStone));
+        let mut ribs = std::mem::take(b.mesh(Mat::Trim));
+        for k in 0..2 {
+            let za = z0 + 0.6 + k as f32 * 4.4;
+            geom::rib_vault(&mut web, &mut ribs, Vec2::new(-w / 2.0, za), Vec2::new(w / 2.0, za + 4.4), spring, apex - spring);
         }
+        *b.mesh(Mat::DarkStone) = web;
+        *b.mesh(Mat::Trim) = ribs;
     }
-    // Помост и трон.
-    b.solid([-4.0, 0.0, -26.5], [4.0, 0.45, -23.5], Mat::Stone);
-    b.solid([-0.75, 0.45, -26.3], [0.75, 1.0, -25.2], Mat::Gold);
-    b.solid([-0.75, 0.45, -26.5], [0.75, 3.0, -26.2], Mat::Gold);
-    // Длинные столы.
-    b.solid([-10.0, 0.0, -23.0], [-8.8, 0.9, -12.5], Mat::Wood);
-    b.solid([8.8, 0.0, -23.0], [10.0, 0.9, -12.5], Mat::Wood);
-    // Знамёна.
-    for x in [-9.0, -3.0, 3.0, 9.0] {
-        b.decor([x - 0.8, 4.0, -26.45], [x + 0.8, 9.0, -26.35], Mat::Banner);
-    }
-    for z in [-14.0, -19.0, -24.0] {
-        b.torch(-12.1, 3.5, z);
-        b.torch(12.1, 3.5, z);
-    }
-
-    // --- Двор ---
-    // Колодец.
-    b.solid([10.0, 0.0, 6.0], [13.0, 1.0, 6.4], Mat::Stone);
-    b.solid([10.0, 0.0, 8.6], [13.0, 1.0, 9.0], Mat::Stone);
-    b.solid([10.0, 0.0, 6.4], [10.4, 1.0, 8.6], Mat::Stone);
-    b.solid([12.6, 0.0, 6.4], [13.0, 1.0, 8.6], Mat::Stone);
-    b.solid([10.0, 0.0, 7.3], [10.3, 3.0, 7.7], Mat::Wood);
-    b.solid([12.7, 0.0, 7.3], [13.0, 3.0, 7.7], Mat::Wood);
-    b.solid([9.6, 3.0, 6.0], [13.4, 3.3, 9.0], Mat::Wood);
-    b.torch(11.5, 2.6, 5.7);
-
-    // Навес-конюшня у восточной стены.
-    b.solid([18.0, 4.0, -6.0], [28.0, 4.3, 10.0], Mat::Wood);
-    for z in [-6.0, -0.7, 4.6, 9.7] {
-        b.solid([18.0, 0.0, z], [18.3, 4.0, z + 0.3], Mat::Wood);
-    }
-    for z in [-1.0, 4.0] {
-        b.solid([22.0, 0.0, z], [28.0, 1.4, z + 0.2], Mat::Wood); // перегородки стойл
-    }
-    b.torch(18.6, 3.0, 2.0);
-
-    // Тренировочная площадка с ограждением на западе.
+    // Поднятая решётка.
+    let m = b.mesh(Mat::Iron);
     for i in 0..9 {
-        let z = -4.0 + i as f32 * 1.5;
-        b.solid([-20.0, 0.0, z], [-19.8, 1.1, z + 0.2], Mat::Wood);
-        b.solid([-8.0, 0.0, z], [-7.8, 1.1, z + 0.2], Mat::Wood);
+        let x = -2.2 + i as f32 * 0.55;
+        m.cuboid(Vec3::new(x - 0.05, apex - 1.3, 47.9), Vec3::new(x + 0.05, apex, 48.1));
     }
-    b.decor([-20.0, 0.9, -4.0], [-19.8, 1.0, 8.2], Mat::Wood);
-    b.decor([-8.0, 0.9, -4.0], [-7.8, 1.0, 8.2], Mat::Wood);
-    b.torch(-14.0, 2.5, -4.5);
+    for y in [apex - 1.1, apex - 0.5] {
+        m.cuboid(Vec3::new(-2.4, y, 47.92), Vec3::new(2.4, y + 0.08, 48.08));
+    }
+    // Зубцы и турели.
+    b.merlons_x(-8.0, 8.0, top, z1 - 0.6, z1);
+    b.merlons_x(-8.0, 8.0, top, z0, z0 + 0.6);
+    for x in [-7.5, 7.5] {
+        b.turret(x, z1 + 0.6, 2.1, top + 3.0, 9.0);
+    }
+    // Пояса и окно над воротами.
+    b.mesh(Mat::Trim).cuboid(Vec3::new(-8.0, 9.0, z1 - 0.05), Vec3::new(8.0, 9.35, z1 + 0.2));
+    let (pts, uvs) = geom::lancet_outline(f, 0.0, z1 + 0.03, 1.6, 10.5, 12.8, 1.0);
+    b.glass.push(GlassPane { kind: GlassKind::Lancet, pts, uvs, normal: Vec3::Z });
+    b.banner(f, -4.6, z1 + 0.05, 1.0, 3.0, 8.2, 1.6);
+    b.banner(f, 4.6, z1 + 0.05, 1.0, 3.0, 8.2, 1.6);
+    b.torch(-3.0, 3.0, z1 + 0.35, Vec3::Z);
+    b.torch(3.0, 3.0, z1 + 0.35, Vec3::Z);
+    b.torch(-2.15, 2.8, 45.0, Vec3::X);
+    b.torch(2.15, 2.8, 45.0, Vec3::NEG_X);
+    b.torch(-3.0, 3.0, z0 - 0.35, Vec3::NEG_Z);
+    b.torch(3.0, 3.0, z0 - 0.35, Vec3::NEG_Z);
+}
 
-    // Ящики и бочки.
-    for (x, z, s) in [(-22.0, 18.0, 1.0), (-21.0, 18.2, 0.8), (-22.0, 19.1, 0.9), (20.0, 20.0, 1.2), (21.3, 20.5, 0.9), (-5.0, 14.0, 1.0), (6.5, -5.0, 1.0)] {
+fn courtyard(b: &mut Builder) {
+    // Фонтан в центре двора.
+    let (fx, fz) = (0.0, 14.0);
+    b.solid([fx - 2.4, 0.0, fz - 2.4], [fx + 2.4, 0.8, fz + 2.4], Mat::Trim);
+    let m = b.mesh(Mat::Trim);
+    m.prism(Vec3::new(fx, 0.0, fz), 2.8, 0.8, 8);
+    m.prism(Vec3::new(fx, 0.8, fz), 2.95, 0.12, 8);
+    m.prism(Vec3::new(fx, 0.8, fz), 0.45, 2.4, 8);
+    m.prism(Vec3::new(fx, 2.2, fz), 1.1, 0.25, 8);
+    m.prism(Vec3::new(fx, 2.45, fz), 0.3, 1.2, 8);
+    b.pinnacle(Vec3::new(fx, 3.65, fz), 0.35, 2.2);
+    b.mesh(Mat::Water).prism(Vec3::new(fx, 0.62, fz), 2.55, 0.1, 8);
+    b.solid([fx - 0.5, 0.8, fz - 0.5], [fx + 0.5, 3.6, fz + 0.5], Mat::Trim);
+
+    // Колодец.
+    let (wx, wz) = (-20.0, 30.0);
+    b.solid([wx - 1.5, 0.0, wz - 1.5], [wx + 1.5, 1.0, wz + 1.5], Mat::Stone);
+    b.mesh(Mat::Water).cuboid(Vec3::new(wx - 1.1, 0.95, wz - 1.1), Vec3::new(wx + 1.1, 1.01, wz + 1.1));
+    b.solid([wx - 1.5, 1.0, wz - 0.2], [wx - 1.2, 3.0, wz + 0.2], Mat::Wood);
+    b.solid([wx + 1.2, 1.0, wz - 0.2], [wx + 1.5, 3.0, wz + 0.2], Mat::Wood);
+    b.mesh(Mat::Roof).gable_roof(Vec2::new(wx - 1.9, wz - 1.4), Vec2::new(wx + 1.9, wz + 1.4), 2.9, 4.0, true);
+    b.mesh(Mat::Wood).beam(Vec3::new(wx - 1.3, 2.4, wz), Vec3::new(wx + 1.3, 2.4, wz), 0.1, 0.1, Vec3::Y);
+
+    // Фонарные столбы вдоль главной дороги.
+    for z in [32.0, 22.0, 4.0] {
+        b.lamp_post(-5.0, z);
+        b.lamp_post(5.0, z);
+    }
+
+    // Конюшня у восточной стены.
+    let (sx0, sx1, sz0, sz1) = (37.0, CURTAIN_IN, 6.0, 26.0);
+    for z in [sz0, 11.0, 16.0, 21.0, sz1 - 0.3] {
+        b.solid([sx0, 0.0, z], [sx0 + 0.3, 4.0, z + 0.3], Mat::Wood);
+    }
+    b.solid([sx0, 4.0, sz0], [sx1, 4.3, sz1], Mat::Wood);
+    b.mesh(Mat::Roof).lean_roof([Vec3::new(sx1, 6.0, sz0 - 0.4), Vec3::new(sx1, 6.0, sz1 + 0.4)], [Vec3::new(sx0 - 0.8, 4.3, sz0 - 0.4), Vec3::new(sx0 - 0.8, 4.3, sz1 + 0.4)]);
+    for z in [11.0, 16.0, 21.0] {
+        b.solid([sx0 + 3.0, 0.0, z], [sx1, 1.5, z + 0.2], Mat::Wood);
+    }
+    for (x, z) in [(43.0, 8.0), (43.0, 13.5), (43.5, 18.5)] {
+        b.solid([x - 0.6, 0.0, z - 0.6], [x + 0.6, 1.0, z + 0.6], Mat::Wood); // сено/кормушки
+    }
+    b.torch(sx0 + 0.6, 3.0, 16.0, Vec3::X);
+
+    // Кузница у юго-восточного угла.
+    let (kx0, kx1, kz0, kz1) = (30.0, 40.0, 29.0, 38.0);
+    for (x, z) in [(kx0, kz0), (kx1 - 0.3, kz0), (kx0, kz1 - 0.3), (kx1 - 0.3, kz1 - 0.3)] {
+        b.solid([x, 0.0, z], [x + 0.3, 4.0, z + 0.3], Mat::Wood);
+    }
+    b.solid([kx0, 4.0, kz0], [kx1, 4.3, kz1], Mat::Wood);
+    b.mesh(Mat::Roof).gable_roof(Vec2::new(kx0 - 0.5, kz0 - 0.5), Vec2::new(kx1 + 0.5, kz1 + 0.5), 4.3, 6.5, true);
+    b.solid([36.0, 0.0, 31.0], [39.5, 1.1, 35.0], Mat::Stone); // горн
+    b.mesh(Mat::Coals).cuboid(Vec3::new(36.4, 1.1, 31.4), Vec3::new(39.1, 1.18, 34.6));
+    b.solid([38.2, 1.1, 34.2], [39.4, 6.8, 35.0], Mat::Stone); // труба
+    b.lamp(Vec3::new(37.7, 1.8, 33.0), Color::srgb(1.0, 0.45, 0.15), 160_000.0, 14.0);
+    b.solid([33.0, 0.0, 32.6], [33.6, 0.6, 33.4], Mat::Wood); // колода
+    b.solid([32.8, 0.6, 32.7], [33.8, 0.9, 33.3], Mat::Iron); // наковальня
+    b.barrel_at(31.0, 36.5);
+    b.barrel_at(31.0, 30.5);
+
+    // Тренировочная площадка на западе: ограда и манекены.
+    let (tx0, tx1, tz0, tz1) = (-40.0, -24.0, 4.0, 22.0);
+    let mut z = tz0;
+    while z <= tz1 {
+        b.solid([tx0, 0.0, z], [tx0 + 0.2, 1.1, z + 0.2], Mat::Wood);
+        b.solid([tx1, 0.0, z], [tx1 + 0.2, 1.1, z + 0.2], Mat::Wood);
+        z += 2.0;
+    }
+    b.decor([tx0, 0.85, tz0], [tx0 + 0.2, 0.95, tz1 + 0.2], Mat::Wood);
+    b.decor([tx1, 0.85, tz0], [tx1 + 0.2, 0.95, tz1 + 0.2], Mat::Wood);
+    b.decor([tx0, 0.0, tz0], [tx1, 0.025, tz1], Mat::Grass);
+    for (x, z) in [(-36.0, 8.0), (-32.0, 8.0), (-28.0, 8.0), (-34.0, 15.0), (-30.0, 15.0)] {
+        b.solid([x - 0.12, 0.0, z - 0.12], [x + 0.12, 1.9, z + 0.12], Mat::Wood);
+        b.decor([x - 0.6, 1.35, z - 0.08], [x + 0.6, 1.5, z + 0.08], Mat::Wood);
+        b.decor([x - 0.25, 1.55, z - 0.25], [x + 0.25, 1.95, z + 0.25], Mat::Banner);
+    }
+    b.lamp_post(-32.0, tz0 - 1.0);
+
+    // Ящики, бочки, телега.
+    for (x, z, s) in [(-22.0, 38.0, 1.0), (-20.9, 38.2, 0.8), (-22.0, 36.9, 0.9), (20.0, 20.0, 1.2), (21.3, 20.5, 0.9), (-40.0, 30.0, 1.1), (-41.2, 30.4, 0.9)] {
         b.crate_at(x, z, s);
     }
+    for (x, z) in [(22.0, 18.6), (23.0, 19.4), (-40.0, 32.0), (40.0, -2.0), (41.0, -2.8)] {
+        b.barrel_at(x, z);
+    }
+    // Сено.
+    for (x, z) in [(14.0, 24.0), (15.3, 24.2), (14.6, 25.3)] {
+        b.solid([x - 0.6, 0.0, z - 0.45], [x + 0.6, 0.8, z + 0.45], Mat::Leaves);
+    }
+}
 
-    Layout { blocks: b.blocks, torches: b.torches }
+fn inner_wall(b: &mut Builder) {
+    let (d0, d1) = INNER_WALL;
+    let f = WallFrame { along_x: true };
+    let h = 10.0;
+    let openings = [Opening::door(0.0, 6.0, 3.6, 3.4), Opening::door(-24.0, 1.8, 2.3, 1.2), Opening::door(24.0, 1.8, 2.3, 1.2)];
+    b.wall(f, -CURTAIN_IN, CURTAIN_IN, 0.0, h, d0, d1, &openings, Mat::Stone);
+    b.merlons_x(-44.0, -9.0, h, d1 - 0.6, d1);
+    b.merlons_x(9.0, 44.0, h, d1 - 0.6, d1);
+    b.mesh(Mat::Trim).cuboid(Vec3::new(-CURTAIN_IN, h - 0.5, d1 - 0.05), Vec3::new(CURTAIN_IN, h - 0.15, d1 + 0.25));
+    // Надвратные башни.
+    for x in [-5.5, 5.5] {
+        b.solid([x - 2.5, 0.0, d0 - 1.0], [x + 2.5, 14.0, d1 + 1.0], Mat::DarkStone);
+        b.merlons_x(x - 2.5, x + 2.5, 14.0, d1 + 0.4, d1 + 1.0);
+        b.mesh(Mat::Roof).spire(Vec3::new(x, 14.0, (d0 + d1) / 2.0), 2.6, 9.0, 4);
+        b.mesh(Mat::Gold).prism(Vec3::new(x, 22.8, (d0 + d1) / 2.0), 0.1, 1.0, 4);
+        let (pts, uvs) = geom::lancet_outline(f, x, d1 + 1.03, 0.9, 7.0, 8.8, 0.6);
+        b.glass.push(GlassPane { kind: GlassKind::Lancet, pts, uvs, normal: Vec3::Z });
+    }
+    let fz = WallFrame { along_x: true };
+    for x in [-36.0, -14.0, 14.0, 36.0] {
+        b.buttress(fz, x, d1, 1.0, 1.6, 8.0, 1.2);
+    }
+    b.banner(f, -5.5, d1 + 1.05, 1.0, 3.5, 10.0, 2.0);
+    b.banner(f, 5.5, d1 + 1.05, 1.0, 3.5, 10.0, 2.0);
+    for x in [-3.6, 3.6] {
+        b.torch(x, 3.2, d1 + 0.35, Vec3::Z);
+        b.torch(x, 3.2, d0 - 0.35, Vec3::NEG_Z);
+    }
+    for x in [-24.0, 24.0] {
+        b.torch(x + 1.5, 2.6, d1 + 0.35, Vec3::Z);
+    }
+}
+
+fn cathedral(b: &mut Builder) {
+    let fz = WallFrame { along_x: true };
+    let fx = WallFrame { along_x: false };
+    let (front_in, back_in) = (HALL_FRONT - 1.0, HALL_BACK + 1.0); // внутренние грани торцов
+    let aisle_h = 9.0;
+    let nave_h = 16.0;
+    let ridge = 24.0;
+
+    // Пол.
+    b.decor([-HALL_HALF + 1.0, 0.0, back_in], [HALL_HALF - 1.0, 0.03, front_in], Mat::Floor);
+
+    // --- Фасад (юг) ---
+    let portal = Opening::door(0.0, 5.0, 4.2, 4.0);
+    let side_portals = [Opening::door(-9.5, 2.6, 3.0, 1.8), Opening::door(9.5, 2.6, 3.0, 1.8)];
+    b.wall(fz, -HALL_HALF, -NAVE_HALF, 0.0, aisle_h, front_in, HALL_FRONT, &side_portals, Mat::DarkStone);
+    b.wall(fz, NAVE_HALF, HALL_HALF, 0.0, aisle_h, front_in, HALL_FRONT, &side_portals, Mat::DarkStone);
+    b.wall(fz, -NAVE_HALF, NAVE_HALF, 0.0, nave_h, front_in, HALL_FRONT, &[portal], Mat::DarkStone);
+    b.gable(fz, -NAVE_HALF - 0.5, NAVE_HALF + 0.5, nave_h, ridge, front_in, HALL_FRONT, Mat::DarkStone);
+    // Ступени перед порталом.
+    b.solid([-4.0, 0.0, HALL_FRONT], [4.0, 0.2, HALL_FRONT + 1.2], Mat::Trim);
+    // Портал: углублённые рёбра (архивольты) и тимпан.
+    let pa = portal.apex();
+    for k in 1..=3 {
+        let grow = k as f32 * 0.45;
+        let path: Vec<Vec3> = (0..=20)
+            .map(|i| {
+                let s = -(portal.width / 2.0 + grow) + (portal.width + 2.0 * grow) * i as f32 / 20.0;
+                Vec3::new(s, portal.spring + arch_height(s, portal.width + 2.0 * grow, portal.rise + grow), HALL_FRONT + 0.15)
+            })
+            .collect();
+        b.mesh(Mat::Trim).beam_path(&path, 0.16, 0.14, Vec3::Z);
+        for s in [-(portal.width / 2.0 + grow), portal.width / 2.0 + grow] {
+            b.mesh(Mat::Trim).prism(Vec3::new(s, 0.0, HALL_FRONT + 0.15), 0.17, portal.spring, 8);
+        }
+    }
+    // Щипец-вимперг над порталом.
+    b.mesh(Mat::Trim).beam(Vec3::new(-4.2, pa - 0.6, HALL_FRONT + 0.2), Vec3::new(0.0, pa + 2.6, HALL_FRONT + 0.2), 0.18, 0.2, Vec3::Z);
+    b.mesh(Mat::Trim).beam(Vec3::new(0.0, pa + 2.6, HALL_FRONT + 0.2), Vec3::new(4.2, pa - 0.6, HALL_FRONT + 0.2), 0.18, 0.2, Vec3::Z);
+    b.pinnacle(Vec3::new(0.0, pa + 2.6, HALL_FRONT + 0.2), 0.25, 1.6);
+    // Роза над порталом — с обеих сторон стены.
+    let rose_c = Vec3::new(0.0, 12.6, 0.0);
+    let rose_r = 3.0;
+    for (z, n) in [(HALL_FRONT + 0.04, Vec3::Z), (front_in - 0.04, Vec3::NEG_Z)] {
+        let pts: Vec<Vec3> = (0..32)
+            .map(|i| {
+                let a = i as f32 / 32.0 * std::f32::consts::TAU;
+                Vec3::new(rose_c.x + a.cos() * rose_r, rose_c.y + a.sin() * rose_r, z)
+            })
+            .collect();
+        let uvs = (0..32)
+            .map(|i| {
+                let a = i as f32 / 32.0 * std::f32::consts::TAU;
+                Vec2::new(0.5 + a.cos() * 0.5, 0.5 - a.sin() * 0.5)
+            })
+            .collect();
+        b.glass.push(GlassPane { kind: GlassKind::Rose, pts, uvs, normal: n });
+        let ring: Vec<Vec3> = (0..=32)
+            .map(|i| {
+                let a = i as f32 / 32.0 * std::f32::consts::TAU;
+                Vec3::new(rose_c.x + a.cos() * (rose_r + 0.15), rose_c.y + a.sin() * (rose_r + 0.15), z + n.z * 0.1)
+            })
+            .collect();
+        b.mesh(Mat::Trim).beam_path(&ring, 0.25, 0.22, Vec3::Z);
+    }
+    b.lamp(Vec3::new(0.0, 12.6, front_in - 1.5), Color::srgb(0.55, 0.45, 1.0), 25_000.0, 10.0);
+    // Галерея королей — ряд ниш над порталом.
+    for i in 0..7 {
+        let x = -5.4 + i as f32 * 1.8;
+        b.mesh(Mat::Trim).prism(Vec3::new(x, 9.0, HALL_FRONT + 0.15), 0.12, 0.9, 6);
+    }
+    b.mesh(Mat::Trim).cuboid(Vec3::new(-6.5, 8.8, HALL_FRONT), Vec3::new(6.5, 9.0, HALL_FRONT + 0.35));
+    b.mesh(Mat::Trim).cuboid(Vec3::new(-6.5, 9.9, HALL_FRONT), Vec3::new(6.5, 10.1, HALL_FRONT + 0.35));
+
+    // Башни фасада.
+    for sx in [-1.0f32, 1.0] {
+        let cx = sx * 15.5;
+        let (x0, x1) = (cx - 2.5, cx + 2.5);
+        let (z0, z1) = (HALL_FRONT - 5.0, HALL_FRONT + 4.0);
+        b.solid([x0, 0.0, z0], [x1, 28.0, z1], Mat::DarkStone);
+        for y in [9.0, 16.0, 24.0] {
+            b.mesh(Mat::Trim).cuboid(Vec3::new(x0 - 0.15, y - 0.35, z0 - 0.15), Vec3::new(x1 + 0.15, y, z1 + 0.15));
+        }
+        // Угловые контрфорсы башни.
+        for (bx, bz) in [(x0 + 0.7, z1), (x1 - 0.7, z1)] {
+            b.solid([bx - 0.7, 0.0, bz - 0.7], [bx + 0.7, 22.0, bz + 1.2], Mat::DarkStone);
+            b.pinnacle(Vec3::new(bx, 22.0, bz + 0.25), 0.55, 4.0);
+        }
+        // Окна-ланцеты на фасаде башни.
+        for (y, h) in [(11.0, 3.2), (18.0, 4.0)] {
+            for dx in [-0.8, 0.8] {
+                let (pts, uvs) = geom::lancet_outline(fz, cx + dx, z1 + 0.03, 1.0, y, y + h, 0.7);
+                b.glass.push(GlassPane { kind: GlassKind::Lancet, pts, uvs, normal: Vec3::Z });
+            }
+        }
+        // Звонница и высокий шпиль.
+        b.mesh(Mat::DarkStone).prism(Vec3::new(cx, 28.0, (z0 + z1) / 2.0), 2.4, 3.5, 8);
+        b.mesh(Mat::Trim).prism(Vec3::new(cx, 31.5, (z0 + z1) / 2.0), 2.7, 0.4, 8);
+        b.mesh(Mat::Roof).spire(Vec3::new(cx, 31.9, (z0 + z1) / 2.0), 2.6, 18.0, 8);
+        b.mesh(Mat::Gold).prism(Vec3::new(cx, 49.6, (z0 + z1) / 2.0), 0.15, 2.0, 4);
+        b.mesh(Mat::Gold).cuboid(Vec3::new(cx - 0.7, 50.8, (z0 + z1) / 2.0 - 0.08), Vec3::new(cx + 0.7, 51.0, (z0 + z1) / 2.0 + 0.08));
+        for (px, pz) in [(x0, z0), (x1, z0), (x0, z1), (x1, z1)] {
+            b.pinnacle(Vec3::new(px, 28.0, pz), 0.5, 4.5);
+        }
+        b.torch(sx * 11.6, 3.2, HALL_FRONT + 0.35, Vec3::Z);
+    }
+
+    // --- Северная стена с тремя высокими окнами ---
+    let apse_windows = [Opening::window(-3.2, 2.0, 3.5, 11.0, 2.4), Opening::window(0.0, 2.2, 3.0, 11.8, 2.6), Opening::window(3.2, 2.0, 3.5, 11.0, 2.4)];
+    let aisle_end_windows = [Opening::window(-9.5, 2.0, 2.0, 5.2, 1.5), Opening::window(9.5, 2.0, 2.0, 5.2, 1.5)];
+    b.wall(fz, -HALL_HALF, -NAVE_HALF, 0.0, aisle_h, HALL_BACK, back_in, &aisle_end_windows, Mat::DarkStone);
+    b.wall(fz, NAVE_HALF, HALL_HALF, 0.0, aisle_h, HALL_BACK, back_in, &aisle_end_windows, Mat::DarkStone);
+    b.wall(fz, -NAVE_HALF, NAVE_HALF, 0.0, nave_h, HALL_BACK, back_in, &apse_windows, Mat::DarkStone);
+    b.gable(fz, -NAVE_HALF - 0.5, NAVE_HALF + 0.5, nave_h, ridge, HALL_BACK, back_in, Mat::DarkStone);
+
+    // --- Боковые стены нефов: окна между колоннами, по двери в каждом ---
+    let bay_centers: Vec<f32> = std::iter::once(front_in).chain(COLUMN_Z).chain(std::iter::once(back_in)).collect::<Vec<_>>().windows(2).map(|w| (w[0] + w[1]) / 2.0).collect();
+    let mut side_openings: Vec<Opening> = bay_centers
+        .iter()
+        .filter(|z| (**z - SIDE_DOOR_Z).abs() > 2.0)
+        .map(|&z| Opening::window(z, 2.4, 1.8, 5.0, 1.8))
+        .collect();
+    side_openings.push(Opening::door(SIDE_DOOR_Z, 2.4, 2.6, 1.4));
+    for sx in [-1.0f32, 1.0] {
+        let (d0, d1) = if sx < 0.0 { (-HALL_HALF, -HALL_HALF + 1.0) } else { (HALL_HALF - 1.0, HALL_HALF) };
+        b.wall(fx, back_in, front_in, 0.0, aisle_h, d0, d1, &side_openings, Mat::DarkStone);
+        b.mesh(Mat::Trim).cuboid(Vec3::new(d0.min(d1) - 0.2, aisle_h - 0.4, back_in), Vec3::new(d0.max(d1) + 0.2, aisle_h, front_in));
+        // Контрфорсы с аркбутанами.
+        let face = if sx < 0.0 { -HALL_HALF } else { HALL_HALF };
+        for &z in COLUMN_Z.iter() {
+            b.buttress(fx, z, face, sx, 2.6, 12.5, 1.2);
+            geom::flying_buttress(b.mesh(Mat::Trim), Vec3::new(sx * (HALL_HALF + 1.0), 13.0, z), Vec3::new(sx * (NAVE_HALF + 0.1), 15.0, z), 0.4);
+        }
+        // Факелы внутри боковых нефов.
+        for &z in COLUMN_Z.iter() {
+            b.torch(sx * (HALL_HALF - 1.35), 3.3, z, Vec3::new(-sx, 0.0, 0.0));
+        }
+    }
+
+    // --- Аркада нефа и верхний ряд окон ---
+    let mut edges = vec![front_in];
+    for &z in COLUMN_Z.iter() {
+        edges.push(z + 0.7);
+        edges.push(z - 0.7);
+    }
+    edges.push(back_in);
+    let arcade: Vec<Opening> = edges
+        .chunks(2)
+        .map(|c| {
+            let w = (c[0] - c[1]).abs();
+            Opening::door((c[0] + c[1]) / 2.0, w, 5.6, (w / 2.0).max(3.0))
+        })
+        .collect();
+    let clerestory: Vec<Opening> = bay_centers.iter().map(|&z| Opening::window(z, 2.4, 10.6, 13.2, 1.6)).collect();
+    for sx in [-1.0f32, 1.0] {
+        let (d0, d1) = if sx < 0.0 { (-NAVE_HALF, -NAVE_HALF + 1.0) } else { (NAVE_HALF - 1.0, NAVE_HALF) };
+        b.wall(fx, back_in, front_in, 0.0, 10.0, d0, d1, &arcade, Mat::DarkStone);
+        b.wall(fx, back_in, front_in, 10.0, nave_h, d0, d1, &clerestory, Mat::DarkStone);
+        // Колонны аркады (декор поверх опор).
+        for &z in COLUMN_Z.iter() {
+            b.column(sx * (NAVE_HALF - 0.5), z, 0.55, 5.6);
+            // Служебные колонки до пят свода нефа.
+            b.mesh(Mat::Trim).prism(Vec3::new(sx * (NAVE_HALF - 1.12), 5.6, z), 0.16, 4.4, 6);
+        }
+        b.mesh(Mat::Trim).cuboid(Vec3::new(sx * (NAVE_HALF - 1.0) - 0.25, 9.6, back_in), Vec3::new(sx * (NAVE_HALF - 1.0) + 0.25, 9.85, front_in));
+        // Крыши боковых нефов.
+        let (xi, xo) = (sx * NAVE_HALF, sx * (HALL_HALF + 0.4));
+        b.mesh(Mat::Roof).lean_roof([Vec3::new(xi, 10.3, back_in - 1.4), Vec3::new(xi, 10.3, front_in + 1.4)], [Vec3::new(xo, aisle_h, back_in - 1.4), Vec3::new(xo, aisle_h, front_in + 1.4)]);
+        // Знамёна на опорах аркады.
+        for &z in COLUMN_Z.iter().skip(1).step_by(2) {
+            b.banner(fx, z, sx * (NAVE_HALF - 1.2), -sx, 3.0, 5.3, 1.0);
+        }
+    }
+
+    // --- Своды ---
+    {
+        let mut web = std::mem::take(b.mesh(Mat::Stone));
+        let mut ribs = std::mem::take(b.mesh(Mat::Trim));
+        let lines: Vec<f32> = std::iter::once(front_in).chain(COLUMN_Z).chain(std::iter::once(back_in)).collect();
+        for w in lines.windows(2) {
+            let (za, zb) = (w[1], w[0]);
+            geom::rib_vault(&mut web, &mut ribs, Vec2::new(-NAVE_HALF + 1.0, za), Vec2::new(NAVE_HALF - 1.0, zb), 10.0, 6.0);
+            for sx in [-1.0f32, 1.0] {
+                let (xa, xb) = if sx < 0.0 { (-HALL_HALF + 1.0, -NAVE_HALF) } else { (NAVE_HALF, HALL_HALF - 1.0) };
+                geom::rib_vault(&mut web, &mut ribs, Vec2::new(xa, za), Vec2::new(xb, zb), 5.6, 3.0);
+            }
+        }
+        *b.mesh(Mat::Stone) = web;
+        *b.mesh(Mat::Trim) = ribs;
+    }
+    // Крыша нефа.
+    b.mesh(Mat::Roof).gable_roof(Vec2::new(-NAVE_HALF - 0.6, HALL_BACK - 0.3), Vec2::new(NAVE_HALF + 0.6, HALL_FRONT + 0.3), nave_h, ridge, false);
+    // Шпиль-флеш над средокрестием.
+    b.mesh(Mat::Roof).spire(Vec3::new(0.0, ridge - 1.0, -42.0), 1.6, 12.0, 8);
+    b.mesh(Mat::Trim).prism(Vec3::new(0.0, ridge - 3.0, -42.0), 1.5, 2.0, 8);
+    b.mesh(Mat::Gold).prism(Vec3::new(0.0, ridge + 10.8, -42.0), 0.1, 1.4, 4);
+    // Карнизы нефа.
+    for sx in [-1.0f32, 1.0] {
+        b.mesh(Mat::Trim).cuboid(Vec3::new(sx * NAVE_HALF - 0.35, nave_h - 0.4, HALL_BACK), Vec3::new(sx * NAVE_HALF + 0.35, nave_h, HALL_FRONT));
+    }
+
+    // --- Хоры и трон ---
+    let (cz0, cz1) = (back_in, COLUMN_Z[5] - 0.7);
+    b.solid([-NAVE_HALF + 1.0, 0.0, cz0], [NAVE_HALF - 1.0, 0.4, cz1], Mat::Trim);
+    b.solid([-3.0, 0.4, cz0], [3.0, 0.8, cz0 + 3.0], Mat::Trim);
+    b.decor([-NAVE_HALF + 1.0, 0.4, cz0], [NAVE_HALF - 1.0, 0.42, cz1], Mat::Banner);
+    // Трон.
+    let tz = cz0 + 1.2;
+    b.solid([-0.8, 0.8, tz - 0.6], [0.8, 1.35, tz + 0.6], Mat::Gold);
+    b.solid([-0.8, 0.8, tz - 0.75], [0.8, 4.0, tz - 0.55], Mat::Gold);
+    b.mesh(Mat::Gold).spire(Vec3::new(0.0, 4.0, tz - 0.65), 0.55, 1.3, 4);
+    for x in [-0.8, 0.8] {
+        b.mesh(Mat::Gold).prism(Vec3::new(x, 0.8, tz - 0.65), 0.12, 3.6, 6);
+        b.mesh(Mat::Gold).spire(Vec3::new(x, 4.4, tz - 0.65), 0.15, 0.6, 4);
+    }
+    b.decor([-0.7, 1.35, tz - 0.5], [0.7, 1.42, tz + 0.5], Mat::Banner);
+    // Большое знамя за троном.
+    b.banner(fz, 0.0, back_in + 0.05, 1.0, 1.2, 3.2, 2.6);
+    // Длинные столы в боковых нефах.
+    for x in [-9.5, 9.5] {
+        b.solid([x - 0.6, 0.75, -38.0], [x + 0.6, 0.9, -24.0], Mat::Wood);
+        for z in [-37.5, -31.0, -24.5] {
+            b.solid([x - 0.5, 0.0, z - 0.1], [x + 0.5, 0.75, z + 0.1], Mat::Wood);
+        }
+        for dx in [-1.0, 1.0] {
+            b.solid([x + dx - 0.2, 0.0, -38.0], [x + dx + 0.2, 0.45, -24.0], Mat::Wood);
+        }
+    }
+    // Люстры над нефом.
+    for z in [-30.0, -42.0, -54.0] {
+        b.chandelier(Vec3::new(0.0, 6.5, z), 15.6);
+    }
+    for z in [-24.0, -48.0] {
+        b.lamp(Vec3::new(0.0, 4.0, z), Color::srgb(1.0, 0.7, 0.4), 40_000.0, 14.0);
+    }
+    // Канделябры у хоров.
+    for x in [-4.0, 4.0] {
+        b.solid([x - 0.2, 0.4, cz1 - 0.6], [x + 0.2, 2.2, cz1 - 0.2], Mat::Iron);
+        b.torch(x, 2.45, cz1 - 0.4, Vec3::ZERO);
+    }
+}
+
+fn cloister(b: &mut Builder) {
+    let fz = WallFrame { along_x: true };
+    let fx = WallFrame { along_x: false };
+    let (x0, x1, z0, z1) = (-CURTAIN_IN, -20.0, -63.0, -17.0);
+    let h = 7.0;
+    // Наружные стены.
+    b.wall(fz, x0, x1, 0.0, h, z1 - 1.0, z1, &[Opening::door(-31.0, 2.4, 2.6, 1.4)], Mat::Stone);
+    b.wall(fz, x0, x1, 0.0, h, z0 - 1.0, z0, &[], Mat::Stone);
+    b.wall(fx, z0 - 1.0, z1, 0.0, h, x1 - 1.0, x1, &[Opening::door(SIDE_DOOR_Z, 2.4, 2.6, 1.4)], Mat::Stone);
+    // Аркада галереи вокруг сада.
+    let walk = 3.5;
+    let (gx0, gx1, gz0, gz1) = (x0 + walk, x1 - 1.0 - walk, z0 + walk, z1 - 1.0 - walk);
+    let ah = 4.6;
+    let arches = |a: f32, bnd: f32| -> Vec<Opening> {
+        let n = ((bnd - a) / 3.0).floor().max(1.0) as usize;
+        let step = (bnd - a) / n as f32;
+        (0..n).map(|i| Opening::door(a + step * (i as f32 + 0.5), step - 0.6, 2.4, 1.3)).collect()
+    };
+    b.wall(fz, gx0, gx1, 0.0, ah, gz1 - 0.6, gz1, &arches(gx0, gx1), Mat::Trim);
+    b.wall(fz, gx0, gx1, 0.0, ah, gz0, gz0 + 0.6, &arches(gx0, gx1), Mat::Trim);
+    b.wall(fx, gz0, gz1, 0.0, ah, gx0, gx0 + 0.6, &arches(gz0, gz1), Mat::Trim);
+    b.wall(fx, gz0, gz1, 0.0, ah, gx1 - 0.6, gx1, &arches(gz0, gz1), Mat::Trim);
+    // Перекрытия галерей и крыши.
+    let slab = |b: &mut Builder, min: [f32; 3], max: [f32; 3]| b.solid(min, max, Mat::Wood);
+    slab(b, [x0, ah, z0], [x1 - 1.0, ah + 0.35, gz0 + 0.6]);
+    slab(b, [x0, ah, gz1 - 0.6], [x1 - 1.0, ah + 0.35, z1 - 1.0]);
+    slab(b, [x0, ah, gz0], [gx0 + 0.6, ah + 0.35, gz1]);
+    slab(b, [gx1 - 0.6, ah, gz0], [x1 - 1.0, ah + 0.35, gz1]);
+    let r = b.mesh(Mat::Roof);
+    r.lean_roof([Vec3::new(x0, h - 0.3, z0), Vec3::new(x1 - 1.0, h - 0.3, z0)], [Vec3::new(x0, ah + 0.35, gz0 + 0.9), Vec3::new(x1 - 1.0, ah + 0.35, gz0 + 0.9)]);
+    r.lean_roof([Vec3::new(x0, h - 0.3, z1 - 1.0), Vec3::new(x1 - 1.0, h - 0.3, z1 - 1.0)], [Vec3::new(x0, ah + 0.35, gz1 - 0.9), Vec3::new(x1 - 1.0, ah + 0.35, gz1 - 0.9)]);
+    r.lean_roof([Vec3::new(x0, h - 0.3, gz0), Vec3::new(x0, h - 0.3, gz1)], [Vec3::new(gx0 + 0.9, ah + 0.35, gz0), Vec3::new(gx0 + 0.9, ah + 0.35, gz1)]);
+    r.lean_roof([Vec3::new(x1 - 1.0, h - 0.3, gz0), Vec3::new(x1 - 1.0, h - 0.3, gz1)], [Vec3::new(gx1 - 0.9, ah + 0.35, gz0), Vec3::new(gx1 - 0.9, ah + 0.35, gz1)]);
+    // Балки потолка галерей.
+    let mut z = z0 + 1.5;
+    while z < z1 - 1.0 {
+        b.mesh(Mat::Wood).cuboid(Vec3::new(x0, ah - 0.25, z - 0.12), Vec3::new(gx0, ah, z + 0.12));
+        b.mesh(Mat::Wood).cuboid(Vec3::new(gx1, ah - 0.25, z - 0.12), Vec3::new(x1 - 1.0, ah, z + 0.12));
+        z += 3.0;
+    }
+    let mut x = x0 + 1.5;
+    while x < x1 - 1.0 {
+        b.mesh(Mat::Wood).cuboid(Vec3::new(x - 0.12, ah - 0.25, z0), Vec3::new(x + 0.12, ah, gz0));
+        b.mesh(Mat::Wood).cuboid(Vec3::new(x - 0.12, ah - 0.25, gz1), Vec3::new(x + 0.12, ah, z1 - 1.0));
+        x += 3.0;
+    }
+    // Пол галерей и сад.
+    b.decor([x0, 0.0, z0], [x1 - 1.0, 0.03, z1 - 1.0], Mat::Floor);
+    b.decor([gx0 + 0.6, 0.0, gz0 + 0.6], [gx1 - 0.6, 0.05, gz1 - 0.6], Mat::Grass);
+    // Колодец-фонтан в центре сада и кипарисы.
+    let (cx, cz) = ((gx0 + gx1) / 2.0, (gz0 + gz1) / 2.0);
+    b.solid([cx - 1.8, 0.0, cz - 1.8], [cx + 1.8, 0.7, cz + 1.8], Mat::Trim);
+    b.mesh(Mat::Trim).prism(Vec3::new(cx, 0.0, cz), 2.1, 0.7, 8);
+    b.mesh(Mat::Water).prism(Vec3::new(cx, 0.55, cz), 1.9, 0.1, 8);
+    b.solid([cx - 0.3, 0.7, cz - 0.3], [cx + 0.3, 2.6, cz + 0.3], Mat::Trim);
+    b.pinnacle(Vec3::new(cx, 2.6, cz), 0.3, 1.8);
+    for (tx, tz) in [(gx0 + 3.0, gz0 + 4.0), (gx1 - 3.0, gz0 + 4.0), (gx0 + 3.0, gz1 - 4.0), (gx1 - 3.0, gz1 - 4.0), (cx, gz0 + 9.0), (cx, gz1 - 9.0)] {
+        cypress(b, tx, tz, 5.5);
+    }
+    // Факелы в галереях.
+    for (tx, tz, out) in [(x0 + 0.35, -30.0, Vec3::X), (x0 + 0.35, -50.0, Vec3::X), (x1 - 1.35, -28.0, Vec3::NEG_X), (x1 - 1.35, -55.0, Vec3::NEG_X), (-38.0, z0 + 0.35, Vec3::Z), (-25.0, z1 - 1.35, Vec3::NEG_Z)] {
+        b.torch(tx, 3.0, tz, out);
+    }
+}
+
+fn cypress(b: &mut Builder, x: f32, z: f32, h: f32) {
+    b.solid([x - 0.2, 0.0, z - 0.2], [x + 0.2, h * 0.9, z + 0.2], Mat::Wood);
+    let m = b.mesh(Mat::Leaves);
+    m.prism(Vec3::new(x, 0.8, z), 0.7, h * 0.35, 8);
+    m.spire(Vec3::new(x, 0.8 + h * 0.35, z), 0.75, h * 0.65, 8);
+    m.spire(Vec3::new(x, 0.6, z), 0.8, 0.25, 8);
+}
+
+fn barracks(b: &mut Builder) {
+    let fz = WallFrame { along_x: true };
+    let fx = WallFrame { along_x: false };
+    let (x0, x1, z0, z1) = (20.0, CURTAIN_IN, -63.0, -17.0);
+    let h = 7.0;
+    let ceil = 5.0;
+    let (cx0, cx1) = (30.0, 33.0); // центральный коридор
+    let (cz0, cz1) = (SIDE_DOOR_Z - 1.5, SIDE_DOOR_Z + 1.5); // поперечный коридор
+    b.wall(fz, x0, x1, 0.0, h, z1 - 1.0, z1, &[Opening::door((cx0 + cx1) / 2.0, 2.4, 2.6, 1.4)], Mat::Stone);
+    b.wall(fz, x0, x1, 0.0, h, z0 - 1.0, z0, &[], Mat::Stone);
+    b.wall(fx, z0 - 1.0, z1, 0.0, h, x0, x0 + 1.0, &[Opening::door(SIDE_DOOR_Z, 2.4, 2.6, 1.4)], Mat::Stone);
+    // Окна на южном фасаде.
+    for x in [22.0, 26.5, 37.0, 41.5] {
+        let (pts, uvs) = geom::lancet_outline(fz, x, z1 + 0.03, 1.1, 2.4, 4.2, 0.8);
+        b.glass.push(GlassPane { kind: GlassKind::Lancet, pts, uvs, normal: Vec3::Z });
+    }
+    // Потолок и крыша.
+    b.solid([x0 + 1.0, ceil, z0], [x1, ceil + 0.4, z1 - 1.0], Mat::Wood);
+    b.solid([x0, ceil + 0.4, z0 - 1.0], [x1, h, z1], Mat::Stone);
+    b.mesh(Mat::Roof).gable_roof(Vec2::new(x0 - 0.5, z0 - 1.5), Vec2::new(x1, z1 + 0.5), h, 12.5, false);
+    // Внутренние стены коридоров (толщина 0.4) с дверями в комнаты.
+    let wall_h = ceil;
+    let door = |s: f32| Opening::door(s, 1.6, 2.2, 1.0);
+    let south_split = -29.0;
+    let north_split = -53.5;
+    let south_rooms = [door((cz1 + 0.4 + south_split) / 2.0), door((south_split + z1 - 1.0) / 2.0)];
+    let north_rooms = [door((z0 + north_split) / 2.0), door((north_split + cz0 - 0.4) / 2.0)];
+    for (d0, d1) in [(cx0 - 0.4, cx0), (cx1, cx1 + 0.4)] {
+        b.wall(fx, cz1 + 0.4, z1 - 1.0, 0.0, wall_h, d0, d1, &south_rooms, Mat::Stone);
+        b.wall(fx, z0, cz0 - 0.4, 0.0, wall_h, d0, d1, &north_rooms, Mat::Stone);
+    }
+    for (d0, d1) in [(cz0 - 0.4, cz0), (cz1, cz1 + 0.4)] {
+        b.wall(fz, x0 + 1.0, cx0 - 0.4, 0.0, wall_h, d0, d1, &[], Mat::Stone);
+        b.wall(fz, cx1 + 0.4, x1, 0.0, wall_h, d0, d1, &[], Mat::Stone);
+    }
+    // Перегородки между комнатами.
+    for (xa, xb) in [(x0 + 1.0, cx0 - 0.4), (cx1 + 0.4, x1)] {
+        b.solid([xa, 0.0, south_split - 0.2], [xb, wall_h, south_split + 0.2], Mat::Stone);
+        b.solid([xa, 0.0, north_split - 0.2], [xb, wall_h, north_split + 0.2], Mat::Stone);
+    }
+    b.decor([x0 + 1.0, 0.0, z0], [x1, 0.03, z1 - 1.0], Mat::Floor);
+    // Балки потолка.
+    let mut z = z0 + 2.0;
+    while z < z1 - 1.0 {
+        b.mesh(Mat::Wood).cuboid(Vec3::new(x0 + 1.0, ceil - 0.3, z - 0.15), Vec3::new(x1, ceil, z + 0.15));
+        z += 4.0;
+    }
+    // Факелы в коридорах.
+    for z in [-22.0, -32.0, -50.0, -60.0] {
+        b.torch(cx0 + 0.35, 2.8, z, Vec3::X);
+        b.torch(cx1 - 0.35, 2.8, z + 3.0, Vec3::NEG_X);
+    }
+    b.torch(24.0, 2.8, cz0 + 0.35, Vec3::Z);
+    b.torch(39.0, 2.8, cz1 - 0.35, Vec3::NEG_Z);
+
+    // Комнаты: спальни с койками (юг), арсенал (северо-восток), трапезная (северо-запад), склад (юго-восток).
+    for z in [-20.5, -23.5, -26.5] {
+        b.solid([x0 + 1.2, 0.0, z - 0.5], [x0 + 3.2, 0.5, z + 0.5], Mat::Wood);
+        b.decor([x0 + 1.25, 0.5, z - 0.45], [x0 + 2.2, 0.6, z + 0.45], Mat::Banner);
+        b.solid([cx0 - 2.4, 0.0, z - 0.5], [cx0 - 0.4, 0.5, z + 0.5], Mat::Wood);
+    }
+    for z in [-31.5, -34.5, -37.5] {
+        b.solid([x0 + 1.2, 0.0, z - 0.5], [x0 + 3.2, 0.5, z + 0.5], Mat::Wood);
+        b.decor([x0 + 1.25, 0.5, z - 0.45], [x0 + 2.2, 0.6, z + 0.45], Mat::Banner);
+    }
+    b.lamp(Vec3::new(24.0, 3.5, -23.0), Color::srgb(1.0, 0.65, 0.35), 25_000.0, 9.0);
+    b.lamp(Vec3::new(24.0, 3.5, -35.0), Color::srgb(1.0, 0.65, 0.35), 25_000.0, 9.0);
+    // Склад.
+    for (x, z, s) in [(36.0, -20.0, 1.2), (37.3, -20.2, 0.9), (36.2, -21.3, 1.0), (43.0, -27.0, 1.2), (42.8, -33.0, 1.0), (43.0, -38.5, 1.1)] {
+        b.crate_at(x, z, s);
+    }
+    for (x, z) in [(39.0, -20.0), (40.0, -20.0), (43.5, -24.5), (35.0, -38.5)] {
+        b.barrel_at(x, z);
+    }
+    b.lamp(Vec3::new(39.0, 3.5, -30.0), Color::srgb(1.0, 0.65, 0.35), 20_000.0, 9.0);
+    // Трапезная.
+    b.solid([21.0, 0.75, -61.0], [27.0, 0.9, -59.8], Mat::Wood);
+    b.solid([21.0, 0.75, -50.0], [27.0, 0.9, -48.8], Mat::Wood);
+    for z in [-61.6, -59.2, -50.6, -48.2] {
+        b.solid([21.0, 0.0, z - 0.2], [27.0, 0.45, z + 0.2], Mat::Wood);
+    }
+    for z in [-60.4, -49.4] {
+        for x in [21.5, 26.5] {
+            b.solid([x - 0.1, 0.0, z - 0.4], [x + 0.1, 0.75, z + 0.4], Mat::Wood);
+        }
+    }
+    b.lamp(Vec3::new(24.0, 3.8, -55.0), Color::srgb(1.0, 0.65, 0.35), 30_000.0, 10.0);
+    b.lamp(Vec3::new(24.0, 3.8, -48.0), Color::srgb(1.0, 0.65, 0.35), 25_000.0, 9.0);
+    // Арсенал: стойки с оружием.
+    for z in [-46.0, -50.0, -57.0, -61.0] {
+        b.solid([x1 - 0.6, 0.0, z - 1.2], [x1, 2.2, z + 1.2], Mat::Wood);
+        let m = b.mesh(Mat::Iron);
+        for k in 0..5 {
+            let zz = z - 1.0 + k as f32 * 0.5;
+            m.cuboid(Vec3::new(x1 - 0.8, 0.3, zz - 0.03), Vec3::new(x1 - 0.7, 2.0, zz + 0.03));
+        }
+    }
+    b.solid([37.0, 0.0, -58.0], [40.0, 0.9, -56.5], Mat::Wood);
+    b.lamp(Vec3::new(39.0, 3.5, -52.0), Color::srgb(1.0, 0.65, 0.35), 25_000.0, 10.0);
+    b.lamp(Vec3::new(39.0, 3.5, -60.0), Color::srgb(1.0, 0.65, 0.35), 20_000.0, 9.0);
+}
+
+fn surroundings(b: &mut Builder) {
+    // Дорога к воротам и кипарисы вдоль неё.
+    b.decor([-3.0, 0.0, 50.0], [3.0, 0.02, 130.0], Mat::Cobble);
+    for z in [62.0, 76.0, 90.0, 104.0] {
+        cypress(b, -7.0, z, 7.0);
+        cypress(b, 7.0, z + 4.0, 6.5);
+    }
+    // Камни и холмики вокруг стен.
+    for (x, z, s) in [(-60.0, 20.0, 1.6), (-58.0, -40.0, 2.2), (62.0, -10.0, 1.8), (58.0, 30.0, 1.2), (30.0, 62.0, 2.0), (-35.0, 70.0, 1.5), (-20.0, -84.0, 2.4), (25.0, -82.0, 1.7)] {
+        b.solid([x - s, 0.0, z - s * 0.8], [x + s, s * 0.7, z + s * 0.8], Mat::Stone);
+    }
+    // Лес кипарисов на горизонте.
+    let mut seed = 17u32;
+    let mut rnd = || {
+        seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+        (seed >> 8) as f32 / (1u32 << 24) as f32
+    };
+    for _ in 0..90 {
+        let a = rnd() * std::f32::consts::TAU;
+        let r = 75.0 + rnd() * 70.0;
+        let (x, z) = (a.cos() * r, a.sin() * r - 10.0);
+        if x.abs() < 14.0 && z > 40.0 {
+            continue;
+        }
+        let h = 5.0 + rnd() * 6.0;
+        cypress(b, x, z, h);
+    }
 }
 
 pub fn level_colliders() -> LevelColliders {
-    LevelColliders(castle_layout().blocks.iter().filter(|b| b.solid).map(|b| b.aabb).collect())
+    let layout = castle_layout();
+    let mut colliders: Vec<Aabb> = layout.blocks.iter().filter(|b| b.solid).map(|b| b.aabb).collect();
+    colliders.extend(layout.invisible);
+    LevelColliders(colliders)
 }
 
 /// Точки появления игроков во дворе возле ворот.
 pub fn spawn_point(index: usize) -> Vec3 {
     let col = (index % 4) as f32;
     let row = (index / 4 % 4) as f32;
-    Vec3::new(-3.0 + col * 2.0, 0.1, 20.0 + row * 1.5)
+    Vec3::new(-3.0 + col * 2.0, 0.1, 30.0 + row * 1.5)
 }
 
-fn material_for(mat: Mat) -> StandardMaterial {
-    let (color, roughness, emissive) = match mat {
-        Mat::Grass => (Color::srgb(0.25, 0.36, 0.18), 0.95, LinearRgba::BLACK),
-        Mat::Cobble => (Color::srgb(0.38, 0.36, 0.33), 0.9, LinearRgba::BLACK),
-        Mat::Stone => (Color::srgb(0.55, 0.53, 0.5), 0.85, LinearRgba::BLACK),
-        Mat::DarkStone => (Color::srgb(0.4, 0.39, 0.38), 0.85, LinearRgba::BLACK),
-        Mat::Floor => (Color::srgb(0.32, 0.28, 0.25), 0.7, LinearRgba::BLACK),
-        Mat::Wood => (Color::srgb(0.42, 0.29, 0.17), 0.8, LinearRgba::BLACK),
-        Mat::Banner => (Color::srgb(0.55, 0.06, 0.06), 0.9, LinearRgba::BLACK),
-        Mat::Gold => (Color::srgb(0.8, 0.62, 0.2), 0.35, LinearRgba::rgb(0.08, 0.05, 0.0)),
-    };
-    StandardMaterial { base_color: color, perceptual_roughness: roughness, emissive, ..default() }
+/// Подсказки, где ставить врагов: открытые места (≥ 3 м свободного пола вокруг),
+/// не ближе 12 м к точкам появления игроков.
+/// Порядок: две точки во дворе у тренировочной площадки, одна у конюшни,
+/// две в нефе собора и тяжёлый рыцарь перед хорами.
+#[allow(dead_code)]
+pub fn npc_spawn_hints() -> Vec<Vec3> {
+    vec![
+        Vec3::new(-18.0, 0.0, 10.0),
+        Vec3::new(-14.0, 0.0, 18.0),
+        Vec3::new(30.0, 0.0, 14.0),
+        Vec3::new(-3.0, 0.0, -48.0),
+        Vec3::new(3.0, 0.0, -48.0),
+        Vec3::new(0.0, 0.0, -55.0),
+    ]
 }
 
 /// Клиент: создаёт меши, материалы и свет для уровня.
-pub fn spawn_level(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
-    let layout = castle_layout();
-    let mut mats = std::collections::HashMap::new();
+pub fn spawn_level(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut surfaces: ResMut<Assets<crate::graphics::SurfaceMaterial>>,
+    mut glass_mats: ResMut<Assets<crate::graphics::GlassMaterial>>,
+    mut flame_mats: ResMut<Assets<crate::graphics::FlameMaterial>>,
+) {
+    let mut layout = castle_layout();
+
+    // Все коробки и декор одного материала — в один меш.
     for block in &layout.blocks {
-        let handle = mats.entry(block.mat).or_insert_with(|| materials.add(material_for(block.mat))).clone();
-        let size = block.aabb.max - block.aabb.min;
-        let center = (block.aabb.max + block.aabb.min) / 2.0;
+        layout.decor.entry(block.mat).or_default().cuboid(block.aabb.min, block.aabb.max);
+    }
+    let mut decor: Vec<(Mat, MeshBuilder)> = layout.decor.into_iter().collect();
+    decor.sort_by_key(|(m, _)| *m);
+    for (mat, mb) in decor {
+        if mb.is_empty() {
+            continue;
+        }
+        let mut e = commands.spawn((
+            Mesh3d(meshes.add(mb.build())),
+            MeshMaterial3d(surfaces.add(crate::graphics::surface_material(mat))),
+            Transform::IDENTITY,
+        ));
+        if matches!(mat, Mat::Coals | Mat::Water) {
+            e.insert(NotShadowCaster);
+        }
+    }
+
+    // Витражи (двусторонние, не отбрасывают тень — свет проходит в окна).
+    for kind in [GlassKind::Lancet, GlassKind::Rose] {
+        let mut mb = MeshBuilder::default();
+        for pane in layout.glass.iter().filter(|p| p.kind == kind) {
+            mb.polygon(&pane.pts, &pane.uvs, pane.normal);
+            mb.polygon(&pane.pts, &pane.uvs, -pane.normal);
+        }
+        if mb.is_empty() {
+            continue;
+        }
         commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
-            MeshMaterial3d(handle),
-            Transform::from_translation(center),
+            Mesh3d(meshes.add(mb.build())),
+            MeshMaterial3d(glass_mats.add(crate::graphics::glass_material(kind == GlassKind::Rose))),
+            Transform::IDENTITY,
+            NotShadowCaster,
         ));
     }
 
-    let torch_mesh = meshes.add(Cuboid::new(0.15, 0.4, 0.15));
-    let flame = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 0.6, 0.2),
-        emissive: LinearRgba::rgb(12.0, 5.0, 1.0),
-        ..default()
-    });
-    for torch in &layout.torches {
-        commands.spawn((Mesh3d(torch_mesh.clone()), MeshMaterial3d(flame.clone()), Transform::from_translation(torch.pos)));
+    // Факелы: железный держатель, пламя-билборд и мерцающий свет.
+    let mut holders = MeshBuilder::default();
+    for t in &layout.torches {
+        let base = t.pos - Vec3::Y * 0.35;
+        if t.out != Vec3::ZERO {
+            let wall = base - t.out * 0.35;
+            holders.beam(wall + Vec3::Y * -0.25, base, 0.03, 0.03, Vec3::Y);
+            holders.cuboid(wall - Vec3::splat(0.08) - Vec3::Y * 0.3, wall + Vec3::splat(0.08) - Vec3::Y * 0.1);
+        }
+        holders.prism(base - Vec3::Y * 0.25, 0.05, 0.3, 6);
+        holders.prism(base + Vec3::Y * 0.02, 0.1, 0.12, 6);
+    }
+    if !holders.is_empty() {
+        commands.spawn((Mesh3d(meshes.add(holders.build())), MeshMaterial3d(surfaces.add(crate::graphics::surface_material(Mat::Iron)))));
+    }
+    let flame_mesh = meshes.add(Rectangle::new(0.42, 0.75));
+    let flame = flame_mats.add(crate::graphics::FlameMaterial::default());
+    for (i, t) in layout.torches.iter().enumerate() {
+        crate::graphics::spawn_flame(&mut commands, flame_mesh.clone(), flame.clone(), t.pos + Vec3::Y * 0.12, t.out, i as f32 * 1.7);
+    }
+    for lamp in &layout.lamps {
         commands.spawn((
-            PointLight {
-                color: Color::srgb(1.0, 0.65, 0.35),
-                intensity: 60_000.0,
-                range: 14.0,
-                shadow_maps_enabled: false,
-                ..default()
-            },
-            Transform::from_translation(torch.pos + Vec3::Y * 0.3),
+            PointLight { color: lamp.color, intensity: lamp.intensity, range: lamp.range, shadow_maps_enabled: false, ..default() },
+            Transform::from_translation(lamp.pos),
+            crate::graphics::Flicker { base: lamp.intensity, phase: lamp.pos.x + lamp.pos.z },
         ));
     }
+}
 
-    // Закатное солнце.
-    commands.spawn((
-        DirectionalLight { color: Color::srgb(1.0, 0.82, 0.6), illuminance: 6_000.0, shadow_maps_enabled: true, ..default() },
-        Transform::from_xyz(60.0, 40.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::collision::Body;
+
+    fn free(level: &LevelColliders, p: Vec3) -> bool {
+        level.body_is_free(&Body::STANDING, p)
+    }
+
+    #[test]
+    fn spawn_points_are_free() {
+        let level = level_colliders();
+        for i in 0..16 {
+            assert!(free(&level, spawn_point(i)), "точка появления {i} в стене: {}", spawn_point(i));
+        }
+        for p in npc_spawn_hints() {
+            assert!(free(&level, p + Vec3::Y * 0.1), "точка врага в стене: {p}");
+            for s in spawn_points_sample() {
+                assert!(p.distance(s) >= 12.0, "враг {p} слишком близко к появлению игрока {s}");
+            }
+        }
+    }
+
+    fn spawn_points_sample() -> Vec<Vec3> {
+        (0..16).map(spawn_point).collect()
+    }
+
+    /// Проходы, которые должны оставаться открытыми: ворота, калитки, двери, коридоры.
+    #[test]
+    fn key_passages_are_open() {
+        let level = level_colliders();
+        let checks = [
+            ("проезд надвратной башни", Vec3::new(0.0, 0.05, 45.0)),
+            ("внутренние ворота", Vec3::new(0.0, 0.05, -6.5)),
+            ("западная калитка", Vec3::new(-24.0, 0.05, -6.5)),
+            ("восточная калитка", Vec3::new(24.0, 0.05, -6.5)),
+            ("портал собора", Vec3::new(0.0, 0.25, -20.5)),
+            ("боковой портал собора", Vec3::new(-9.5, 0.05, -20.5)),
+            ("неф", Vec3::new(0.0, 0.05, -40.0)),
+            ("боковой неф", Vec3::new(-9.0, 0.05, -45.0)),
+            ("аркада нефа", Vec3::new(-6.0, 0.05, -36.0)),
+            ("западная дверь собора", Vec3::new(-12.5, 0.05, SIDE_DOOR_Z)),
+            ("восточная дверь собора", Vec3::new(12.5, 0.05, SIDE_DOOR_Z)),
+            ("западный проход", Vec3::new(-17.5, 0.05, -42.0)),
+            ("устье западного прохода", Vec3::new(-19.0, 0.05, -17.0)),
+            ("коридор за собором", Vec3::new(0.0, 0.05, -66.0)),
+            ("дверь клуатра с площади", Vec3::new(-31.0, 0.05, -17.5)),
+            ("дверь клуатра из прохода", Vec3::new(-20.5, 0.05, SIDE_DOOR_Z)),
+            ("галерея клуатра", Vec3::new(-43.0, 0.05, -40.0)),
+            ("сад клуатра", Vec3::new(-30.0, 0.05, -30.0)),
+            ("дверь казарм", Vec3::new(31.5, 0.05, -17.5)),
+            ("западная дверь казарм", Vec3::new(20.5, 0.05, SIDE_DOOR_Z)),
+            ("коридор казарм", Vec3::new(31.5, 0.05, -50.0)),
+            ("поперечный коридор казарм", Vec3::new(40.0, 0.05, SIDE_DOOR_Z)),
+            ("верх стены", Vec3::new(-30.0, 12.05, 44.5)),
+        ];
+        for (name, p) in checks {
+            assert!(free(&level, p), "закрыт проход: {name} ({p})");
+        }
+    }
+
+    /// Можно дойти пешком от ворот до хоров и подняться по лестнице на стену.
+    #[test]
+    fn walk_gate_to_choir_and_up_the_stairs() {
+        let level = level_colliders();
+        let walk = |path: &[Vec3]| {
+            let mut feet = path[0];
+            for target in &path[1..] {
+                for _ in 0..4000 {
+                    let to = *target - feet;
+                    let flat = Vec3::new(to.x, 0.0, to.z);
+                    if flat.length() < 0.3 {
+                        break;
+                    }
+                    let step = flat.normalize() * 0.1;
+                    level.move_body(&Body::STANDING, &mut feet, step + Vec3::new(0.0, -0.05, 0.0), true);
+                }
+                let to = *target - feet;
+                assert!(Vec2::new(to.x, to.z).length() < 0.5, "застрял по пути к {target}: стою в {feet}");
+            }
+            feet
+        };
+        walk(&[
+            Vec3::new(0.0, 0.0, 70.0),
+            Vec3::new(0.0, 0.0, 30.0),
+            Vec3::new(7.0, 0.0, 22.0),
+            Vec3::new(7.0, 0.0, 2.0),
+            Vec3::new(0.0, 0.0, -10.0),
+            Vec3::new(0.0, 0.0, -30.0),
+            Vec3::new(-9.0, 0.0, -42.0),
+            Vec3::new(-17.0, 0.0, -42.0),
+            Vec3::new(-30.0, 0.0, -42.0),
+        ]);
+        let top = walk(&[Vec3::new(-9.0, 0.0, 41.7), Vec3::new(-27.6, 0.0, 41.7), Vec3::new(-27.6, 0.0, 44.5)]);
+        assert!(top.y > 11.9, "не поднялся на стену: {top}");
+    }
 }

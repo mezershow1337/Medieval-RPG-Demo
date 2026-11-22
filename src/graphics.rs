@@ -1,0 +1,334 @@
+//! Графика: собственные шейдеры (процедурный камень, витражи, огонь, небо),
+//! пост-обработка (HDR, блум, SSAO, TAA, объёмный туман с лучами солнца) и атмосфера.
+//!
+//! F9 — переключить «тяжёлые» эффекты (объёмный туман и SSAO), если игра тормозит.
+
+use crate::level::Mat;
+use bevy::anti_alias::taa::TemporalAntiAliasing;
+use bevy::asset::{RenderAssetUsages, embedded_asset};
+use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::light::{CascadeShadowConfigBuilder, FogVolume, NotShadowCaster, NotShadowReceiver, ShadowFilteringMethod, VolumetricFog, VolumetricLight};
+use bevy::mesh::Indices;
+use bevy::pbr::{DistanceFog, ExtendedMaterial, FogFalloff, MaterialExtension, ScreenSpaceAmbientOcclusion};
+use bevy::post_process::bloom::Bloom;
+use bevy::prelude::*;
+use bevy::render::render_resource::{AsBindGroup, PrimitiveTopology};
+use bevy::camera::Hdr;
+use bevy::render::view::{ColorGrading, ColorGradingGlobal};
+use bevy::shader::ShaderRef;
+
+/// Направление на солнце (низкое закатное солнце с запада-юго-запада).
+pub const SUN_DIR: Vec3 = Vec3::new(-0.78, 0.30, 0.42);
+/// Цвет тумана — совпадает с горизонтом неба.
+const FOG_COLOR: Color = Color::srgb(0.42, 0.36, 0.40);
+
+pub struct GraphicsPlugin;
+
+impl Plugin for GraphicsPlugin {
+    fn build(&self, app: &mut App) {
+        embedded_asset!(app, "shaders/surface.wesl");
+        embedded_asset!(app, "shaders/glass.wesl");
+        embedded_asset!(app, "shaders/flame.wesl");
+        embedded_asset!(app, "shaders/sky.wesl");
+        app.add_plugins((
+            MaterialPlugin::<SurfaceMaterial>::default(),
+            MaterialPlugin::<GlassMaterial>::default(),
+            MaterialPlugin::<FlameMaterial>::default(),
+            MaterialPlugin::<SkyMaterial>::default(),
+        ))
+        .insert_resource(GraphicsSettings { heavy: true })
+        .add_observer(setup_camera)
+        .add_systems(Startup, setup_environment)
+        .add_systems(Update, (billboard_flames, flicker_lights, follow_sky, toggle_heavy));
+    }
+}
+
+#[derive(Resource)]
+pub struct GraphicsSettings {
+    pub heavy: bool,
+}
+
+// ---------- Камень, дерево, черепица и т. д. ----------
+
+pub type SurfaceMaterial = ExtendedMaterial<StandardMaterial, SurfaceExt>;
+
+/// Параметры процедурной поверхности (см. shaders/surface.wesl).
+#[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
+pub struct SurfaceExt {
+    /// Второй цвет: шов кладки, волокна дерева, тёмная плитка и т. п.
+    #[uniform(100)]
+    pub color_b: Vec4,
+    /// x — узор, y — масштаб, z — разброс цвета, w — сила рельефа.
+    #[uniform(100)]
+    pub params: Vec4,
+    /// x — мох, y — грязь у земли, z — свечение (угли), w — запас.
+    #[uniform(100)]
+    pub params2: Vec4,
+}
+
+impl MaterialExtension for SurfaceExt {
+    fn fragment_shader() -> ShaderRef {
+        "embedded://medieval_rpg/shaders/surface.wesl".into()
+    }
+}
+
+// Номера узоров в шейдере.
+const P_ASHLAR: f32 = 0.0;
+const P_FLAGSTONE: f32 = 1.0;
+const P_WOOD: f32 = 2.0;
+const P_COBBLE: f32 = 3.0;
+const P_GRASS: f32 = 4.0;
+const P_CLOTH: f32 = 5.0;
+const P_SLATE: f32 = 6.0;
+const P_METAL: f32 = 7.0;
+const P_WATER: f32 = 8.0;
+const P_COALS: f32 = 9.0;
+const P_LEAVES: f32 = 10.0;
+
+fn lin(c: Color) -> Vec4 {
+    let l = c.to_linear();
+    Vec4::new(l.red, l.green, l.blue, 1.0)
+}
+
+/// Материал для каждого типа поверхности уровня.
+pub fn surface_material(mat: Mat) -> SurfaceMaterial {
+    // (основной цвет, второй цвет, узор, масштаб, разброс, рельеф, шероховатость, металл, мох, грязь, свечение)
+    let (a, b, pattern, scale, var, bump, rough, metal, moss, grime, glow) = match mat {
+        Mat::Grass => (Color::srgb(0.20, 0.27, 0.12), Color::srgb(0.33, 0.30, 0.17), P_GRASS, 1.0, 0.5, 0.4, 0.95, 0.0, 0.0, 0.0, 0.0),
+        Mat::Cobble => (Color::srgb(0.36, 0.34, 0.32), Color::srgb(0.12, 0.11, 0.10), P_COBBLE, 1.0, 0.35, 1.0, 0.85, 0.0, 0.35, 0.0, 0.0),
+        Mat::Stone => (Color::srgb(0.56, 0.53, 0.48), Color::srgb(0.24, 0.22, 0.20), P_ASHLAR, 1.0, 0.25, 1.0, 0.88, 0.0, 0.5, 0.6, 0.0),
+        Mat::DarkStone => (Color::srgb(0.36, 0.35, 0.36), Color::srgb(0.13, 0.12, 0.13), P_ASHLAR, 1.15, 0.25, 1.0, 0.85, 0.0, 0.4, 0.6, 0.0),
+        Mat::Floor => (Color::srgb(0.42, 0.38, 0.34), Color::srgb(0.16, 0.14, 0.13), P_FLAGSTONE, 1.0, 0.3, 0.8, 0.55, 0.0, 0.0, 0.2, 0.0),
+        Mat::Wood => (Color::srgb(0.34, 0.22, 0.12), Color::srgb(0.18, 0.11, 0.06), P_WOOD, 1.0, 0.35, 0.6, 0.75, 0.0, 0.0, 0.0, 0.0),
+        Mat::Banner => (Color::srgb(0.50, 0.04, 0.05), Color::srgb(0.85, 0.62, 0.20), P_CLOTH, 1.0, 0.2, 0.3, 0.9, 0.0, 0.0, 0.0, 0.0),
+        Mat::Gold => (Color::srgb(0.90, 0.68, 0.30), Color::srgb(0.55, 0.38, 0.12), P_METAL, 1.0, 0.2, 0.3, 0.3, 1.0, 0.0, 0.0, 0.0),
+        Mat::Trim => (Color::srgb(0.62, 0.58, 0.52), Color::srgb(0.30, 0.28, 0.25), P_ASHLAR, 1.6, 0.15, 0.5, 0.8, 0.0, 0.3, 0.4, 0.0),
+        Mat::Roof => (Color::srgb(0.20, 0.22, 0.27), Color::srgb(0.08, 0.09, 0.11), P_SLATE, 1.0, 0.3, 1.0, 0.6, 0.0, 0.25, 0.0, 0.0),
+        Mat::Iron => (Color::srgb(0.22, 0.21, 0.20), Color::srgb(0.35, 0.20, 0.12), P_METAL, 1.0, 0.3, 0.3, 0.45, 0.9, 0.0, 0.0, 0.0),
+        Mat::Coals => (Color::srgb(0.08, 0.05, 0.04), Color::srgb(1.0, 0.35, 0.08), P_COALS, 1.0, 0.5, 0.5, 0.9, 0.0, 0.0, 0.0, 6.0),
+        Mat::Water => (Color::srgb(0.05, 0.09, 0.10), Color::srgb(0.10, 0.16, 0.16), P_WATER, 1.0, 0.0, 0.3, 0.05, 0.0, 0.0, 0.0, 0.0),
+        Mat::Leaves => (Color::srgb(0.07, 0.15, 0.07), Color::srgb(0.16, 0.24, 0.09), P_LEAVES, 1.0, 0.4, 1.0, 0.9, 0.0, 0.0, 0.0, 0.0),
+    };
+    ExtendedMaterial {
+        base: StandardMaterial { base_color: a, perceptual_roughness: rough, metallic: metal, reflectance: 0.4, ..default() },
+        extension: SurfaceExt {
+            color_b: lin(b),
+            params: Vec4::new(pattern, scale, var, bump),
+            params2: Vec4::new(moss, grime, glow, 0.0),
+        },
+    }
+}
+
+// ---------- Витражи ----------
+
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct GlassMaterial {
+    /// x — вид (0 ланцет, 1 роза), y — яркость, z, w — запас.
+    #[uniform(0)]
+    pub params: Vec4,
+}
+
+impl Material for GlassMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "embedded://medieval_rpg/shaders/glass.wesl".into()
+    }
+}
+
+pub fn glass_material(rose: bool) -> GlassMaterial {
+    GlassMaterial { params: Vec4::new(if rose { 1.0 } else { 0.0 }, 2.6, 0.0, 0.0) }
+}
+
+// ---------- Пламя факелов ----------
+
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone, Default)]
+pub struct FlameMaterial {
+    #[uniform(0)]
+    pub params: Vec4,
+}
+
+impl Material for FlameMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "embedded://medieval_rpg/shaders/flame.wesl".into()
+    }
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Add
+    }
+}
+
+/// Пламя всегда повёрнуто к камере (по вертикальной оси).
+#[derive(Component)]
+pub struct Billboard;
+
+/// Мерцание источника света.
+#[derive(Component)]
+pub struct Flicker {
+    pub base: f32,
+    pub phase: f32,
+}
+
+pub fn spawn_flame(commands: &mut Commands, mesh: Handle<Mesh>, material: Handle<FlameMaterial>, pos: Vec3, out: Vec3, phase: f32) {
+    commands.spawn((Mesh3d(mesh), MeshMaterial3d(material), Transform::from_translation(pos), Billboard, NotShadowCaster, NotShadowReceiver));
+    // Свет чуть отодвинут от стены, чтобы стена освещалась ровнее.
+    let intensity = 45_000.0;
+    commands.spawn((
+        PointLight { color: Color::srgb(1.0, 0.58, 0.28), intensity, range: 13.0, radius: 0.15, shadow_maps_enabled: false, ..default() },
+        Transform::from_translation(pos + out * 0.35 + Vec3::Y * 0.1),
+        Flicker { base: intensity, phase },
+    ));
+}
+
+fn billboard_flames(cameras: Query<&GlobalTransform, With<Camera3d>>, mut flames: Query<&mut Transform, With<Billboard>>) {
+    let Some(cam) = cameras.iter().next() else { return };
+    let cam_pos = cam.translation();
+    for mut t in &mut flames {
+        let d = cam_pos - t.translation;
+        let yaw = d.x.atan2(d.z);
+        t.rotation = Quat::from_rotation_y(yaw);
+    }
+}
+
+fn flicker_lights(time: Res<Time>, mut lights: Query<(&mut PointLight, &Flicker)>) {
+    let t = time.elapsed_secs();
+    for (mut light, f) in &mut lights {
+        let p = f.phase;
+        let n = (t * 9.1 + p).sin() * 0.5 + (t * 23.7 + p * 2.3).sin() * 0.3 + (t * 4.3 + p * 0.7).sin() * 0.2;
+        light.intensity = f.base * (0.85 + 0.12 * n);
+    }
+}
+
+// ---------- Небо ----------
+
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct SkyMaterial {
+    /// xyz — направление на солнце.
+    #[uniform(0)]
+    pub sun: Vec4,
+}
+
+impl Material for SkyMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "embedded://medieval_rpg/shaders/sky.wesl".into()
+    }
+}
+
+#[derive(Component)]
+struct SkyDome;
+
+/// Сфера, вывернутая внутрь (камера внутри неё).
+fn sky_mesh(radius: f32) -> Mesh {
+    let (rings, segs) = (32usize, 64usize);
+    let mut pos = Vec::new();
+    let mut nrm = Vec::new();
+    let mut uv = Vec::new();
+    for r in 0..=rings {
+        let phi = r as f32 / rings as f32 * std::f32::consts::PI;
+        for s in 0..=segs {
+            let th = s as f32 / segs as f32 * std::f32::consts::TAU;
+            let d = Vec3::new(phi.sin() * th.cos(), phi.cos(), phi.sin() * th.sin());
+            pos.push((d * radius).to_array());
+            nrm.push((-d).to_array());
+            uv.push([s as f32 / segs as f32, r as f32 / rings as f32]);
+        }
+    }
+    let mut idx = Vec::new();
+    let w = segs as u32 + 1;
+    for r in 0..rings as u32 {
+        for s in 0..segs as u32 {
+            let (a, b, c, d) = (r * w + s, r * w + s + 1, (r + 1) * w + s, (r + 1) * w + s + 1);
+            idx.extend_from_slice(&[a, b, c, b, d, c]);
+        }
+    }
+    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, nrm)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
+        .with_inserted_indices(Indices::U32(idx))
+}
+
+fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut skies: ResMut<Assets<SkyMaterial>>) {
+    commands.insert_resource(ClearColor(FOG_COLOR));
+    commands.insert_resource(GlobalAmbientLight { color: Color::srgb(0.55, 0.55, 0.75), brightness: 180.0, ..default() });
+
+    let sun = SUN_DIR.normalize();
+    commands.spawn((
+        Mesh3d(meshes.add(sky_mesh(900.0))),
+        MeshMaterial3d(skies.add(SkyMaterial { sun: sun.extend(0.0) })),
+        Transform::IDENTITY,
+        SkyDome,
+        NotShadowCaster,
+        NotShadowReceiver,
+    ));
+
+    // Закатное солнце.
+    commands.spawn((
+        DirectionalLight { color: Color::srgb(1.0, 0.72, 0.48), illuminance: 9_000.0, shadow_maps_enabled: true, ..default() },
+        Transform::from_translation(sun * 100.0).looking_at(Vec3::ZERO, Vec3::Y),
+        CascadeShadowConfigBuilder { num_cascades: 4, first_cascade_far_bound: 12.0, maximum_distance: 160.0, ..default() }.build(),
+        VolumetricLight,
+    ));
+    // Лёгкая дымка над замком — в ней видны лучи из окон и от факелов.
+    commands.spawn((
+        FogVolume {
+            fog_color: Color::srgb(0.85, 0.8, 0.8),
+            density_factor: 0.035,
+            absorption: 0.15,
+            scattering: 0.35,
+            scattering_asymmetry: 0.6,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 14.0, -12.0).with_scale(Vec3::new(130.0, 28.0, 150.0)),
+    ));
+}
+
+fn follow_sky(cameras: Query<&GlobalTransform, With<Camera3d>>, mut sky: Query<&mut Transform, With<SkyDome>>) {
+    let Some(cam) = cameras.iter().next() else { return };
+    for mut t in &mut sky {
+        t.translation = cam.translation();
+    }
+}
+
+// ---------- Камера и пост-обработка ----------
+
+fn setup_camera(event: On<Add<Camera3d>>, mut commands: Commands, settings: Res<GraphicsSettings>) {
+    let mut e = commands.entity(event.entity);
+    e.insert((
+        Hdr,
+        Tonemapping::TonyMcMapface,
+        Bloom { intensity: 0.16, ..Bloom::NATURAL },
+        ColorGrading {
+            global: ColorGradingGlobal { exposure: 0.3, post_saturation: 1.08, ..default() },
+            ..default()
+        },
+        DistanceFog {
+            color: FOG_COLOR,
+            directional_light_color: Color::srgba(1.0, 0.62, 0.35, 0.5),
+            directional_light_exponent: 18.0,
+            falloff: FogFalloff::from_visibility_colors(280.0, Color::srgb(0.45, 0.38, 0.42), Color::srgb(0.75, 0.62, 0.55)),
+        },
+        Msaa::Off,
+        TemporalAntiAliasing::default(),
+        ShadowFilteringMethod::Temporal,
+    ));
+    if settings.heavy {
+        e.insert(heavy_effects());
+    }
+}
+
+fn heavy_effects() -> impl Bundle {
+    (ScreenSpaceAmbientOcclusion::default(), VolumetricFog { ambient_intensity: 0.0, step_count: 48, jitter: 0.5, ..default() })
+}
+
+fn toggle_heavy(keys: Res<ButtonInput<KeyCode>>, mut settings: ResMut<GraphicsSettings>, cameras: Query<Entity, With<Camera3d>>, mut commands: Commands) {
+    if !keys.just_pressed(KeyCode::F9) {
+        return;
+    }
+    settings.heavy = !settings.heavy;
+    info!("Тяжёлые эффекты (SSAO, объёмный туман): {}", if settings.heavy { "вкл" } else { "выкл" });
+    for e in &cameras {
+        if settings.heavy {
+            commands.entity(e).insert(heavy_effects());
+        } else {
+            commands.entity(e).remove::<(ScreenSpaceAmbientOcclusion, VolumetricFog)>();
+        }
+    }
+}

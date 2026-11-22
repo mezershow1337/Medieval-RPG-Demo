@@ -7,6 +7,7 @@
 
 mod client;
 mod collision;
+mod graphics;
 mod hud;
 mod level;
 mod player;

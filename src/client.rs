@@ -2,7 +2,7 @@
 
 use crate::player::{LocalPlayer, PlayerPlugin, spawn_local_player};
 use crate::protocol::*;
-use crate::{hud, level};
+use crate::{graphics, hud, level};
 use bevy::prelude::*;
 use bevy_renet::netcode::{ClientAuthentication, NetcodeClientPlugin, NetcodeClientTransport, NetcodeErrorEvent};
 use bevy_renet::{RenetClient, RenetClientPlugin, client_connected};
@@ -58,7 +58,7 @@ pub fn run(server_addr: SocketAddr) {
             primary_window: Some(Window { title: "Medieval RPG — прототип".into(), ..default() }),
             ..default()
         }))
-        .add_plugins((RenetClientPlugin, NetcodeClientPlugin, PlayerPlugin, hud::HudPlugin))
+        .add_plugins((RenetClientPlugin, NetcodeClientPlugin, PlayerPlugin, hud::HudPlugin, graphics::GraphicsPlugin))
         .insert_resource(RenetClient::new(connection_config()))
         .insert_resource(transport)
         .insert_resource(NetState { server_addr: Some(server_addr), ..default() })
