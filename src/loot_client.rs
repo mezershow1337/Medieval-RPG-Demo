@@ -4,7 +4,8 @@ use crate::client::CorpseMarker;
 use crate::collision::LevelColliders;
 use crate::inventory::Inventory;
 use crate::inventory_ui::{InventoryUiPlugin, UiFonts};
-use crate::items::{ItemBaseId, ItemShape, Quality};
+use crate::icons::ItemModels;
+use crate::items::{ItemBaseId, Quality};
 use crate::loot_net::*;
 use crate::player::PlayerCamera;
 use crate::protocol::{decode, encode};
@@ -20,7 +21,7 @@ impl Plugin for LootClientPlugin {
             .insert_resource(LootState::default())
             .insert_resource(LootIndex::default())
             .insert_resource(PendingCorpses::default())
-            .add_systems(Startup, (setup_loot_assets, setup_prompt, setup_use_bar).chain().after(crate::inventory_ui::setup_fonts))
+            .add_systems(Startup, (setup_loot_assets, crate::icons::setup_models, setup_prompt, setup_use_bar).chain().after(crate::inventory_ui::setup_fonts))
             .add_systems(Update, (receive_loot, attach_corpse_views, interact_input).chain().run_if(client_connected))
             .add_systems(Update, (animate_drops, aim_target, update_prompt, update_notices, update_use_bar).chain());
     }
@@ -105,12 +106,9 @@ struct LootAssets {
     corpse_mat: Handle<StandardMaterial>,
     corpse_empty_mat: Handle<StandardMaterial>,
     blood_mat: Handle<StandardMaterial>,
-    shapes: HashMap<&'static str, Handle<Mesh>>,
-    steel: Handle<StandardMaterial>,
-    wood: Handle<StandardMaterial>,
-    gold: Handle<StandardMaterial>,
-    /// Материал «свечения» по качеству.
-    glow: Vec<Handle<StandardMaterial>>,
+    /// Светящийся круг под ценной вещью и его материалы по качеству.
+    halo: Handle<Mesh>,
+    halo_mat: Vec<Handle<StandardMaterial>>,
     beam: Handle<Mesh>,
     beam_mat: Vec<Handle<StandardMaterial>>,
 }
@@ -121,46 +119,18 @@ fn quality_color(q: Quality) -> Color {
 }
 
 fn setup_loot_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
-    let mut shapes = HashMap::new();
-    shapes.insert("blade", meshes.add(Cuboid::new(0.07, 0.025, 0.85)));
-    shapes.insert("guard", meshes.add(Cuboid::new(0.22, 0.04, 0.04)));
-    shapes.insert("handle", meshes.add(Cylinder::new(0.022, 0.5)));
-    shapes.insert("pole", meshes.add(Cylinder::new(0.025, 1.6)));
-    shapes.insert("head", meshes.add(Cuboid::new(0.14, 0.12, 0.14)));
-    shapes.insert("axe", meshes.add(Cuboid::new(0.04, 0.22, 0.2)));
-    shapes.insert("shield", meshes.add(Cuboid::new(0.5, 0.05, 0.65)));
-    shapes.insert("armor", meshes.add(Cuboid::new(0.45, 0.14, 0.4)));
-    shapes.insert("helmet", meshes.add(Sphere::new(0.16)));
-    shapes.insert("small", meshes.add(Sphere::new(0.05)));
-    shapes.insert("coins", meshes.add(Cylinder::new(0.08, 0.04)));
-    shapes.insert("flask", meshes.add(Cylinder::new(0.05, 0.16)));
-    let glow = Quality::ALL
-        .iter()
-        .map(|q| {
-            let c = quality_color(*q).to_linear();
-            let strength = [0.0, 0.0, 0.4, 1.2, 2.5, 5.0][q.index()];
-            materials.add(StandardMaterial {
-                base_color: quality_color(*q).mix(&Color::srgb(0.35, 0.35, 0.38), 0.5),
-                emissive: LinearRgba::rgb(c.red * strength, c.green * strength, c.blue * strength),
-                perceptual_roughness: 0.5,
-                metallic: 0.3,
-                ..default()
-            })
+    let glow_mat = |materials: &mut Assets<StandardMaterial>, q: Quality, alpha: f32, power: f32| {
+        let c = quality_color(q).to_linear();
+        materials.add(StandardMaterial {
+            base_color: quality_color(q).with_alpha(alpha),
+            emissive: LinearRgba::rgb(c.red * power, c.green * power, c.blue * power),
+            alpha_mode: AlphaMode::Add,
+            unlit: true,
+            ..default()
         })
-        .collect();
-    let beam_mat = Quality::ALL
-        .iter()
-        .map(|q| {
-            let c = quality_color(*q).to_linear();
-            materials.add(StandardMaterial {
-                base_color: quality_color(*q).with_alpha(0.25),
-                emissive: LinearRgba::rgb(c.red * 3.0, c.green * 3.0, c.blue * 3.0),
-                alpha_mode: AlphaMode::Add,
-                unlit: true,
-                ..default()
-            })
-        })
-        .collect();
+    };
+    let halo_mat = Quality::ALL.iter().map(|q| glow_mat(&mut materials, *q, 0.12, [0.0, 0.0, 0.6, 1.0, 1.6, 2.4][q.index()])).collect();
+    let beam_mat = Quality::ALL.iter().map(|q| glow_mat(&mut materials, *q, 0.25, 3.0)).collect();
     commands.insert_resource(LootAssets {
         corpse_body: meshes.add(Capsule3d::new(0.28, 1.0)),
         corpse_head: meshes.add(Sphere::new(0.2)),
@@ -168,59 +138,27 @@ fn setup_loot_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
         corpse_mat: materials.add(StandardMaterial { base_color: Color::srgb(0.42, 0.42, 0.45), metallic: 0.6, perceptual_roughness: 0.45, ..default() }),
         corpse_empty_mat: materials.add(StandardMaterial { base_color: Color::srgb(0.25, 0.24, 0.24), perceptual_roughness: 0.9, ..default() }),
         blood_mat: materials.add(StandardMaterial { base_color: Color::srgb(0.25, 0.02, 0.02), perceptual_roughness: 0.3, ..default() }),
-        shapes,
-        steel: materials.add(StandardMaterial { base_color: Color::srgb(0.7, 0.7, 0.74), metallic: 0.8, perceptual_roughness: 0.3, ..default() }),
-        wood: materials.add(Color::srgb(0.4, 0.27, 0.15)),
-        gold: materials.add(StandardMaterial { base_color: Color::srgb(0.9, 0.7, 0.2), metallic: 0.9, perceptual_roughness: 0.3, ..default() }),
-        glow,
+        halo: meshes.add(Circle::new(0.32)),
+        halo_mat,
         beam: meshes.add(Cylinder::new(0.02, 1.6)),
         beam_mat,
     });
 }
 
-/// Модель предмета на земле: несколько коробок, окрашенных по качеству.
-fn spawn_item_model(p: &mut ChildSpawnerCommands, assets: &LootAssets, shape: ItemShape, quality: Quality) {
-    let m = |name: &str| Mesh3d(assets.shapes[name].clone());
-    let q = MeshMaterial3d(assets.glow[quality.index()].clone());
-    let steel = MeshMaterial3d(assets.steel.clone());
-    let wood = MeshMaterial3d(assets.wood.clone());
-    let lying = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
-    match shape {
-        ItemShape::Blade => {
-            p.spawn((m("blade"), steel, Transform::from_xyz(0.0, 0.03, -0.2)));
-            p.spawn((m("guard"), q.clone(), Transform::from_xyz(0.0, 0.03, 0.25)));
-            p.spawn((m("handle"), q, Transform::from_xyz(0.0, 0.03, 0.4).with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)).with_scale(Vec3::new(1.0, 0.4, 1.0))));
-        }
-        ItemShape::Blunt => {
-            p.spawn((m("handle"), wood, Transform::from_xyz(0.0, 0.03, 0.1).with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2))));
-            p.spawn((m("head"), q, Transform::from_xyz(0.0, 0.07, -0.18)));
-        }
-        ItemShape::Polearm => {
-            p.spawn((m("pole"), wood, Transform::from_xyz(0.0, 0.03, 0.0).with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2))));
-            p.spawn((m("axe"), q, Transform::from_xyz(0.08, 0.1, -0.7).with_rotation(lying)));
-        }
-        ItemShape::Shield => {
-            p.spawn((m("shield"), q, Transform::from_xyz(0.0, 0.03, 0.0)));
-        }
-        ItemShape::Armor => {
-            p.spawn((m("armor"), q, Transform::from_xyz(0.0, 0.07, 0.0)));
-        }
-        ItemShape::Helmet => {
-            p.spawn((m("helmet"), q, Transform::from_xyz(0.0, 0.1, 0.0).with_scale(Vec3::new(1.0, 1.1, 1.0))));
-        }
-        ItemShape::Small => {
-            p.spawn((m("small"), q, Transform::from_xyz(0.0, 0.05, 0.0)));
-        }
-        ItemShape::Coins => {
-            p.spawn((m("coins"), MeshMaterial3d(assets.gold.clone()), Transform::from_xyz(0.0, 0.02, 0.0)));
-        }
-        ItemShape::Flask => {
-            p.spawn((m("flask"), q, Transform::from_xyz(0.0, 0.08, 0.0)));
-        }
+/// Предмет на земле: его 3D-модель (та же, что на иконке) и подсветка по качеству.
+fn spawn_item_model(p: &mut ChildSpawnerCommands, assets: &LootAssets, models: &ItemModels, base: ItemBaseId, quality: Quality) {
+    p.spawn((WorldAssetRoot(models.get(base)), Transform::default()));
+    // Добротные и лучше слегка светятся снизу, редкие — ещё и лучом, чтобы их было видно издалека.
+    if quality >= Quality::Uncommon {
+        p.spawn((
+            Mesh3d(assets.halo.clone()),
+            MeshMaterial3d(assets.halo_mat[quality.index()].clone()),
+            Transform::from_xyz(0.0, 0.004, 0.0).with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+            bevy::light::NotShadowCaster,
+        ));
     }
-    // Луч света над ценными вещами, чтобы их было видно издалека.
     if quality >= Quality::Rare {
-        p.spawn((Mesh3d(assets.beam.clone()), MeshMaterial3d(assets.beam_mat[quality.index()].clone()), Transform::from_xyz(0.0, 0.8, 0.0)));
+        p.spawn((Mesh3d(assets.beam.clone()), MeshMaterial3d(assets.beam_mat[quality.index()].clone()), Transform::from_xyz(0.0, 0.8, 0.0), bevy::light::NotShadowCaster));
     }
 }
 
@@ -231,6 +169,7 @@ fn receive_loot(
     mut state: ResMut<LootState>,
     mut index: ResMut<LootIndex>,
     assets: Res<LootAssets>,
+    models: Res<ItemModels>,
     mut corpses: Query<(&mut CorpseView, Option<&Children>)>,
     mut pending: ResMut<PendingCorpses>,
     mut mats: Query<&mut MeshMaterial3d<StandardMaterial>>,
@@ -310,7 +249,7 @@ fn receive_loot(
                         Transform::from_translation(start.into()).with_rotation(Quat::from_rotation_y(yaw)),
                         Visibility::default(),
                     ))
-                    .with_children(|p| spawn_item_model(p, &assets, base.base().shape, quality))
+                    .with_children(|p| spawn_item_model(p, &assets, &models, base, quality))
                     .id();
                 if let Some(old) = index.0.insert(id, e) {
                     commands.entity(old).despawn();
