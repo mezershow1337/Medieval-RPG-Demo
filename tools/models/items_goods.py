@@ -1134,6 +1134,15 @@ for _d in DRINKS:
     _drink(*_d)
 
 
+@item("spoiled_brew", (1, 1), name="Испорченное варево", pose="upright", azimuth=20, elevation=14, margin=0.88)
+def spoiled_brew():
+    """Неудавшееся варево: мутная бурая жижа в пузырьке, заткнутом пробкой."""
+    M()
+    K.glass_mat("glass", (176, 190, 160))
+    K.liquid_mat("murk", (120, 92, 44))
+    flask_body("small", "murk", seal="cork", liquid_level=0.55)
+
+
 @item("mercury", (1, 1), name="Ртуть", pose="upright", azimuth=20, elevation=14, margin=0.88)
 def mercury():
     M()
