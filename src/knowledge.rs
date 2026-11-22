@@ -19,10 +19,12 @@ use crate::collision::LevelColliders;
 use crate::economy::{NUMMI_PER_FOLLIS, format_money, give_money, take_money};
 use crate::combat::Action;
 use crate::inventory::{Inventory, Target};
-use crate::items::{ItemUid, Quality, Rng, roll_item};
+use crate::items::{ItemBaseId, ItemUid, Quality, Rng, roll_item};
 use crate::loot_net::{CH_LOOT, LootServerMessage};
 use crate::loot_server::LootWorld;
 use crate::lore::*;
+use crate::medicine::{self, Body, Treated};
+use crate::medicine_server::Bodies;
 use crate::lore_net::*;
 use crate::protocol::{decode, encode};
 use crate::server::GameWorld;
@@ -31,6 +33,8 @@ use crate::trade_server::{LessonRequested, RefundLesson};
 use bevy_renet::{RenetServer, RenetServerEvent, renet::ServerEvent};
 use std::collections::HashMap;
 
+/// Падение здоровья за кадр больше этого — по нам попали (кровотечение за кадр куда меньше).
+pub const HIT_THRESHOLD: f32 = 0.5;
 /// Секунд реального времени на час урока у мастера.
 pub const LESSON_SECS: f32 = 12.0;
 /// Сбор: секунд на траву и на корень (корни выкапывать дольше).
@@ -44,7 +48,8 @@ pub struct KnowledgeServerPlugin;
 
 impl Plugin for KnowledgeServerPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(KnowledgeWorld::default())
+        app.add_plugins(crate::medicine_server::MedicineServerPlugin)
+            .insert_resource(KnowledgeWorld::default())
             .add_observer(on_connection)
             .add_observer(on_lesson)
             .add_observer(on_grant)
@@ -100,6 +105,7 @@ enum Task {
     Read { uid: ItemUid, text: Book },
     Gather { patch: u32 },
     Lesson { master: u32, mode: LessonMode },
+    Treat { uid: ItemUid },
 }
 
 struct Activity {
@@ -320,7 +326,7 @@ fn start(server: &mut RenetServer, world: &mut KnowledgeWorld, player: u64, task
     send(server, player, &LoreServerMessage::Activity { verb, done, total });
 }
 
-fn receive_lore_messages(mut server: ResMut<RenetServer>, game: Res<GameWorld>, mut world: ResMut<KnowledgeWorld>, mut loot: ResMut<LootWorld>) {
+fn receive_lore_messages(mut server: ResMut<RenetServer>, game: Res<GameWorld>, mut world: ResMut<KnowledgeWorld>, mut loot: ResMut<LootWorld>, bodies: Res<Bodies>) {
     for pid in server.clients_id() {
         while let Some(bytes) = server.receive_message(pid, CH_LORE) {
             let Some(msg) = decode::<LoreClientMessage>(&bytes) else { continue };
@@ -400,6 +406,16 @@ fn receive_lore_messages(mut server: ResMut<RenetServer>, game: Res<GameWorld>, 
                     };
                     start(&mut server, &mut world, pid, Task::Lesson { master, mode }, verb, 0.0, LESSON_SECS, feet, hp);
                 }
+                LoreClientMessage::Treat { uid } => {
+                    let Some(base) = loot.inventories.get(&pid).and_then(|inv| inv.find(uid)).map(|(_, i)| i.base) else { continue };
+                    let healthy = Body::default();
+                    let body = bodies.bodies.get(&pid).unwrap_or(&healthy);
+                    match medicine::plan(body, base.base().name) {
+                        Some((verb, secs)) => start(&mut server, &mut world, pid, Task::Treat { uid }, verb.into(), 0.0, secs, feet, hp),
+                        None if medicine::is_remedy(base.base().name) => notice(&mut server, pid, "Нечего лечить"),
+                        None => notice(&mut server, pid, "Это не лекарство"),
+                    }
+                }
                 LoreClientMessage::Stop => {}
             }
         }
@@ -419,7 +435,14 @@ fn apprentice_chore(teacher: Teacher) -> &'static str {
     }
 }
 
-fn tick_activities(time: Res<Time>, mut server: ResMut<RenetServer>, game: Res<GameWorld>, mut world: ResMut<KnowledgeWorld>, mut loot: ResMut<LootWorld>) {
+fn tick_activities(
+    time: Res<Time>,
+    mut server: ResMut<RenetServer>,
+    mut game: ResMut<GameWorld>,
+    mut world: ResMut<KnowledgeWorld>,
+    mut loot: ResMut<LootWorld>,
+    mut bodies: ResMut<Bodies>,
+) {
     let dt = time.delta_secs();
     let mut ended: Vec<(u64, bool)> = Vec::new();
     for (pid, a) in world.activities.iter_mut() {
@@ -429,7 +452,7 @@ fn tick_activities(time: Res<Time>, mut server: ResMut<RenetServer>, game: Res<G
         };
         let f = &actor.fighter;
         let moved = Vec2::new(actor.pose.feet.x - a.start.x, actor.pose.feet.z - a.start.z).length() > 0.6;
-        if !actor.alive || f.is_dead() || f.hp < a.last_hp - 0.01 || !matches!(f.action, Action::Idle) || moved {
+        if !actor.alive || f.is_dead() || f.hp < a.last_hp - HIT_THRESHOLD || !matches!(f.action, Action::Idle) || moved {
             ended.push((*pid, false));
             continue;
         }
@@ -462,6 +485,7 @@ fn tick_activities(time: Res<Time>, mut server: ResMut<RenetServer>, game: Res<G
         match a.task {
             Task::Read { uid, text } => finish_reading(&mut server, &mut world, &mut loot, pid, uid, text),
             Task::Gather { patch } => finish_gathering(&mut server, &mut world, &mut loot, pid, patch),
+            Task::Treat { uid } => finish_treatment(&mut server, &mut world, &mut loot, &mut game, &mut bodies, pid, uid),
             Task::Lesson { master, mode } => {
                 let Some(m) = world.masters.get(&master) else { continue };
                 let (teacher, wage) = (m.teacher, m.wage);
@@ -601,5 +625,59 @@ fn regrow_patches(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: R
             p.charges += 1;
             server.broadcast_message(CH_LORE, encode(&LoreServerMessage::PatchCharges { id: *id, charges: p.charges }));
         }
+    }
+}
+
+/// Лечение закончено: применить средство, списать предмет (и бинт к припарке).
+fn finish_treatment(server: &mut RenetServer, world: &mut KnowledgeWorld, loot: &mut LootWorld, game: &mut GameWorld, bodies: &mut Bodies, pid: u64, uid: ItemUid) {
+    let Some(item) = loot.inventories.get(&pid).and_then(|inv| inv.find(uid)).map(|(_, i)| i.clone()) else { return };
+    let Some(k) = world.players.get_mut(&pid) else { return };
+    let name = item.info().name;
+    let bandage = ItemBaseId::find("Бинт");
+    let has_bandage = name != "Бинт" && loot.inventories.get(&pid).is_some_and(|inv| inv.all_items().any(|i| Some(i.base) == bandage));
+    let roll = bodies.rng.f32();
+    let result = medicine::apply(bodies.body(pid), k, name, item.quality.index(), has_bandage, roll);
+    bodies.touch(pid);
+    let take_one = |loot: &mut LootWorld, uid: ItemUid| {
+        if let Some(inv) = loot.inventories.get_mut(&pid)
+            && let Some((mut it, loc)) = inv.take(uid)
+            && it.count > 1
+        {
+            it.count -= 1;
+            let _ = inv.place(it, loc.into());
+        }
+    };
+    let text = match &result {
+        Treated::Wound { text, bandage_used } => {
+            take_one(loot, uid);
+            if *bandage_used && let Some(b) = loot.inventories.get(&pid).and_then(|inv| inv.all_items().find(|i| Some(i.base) == bandage).map(|i| i.uid)) {
+                take_one(loot, b);
+            }
+            // Перевязка даёт передышку и немного сил, как и раньше.
+            if name == "Бинт"
+                && let (Some(c), Some(a)) = (item.base.consumable(), game.actors.get_mut(&pid))
+            {
+                a.fighter.hp = (a.fighter.hp + c.heal).min(a.fighter.max_hp);
+            }
+            k.practice(Skill::Medicine, 0.6);
+            text.clone()
+        }
+        Treated::Drunk { text } => {
+            take_one(loot, uid);
+            text.clone()
+        }
+        Treated::Extraction { ok, damage, text } => {
+            if let Some(a) = game.actors.get_mut(&pid) {
+                a.fighter.hp = (a.fighter.hp - damage).max(1.0);
+            }
+            k.practice(Skill::Medicine, if *ok { 1.5 } else { 0.5 });
+            text.clone()
+        }
+        Treated::Nothing(text) => text.clone(),
+    };
+    notice(server, pid, text);
+    sync_knowledge(server, world, pid);
+    if result.consumes_item() {
+        sync_inventory(server, loot, pid);
     }
 }

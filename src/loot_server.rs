@@ -156,8 +156,8 @@ impl LootWorld {
     fn starter_inventory(&mut self) -> Inventory {
         let mut inv = Inventory::new(PLAYER_GRID);
         let kit = vec![
-            self.make("Одноручный меч", Quality::Common, 1),
-            self.make("Стёганый гамбезон", Quality::Common, 1),
+            self.make("Спата", Quality::Common, 1),
+            self.make("Стёганая туника", Quality::Common, 1),
             self.make("Кожаные сапоги", Quality::Poor, 1),
             self.make("Бинт", Quality::Common, 3),
             self.make("Фоллис", Quality::Common, 30),

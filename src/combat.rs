@@ -1213,8 +1213,8 @@ mod tests {
     fn weapon_from_item_name() {
         assert_eq!(WeaponKind::from_item_name("Боевой топор"), WeaponKind::Axe);
         assert_eq!(WeaponKind::from_item_name("Кинжал"), WeaponKind::Seax);
-        assert_eq!(WeaponKind::from_item_name("Алебарда"), WeaponKind::Spear);
-        assert_eq!(WeaponKind::from_item_name("Длинный меч"), WeaponKind::Spatha);
+        assert_eq!(WeaponKind::from_item_name("Пехотное копьё"), WeaponKind::Spear);
+        assert_eq!(WeaponKind::from_item_name("Кавалерийская спата"), WeaponKind::Spatha);
     }
 
     #[test]

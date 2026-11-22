@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = "0.20.1"
+bevy = { version = "0.20.1", features = ["jpeg"] }  # jpeg — текстуры 3D-моделей
 bevy_renet = "6.0.0"
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", default-features = false, features = ["alloc"] }
