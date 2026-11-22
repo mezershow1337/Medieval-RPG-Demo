@@ -4,7 +4,7 @@ use crate::combat::{self, Action, Fighter, WeaponKind};
 use crate::fight::{self, CombatFeedback, LocalFighter};
 use crate::player::{LocalPlayer, PlayerPlugin, spawn_local_player};
 use crate::protocol::*;
-use crate::rig::{self, CharacterModels, NeedsRig, NeedsShield, NeedsWeapon, Outfit, PoseInput, RigPose};
+use crate::rig::{self, Blade, CharacterModels, NeedsRig, NeedsShield, NeedsWeapon, Outfit, PoseInput, RigPose, ShieldKind};
 use crate::{graphics, hud, level};
 use bevy::prelude::*;
 use bevy_renet::netcode::{ClientAuthentication, NetcodeClientPlugin, NetcodeClientTransport, NetcodeErrorEvent};
@@ -77,10 +77,6 @@ struct ArrowAssets {
     material: Handle<StandardMaterial>,
 }
 
-/// Лезвие меча (меняет материал, когда удар нельзя парировать).
-#[derive(Component, Clone)]
-pub struct Blade;
-
 /// Тело на земле.
 #[derive(Component)]
 #[allow(dead_code)] // используется окном обыска (тред про инвентарь)
@@ -108,7 +104,8 @@ pub struct CharacterAssets {
 }
 
 impl CharacterAssets {
-    /// Обычный материал клинка.
+    /// Обычный материал клинка (пока модели не загружены — простая сталь).
+    #[allow(dead_code)]
     pub fn blade(&self, models: Option<&CharacterModels>) -> Handle<StandardMaterial> {
         models.map(|m| m.blade.clone()).unwrap_or_else(|| self.steel.clone())
     }
@@ -182,7 +179,7 @@ fn setup_character_assets(mut commands: Commands, mut materials: ResMut<Assets<S
 }
 
 /// Где рука держит оружие: (правая, левая) — центр кулака в координатах оружия.
-fn weapon_grips(weapon: WeaponKind) -> (Vec3, Option<Vec3>) {
+pub fn weapon_grips(weapon: WeaponKind) -> (Vec3, Option<Vec3>) {
     match weapon {
         WeaponKind::Spatha | WeaponKind::Axe | WeaponKind::Seax => (Vec3::new(0.0, -0.06, 0.0), None),
         // Копьё: начало координат — передняя (левая) рука, правая сзади на древке.
@@ -222,7 +219,7 @@ fn spawn_remote(commands: &mut Commands, index: &mut RemoteIndex, snap: &ActorSn
             p.spawn((BodyRig, NeedsRig(Outfit::for_actor(snap.kind, snap.id)), Transform::default(), Visibility::default()));
             p.spawn((RemoteSword, ShownWeapon(snap.weapon), NeedsWeapon(snap.weapon), Transform::from_xyz(0.3, 1.0, -0.4), Visibility::default()));
             if snap.shield {
-                p.spawn((RemoteShield, NeedsShield, Transform::from_xyz(-0.42, 1.05, -0.1), Visibility::default()));
+                p.spawn((RemoteShield, NeedsShield(ShieldKind::for_actor(snap.kind)), Transform::from_xyz(-0.42, 1.05, -0.1), Visibility::default()));
             }
         })
         .id();
@@ -245,7 +242,7 @@ fn spawn_corpse(commands: &mut Commands, index: &mut CorpseIndex, corpse_id: u64
             ));
             if proto.has_shield {
                 c.spawn((
-                    NeedsShield,
+                    NeedsShield(ShieldKind::for_actor(kind)),
                     Transform::from_xyz(-0.6, 0.06, 0.55).with_rotation(Quat::from_rotation_y(-0.5) * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
                     Visibility::default(),
                 ));
@@ -487,12 +484,12 @@ fn animate_remote(
     mut swords: Query<(&mut Transform, &Children), (With<RemoteSword>, Without<RemoteActor>, Without<RemoteShield>)>,
     mut shields: Query<&mut Transform, (With<RemoteShield>, Without<RemoteActor>, Without<RemoteSword>)>,
     mut rigs: Query<&mut RigPose, With<BodyRig>>,
-    mut blades: Query<&mut MeshMaterial3d<StandardMaterial>, With<Blade>>,
+    mut blades: Query<(&Blade, &mut MeshMaterial3d<StandardMaterial>)>,
 ) {
     let dt = time.delta_secs();
     let now = time.elapsed_secs();
     let t = 1.0 - (-15.0 * dt).exp();
-    let blade_mat = assets.blade(models.as_deref());
+    let _ = models;
     for (mut r, mut transform, children) in &mut remotes {
         r.fighter.tick(dt);
         if transform.translation.distance(r.target_pos) > 5.0 {
@@ -573,6 +570,9 @@ fn animate_remote(
             time: now + r.id as f32,
             right_grip: Some(sword_tf.transform_point(right)),
             left_grip: left.map(|l| sword_tf.transform_point(l)).or(shield_tf.map(|s| s.transform_point(SHIELD_GRIP))),
+            // Кулак обхватывает рукоять/древко по оси оружия, щит — за горизонтальную ручку.
+            right_axis: Some(sword_tf.rotation * Vec3::Y),
+            left_axis: if left.is_some() { Some(sword_tf.rotation * Vec3::Y) } else { shield_tf.map(|s| s.rotation * Vec3::NEG_X) },
         };
         let mut solved = rig::solve_pose(&input);
         // Если руки не дотягиваются до рукояти, меч придвигается к ним (только внешний вид,
@@ -602,8 +602,8 @@ fn animate_remote(
         {
             *sword = sword_tf;
             for bc in blade_children.iter() {
-                if let Ok(mut m) = blades.get_mut(bc) {
-                    m.0 = if riposte { assets.blade_red.clone() } else { blade_mat.clone() };
+                if let Ok((b, mut m)) = blades.get_mut(bc) {
+                    m.0 = if riposte { assets.blade_red.clone() } else { b.0.clone() };
                 }
             }
         }

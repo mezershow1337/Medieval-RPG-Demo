@@ -1,7 +1,8 @@
 //! Бой на стороне клиента: ввод (ЛКМ — удар, ПКМ — парирование), предсказание своего
 //! состояния, меч в руках от первого лица и эффекты попаданий.
 
-use crate::client::{Blade, CharacterAssets, NetState, RemoteActor, RemoteIndex};
+use crate::client::{CharacterAssets, NetState, RemoteActor, RemoteIndex};
+use crate::rig::Blade;
 use crate::combat::{self, Action, Fighter, HitOutcome};
 use crate::player::{LocalPlayer, PlayerCamera};
 use crate::protocol::*;
@@ -203,7 +204,7 @@ fn animate_view_sword(
     local: Query<(&LocalPlayer, &LocalFighter)>,
     mut camera: Query<&mut Transform, (With<PlayerCamera>, Without<ViewSword>)>,
     mut sword: Query<(&mut Transform, &mut Visibility, &Children), (With<ViewSword>, Without<PlayerCamera>)>,
-    mut blades: Query<&mut MeshMaterial3d<StandardMaterial>, With<Blade>>,
+    mut blades: Query<(&Blade, &mut MeshMaterial3d<StandardMaterial>)>,
     mut arm: Query<(&crate::rig::ViewArm, &mut Visibility), (With<ViewArmRoot>, Without<ViewSword>)>,
     mut joints: Query<&mut Transform, (Without<ViewSword>, Without<PlayerCamera>, Without<ViewArmRoot>)>,
 ) {
@@ -222,17 +223,18 @@ fn animate_view_sword(
     // Меч от первого лица чуть приподнят, чтобы в кадре была рука с рукоятью.
     st.translation = Vec3::new(-0.06, -0.25 + VIEW_LIFT, -0.04) + fix * hilt;
     st.rotation = Quat::from_rotation_arc(Vec3::Y, (fix * dir).normalize());
-    let blade = assets.blade(models.as_deref());
+    let _ = (&assets, &models);
     for c in children.iter() {
-        if let Ok(mut m) = blades.get_mut(c) {
-            m.0 = blade.clone();
+        if let Ok((b, mut m)) = blades.get_mut(c) {
+            m.0 = b.0.clone();
         }
     }
     // Рука держит рукоять.
     if let Ok((arm, mut arm_vis)) = arm.single_mut() {
         *arm_vis = *vis;
-        let grip = st.transform_point(Vec3::new(0.0, -0.06, 0.0));
-        for (joint, (pos, rot)) in arm.joints().into_iter().zip(crate::rig::view_arm_pose(VIEW_SHOULDER, grip)) {
+        let grip = st.transform_point(crate::client::weapon_grips(f.fighter.weapon).0);
+        let axis = st.rotation * Vec3::Y;
+        for (joint, (pos, rot)) in arm.joints().into_iter().zip(crate::rig::view_arm_pose(VIEW_SHOULDER, grip, axis)) {
             if let Ok(mut t) = joints.get_mut(joint) {
                 t.translation = pos;
                 t.rotation = rot;
