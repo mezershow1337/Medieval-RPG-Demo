@@ -166,7 +166,7 @@ const SHIELD_GRIP: Vec3 = Vec3::new(0.0, -0.02, 0.07);
 
 fn spawn_remote(commands: &mut Commands, index: &mut RemoteIndex, snap: &ActorSnapshot) {
     let pos: Vec3 = snap.pos.into();
-    let mut fighter = Fighter::new(snap.weapon, snap.max_hp, snap.kind == ActorKind::Swordsman);
+    let mut fighter = Fighter::new(snap.weapon, snap.max_hp, snap.shield);
     fighter.action = snap.action;
     fighter.hp = snap.hp;
     let entity = commands
@@ -357,11 +357,12 @@ fn receive_snapshots(
                 r.pitch = a.pitch;
                 r.crouching = a.crouching;
                 // Берём действие с сервера, но не откатываем таймер назад внутри того же действия.
-                if std::mem::discriminant(&r.fighter.action) != std::mem::discriminant(&a.action) || action_time(&a.action) > action_time(&r.fighter.action) {
+                if std::mem::discriminant(&r.fighter.action) != std::mem::discriminant(&a.action) || a.action.time() > r.fighter.action.time() {
                     r.fighter.action = a.action;
                 }
                 r.fighter.hp = a.hp;
                 r.fighter.max_hp = a.max_hp;
+                r.fighter.has_shield = a.shield;
             }
             None if !index.0.contains_key(&a.id) => spawn_remote(&mut commands, &mut index, a),
             None => {}
@@ -373,20 +374,6 @@ fn receive_snapshots(
         if let Some(e) = index.0.remove(&id) {
             commands.entity(e).despawn();
         }
-    }
-}
-
-fn action_time(a: &Action) -> f32 {
-    match *a {
-        Action::Windup { t, .. }
-        | Action::Strike { t, .. }
-        | Action::Recovery { t, .. }
-        | Action::Parry { t }
-        | Action::ParryRecovery { t }
-        | Action::BlockRecoil { t }
-        | Action::Stagger { t }
-        | Action::Flinch { t } => t,
-        Action::Idle | Action::Block | Action::Dead => 0.0,
     }
 }
 
@@ -440,15 +427,17 @@ fn animate_remote(
         let eye = 1.65 - 0.6 * r.crouch;
         let aim = Quat::from_rotation_x(r.pitch * 0.6);
         let (hilt, dir) = combat::weapon_pose(&r.fighter.action, r.fighter.weapon, now);
-        let unparryable = matches!(r.fighter.action, Action::Windup { unparryable: true, .. } | Action::Strike { unparryable: true, .. });
+        // Ответный удар после парирования подсвечиваем.
+        let riposte = matches!(r.fighter.action, Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. });
         let (twist, lean) = match r.fighter.action {
             Action::Windup { swing, .. } | Action::Strike { swing, .. } | Action::Recovery { swing, .. } => {
                 let lean = if swing == combat::Swing::Overhead { -0.25 * (aim * dir).z.abs().min(1.0) } else { -0.05 };
                 (-(aim * dir).x * 0.55, lean)
             }
-            Action::Stagger { t } | Action::BlockRecoil { t } => (0.0, 0.32 + (now * 25.0).sin() * 0.05 * (1.0 - t).max(0.0)),
+            Action::Stagger { t, .. } => (0.0, 0.32 + (now * 25.0).sin() * 0.05 * (1.0 - t).max(0.0)),
+            Action::GuardStagger { .. } => (0.15, 0.12),
             Action::Flinch { .. } => (0.1, 0.15),
-            Action::Parry { .. } | Action::ParryRecovery { .. } => (0.2, 0.05),
+            Action::Guard { .. } => (0.2, 0.05),
             _ => (0.0, 0.0),
         };
 
@@ -471,7 +460,7 @@ fn animate_remote(
         if let Some(e) = shield_entity
             && let Ok(mut shield) = shields.get_mut(e)
         {
-            let (pos, rot) = if matches!(r.fighter.action, Action::Block) {
+            let (pos, rot) = if matches!(r.fighter.action, Action::Guard { .. } | Action::GuardStagger { .. }) {
                 (Vec3::new(-0.05, 1.25, -0.5), Quat::IDENTITY)
             } else {
                 (Vec3::new(-0.38, 1.0, -0.22), Quat::from_rotation_y(1.0))
@@ -522,7 +511,7 @@ fn animate_remote(
             *sword = sword_tf;
             for bc in blade_children.iter() {
                 if let Ok(mut m) = blades.get_mut(bc) {
-                    m.0 = if unparryable { assets.blade_red.clone() } else { blade_mat.clone() };
+                    m.0 = if riposte { assets.blade_red.clone() } else { blade_mat.clone() };
                 }
             }
         }
