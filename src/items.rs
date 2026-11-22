@@ -1,0 +1,647 @@
+//! Предметы: базовые типы, качество, случайные характеристики и таблицы добычи.
+//!
+//! Чистые данные без графики и сети: этим модулем пользуются и сервер (бросок добычи),
+//! и клиент (подсказки, цвета). Всё случайное идёт через [`Rng`], чтобы результат
+//! можно было повторить по зерну.
+
+use serde::{Deserialize, Serialize};
+
+// ---------------------------------------------------------------------------
+// Генератор случайных чисел
+// ---------------------------------------------------------------------------
+
+/// Маленький быстрый генератор (xorshift64*). Своих зависимостей не тянем.
+#[derive(Clone, Debug)]
+pub struct Rng(u64);
+
+impl Rng {
+    pub fn new(seed: u64) -> Self {
+        Self(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1)
+    }
+
+    pub fn from_time() -> Self {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1);
+        Self::new(nanos)
+    }
+
+    pub fn next_u64(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.0 = x;
+        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+
+    /// Число в [0, 1).
+    pub fn f32(&mut self) -> f32 {
+        (self.next_u64() >> 40) as f32 / (1u64 << 24) as f32
+    }
+
+    pub fn range_f32(&mut self, min: f32, max: f32) -> f32 {
+        min + (max - min) * self.f32()
+    }
+
+    /// Целое в [min, max] включительно.
+    pub fn range_u32(&mut self, min: u32, max: u32) -> u32 {
+        if max <= min {
+            return min;
+        }
+        min + (self.next_u64() % (max - min + 1) as u64) as u32
+    }
+
+    /// Индекс по весам. Пустой список или нулевые веса дают None.
+    pub fn weighted<T>(&mut self, items: &[(T, f32)]) -> Option<usize> {
+        let total: f32 = items.iter().map(|(_, w)| w.max(0.0)).sum();
+        if total <= 0.0 {
+            return None;
+        }
+        let mut roll = self.f32() * total;
+        for (i, (_, w)) in items.iter().enumerate() {
+            roll -= w.max(0.0);
+            if roll < 0.0 {
+                return Some(i);
+            }
+        }
+        Some(items.len() - 1)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Качество
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Quality {
+    Poor,
+    Common,
+    Uncommon,
+    Rare,
+    Epic,
+    Legendary,
+}
+
+impl Quality {
+    pub const ALL: [Quality; 6] = [Quality::Poor, Quality::Common, Quality::Uncommon, Quality::Rare, Quality::Epic, Quality::Legendary];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Quality::Poor => "Ветхое",
+            Quality::Common => "Обычное",
+            Quality::Uncommon => "Добротное",
+            Quality::Rare => "Редкое",
+            Quality::Epic => "Эпическое",
+            Quality::Legendary => "Легендарное",
+        }
+    }
+
+    /// Цвет рамки и названия (sRGB).
+    pub fn color(self) -> [f32; 3] {
+        match self {
+            Quality::Poor => [0.55, 0.55, 0.55],
+            Quality::Common => [0.92, 0.92, 0.88],
+            Quality::Uncommon => [0.35, 0.85, 0.3],
+            Quality::Rare => [0.3, 0.55, 1.0],
+            Quality::Epic => [0.72, 0.35, 0.95],
+            Quality::Legendary => [1.0, 0.62, 0.12],
+        }
+    }
+
+    /// Множитель базовых характеристик предмета (урон, броня).
+    pub fn stat_multiplier(self) -> f32 {
+        match self {
+            Quality::Poor => 0.8,
+            Quality::Common => 1.0,
+            Quality::Uncommon => 1.1,
+            Quality::Rare => 1.2,
+            Quality::Epic => 1.32,
+            Quality::Legendary => 1.45,
+        }
+    }
+
+    /// Сколько случайных свойств получает предмет.
+    pub fn affix_count(self) -> usize {
+        match self {
+            Quality::Poor | Quality::Common => 0,
+            Quality::Uncommon => 1,
+            Quality::Rare => 2,
+            Quality::Epic => 3,
+            Quality::Legendary => 4,
+        }
+    }
+
+    pub fn index(self) -> usize {
+        self as usize
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Характеристики
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Stat {
+    /// Урон оружия (базовая характеристика оружия).
+    WeaponDamage,
+    /// Броня (базовая характеристика доспехов и щитов).
+    Armor,
+    /// Добавочный урон.
+    BonusDamage,
+    MaxHealth,
+    Strength,
+    Agility,
+    /// % к скорости передвижения.
+    MoveSpeed,
+    /// % к скорости замаха и удара.
+    ActionSpeed,
+    /// Миллисекунды к окну парирования.
+    ParryWindow,
+    /// % снижения потери стойкости при блоке.
+    BlockStability,
+    /// % снижения урона от ударов в голову.
+    HeadshotReduction,
+    /// Удача: шанс найти вещи лучшего качества.
+    Luck,
+}
+
+impl Stat {
+    pub fn name(self) -> &'static str {
+        match self {
+            Stat::WeaponDamage => "Урон оружия",
+            Stat::Armor => "Броня",
+            Stat::BonusDamage => "Доп. урон",
+            Stat::MaxHealth => "Здоровье",
+            Stat::Strength => "Сила",
+            Stat::Agility => "Ловкость",
+            Stat::MoveSpeed => "Скорость бега",
+            Stat::ActionSpeed => "Скорость ударов",
+            Stat::ParryWindow => "Окно парирования",
+            Stat::BlockStability => "Устойчивость блока",
+            Stat::HeadshotReduction => "Защита головы",
+            Stat::Luck => "Удача",
+        }
+    }
+
+    /// Как показывать число.
+    pub fn format(self, value: f32) -> String {
+        match self {
+            Stat::MoveSpeed | Stat::ActionSpeed | Stat::BlockStability | Stat::HeadshotReduction => format!("{value:+.1}%"),
+            Stat::ParryWindow => format!("{value:+.0} мс"),
+            Stat::WeaponDamage | Stat::Armor => format!("{value:.0}"),
+            _ => format!("{value:+.0}"),
+        }
+    }
+}
+
+/// Сумма характеристик (например, всей надетой экипировки).
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+pub struct StatTotals(pub Vec<(Stat, f32)>);
+
+impl StatTotals {
+    pub fn add(&mut self, stat: Stat, value: f32) {
+        match self.0.iter_mut().find(|(s, _)| *s == stat) {
+            Some((_, v)) => *v += value,
+            None => self.0.push((stat, value)),
+        }
+    }
+
+    pub fn get(&self, stat: Stat) -> f32 {
+        self.0.iter().find(|(s, _)| *s == stat).map(|(_, v)| *v).unwrap_or(0.0)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Слоты экипировки
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EquipSlot {
+    Head,
+    Chest,
+    Hands,
+    Legs,
+    Feet,
+    MainHand,
+    OffHand,
+    Necklace,
+    Ring,
+}
+
+impl EquipSlot {
+    pub const ALL: [EquipSlot; 9] = [
+        EquipSlot::Head,
+        EquipSlot::Necklace,
+        EquipSlot::Chest,
+        EquipSlot::Hands,
+        EquipSlot::Legs,
+        EquipSlot::Feet,
+        EquipSlot::Ring,
+        EquipSlot::MainHand,
+        EquipSlot::OffHand,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            EquipSlot::Head => "Голова",
+            EquipSlot::Chest => "Торс",
+            EquipSlot::Hands => "Руки",
+            EquipSlot::Legs => "Ноги",
+            EquipSlot::Feet => "Ступни",
+            EquipSlot::MainHand => "Правая рука",
+            EquipSlot::OffHand => "Левая рука",
+            EquipSlot::Necklace => "Шея",
+            EquipSlot::Ring => "Кольцо",
+        }
+    }
+
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|s| *s == self).unwrap()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Базовые предметы
+// ---------------------------------------------------------------------------
+
+/// Как предмет выглядит, когда лежит на земле.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemShape {
+    Blade,
+    Blunt,
+    Polearm,
+    Shield,
+    Armor,
+    Helmet,
+    Small,
+    Coins,
+    Flask,
+}
+
+/// Описание вида предмета. Конкретный экземпляр — [`Item`].
+#[derive(Debug, Clone, Copy)]
+pub struct ItemBase {
+    pub name: &'static str,
+    /// Короткая подпись для клетки инвентаря.
+    pub short: &'static str,
+    pub slot: Option<EquipSlot>,
+    /// Размер в клетках сетки (ширина, высота).
+    pub size: (u8, u8),
+    /// Основная характеристика и её значение при обычном качестве.
+    pub base_stat: Option<(Stat, f32)>,
+    /// Больше 1 — предметы складываются в стопку.
+    pub max_stack: u16,
+    /// Какие случайные свойства может получить.
+    pub affix_pool: &'static [Stat],
+    pub shape: ItemShape,
+    /// Можно ли выпасть с качеством выше обычного (у монет и зелий нет качества).
+    pub has_quality: bool,
+}
+
+const WEAPON_AFFIXES: &[Stat] = &[Stat::BonusDamage, Stat::Strength, Stat::Agility, Stat::ActionSpeed, Stat::ParryWindow];
+const SHIELD_AFFIXES: &[Stat] = &[Stat::MaxHealth, Stat::Strength, Stat::BlockStability, Stat::ParryWindow];
+const ARMOR_AFFIXES: &[Stat] = &[Stat::MaxHealth, Stat::Strength, Stat::Agility, Stat::MoveSpeed, Stat::Luck];
+const HELMET_AFFIXES: &[Stat] = &[Stat::MaxHealth, Stat::HeadshotReduction, Stat::Strength, Stat::Luck];
+const JEWEL_AFFIXES: &[Stat] = &[Stat::MaxHealth, Stat::Strength, Stat::Agility, Stat::MoveSpeed, Stat::ActionSpeed, Stat::Luck, Stat::BonusDamage];
+
+macro_rules! base {
+    ($name:expr, $short:expr, $slot:expr, $size:expr, $stat:expr, $stack:expr, $affixes:expr, $shape:expr, $quality:expr) => {
+        ItemBase { name: $name, short: $short, slot: $slot, size: $size, base_stat: $stat, max_stack: $stack, affix_pool: $affixes, shape: $shape, has_quality: $quality }
+    };
+}
+
+use EquipSlot as S;
+use ItemShape as Sh;
+
+/// Все виды предметов. Индекс в этом массиве — [`ItemBaseId`].
+pub const ITEM_BASES: &[ItemBase] = &[
+    // Оружие
+    base!("Одноручный меч", "Меч", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Длинный меч", "Длинный меч", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 42.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Булава", "Булава", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 34.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Боевой топор", "Топор", Some(S::MainHand), (2, 3), Some((Stat::WeaponDamage, 38.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Алебарда", "Алебарда", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 50.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Кинжал", "Кинжал", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 20.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    // Щиты
+    base!("Каплевидный щит", "Щит", Some(S::OffHand), (2, 3), Some((Stat::Armor, 20.0)), 1, SHIELD_AFFIXES, Sh::Shield, true),
+    base!("Баклер", "Баклер", Some(S::OffHand), (2, 2), Some((Stat::Armor, 10.0)), 1, SHIELD_AFFIXES, Sh::Shield, true),
+    // Шлемы
+    base!("Топфхельм", "Топфхельм", Some(S::Head), (2, 2), Some((Stat::Armor, 18.0)), 1, HELMET_AFFIXES, Sh::Helmet, true),
+    base!("Шапель", "Шапель", Some(S::Head), (2, 2), Some((Stat::Armor, 11.0)), 1, HELMET_AFFIXES, Sh::Helmet, true),
+    // Торс
+    base!("Стёганый гамбезон", "Гамбезон", Some(S::Chest), (2, 3), Some((Stat::Armor, 14.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    base!("Кольчужный хауберк", "Кольчуга", Some(S::Chest), (2, 3), Some((Stat::Armor, 26.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    base!("Латная кираса", "Кираса", Some(S::Chest), (2, 3), Some((Stat::Armor, 38.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    // Руки, ноги
+    base!("Латные рукавицы", "Рукавицы", Some(S::Hands), (2, 2), Some((Stat::Armor, 9.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    base!("Кожаные перчатки", "Перчатки", Some(S::Hands), (2, 2), Some((Stat::Armor, 4.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    base!("Латные поножи", "Поножи", Some(S::Legs), (2, 3), Some((Stat::Armor, 16.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    base!("Кожаные сапоги", "Сапоги", Some(S::Feet), (2, 2), Some((Stat::Armor, 5.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    // Украшения
+    base!("Серебряное кольцо", "Кольцо", Some(S::Ring), (1, 1), None, 1, JEWEL_AFFIXES, Sh::Small, true),
+    base!("Амулет с гербом", "Амулет", Some(S::Necklace), (1, 1), None, 1, JEWEL_AFFIXES, Sh::Small, true),
+    // Расходники и ценности
+    base!("Золотые монеты", "Золото", None, (1, 1), None, 100, &[], Sh::Coins, false),
+    base!("Бинт", "Бинт", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Целебное зелье", "Зелье", None, (1, 2), None, 3, &[], Sh::Flask, false),
+    base!("Рубин", "Рубин", None, (1, 1), None, 1, &[], Sh::Small, false),
+];
+
+/// Номер вида предмета в [`ITEM_BASES`].
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ItemBaseId(pub u16);
+
+impl ItemBaseId {
+    pub fn base(self) -> &'static ItemBase {
+        &ITEM_BASES[self.0 as usize]
+    }
+
+    pub fn by_name(name: &str) -> ItemBaseId {
+        ItemBaseId(ITEM_BASES.iter().position(|b| b.name == name).unwrap_or_else(|| panic!("нет предмета «{name}»")) as u16)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Экземпляр предмета
+// ---------------------------------------------------------------------------
+
+/// Уникальный номер экземпляра предмета (выдаёт сервер).
+pub type ItemUid = u64;
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct Item {
+    pub uid: ItemUid,
+    pub base: ItemBaseId,
+    pub quality: Quality,
+    /// Случайные свойства.
+    pub affixes: Vec<(Stat, f32)>,
+    pub count: u16,
+}
+
+impl Item {
+    pub fn info(&self) -> &'static ItemBase {
+        self.base.base()
+    }
+
+    pub fn size(&self) -> (u8, u8) {
+        self.info().size
+    }
+
+    pub fn display_name(&self) -> String {
+        let base = self.info();
+        if self.count > 1 { format!("{} ×{}", base.name, self.count) } else { base.name.to_string() }
+    }
+
+    /// Основная характеристика с учётом качества.
+    pub fn main_stat(&self) -> Option<(Stat, f32)> {
+        self.info().base_stat.map(|(s, v)| (s, (v * self.quality.stat_multiplier()).round()))
+    }
+
+    /// Все характеристики предмета: основная + случайные.
+    pub fn stats(&self) -> StatTotals {
+        let mut totals = StatTotals::default();
+        if let Some((s, v)) = self.main_stat() {
+            totals.add(s, v);
+        }
+        for (s, v) in &self.affixes {
+            totals.add(*s, *v);
+        }
+        totals
+    }
+
+    /// Приблизительная цена в золоте (пригодится торговцу).
+    pub fn value(&self) -> u32 {
+        let base = match self.info().shape {
+            ItemShape::Coins => return self.count as u32,
+            ItemShape::Small if self.info().slot.is_none() => 40,
+            ItemShape::Flask => 15,
+            _ => 20,
+        };
+        let q = [0.5, 1.0, 2.0, 4.0, 9.0, 20.0][self.quality.index()];
+        (base as f32 * q) as u32 * self.count.max(1) as u32
+    }
+
+    pub fn can_stack_with(&self, other: &Item) -> bool {
+        self.base == other.base && self.info().max_stack > 1 && self.quality == other.quality
+    }
+}
+
+/// Диапазон случайного свойства: значение при обычном качестве (мин, макс).
+fn affix_range(stat: Stat) -> (f32, f32) {
+    match stat {
+        Stat::BonusDamage => (1.0, 4.0),
+        Stat::MaxHealth => (4.0, 12.0),
+        Stat::Strength | Stat::Agility => (1.0, 3.0),
+        Stat::MoveSpeed => (1.0, 3.0),
+        Stat::ActionSpeed => (1.5, 4.0),
+        Stat::ParryWindow => (10.0, 30.0),
+        Stat::BlockStability => (4.0, 10.0),
+        Stat::HeadshotReduction => (4.0, 10.0),
+        Stat::Luck => (5.0, 15.0),
+        Stat::WeaponDamage | Stat::Armor => (0.0, 0.0),
+    }
+}
+
+/// Выдаёт уникальные номера предметов.
+#[derive(Debug, Default, Clone)]
+pub struct UidGen(pub ItemUid);
+
+impl UidGen {
+    pub fn next(&mut self) -> ItemUid {
+        self.0 += 1;
+        self.0
+    }
+}
+
+/// Создаёт предмет заданного вида и качества со случайными свойствами.
+pub fn roll_item(base_id: ItemBaseId, quality: Quality, count: u16, rng: &mut Rng, uids: &mut UidGen) -> Item {
+    let base = base_id.base();
+    let quality = if base.has_quality { quality } else { Quality::Common };
+    let mut pool: Vec<Stat> = base.affix_pool.to_vec();
+    let mut affixes = Vec::new();
+    for _ in 0..quality.affix_count().min(pool.len()) {
+        let stat = pool.swap_remove((rng.next_u64() % pool.len() as u64) as usize);
+        let (lo, hi) = affix_range(stat);
+        // Чем выше качество, тем выше нижняя граница — легендарки не бывают «пустыми».
+        let floor = (quality.index() as f32 - 2.0).max(0.0) * 0.12;
+        let t = rng.range_f32(floor.min(0.9), 1.0);
+        let value = (lo + (hi - lo) * t) * quality.stat_multiplier();
+        let value = if stat == Stat::ParryWindow { value.round() } else { (value * 10.0).round() / 10.0 };
+        affixes.push((stat, value));
+    }
+    Item { uid: uids.next(), base: base_id, quality, affixes, count: count.clamp(1, base.max_stack) }
+}
+
+// ---------------------------------------------------------------------------
+// Таблицы добычи
+// ---------------------------------------------------------------------------
+
+/// Какая таблица добычи у противника или сундука.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LootTableId {
+    /// Ополченец / пехотинец.
+    Footman,
+    /// Рыцарь.
+    Knight,
+    /// Капитан рыцарей (мини-босс).
+    KnightCaptain,
+    /// Сундук в замке.
+    Chest,
+}
+
+pub struct LootTable {
+    /// Сколько вещей (кроме золота) выпадает: от и до.
+    pub rolls: (u32, u32),
+    /// Возможные вещи и их веса.
+    pub entries: &'static [(&'static str, f32)],
+    /// Веса качеств: Ветхое..Легендарное.
+    pub quality_weights: [f32; 6],
+    /// Золото: от и до (0 — не выпадает).
+    pub gold: (u32, u32),
+}
+
+impl LootTableId {
+    pub fn table(self) -> LootTable {
+        match self {
+            LootTableId::Footman => LootTable {
+                rolls: (1, 2),
+                entries: &[
+                    ("Одноручный меч", 3.0),
+                    ("Булава", 3.0),
+                    ("Кинжал", 2.0),
+                    ("Баклер", 2.0),
+                    ("Шапель", 3.0),
+                    ("Стёганый гамбезон", 3.0),
+                    ("Кожаные перчатки", 2.0),
+                    ("Кожаные сапоги", 2.0),
+                    ("Бинт", 4.0),
+                ],
+                quality_weights: [30.0, 45.0, 18.0, 6.0, 1.0, 0.0],
+                gold: (2, 15),
+            },
+            LootTableId::Knight => LootTable {
+                rolls: (2, 3),
+                entries: &[
+                    ("Одноручный меч", 3.0),
+                    ("Длинный меч", 3.0),
+                    ("Боевой топор", 2.0),
+                    ("Алебарда", 1.5),
+                    ("Каплевидный щит", 3.0),
+                    ("Топфхельм", 3.0),
+                    ("Кольчужный хауберк", 3.0),
+                    ("Латная кираса", 1.5),
+                    ("Латные рукавицы", 2.0),
+                    ("Латные поножи", 2.0),
+                    ("Серебряное кольцо", 1.0),
+                    ("Целебное зелье", 2.0),
+                    ("Бинт", 2.0),
+                ],
+                quality_weights: [10.0, 40.0, 30.0, 14.0, 5.0, 1.0],
+                gold: (10, 40),
+            },
+            LootTableId::KnightCaptain => LootTable {
+                rolls: (3, 4),
+                entries: &[
+                    ("Длинный меч", 3.0),
+                    ("Алебарда", 2.0),
+                    ("Каплевидный щит", 2.0),
+                    ("Топфхельм", 2.0),
+                    ("Латная кираса", 3.0),
+                    ("Латные поножи", 2.0),
+                    ("Латные рукавицы", 2.0),
+                    ("Серебряное кольцо", 2.0),
+                    ("Амулет с гербом", 2.0),
+                    ("Рубин", 1.0),
+                    ("Целебное зелье", 2.0),
+                ],
+                quality_weights: [0.0, 15.0, 35.0, 30.0, 15.0, 5.0],
+                gold: (40, 100),
+            },
+            LootTableId::Chest => LootTable {
+                rolls: (1, 3),
+                entries: &[
+                    ("Серебряное кольцо", 2.0),
+                    ("Амулет с гербом", 2.0),
+                    ("Рубин", 2.0),
+                    ("Целебное зелье", 3.0),
+                    ("Бинт", 3.0),
+                    ("Кинжал", 1.0),
+                    ("Длинный меч", 1.0),
+                ],
+                quality_weights: [5.0, 35.0, 30.0, 20.0, 8.0, 2.0],
+                gold: (15, 60),
+            },
+        }
+    }
+}
+
+/// Выбрасывает качество по весам. `luck` (из характеристики «Удача», в процентах)
+/// сдвигает шансы к лучшему качеству.
+pub fn roll_quality(weights: [f32; 6], luck: f32, rng: &mut Rng) -> Quality {
+    let boost = 1.0 + luck.max(0.0) / 100.0;
+    let list: Vec<(Quality, f32)> = Quality::ALL.iter().map(|q| (*q, weights[q.index()] * boost.powi(q.index() as i32))).collect();
+    rng.weighted(&list).map(|i| list[i].0).unwrap_or(Quality::Common)
+}
+
+/// Бросок таблицы добычи: список предметов (золото — отдельной стопкой).
+pub fn roll_loot(table: LootTableId, luck: f32, rng: &mut Rng, uids: &mut UidGen) -> Vec<Item> {
+    let t = table.table();
+    let mut items = Vec::new();
+    let entries: Vec<(ItemBaseId, f32)> = t.entries.iter().map(|(n, w)| (ItemBaseId::by_name(n), *w)).collect();
+    for _ in 0..rng.range_u32(t.rolls.0, t.rolls.1) {
+        let Some(i) = rng.weighted(&entries) else { break };
+        let base = entries[i].0;
+        let quality = roll_quality(t.quality_weights, luck, rng);
+        let count = if base.base().max_stack > 1 { rng.range_u32(1, base.base().max_stack.min(3) as u32) as u16 } else { 1 };
+        items.push(roll_item(base, quality, count, rng, uids));
+    }
+    if t.gold.1 > 0 {
+        let gold = rng.range_u32(t.gold.0, t.gold.1) as u16;
+        items.push(roll_item(ItemBaseId::by_name("Золотые монеты"), Quality::Common, gold, rng, uids));
+    }
+    items
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_table_entries_exist() {
+        for t in [LootTableId::Footman, LootTableId::Knight, LootTableId::KnightCaptain, LootTableId::Chest] {
+            for (name, _) in t.table().entries {
+                ItemBaseId::by_name(name);
+            }
+        }
+    }
+
+    #[test]
+    fn affix_count_follows_quality() {
+        let mut rng = Rng::new(7);
+        let mut uids = UidGen::default();
+        let sword = ItemBaseId::by_name("Длинный меч");
+        for q in Quality::ALL {
+            let item = roll_item(sword, q, 1, &mut rng, &mut uids);
+            assert_eq!(item.affixes.len(), q.affix_count());
+            assert!(item.main_stat().unwrap().1 > 0.0);
+        }
+    }
+
+    #[test]
+    fn luck_improves_quality() {
+        let w = LootTableId::Knight.table().quality_weights;
+        let avg = |luck: f32| {
+            let mut rng = Rng::new(42);
+            (0..5000).map(|_| roll_quality(w, luck, &mut rng).index() as f32).sum::<f32>() / 5000.0
+        };
+        assert!(avg(100.0) > avg(0.0));
+    }
+
+    #[test]
+    fn loot_always_has_gold() {
+        let mut rng = Rng::new(1);
+        let mut uids = UidGen::default();
+        let loot = roll_loot(LootTableId::Knight, 0.0, &mut rng, &mut uids);
+        assert!(loot.iter().any(|i| i.info().shape == ItemShape::Coins));
+        assert!(loot.len() >= 3);
+    }
+}
