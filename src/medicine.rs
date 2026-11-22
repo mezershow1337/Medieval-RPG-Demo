@@ -528,6 +528,8 @@ pub fn remedy(item: &str) -> (Option<WoundCare>, Option<Intake>) {
         "Свинцовые белила" | "Сурик" => (None, i(Intake { verb: "Глотаете порошок", secs: 1.5, toxins: &[(Toxin::Lead, 1.0)], ..INTAKE })),
         "Щёлок" | "Серная вода" => (None, i(Intake { verb: "Отпиваете", secs: 1.5, toxins: &[(Toxin::Caustic, 1.0)], ..INTAKE })),
         "Нефть" => (None, i(Intake { verb: "Отпиваете нефть", secs: 1.5, toxins: &[(Toxin::Naphtha, 1.2)], ..INTAKE })),
+        // Неудачная варка: в лучшем случае ничего, в худшем — тошнит.
+        "Испорченное варево" => (None, i(Intake { verb: "Пьёте мутное варево", toxins: &[(Toxin::Copper, 0.2)], ..INTAKE })),
         _ => (None, None),
     }
 }
