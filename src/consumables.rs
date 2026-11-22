@@ -91,7 +91,7 @@ fn tick_consumables(
         };
         let f = &mut actor.fighter;
         // Удар по нам, своя атака или парирование прерывают применение.
-        let interrupted = !actor.alive || f.is_dead() || f.hp < u.last_hp - 0.01 || !matches!(f.action, Action::Idle);
+        let interrupted = !actor.alive || f.is_dead() || f.hp < u.last_hp - crate::knowledge::HIT_THRESHOLD || !matches!(f.action, Action::Idle);
         if interrupted {
             finished.push((*pid, false));
             continue;

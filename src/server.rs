@@ -43,6 +43,8 @@ pub struct Actor {
     move_mult: f32,
     /// В этом кадре выпущена стрела.
     shoot: bool,
+    /// Как раны, боль и яды меняют бойца (ведёт medicine_server.rs).
+    pub body_mods: crate::medicine::BodyMods,
 }
 
 /// Тело на земле. Предметы для обыска добавит система лута.
@@ -67,6 +69,8 @@ pub struct GameWorld {
     rng: Rng,
     arrows: Vec<Arrow>,
     next_arrow_id: u64,
+    /// Попадания по игрокам за кадр: из них medicine_server.rs делает раны.
+    pub hits_taken: Vec<crate::medicine::HitTaken>,
 }
 
 #[derive(Resource)]
@@ -107,6 +111,7 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         rng: Rng::new(now.as_nanos() as u64),
         arrows: Vec::new(),
         next_arrow_id: 1,
+        hits_taken: Vec::new(),
     };
     for spawn in npc::npc_spawns() {
         spawn_npc(&mut world, &level, spawn, 0.0);
@@ -146,6 +151,7 @@ fn spawn_npc(world: &mut GameWorld, level: &LevelColliders, spawn: NpcSpawn, now
             sweep: None,
             move_mult: 1.0,
             shoot: false,
+            body_mods: Default::default(),
         },
     );
 }
@@ -178,6 +184,7 @@ fn on_server_event(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>,
                     sweep: None,
                     move_mult: 1.0,
                     shoot: false,
+                    body_mods: Default::default(),
                 },
             );
         }
@@ -321,12 +328,13 @@ fn sync_equipment(world: &mut GameWorld, loot: Option<&LootWorld>) {
             }
         }
         let e = gear_effects(&stats);
-        actor.fighter.action_speed = e.action_speed;
+        let m = actor.body_mods;
+        actor.fighter.action_speed = e.action_speed * m.action_speed;
         actor.fighter.block_stability = e.block_stability;
-        actor.fighter.stamina_regen_mult = e.stamina_regen;
-        actor.fighter.max_stamina = e.max_stamina;
-        actor.fighter.stamina = actor.fighter.stamina.min(e.max_stamina);
-        actor.move_mult = e.move_mult;
+        actor.fighter.stamina_regen_mult = e.stamina_regen * m.stamina_regen;
+        actor.fighter.max_stamina = e.max_stamina * m.max_stamina;
+        actor.fighter.stamina = actor.fighter.stamina.min(actor.fighter.max_stamina);
+        actor.move_mult = e.move_mult * m.move_mult;
     }
 }
 
@@ -396,6 +404,11 @@ fn combat_tick(mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, le
     let now = time.elapsed_secs_f64();
     let loot = loot.as_deref();
     sync_equipment(&mut world, loot);
+    // Умершие не от удара (кровопотеря, яд, антонов огонь).
+    let dying: Vec<u64> = world.actors.iter().filter(|(_, a)| a.alive && a.fighter.hp <= 0.0).map(|(id, _)| *id).collect();
+    for id in dying {
+        kill(&mut server, &mut world, id, None, now);
+    }
 
     // 1. Таймеры и участок траектории удара за этот кадр.
     for actor in world.actors.values_mut() {
@@ -498,6 +511,11 @@ fn combat_tick(mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, le
             continue;
         }
         let outcome = combat::resolve_arrow(&mut t.fighter, shield_facing, head, damage);
+        if let HitOutcome::Damage { amount, head, .. } = outcome
+            && t.kind == ActorKind::Player
+        {
+            world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon: combat::WeaponKind::Bow, amount, head });
+        }
         server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: arrow.owner, target: tid, outcome, at: point.into() }));
         if let HitOutcome::Damage { killed: true, .. } = outcome {
             kill(&mut server, &mut world, tid, Some(arrow.owner), now);
@@ -531,6 +549,12 @@ fn combat_tick(mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, le
                 world.actors.insert(aid, attacker);
                 let Some(outcome) = outcome else { continue };
                 debug!("Попадание {aid} -> {tid}: {outcome:?}");
+                if let HitOutcome::Damage { amount, head, .. } = outcome
+                    && world.actors.get(&tid).is_some_and(|t| t.kind == ActorKind::Player)
+                {
+                    let weapon = world.actors.get(&aid).map_or(combat::WeaponKind::Spatha, |a| a.fighter.weapon);
+                    world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon, amount, head });
+                }
                 server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: aid, target: tid, outcome, at: point.into() }));
                 if let HitOutcome::Damage { killed: true, .. } = outcome {
                     kill(&mut server, &mut world, tid, Some(aid), now);

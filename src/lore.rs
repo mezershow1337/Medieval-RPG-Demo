@@ -357,14 +357,16 @@ pub enum Technique {
     Incendiary,
     Glassblowing,
     Pottery,
+    /// Цельс, книга VII: вырезать или вытолкнуть наконечник, не порвав жил.
+    ArrowExtraction,
 }
 
 impl Technique {
-    pub const ALL: [Technique; 20] = {
+    pub const ALL: [Technique; 21] = {
         use Technique::*;
         [
             Gathering, Poultice, WoundWashing, Decoction, Dosage, Maceration, Salve, Oxymel, Theriac, Fermentation, Distillation, Sublimation, Calcination, Mordanting,
-            VatDyeing, Ink, Soap, Incendiary, Glassblowing, Pottery,
+            VatDyeing, Ink, Soap, Incendiary, Glassblowing, Pottery, ArrowExtraction,
         ]
     };
 
@@ -391,6 +393,7 @@ impl Technique {
             Incendiary => "Зажигательные смеси",
             Glassblowing => "Выдувание стекла",
             Pottery => "Гончарное дело",
+            ArrowExtraction => "Извлечение стрел",
         }
     }
 
@@ -417,6 +420,7 @@ impl Technique {
             Incendiary => "Смола, сера, ладан и пакля в глиняном горшке; с нефтью горит сильнее.",
             Glassblowing => "Выдувать флаконы, реторты и амбики из стекла.",
             Pottery => "Лепить и обжигать горшки и тигли.",
+            ArrowExtraction => "Расширить рану, вынуть наконечник по ходу древка или вытолкнуть насквозь, не порвав жил; потом промыть и перевязать.",
         }
     }
 
@@ -424,7 +428,7 @@ impl Technique {
         use Technique::*;
         match self {
             Gathering | Maceration => Skill::Herbalism,
-            Poultice | WoundWashing | Dosage | Theriac => Skill::Medicine,
+            Poultice | WoundWashing | Dosage | Theriac | ArrowExtraction => Skill::Medicine,
             Decoction | Salve | Oxymel => Skill::Herbalism,
             _ => Skill::Alchemy,
         }
@@ -468,7 +472,7 @@ impl Lore {
                 Poultice | WoundWashing => 0.5,
                 Gathering | Decoction | Maceration | Oxymel | Fermentation | Ink => 1.0,
                 Salve | Calcination | Mordanting | Soap => 2.0,
-                Dosage | Incendiary | VatDyeing => 3.0,
+                Dosage | Incendiary | VatDyeing | ArrowExtraction => 3.0,
                 Distillation | Sublimation => 4.0,
                 Theriac | Pottery => 6.0,
                 Glassblowing => 10.0,
@@ -636,7 +640,7 @@ impl Book {
                 v
             }
             Book::Celsus => {
-                let mut v = vec![Lore::Technique(WoundWashing), Lore::Technique(Poultice), Lore::Technique(Salve), Lore::Technique(Dosage)];
+                let mut v = vec![Lore::Technique(WoundWashing), Lore::Technique(Poultice), Lore::Technique(Salve), Lore::Technique(Dosage), Lore::Technique(ArrowExtraction)];
                 v.extend(props(&[Yarrow, Plantain, Frankincense, Alum, Myrrh, Comfrey]));
                 v
             }
@@ -773,6 +777,7 @@ impl Teacher {
                 v.push(t(Decoction));
                 v.push(t(Dosage));
                 v.extend(props(&[Poppy, Henbane]));
+                v.push(t(ArrowExtraction));
                 v.push(t(Salve));
                 v.extend(props(&[Myrrh, Frankincense, Alum]));
                 v.push(t(Oxymel));
@@ -812,6 +817,8 @@ impl Teacher {
                 v.extend(props(&[Licorice, Rhubarb, MuttonFat]));
                 v.extend(idp(&[Wormwood, Thyme]));
                 v.push(t(Salve));
+                // Степняки живут луком: стрелу из раны вынимают лучше городских врачей.
+                v.push(t(ArrowExtraction));
             }
         }
         v
