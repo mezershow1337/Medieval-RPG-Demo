@@ -440,7 +440,14 @@ fn receive_lore_messages(mut server: ResMut<RenetServer>, game: Res<GameWorld>, 
                     let Some(inv) = loot.inventories.get(&pid) else { continue };
                     match check_brew(inv, vessel, &spec).and_then(|v| need_fire(&spec, feet).map(|_| v)) {
                         Ok(v) => {
-                            let verb = format!("{}: {}", v.name(), if spec.heat == brewing::Heat::None { "настаиваете" } else { "варите" });
+                            let what = match v {
+                                Vessel::Mortar => "растираете",
+                                Vessel::Crucible => "обжигаете",
+                                v if v.still() => "перегоняете",
+                                _ if spec.heat == brewing::Heat::None => "настаиваете",
+                                _ => "варите",
+                            };
+                            let verb = format!("{}: {what}", v.name());
                             let secs = spec.real_secs();
                             start(&mut server, &mut world, pid, Task::Brew { vessel, spec }, verb, 0.0, secs, feet, hp);
                         }
@@ -798,7 +805,8 @@ fn finish_brewing(
         }
     };
     let flasks = count_named(inv, brewing::FLASK).min(u16::MAX as u32) as u16;
-    let result = brewing::brew(spec, v, k, flasks);
+    let roll = bodies.rng.f32();
+    let result = brewing::brew(spec, v, k, flasks, roll);
     // Ничего не вышло (например, некуда разлить) — всё остаётся в сумке.
     if result.product.is_none() && !result.vessel_broken {
         notice(server, pid, result.text);
@@ -808,7 +816,7 @@ fn finish_brewing(
         take_named(inv, name, *n as u32);
     }
     take_named(inv, brewing::FLASK, result.flasks_used as u32);
-    if result.vessel_broken {
+    if result.vessel_broken || result.vessel_used {
         let _ = inv.take(vessel);
     }
     if let Some((name, count, q)) = result.product
@@ -824,6 +832,10 @@ fn finish_brewing(
     }
     if result.burn > 0.0 {
         bodies.body(pid).burn(result.burn);
+        bodies.touch(pid);
+    }
+    if let Some((toxin, doses)) = result.poison {
+        bodies.body(pid).poison(toxin, doses);
         bodies.touch(pid);
     }
     if let Some(t) = result.technique {

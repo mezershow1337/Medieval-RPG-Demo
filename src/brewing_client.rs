@@ -50,10 +50,17 @@ impl BrewState {
     pub fn open_vessel(&mut self, uid: ItemUid, vessel: Vessel) {
         if self.open.map(|o| o.0) != Some(uid) {
             self.counts.clear();
-            if vessel == Vessel::Mortar {
+            if !vessel.takes_water() {
                 self.water = 0;
-                self.heat = Heat::None;
-                self.hours = 0.25;
+            }
+            match vessel {
+                Vessel::Mortar => {
+                    self.heat = Heat::None;
+                    self.hours = 0.25;
+                }
+                Vessel::Crucible => self.heat = Heat::High,
+                v if v.still() => self.heat = Heat::Medium,
+                _ => {}
             }
         }
         self.open = Some((uid, vessel));
@@ -266,12 +273,14 @@ fn rebuild_brew_panel(
                 r.spawn(label(fonts, format!("{shown} · {:.0} др.", brewing::mass(name).unwrap_or(0.0)), 14.0, TEXT, false));
             });
         }
-        if vessel != Vessel::Mortar {
+        if vessel.takes_water() {
             row(p).with_children(|r| {
                 button(r, fonts, "−", BrewAction::WaterDown, false);
                 r.spawn(label(fonts, format!("Вода: {} кот. ({:.0} др.)", state.water, water), 14.0, TEXT, true));
                 button(r, fonts, "+", BrewAction::WaterUp, false);
             });
+        }
+        if vessel != Vessel::Mortar {
             row(p).with_children(|r| {
                 r.spawn(label(fonts, "Огонь:", 14.0, TEXT, true));
                 for h in Heat::ALL {
@@ -293,11 +302,21 @@ fn rebuild_brew_panel(
             p.spawn(label(fonts, parts.join(", "), 13.0, DIM, false));
         }
         p.spawn(label(fonts, format!("Пустых флаконов: {flasks} (жидкое разливают во флаконы)"), 13.0, DIM, false));
+        if vessel.glass() {
+            p.spawn(label(fonts, "Стекло боится сильного огня: может лопнуть", 13.0, DIM, false));
+        }
         if state.heat != Heat::None && vessel != Vessel::Mortar && !crate::level::hearths().is_empty() {
             p.spawn(label(fonts, "На огне варят у очага или костра (в домах, мастерских, у костров за стенами)", 13.0, DIM, false));
         }
         row(p).with_children(|r| {
-            button(r, fonts, if state.heat == Heat::None || vessel == Vessel::Mortar { "Начать" } else { "Варить" }, BrewAction::Start, !state.counts.is_empty());
+            let verb = match vessel {
+                Vessel::Mortar => "Растереть",
+                Vessel::Crucible => "Обжигать",
+                v if v.still() => "Перегонять",
+                _ if state.heat == Heat::None => "Начать",
+                _ => "Варить",
+            };
+            button(r, fonts, verb, BrewAction::Start, !state.counts.is_empty());
             r.spawn(label(fonts, format!("≈ {:.0} с", BrewSpec { items: vec![], water: 0, heat: state.heat, hours: state.hours }.real_secs()), 13.0, DIM, false));
         });
         let hints = brewing::known_hints(&knowledge.0);
