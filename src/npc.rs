@@ -35,18 +35,19 @@ pub struct NpcSpawn {
 
 /// Где стоят враги в начале и куда возрождаются.
 pub fn npc_spawns() -> Vec<NpcSpawn> {
-    use std::f32::consts::PI;
-    vec![
-        // Тренировочная площадка во дворе.
-        NpcSpawn { kind: ActorKind::Swordsman, pos: Vec3::new(-15.0, 0.0, 0.0), yaw: -PI / 2.0 },
-        NpcSpawn { kind: ActorKind::Swordsman, pos: Vec3::new(-12.0, 0.0, 5.0), yaw: -PI / 2.0 },
-        // Двор у конюшни.
-        NpcSpawn { kind: ActorKind::Swordsman, pos: Vec3::new(14.0, 0.0, -3.0), yaw: PI / 2.0 },
-        // Тронный зал: два стражника и тяжёлый рыцарь у трона.
-        NpcSpawn { kind: ActorKind::Swordsman, pos: Vec3::new(-3.0, 0.0, -14.0), yaw: PI },
-        NpcSpawn { kind: ActorKind::Swordsman, pos: Vec3::new(3.0, 0.0, -14.0), yaw: PI },
-        NpcSpawn { kind: ActorKind::HeavyKnight, pos: Vec3::new(0.0, 0.0, -21.0), yaw: PI },
-    ]
+    // Места берём из уровня: пять мечников (двор, конюшня, неф собора) и тяжёлый рыцарь перед хорами.
+    // Все смотрят в сторону точки появления игроков.
+    let hints = crate::level::npc_spawn_hints();
+    let last = hints.len().saturating_sub(1);
+    hints
+        .into_iter()
+        .enumerate()
+        .map(|(i, pos)| {
+            let kind = if i == last { ActorKind::HeavyKnight } else { ActorKind::Swordsman };
+            let (dx, dz) = (0.0 - pos.x, 32.0 - pos.z);
+            NpcSpawn { kind, pos, yaw: (-dx).atan2(-dz) }
+        })
+        .collect()
 }
 
 pub fn fighter_for(kind: ActorKind) -> Fighter {
@@ -301,11 +302,11 @@ mod tests {
     #[test]
     fn knight_approaches_and_hits_player() {
         let level = crate::level::level_colliders();
-        let spawn = NpcSpawn { kind: ActorKind::Swordsman, pos: Vec3::new(0.0, 0.0, 10.0), yaw: 0.0 };
+        let spawn = NpcSpawn { kind: ActorKind::Swordsman, pos: Vec3::new(10.0, 0.0, 0.0), yaw: 0.0 };
         let mut brain = Brain::new(&spawn);
-        let mut pose = Pose { feet: Vec3::new(0.0, 0.0, 10.0), yaw: 0.0, pitch: 0.0, crouching: false };
+        let mut pose = Pose { feet: Vec3::new(10.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, crouching: false };
         let mut knight = fighter_for(ActorKind::Swordsman);
-        let player_pose = Pose { feet: Vec3::new(0.0, 0.0, 16.0), yaw: 0.0, pitch: 0.0, crouching: false };
+        let player_pose = Pose { feet: Vec3::new(10.0, 0.0, 6.0), yaw: 0.0, pitch: 0.0, crouching: false };
         let mut player = fighter_for(ActorKind::Player);
         let mut rng = Rng::new(42);
         let dt = 1.0 / 60.0;
@@ -330,14 +331,14 @@ mod tests {
     #[test]
     fn player_fights_swordsman() {
         let level = crate::level::level_colliders();
-        let spawn = NpcSpawn { kind: ActorKind::Swordsman, pos: Vec3::new(0.0, 0.0, 10.0), yaw: 0.0 };
+        let spawn = NpcSpawn { kind: ActorKind::Swordsman, pos: Vec3::new(10.0, 0.0, 0.0), yaw: 0.0 };
         let mut brain = Brain::new(&spawn);
-        let mut npc_pose = Pose { feet: Vec3::new(0.0, 0.0, 10.0), yaw: 0.0, pitch: 0.0, crouching: false };
+        let mut npc_pose = Pose { feet: Vec3::new(10.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, crouching: false };
         let mut knight = fighter_for(ActorKind::Swordsman);
         let mut player = fighter_for(ActorKind::Player);
         player.hp = 100_000.0; // игрок бессмертен в этом тесте
         player.max_hp = 100_000.0;
-        let mut player_pose = Pose { feet: Vec3::new(0.0, 0.0, 11.5), yaw: 0.0, pitch: 0.0, crouching: false };
+        let mut player_pose = Pose { feet: Vec3::new(10.0, 0.0, 1.5), yaw: 0.0, pitch: 0.0, crouching: false };
         let mut rng = Rng::new(7);
         let dt = 1.0 / 60.0;
         let (mut damage, mut blocked, mut parried) = (0, 0, 0);

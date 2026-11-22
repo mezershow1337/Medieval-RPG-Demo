@@ -5,7 +5,7 @@ use crate::fight::{self, CombatFeedback, LocalFighter};
 use crate::player::{LocalPlayer, PlayerPlugin, spawn_local_player};
 use crate::protocol::*;
 use crate::rig::{self, CharacterModels, NeedsRig, NeedsShield, NeedsWeapon, Outfit, PoseInput, RigPose};
-use crate::{hud, level};
+use crate::{graphics, hud, level};
 use bevy::prelude::*;
 use bevy_renet::netcode::{ClientAuthentication, NetcodeClientPlugin, NetcodeClientTransport, NetcodeErrorEvent};
 use bevy_renet::{RenetClient, RenetClientPlugin, client_connected};
@@ -107,7 +107,7 @@ pub fn run(server_addr: SocketAddr) {
             primary_window: Some(Window { title: "Medieval RPG — прототип".into(), ..default() }),
             ..default()
         }))
-        .add_plugins((RenetClientPlugin, NetcodeClientPlugin, PlayerPlugin, fight::FightPlugin, hud::HudPlugin))
+        .add_plugins((RenetClientPlugin, NetcodeClientPlugin, PlayerPlugin, fight::FightPlugin, hud::HudPlugin, graphics::GraphicsPlugin))
         .add_plugins(rig::RigPlugin)
         .insert_resource(RenetClient::new(connection_config()))
         .insert_resource(transport)
