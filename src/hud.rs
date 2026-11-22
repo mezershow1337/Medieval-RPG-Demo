@@ -24,6 +24,8 @@ struct BannerText;
 struct FlashOverlay;
 #[derive(Component)]
 struct TargetText;
+#[derive(Component)]
+struct StaminaFill;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
@@ -63,7 +65,7 @@ fn setup_hud(mut commands: Commands) {
         .spawn(Node {
             width: percent(100),
             position_type: PositionType::Absolute,
-            bottom: px(40),
+            bottom: px(96),
             justify_content: JustifyContent::Center,
             ..default()
         })
@@ -78,6 +80,15 @@ fn setup_hud(mut commands: Commands) {
                     ));
                 });
         });
+    // Выносливость — тонкая полоска под здоровьем.
+    commands
+        .spawn(Node { width: percent(100), position_type: PositionType::Absolute, bottom: px(84), justify_content: JustifyContent::Center, ..default() })
+        .with_children(|p| {
+            p.spawn((Node { width: px(300), height: px(7), border: UiRect::all(px(1)), ..default() }, BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.8)), BackgroundColor(Color::srgba(0.05, 0.05, 0.0, 0.5))))
+                .with_children(|bar| {
+                    bar.spawn((StaminaFill, Node { width: percent(100), height: percent(100), ..default() }, BackgroundColor(Color::srgb(0.85, 0.75, 0.25))));
+                });
+        });
     commands.spawn((
         StatusText,
         text("Connecting...", 16.0, Color::WHITE),
@@ -85,7 +96,7 @@ fn setup_hud(mut commands: Commands) {
     ));
     commands.spawn((
         text(
-            "Click - capture mouse | Esc - release\nWASD - move | Shift - sprint | Space - jump | Ctrl/C - crouch\nLMB - attack | RMB - parry (just before the enemy blade lands)",
+            "Click - capture mouse | Esc - release\nWASD - move | Shift - sprint (uses stamina) | Space - jump | Ctrl/C - crouch\nLMB - attack | RMB (hold) - guard: parry with weapon / block with shield\nAfter a successful parry press LMB for a fast riposte",
             14.0,
             Color::srgba(1.0, 1.0, 1.0, 0.75),
         ),
@@ -121,11 +132,17 @@ fn update_status(
 fn update_health(
     local: Query<&LocalFighter>,
     flash: Res<DamageFlash>,
-    mut fill: Single<&mut Node, With<HealthFill>>,
+    mut fill: Single<&mut Node, (With<HealthFill>, Without<StaminaFill>)>,
     mut label: Single<&mut Text, With<HealthText>>,
-    mut overlay: Single<&mut BackgroundColor, With<FlashOverlay>>,
+    mut overlay: Single<&mut BackgroundColor, (With<FlashOverlay>, Without<StaminaFill>)>,
+    mut stamina: Single<(&mut Node, &mut BackgroundColor), (With<StaminaFill>, Without<HealthFill>)>,
 ) {
     if let Ok(f) = local.single() {
+        let s = (f.fighter.stamina / f.fighter.max_stamina.max(1.0)).clamp(0.0, 1.0);
+        let (node, color) = &mut *stamina;
+        node.width = percent(s * 100.0);
+        // Почти без сил — полоска краснеет.
+        color.0 = if s < 0.2 { Color::srgb(0.85, 0.3, 0.15) } else { Color::srgb(0.85, 0.75, 0.25) };
         let k = (f.fighter.hp / f.fighter.max_hp).clamp(0.0, 1.0);
         fill.width = percent(k * 100.0);
         label.0 = format!("{:.0} / {:.0}", f.fighter.hp, f.fighter.max_hp);
@@ -148,8 +165,14 @@ fn update_banner(banner: Res<Banner>, mut q: Single<(&mut Text, &mut TextColor),
 fn update_target(
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
     remotes: Query<(&RemoteActor, &Transform)>,
-    mut label: Single<&mut Text, With<TargetText>>,
+    mut label: Single<(&mut Text, &mut TextFont), With<TargetText>>,
+    fonts: Option<Res<crate::inventory_ui::UiFonts>>,
 ) {
+    // Названия врагов по-русски — нужен шрифт с кириллицей.
+    let (label, font) = &mut *label;
+    if let Some(fonts) = fonts {
+        font.font = fonts.regular.clone().into();
+    }
     let Ok(cam) = camera.single() else { return };
     let eye = cam.translation();
     let fwd = cam.forward();
@@ -164,11 +187,7 @@ fn update_target(
         .min_by(|a, b| a.1.total_cmp(&b.1));
     label.0 = match best {
         Some((r, _)) => {
-            let name = match r.kind {
-                ActorKind::Player => "Player",
-                ActorKind::Swordsman => "Knight (sword & shield)",
-                ActorKind::HeavyKnight => "Heavy Knight",
-            };
+            let name = r.kind.name_ru();
             format!("{name}  {:.0} / {:.0}", r.fighter.hp, r.fighter.max_hp)
         }
         None => String::new(),
