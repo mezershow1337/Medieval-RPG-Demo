@@ -860,115 +860,117 @@ def bake_and_export(key, pose, bake_size=BAKE_SIZE, squash=1.0):
     scene = bpy.context.scene
     opaque = [o for o in PARTS if not o["glass"]]
     glass = [o for o in PARTS if o["glass"]]
-    bpy.ops.object.select_all(action="DESELECT")
-    for o in opaque:
-        o.select_set(True)
-    bpy.context.view_layer.objects.active = opaque[0]
-    if len(opaque) > 1:
-        bpy.ops.object.join()
-    body = bpy.context.view_layer.objects.active
-    body.name = key
-    me = body.data
-    # UV для запекания.
-    for uv in list(me.uv_layers):
-        me.uv_layers.remove(uv)
-    me.uv_layers.new(name="UVMap")
-    bpy.ops.object.mode_set(mode="EDIT")
-    bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project(angle_limit=math.radians(55), island_margin=0.006, area_weight=0.0, correct_aspect=True, scale_to_bounds=False)
-    bpy.ops.uv.pack_islands(margin=0.004, rotate=True)
-    bpy.ops.object.mode_set(mode="OBJECT")
+    body = None
+    if opaque:  # бывают предметы целиком из стекла
+        bpy.ops.object.select_all(action="DESELECT")
+        for o in opaque:
+            o.select_set(True)
+        bpy.context.view_layer.objects.active = opaque[0]
+        if len(opaque) > 1:
+            bpy.ops.object.join()
+        body = bpy.context.view_layer.objects.active
+        body.name = key
+        me = body.data
+        # UV для запекания.
+        for uv in list(me.uv_layers):
+            me.uv_layers.remove(uv)
+        me.uv_layers.new(name="UVMap")
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.uv.smart_project(angle_limit=math.radians(55), island_margin=0.006, area_weight=0.0, correct_aspect=True, scale_to_bounds=False)
+        bpy.ops.uv.pack_islands(margin=0.004, rotate=True)
+        bpy.ops.object.mode_set(mode="OBJECT")
 
-    imgs = {}
-    for kind in ("color", "rough", "metal", "normal"):
-        img = bpy.data.images.new(f"{key}_{kind}", bake_size, bake_size, alpha=False, float_buffer=(kind == "normal"))
-        if kind != "color":
-            img.colorspace_settings.name = "Non-Color"
-        imgs[kind] = img
+        imgs = {}
+        for kind in ("color", "rough", "metal", "normal"):
+            img = bpy.data.images.new(f"{key}_{kind}", bake_size, bake_size, alpha=False, float_buffer=(kind == "normal"))
+            if kind != "color":
+                img.colorspace_settings.name = "Non-Color"
+            imgs[kind] = img
 
-    mats = list(me.materials)
-    tex_nodes = []
-    for m in mats:
-        t = m.node_tree.nodes.new("ShaderNodeTexImage")
-        m.node_tree.nodes.active = t
-        tex_nodes.append((m, t))
+        mats = list(me.materials)
+        tex_nodes = []
+        for m in mats:
+            t = m.node_tree.nodes.new("ShaderNodeTexImage")
+            m.node_tree.nodes.active = t
+            tex_nodes.append((m, t))
 
-    scene.cycles.samples = 16
-    scene.render.bake.margin = 6
-    bpy.ops.object.select_all(action="DESELECT")
-    body.select_set(True)
-    bpy.context.view_layer.objects.active = body
+        scene.cycles.samples = 16
+        scene.render.bake.margin = 6
+        bpy.ops.object.select_all(action="DESELECT")
+        body.select_set(True)
+        bpy.context.view_layer.objects.active = body
 
-    def bake_input(kind, input_name):
-        saved = []
-        for m, t in tex_nodes:
-            t.image = imgs[kind]
-            nt = m.node_tree
-            bsdf = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
-            out = next(n for n in nt.nodes if n.type == "OUTPUT_MATERIAL")
-            src = _socket_source(nt, bsdf.inputs[input_name])
-            em = nt.nodes.new("ShaderNodeEmission")
-            if src is not None:
-                if src.type in ("VALUE", "INT"):
-                    nt.links.new(src, em.inputs["Color"])
+        def bake_input(kind, input_name):
+            saved = []
+            for m, t in tex_nodes:
+                t.image = imgs[kind]
+                nt = m.node_tree
+                bsdf = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
+                out = next(n for n in nt.nodes if n.type == "OUTPUT_MATERIAL")
+                src = _socket_source(nt, bsdf.inputs[input_name])
+                em = nt.nodes.new("ShaderNodeEmission")
+                if src is not None:
+                    if src.type in ("VALUE", "INT"):
+                        nt.links.new(src, em.inputs["Color"])
+                    else:
+                        nt.links.new(src, em.inputs["Color"])
                 else:
-                    nt.links.new(src, em.inputs["Color"])
-            else:
-                v = bsdf.inputs[input_name].default_value
-                em.inputs["Color"].default_value = (*v[:3], 1.0) if hasattr(v, "__len__") else (v, v, v, 1.0)
-            old = _socket_source(nt, out.inputs["Surface"])
-            nt.links.new(em.outputs["Emission"], out.inputs["Surface"])
-            saved.append((nt, out, old, em))
-        bpy.ops.object.bake(type="EMIT")
-        for nt, out, old, em in saved:
-            nt.links.new(old, out.inputs["Surface"])
-            nt.nodes.remove(em)
+                    v = bsdf.inputs[input_name].default_value
+                    em.inputs["Color"].default_value = (*v[:3], 1.0) if hasattr(v, "__len__") else (v, v, v, 1.0)
+                old = _socket_source(nt, out.inputs["Surface"])
+                nt.links.new(em.outputs["Emission"], out.inputs["Surface"])
+                saved.append((nt, out, old, em))
+            bpy.ops.object.bake(type="EMIT")
+            for nt, out, old, em in saved:
+                nt.links.new(old, out.inputs["Surface"])
+                nt.nodes.remove(em)
 
-    bake_input("color", "Base Color")
-    bake_input("rough", "Roughness")
-    bake_input("metal", "Metallic")
-    for m, t in tex_nodes:
-        t.image = imgs["normal"]
-    scene.cycles.samples = 4
-    bpy.ops.object.bake(type="NORMAL", normal_space="TANGENT")
-    for m, t in tex_nodes:
-        m.node_tree.nodes.remove(t)
+        bake_input("color", "Base Color")
+        bake_input("rough", "Roughness")
+        bake_input("metal", "Metallic")
+        for m, t in tex_nodes:
+            t.image = imgs["normal"]
+        scene.cycles.samples = 4
+        bpy.ops.object.bake(type="NORMAL", normal_space="TANGENT")
+        for m, t in tex_nodes:
+            m.node_tree.nodes.remove(t)
 
-    # Упаковка: ORM (G — шероховатость, B — металл) как ждёт glTF.
-    import numpy as np
+        # Упаковка: ORM (G — шероховатость, B — металл) как ждёт glTF.
+        import numpy as np
 
-    def px(img):
-        a = np.empty(bake_size * bake_size * 4, dtype=np.float32)
-        img.pixels.foreach_get(a)
-        return a.reshape(-1, 4)
+        def px(img):
+            a = np.empty(bake_size * bake_size * 4, dtype=np.float32)
+            img.pixels.foreach_get(a)
+            return a.reshape(-1, 4)
 
-    rough = px(imgs["rough"])[:, 0]
-    metal = px(imgs["metal"])[:, 0]
-    orm = bpy.data.images.new(f"{key}_orm", bake_size, bake_size, alpha=False)
-    orm.colorspace_settings.name = "Non-Color"
-    arr = np.stack([np.ones_like(rough), rough, metal, np.ones_like(rough)], -1).astype(np.float32)
-    orm.pixels.foreach_set(arr.ravel())
-    nrm8 = bpy.data.images.new(f"{key}_nrm", bake_size, bake_size, alpha=False)
-    nrm8.colorspace_settings.name = "Non-Color"
-    nrm8.pixels.foreach_set(px(imgs["normal"]).ravel())
+        rough = px(imgs["rough"])[:, 0]
+        metal = px(imgs["metal"])[:, 0]
+        orm = bpy.data.images.new(f"{key}_orm", bake_size, bake_size, alpha=False)
+        orm.colorspace_settings.name = "Non-Color"
+        arr = np.stack([np.ones_like(rough), rough, metal, np.ones_like(rough)], -1).astype(np.float32)
+        orm.pixels.foreach_set(arr.ravel())
+        nrm8 = bpy.data.images.new(f"{key}_nrm", bake_size, bake_size, alpha=False)
+        nrm8.colorspace_settings.name = "Non-Color"
+        nrm8.pixels.foreach_set(px(imgs["normal"]).ravel())
 
-    baked, nb, bsdf = new_material(f"{key}_baked")
-    t_col = nb.new("ShaderNodeTexImage")
-    t_col.image = imgs["color"]
-    nb.link(t_col.outputs["Color"], bsdf.inputs["Base Color"])
-    t_orm = nb.new("ShaderNodeTexImage")
-    t_orm.image = orm
-    sep = nb.new("ShaderNodeSeparateColor")
-    nb.link(t_orm.outputs["Color"], sep.inputs["Color"])
-    nb.link(sep.outputs["Green"], bsdf.inputs["Roughness"])
-    nb.link(sep.outputs["Blue"], bsdf.inputs["Metallic"])
-    t_n = nb.new("ShaderNodeTexImage")
-    t_n.image = nrm8
-    nm = nb.new("ShaderNodeNormalMap")
-    nb.link(t_n.outputs["Color"], nm.inputs["Color"])
-    nb.link(nm.outputs["Normal"], bsdf.inputs["Normal"])
-    me.materials.clear()
-    me.materials.append(baked)
+        baked, nb, bsdf = new_material(f"{key}_baked")
+        t_col = nb.new("ShaderNodeTexImage")
+        t_col.image = imgs["color"]
+        nb.link(t_col.outputs["Color"], bsdf.inputs["Base Color"])
+        t_orm = nb.new("ShaderNodeTexImage")
+        t_orm.image = orm
+        sep = nb.new("ShaderNodeSeparateColor")
+        nb.link(t_orm.outputs["Color"], sep.inputs["Color"])
+        nb.link(sep.outputs["Green"], bsdf.inputs["Roughness"])
+        nb.link(sep.outputs["Blue"], bsdf.inputs["Metallic"])
+        t_n = nb.new("ShaderNodeTexImage")
+        t_n.image = nrm8
+        nm = nb.new("ShaderNodeNormalMap")
+        nb.link(t_n.outputs["Color"], nm.inputs["Color"])
+        nb.link(nm.outputs["Normal"], bsdf.inputs["Normal"])
+        me.materials.clear()
+        me.materials.append(baked)
 
     # Стекло: простой полупрозрачный материал.
     for g in glass:
@@ -987,7 +989,7 @@ def bake_and_export(key, pose, bake_size=BAKE_SIZE, squash=1.0):
         g.data.materials.append(gm)
 
     # Поза на земле.
-    allobj = [body] + glass
+    allobj = ([body] if body else []) + glass
     if pose == "flat":
         for o in allobj:
             o.data.transform(Matrix.Rotation(math.radians(-90), 4, "X"))
