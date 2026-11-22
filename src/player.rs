@@ -80,9 +80,10 @@ pub fn grab_cursor(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     loot: Option<Res<crate::loot_client::LootState>>,
+    trade: Option<Res<crate::trade_client::TradeState>>,
 ) {
-    // Пока открыт инвентарь, клики принадлежат окну, а не бою.
-    if loot.is_some_and(|l| l.ui_open) {
+    // Пока открыт инвентарь или окно торговли, клики принадлежат окну, а не бою.
+    if loot.is_some_and(|l| l.ui_open) || trade.is_some_and(|t| t.window_open()) {
         return;
     }
     if mouse.just_pressed(MouseButton::Left) {

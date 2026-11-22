@@ -160,7 +160,7 @@ impl LootWorld {
             self.make("Стёганый гамбезон", Quality::Common, 1),
             self.make("Кожаные сапоги", Quality::Poor, 1),
             self.make("Бинт", Quality::Common, 3),
-            self.make("Золотые монеты", Quality::Common, 10),
+            self.make("Фоллис", Quality::Common, 30),
         ];
         inv.fill(kit, true);
         inv

@@ -341,10 +341,27 @@ pub const ITEM_BASES: &[ItemBase] = &[
     base!("Серебряное кольцо", "Кольцо", Some(S::Ring), (1, 1), None, 1, JEWEL_AFFIXES, Sh::Small, true),
     base!("Амулет с гербом", "Амулет", Some(S::Necklace), (1, 1), None, 1, JEWEL_AFFIXES, Sh::Small, true),
     // Расходники и ценности
-    base!("Золотые монеты", "Золото", None, (1, 1), None, 100, &[], Sh::Coins, false),
+    // Золотой солид (номисма) Анастасия: 1/72 римского фунта золота, 4,5 г. См. economy.rs.
+    base!("Солид", "Солид", None, (1, 1), None, 100, &[], Sh::Coins, false),
     base!("Бинт", "Бинт", None, (1, 1), None, 5, &[], Sh::Small, false),
     base!("Целебное зелье", "Зелье", None, (1, 2), None, 3, &[], Sh::Flask, false),
     base!("Рубин", "Рубин", None, (1, 1), None, 1, &[], Sh::Small, false),
+    // --- Торговля (economy.rs, trade.rs): монеты реформы Анастасия 498 г. и товары Херсона ---
+    base!("Тремисс", "Тремисс", None, (1, 1), None, 100, &[], Sh::Coins, false),
+    base!("Фоллис", "Фоллис", None, (1, 1), None, 100, &[], Sh::Coins, false),
+    base!("Декануммий", "Декан.", None, (1, 1), None, 100, &[], Sh::Coins, false),
+    base!("Амфора вина", "Вино", None, (2, 3), None, 1, &[], Sh::Flask, false),
+    base!("Амфора оливкового масла", "Масло", None, (2, 3), None, 1, &[], Sh::Flask, false),
+    base!("Стеклянная чаша", "Чаша", None, (1, 1), None, 4, &[], Sh::Small, false),
+    base!("Отрез льна", "Лён", None, (2, 2), None, 3, &[], Sh::Small, false),
+    base!("Отрез шерсти", "Шерсть", None, (2, 2), None, 3, &[], Sh::Small, false),
+    base!("Солёная рыба", "Рыба", None, (1, 2), None, 5, &[], Sh::Small, false),
+    base!("Мешок соли", "Соль", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Сырая шкура", "Шкура", None, (2, 2), None, 3, &[], Sh::Small, false),
+    base!("Овчина", "Овчина", None, (2, 2), None, 3, &[], Sh::Small, false),
+    base!("Войлок", "Войлок", None, (2, 2), None, 3, &[], Sh::Small, false),
+    base!("Воск", "Воск", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Горшок мёда", "Мёд", None, (1, 1), None, 5, &[], Sh::Flask, false),
 ];
 
 /// Номер вида предмета в [`ITEM_BASES`].
@@ -354,6 +371,11 @@ pub struct ItemBaseId(pub u16);
 impl ItemBaseId {
     pub fn base(self) -> &'static ItemBase {
         &ITEM_BASES[self.0 as usize]
+    }
+
+    /// Вид предмета по имени, если такой есть (торговцы пропускают ещё не добавленные товары).
+    pub fn find(name: &str) -> Option<ItemBaseId> {
+        ITEM_BASES.iter().position(|b| b.name == name).map(|i| ItemBaseId(i as u16))
     }
 
     pub fn by_name(name: &str) -> ItemBaseId {
@@ -409,16 +431,10 @@ impl Item {
         totals
     }
 
-    /// Приблизительная цена в золоте (пригодится торговцу).
+    /// Справочная цена всей стопки в нуммиях (1 фоллис = 40 нуммиев, 1 солид = 7200).
+    /// Настоящую цену у торговца считает `trade.rs`: она зависит от лавки, запаса и репутации.
     pub fn value(&self) -> u32 {
-        let base = match self.info().shape {
-            ItemShape::Coins => return self.count as u32,
-            ItemShape::Small if self.info().slot.is_none() => 40,
-            ItemShape::Flask => 15,
-            _ => 20,
-        };
-        let q = [0.5, 1.0, 2.0, 4.0, 9.0, 20.0][self.quality.index()];
-        (base as f32 * q) as u32 * self.count.max(1) as u32
+        crate::economy::item_value(self)
     }
 
     pub fn can_stack_with(&self, other: &Item) -> bool {
@@ -524,7 +540,7 @@ pub struct LootTable {
     pub entries: &'static [(&'static str, f32)],
     /// Веса качеств: Ветхое..Легендарное.
     pub quality_weights: [f32; 6],
-    /// Золото: от и до (0 — не выпадает).
+    /// Деньги в нуммиях: от и до (0 — не выпадают). Выдаются монетами (economy::coins_for).
     pub gold: (u32, u32),
 }
 
@@ -545,7 +561,8 @@ impl LootTableId {
                     ("Бинт", 4.0),
                 ],
                 quality_weights: [30.0, 45.0, 18.0, 6.0, 1.0, 0.0],
-                gold: (2, 15),
+                // Пара фоллисов и мелочь: жалованье солдата — несколько солидов в год.
+                gold: (60, 480),
             },
             LootTableId::Knight => LootTable {
                 rolls: (2, 3),
@@ -565,7 +582,7 @@ impl LootTableId {
                     ("Бинт", 2.0),
                 ],
                 quality_weights: [10.0, 40.0, 30.0, 14.0, 5.0, 1.0],
-                gold: (10, 40),
+                gold: (400, 3200),
             },
             LootTableId::KnightCaptain => LootTable {
                 rolls: (3, 4),
@@ -583,7 +600,7 @@ impl LootTableId {
                     ("Целебное зелье", 2.0),
                 ],
                 quality_weights: [0.0, 15.0, 35.0, 30.0, 15.0, 5.0],
-                gold: (40, 100),
+                gold: (2400, 12000),
             },
             LootTableId::Chest => LootTable {
                 rolls: (1, 3),
@@ -597,7 +614,7 @@ impl LootTableId {
                     ("Длинный меч", 1.0),
                 ],
                 quality_weights: [5.0, 35.0, 30.0, 20.0, 8.0, 2.0],
-                gold: (15, 60),
+                gold: (1200, 9000),
             },
         }
     }
@@ -624,8 +641,10 @@ pub fn roll_loot(table: LootTableId, luck: f32, rng: &mut Rng, uids: &mut UidGen
         items.push(roll_item(base, quality, count, rng, uids));
     }
     if t.gold.1 > 0 {
-        let gold = rng.range_u32(t.gold.0, t.gold.1) as u16;
-        items.push(roll_item(ItemBaseId::by_name("Золотые монеты"), Quality::Common, gold, rng, uids));
+        let nummi = rng.range_u32(t.gold.0, t.gold.1);
+        for (base, count) in crate::economy::coins_for(nummi) {
+            items.push(roll_item(base, Quality::Common, count, rng, uids));
+        }
     }
     items
 }
