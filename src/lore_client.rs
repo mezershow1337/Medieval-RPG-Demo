@@ -81,7 +81,7 @@ pub fn try_use(client: &mut RenetClient, item: &Item, body: Option<&crate::medic
 
 /// Можно ли «использовать» предмет (для подсказок и ПКМ в сумке).
 pub fn usable(base: ItemBaseId) -> bool {
-    Book::from_item(base).is_some() || crate::medicine::is_remedy(base.base().name)
+    Book::from_item(base).is_some() || crate::medicine::is_remedy(base.base().name) || crate::brewing::Vessel::from_item(base.base().name).is_some()
 }
 
 // ---------------------------------------------------------------------------
@@ -291,13 +291,23 @@ fn aim_lore_target(mut view: ResMut<LoreView>, loot: Res<LootState>, camera: Que
                 best = Some((along + miss, t));
             }
         };
+        let mut zone: Option<(f32, LoreTarget)> = None;
         for (id, (p, _)) in &view.patches {
-            test(Vec3::from(p.pos) + Vec3::Y * 0.25, 0.5, LoreTarget::Patch(*id));
+            if p.radius > 1.0 {
+                // Заросль в городе: собирать, стоя в ней (если не смотрим на что-то ещё).
+                let d = Vec3::from(p.pos) - origin;
+                let flat = Vec2::new(d.x, d.z).length();
+                if flat <= p.radius + 0.5 && d.y.abs() < 3.5 && zone.is_none_or(|(s, _)| flat < s) {
+                    zone = Some((flat, LoreTarget::Patch(*id)));
+                }
+            } else {
+                test(Vec3::from(p.pos) + Vec3::Y * 0.25, 0.5, LoreTarget::Patch(*id));
+            }
         }
         for (id, (m, _)) in &view.masters {
             test(Vec3::from(m.pos) + Vec3::Y * 1.1, 0.6, LoreTarget::Master(*id));
         }
-        best.map(|(_, t)| t)
+        best.or(zone).map(|(_, t)| t)
     })();
     if view.target != target {
         view.target = target;
@@ -539,6 +549,7 @@ mod tests {
 
 /// `MRPG_SHOT=файл.png` — через `MRPG_SHOT_DELAY` секунд (по умолчанию 8) сохранить
 /// снимок экрана и выйти. `MRPG_SHOT_UI=knowledge` — перед снимком открыть окно знаний,
+/// `MRPG_SHOT_UI=brew` — открыть сумку и окно варки у горшка (нужен `MRPG_DEBUG_KIT=1`),
 /// `MRPG_SHOT_YAW=градусы` — повернуть камеру.
 pub struct DevShotPlugin;
 
@@ -555,12 +566,22 @@ fn dev_shot(
     time: Res<Time>,
     mut view: ResMut<LoreView>,
     mut player: Query<(&mut crate::player::LocalPlayer, &mut Transform)>,
+    mut loot: ResMut<LootState>,
+    mut brew: ResMut<crate::brewing_client::BrewState>,
     mut done: Local<u8>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let delay: f32 = std::env::var("MRPG_SHOT_DELAY").ok().and_then(|s| s.parse().ok()).unwrap_or(8.0);
     let t = time.elapsed_secs();
     if *done == 0 && t > delay - 1.0 {
+        if std::env::var("MRPG_SHOT_UI").as_deref() == Ok("brew") {
+            loot.ui_open = true;
+            loot.rev += 1;
+            let pot = loot.inventory.as_ref().and_then(|inv| inv.all_items().find(|i| i.info().name == "Глиняный горшок").map(|i| i.uid));
+            if let Some(uid) = pot {
+                brew.open_vessel(uid, crate::brewing::Vessel::ClayPot);
+            }
+        }
         if std::env::var("MRPG_SHOT_UI").as_deref() == Ok("knowledge") {
             view.window_open = true;
             view.rev += 1;

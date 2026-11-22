@@ -1,0 +1,313 @@
+//! Клиент: окно варки. Открывается F или ПКМ по горшку, котелку или ступке в сумке.
+//!
+//! В окне видно, что из сумки можно положить в сосуд (и сколько это драхм), сколько налить
+//! воды, какой огонь и сколько варить. Ниже — что выходит по весу (чтобы игрок, нашедший
+//! рецепт у Галена, мог отмерить «один к четырём»), и подсказки из выученных приёмов.
+#![allow(deprecated)] // Interaction: в Bevy 0.20 помечен устаревшим, но работает и проще.
+
+use crate::brewing::{self, BrewSpec, DRACHMS_PER_KOTYLE, Heat, Vessel};
+use crate::inventory_ui::UiFonts;
+use crate::items::ItemUid;
+use crate::loot_client::LootState;
+use crate::lore_client::{MyKnowledge, send};
+use crate::lore_net::LoreClientMessage;
+use bevy::prelude::*;
+use bevy::ui::FocusPolicy;
+use bevy_renet::RenetClient;
+use std::collections::BTreeMap;
+
+pub struct BrewingClientPlugin;
+
+impl Plugin for BrewingClientPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(BrewState::default())
+            .add_systems(Startup, setup_brew_panel.after(crate::inventory_ui::setup_fonts))
+            .add_systems(Update, (brew_buttons, rebuild_brew_panel).chain());
+    }
+}
+
+const TIME_STEPS: [f32; 14] = [0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 24.0, 48.0, 72.0, 96.0];
+
+#[derive(Resource)]
+pub struct BrewState {
+    open: Option<(ItemUid, Vessel)>,
+    counts: BTreeMap<String, u16>,
+    water: u8,
+    heat: Heat,
+    hours: f32,
+    rev: u64,
+    built: Option<(u64, u64, u64)>,
+}
+
+impl Default for BrewState {
+    fn default() -> Self {
+        Self { open: None, counts: BTreeMap::new(), water: 2, heat: Heat::Low, hours: 1.0, rev: 1, built: None }
+    }
+}
+
+impl BrewState {
+    /// Открыть окно для сосуда из сумки.
+    pub fn open_vessel(&mut self, uid: ItemUid, vessel: Vessel) {
+        if self.open.map(|o| o.0) != Some(uid) {
+            self.counts.clear();
+            if vessel == Vessel::Mortar {
+                self.water = 0;
+                self.heat = Heat::None;
+                self.hours = 0.25;
+            }
+        }
+        self.open = Some((uid, vessel));
+        self.rev += 1;
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+enum BrewAction {
+    Add(String),
+    Sub(String),
+    WaterUp,
+    WaterDown,
+    Heat(Heat),
+    TimeUp,
+    TimeDown,
+    Start,
+    Close,
+}
+
+#[derive(Component)]
+struct BrewButton(BrewAction);
+
+#[derive(Component)]
+struct BrewPanel;
+
+const BG: Color = Color::srgba(0.07, 0.055, 0.04, 0.96);
+const BORDER: Color = Color::srgb(0.45, 0.36, 0.22);
+const TITLE: Color = Color::srgb(0.95, 0.85, 0.6);
+const TEXT: Color = Color::srgb(0.88, 0.84, 0.74);
+const DIM: Color = Color::srgb(0.62, 0.58, 0.5);
+const BTN: Color = Color::srgb(0.22, 0.17, 0.11);
+const BTN_ON: Color = Color::srgb(0.5, 0.36, 0.14);
+
+fn setup_brew_panel(mut commands: Commands) {
+    commands.spawn((
+        BrewPanel,
+        Node {
+            position_type: PositionType::Absolute,
+            display: Display::None,
+            left: px(12),
+            top: px(60),
+            width: px(400),
+            max_height: percent(86),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(px(10)),
+            row_gap: px(4),
+            border: UiRect::all(px(2)),
+            overflow: Overflow::clip_y(),
+            ..default()
+        },
+        BackgroundColor(BG),
+        BorderColor::all(BORDER),
+        GlobalZIndex(30),
+        Interaction::default(),
+        FocusPolicy::Block,
+    ));
+}
+
+fn label(fonts: &UiFonts, s: impl Into<String>, size: f32, color: Color, bold: bool) -> impl Bundle {
+    (
+        Text::new(s),
+        TextFont { font: if bold { fonts.bold.clone() } else { fonts.regular.clone() }.into(), font_size: bevy::text::FontSize::Px(size), ..default() },
+        TextColor(color),
+    )
+}
+
+fn button(p: &mut ChildSpawnerCommands, fonts: &UiFonts, text: &str, action: BrewAction, on: bool) {
+    p.spawn((
+        BrewButton(action),
+        Interaction::default(),
+        FocusPolicy::Block,
+        Node { padding: UiRect::axes(px(8), px(2)), border: UiRect::all(px(1)), justify_content: JustifyContent::Center, ..default() },
+        BackgroundColor(if on { BTN_ON } else { BTN }),
+        BorderColor::all(BORDER),
+    ))
+    .with_children(|b| {
+        b.spawn(label(fonts, text, 14.0, TEXT, true));
+    });
+}
+
+fn row<'a>(p: &'a mut ChildSpawnerCommands<'_>) -> EntityCommands<'a> {
+    p.spawn(Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: px(6), ..default() })
+}
+
+fn brew_buttons(
+    buttons: Query<(&Interaction, &BrewButton), Changed<Interaction>>,
+    mut state: ResMut<BrewState>,
+    loot: Res<LootState>,
+    mut client: Option<ResMut<RenetClient>>,
+    keys: Res<ButtonInput<KeyCode>>,
+) {
+    if state.open.is_some() && (!loot.ui_open || keys.just_pressed(KeyCode::Escape)) {
+        state.open = None;
+        state.rev += 1;
+        return;
+    }
+    let Some((vessel, _)) = state.open else { return };
+    for (i, b) in &buttons {
+        if *i != Interaction::Pressed {
+            continue;
+        }
+        let have = |name: &str| loot.inventory.as_ref().map_or(0, |inv| inv.all_items().filter(|i| i.info().name == name).map(|i| i.count as u32).sum::<u32>());
+        match &b.0 {
+            BrewAction::Add(n) => {
+                let c = state.counts.get(n).copied().unwrap_or(0);
+                if (c as u32) < have(n) {
+                    state.counts.insert(n.clone(), c + 1);
+                }
+            }
+            BrewAction::Sub(n) => {
+                let c = state.counts.get(n).copied().unwrap_or(0);
+                if c <= 1 {
+                    state.counts.remove(n);
+                } else {
+                    state.counts.insert(n.clone(), c - 1);
+                }
+            }
+            BrewAction::WaterUp => state.water = (state.water + 1).min(brewing::MAX_WATER),
+            BrewAction::WaterDown => state.water = state.water.saturating_sub(1),
+            BrewAction::Heat(h) => state.heat = *h,
+            BrewAction::TimeUp => state.hours = TIME_STEPS.iter().copied().find(|t| *t > state.hours + 1e-3).unwrap_or(state.hours),
+            BrewAction::TimeDown => state.hours = TIME_STEPS.iter().rev().copied().find(|t| *t < state.hours - 1e-3).unwrap_or(state.hours),
+            BrewAction::Start => {
+                let spec = BrewSpec { items: state.counts.iter().map(|(n, c)| (n.clone(), *c)).collect(), water: state.water, heat: state.heat, hours: state.hours };
+                if let Some(client) = client.as_mut() {
+                    send(client, &LoreClientMessage::Brew { vessel, spec });
+                }
+                state.counts.clear();
+            }
+            BrewAction::Close => state.open = None,
+        }
+        state.rev += 1;
+    }
+}
+
+fn rebuild_brew_panel(
+    mut commands: Commands,
+    mut state: ResMut<BrewState>,
+    loot: Res<LootState>,
+    knowledge: Res<MyKnowledge>,
+    fonts: Res<UiFonts>,
+    mut panel: Query<(Entity, &mut Node), With<BrewPanel>>,
+) {
+    let Ok((entity, mut node)) = panel.single_mut() else { return };
+    let visible = state.open.is_some() && loot.ui_open;
+    let want = if visible { Display::Flex } else { Display::None };
+    if node.display != want {
+        node.display = want;
+    }
+    if !visible {
+        return;
+    }
+    let key = (state.rev, loot.rev, knowledge.0.known.len() as u64);
+    if state.built == Some(key) && !knowledge.is_changed() {
+        return;
+    }
+    state.built = Some(key);
+    let Some((_, vessel)) = state.open else { return };
+    let Some(inv) = loot.inventory.as_ref() else { return };
+    // Что в сумке можно положить в сосуд.
+    let mut stock: BTreeMap<String, (u32, crate::items::Item)> = BTreeMap::new();
+    for item in inv.all_items() {
+        let n = item.info().name;
+        if brewing::mass(n).is_some() {
+            let e = stock.entry(n.to_string()).or_insert((0, item.clone()));
+            e.0 += item.count as u32;
+        }
+    }
+    // Положенного больше нет в сумке — убрать.
+    let counts: Vec<(String, u16)> = state.counts.iter().map(|(n, c)| (n.clone(), *c)).collect();
+    for (n, c) in counts {
+        let have = stock.get(&n).map_or(0, |s| s.0);
+        if have == 0 {
+            state.counts.remove(&n);
+        } else if c as u32 > have {
+            state.counts.insert(n, have as u16);
+        }
+    }
+    let flasks: u32 = inv.all_items().filter(|i| i.info().name == brewing::FLASK).map(|i| i.count as u32).sum();
+    let dry: f32 = state.counts.iter().map(|(n, c)| brewing::mass(n).unwrap_or(0.0) * *c as f32).sum::<f32>() + 0.0;
+    let water = state.water as f32 * DRACHMS_PER_KOTYLE;
+
+    commands.entity(entity).despawn_children();
+    let state = &*state;
+    let fonts = &*fonts;
+    commands.entity(entity).with_children(|p| {
+        row(p).with_children(|r| {
+            r.spawn((label(fonts, vessel.name(), 20.0, TITLE, true), Node { flex_grow: 1.0, ..default() }));
+            button(r, fonts, "×", BrewAction::Close, false);
+        });
+        p.spawn(label(fonts, "Что положить (вес одной штуки):", 13.0, DIM, false));
+        if stock.is_empty() {
+            p.spawn(label(fonts, "В сумке нет ничего, что кладут в сосуд", 14.0, DIM, false));
+        }
+        for (name, (have, item)) in &stock {
+            let c = state.counts.get(name).copied().unwrap_or(0);
+            let shown = knowledge.item_name(item);
+            let mut shown = shown.split(" ×").next().unwrap_or(&shown).to_string();
+            // Незнакомые травы различаются только видом.
+            if let Some(sub) = crate::lore::Substance::from_item(item.base)
+                && !knowledge.0.identifies(sub)
+            {
+                shown = format!("{shown} ({})", sub.info().look);
+            }
+            row(p).with_children(|r| {
+                button(r, fonts, "−", BrewAction::Sub(name.clone()), false);
+                r.spawn(label(fonts, format!("{c}/{have}"), 14.0, if c > 0 { TITLE } else { TEXT }, true));
+                button(r, fonts, "+", BrewAction::Add(name.clone()), false);
+                r.spawn(label(fonts, format!("{shown} · {:.0} др.", brewing::mass(name).unwrap_or(0.0)), 14.0, TEXT, false));
+            });
+        }
+        if vessel != Vessel::Mortar {
+            row(p).with_children(|r| {
+                button(r, fonts, "−", BrewAction::WaterDown, false);
+                r.spawn(label(fonts, format!("Вода: {} кот. ({:.0} др.)", state.water, water), 14.0, TEXT, true));
+                button(r, fonts, "+", BrewAction::WaterUp, false);
+            });
+            row(p).with_children(|r| {
+                r.spawn(label(fonts, "Огонь:", 14.0, TEXT, true));
+                for h in Heat::ALL {
+                    button(r, fonts, h.name(), BrewAction::Heat(h), state.heat == h);
+                }
+            });
+        }
+        row(p).with_children(|r| {
+            button(r, fonts, "−", BrewAction::TimeDown, false);
+            let t = if state.hours >= 24.0 { format!("{:.0} сут.", state.hours / 24.0) } else if state.hours < 1.0 { format!("{:.0} мин", state.hours * 60.0) } else { format!("{} ч", state.hours) };
+            r.spawn(label(fonts, format!("Время: {t}"), 14.0, TEXT, true));
+            button(r, fonts, "+", BrewAction::TimeUp, false);
+        });
+        let ratio = if dry > 0.0 && water > 0.0 { format!(" · воды к смеси {:.1} : 1", water / dry) } else { String::new() };
+        p.spawn(label(fonts, format!("Смесь: {dry:.0} др.{ratio}"), 13.0, DIM, false));
+        // Доли по весу — чтобы отмерить по книге.
+        if state.counts.len() > 1 {
+            let parts: Vec<String> = state.counts.iter().map(|(n, c)| format!("{} {:.0}%", n.to_lowercase(), brewing::mass(n).unwrap_or(0.0) * *c as f32 / dry * 100.0)).collect();
+            p.spawn(label(fonts, parts.join(", "), 13.0, DIM, false));
+        }
+        p.spawn(label(fonts, format!("Пустых флаконов: {flasks} (жидкое разливают во флаконы)"), 13.0, DIM, false));
+        if state.heat != Heat::None && vessel != Vessel::Mortar && !crate::level::hearths().is_empty() {
+            p.spawn(label(fonts, "На огне варят у очага или костра (в домах, мастерских, у костров за стенами)", 13.0, DIM, false));
+        }
+        row(p).with_children(|r| {
+            button(r, fonts, if state.heat == Heat::None || vessel == Vessel::Mortar { "Начать" } else { "Варить" }, BrewAction::Start, !state.counts.is_empty());
+            r.spawn(label(fonts, format!("≈ {:.0} с", BrewSpec { items: vec![], water: 0, heat: state.heat, hours: state.hours }.real_secs()), 13.0, DIM, false));
+        });
+        let hints = brewing::known_hints(&knowledge.0);
+        if hints.is_empty() {
+            p.spawn(label(fonts, "Рецептов вы не знаете: пробуйте сами или учитесь.", 13.0, DIM, false));
+        } else {
+            p.spawn(label(fonts, "Что вы знаете:", 14.0, TITLE, true));
+            for (_, hint) in hints {
+                p.spawn(label(fonts, format!("• {hint}"), 13.0, TEXT, false));
+            }
+        }
+    });
+}

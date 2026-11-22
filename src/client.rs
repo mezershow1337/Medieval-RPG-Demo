@@ -127,7 +127,7 @@ pub fn run(server_addr: SocketAddr) {
         .add_plugins(rig::RigPlugin)
         .add_plugins(crate::loot_client::LootClientPlugin)
         .add_plugins(crate::trade_client::TradeClientPlugin)
-        .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin))
+        .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin))
         .add_systems(Update, hide_ui_for_shots.run_if(|| std::env::var("MRPG_CAM").is_ok()))
         .insert_resource(RenetClient::new(connection_config()))
         .insert_resource(transport)

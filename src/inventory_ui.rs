@@ -306,7 +306,7 @@ fn rebuild_ui(
                 ));
                 p.spawn(text(
                     &fonts,
-                    "ЛКМ — взять/положить, мимо окна — выбросить\nПКМ или Shift+ЛКМ — быстро переложить или надеть\nF — использовать (бинт, зелье) или читать книгу, Q — выбросить, Tab — закрыть\nK — окно знаний",
+                    "ЛКМ — взять/положить, мимо окна — выбросить\nПКМ или Shift+ЛКМ — быстро переложить или надеть\nF — использовать: лечить, читать, варить в горшке; Q — выбросить, Tab — закрыть\nK — окно знаний",
                     13.0,
                     DIM,
                     false,
@@ -506,6 +506,7 @@ fn handle_input(
     mut client: Option<ResMut<RenetClient>>,
     time: Res<Time>,
     body: Option<Res<crate::medicine_client::MyBody>>,
+    mut brew: Option<ResMut<crate::brewing_client::BrewState>>,
 ) {
     if !state.ui_open {
         return;
@@ -573,8 +574,18 @@ fn handle_input(
     let mine = if owner == Owner::Me { owner_inv(&state, owner).and_then(|i| i.find(uid)).map(|(_, it)| it.clone()) } else { None };
     let lore_usable = mine.as_ref().is_some_and(|it| crate::lore_client::usable(it.base));
     let consumable = mine.as_ref().is_some_and(|it| it.base.consumable().is_some());
+    let use_pressed = keys.just_pressed(KeyCode::KeyF) || (state.container.is_none() && mouse.just_pressed(MouseButton::Right));
+    // Горшок, котелок, ступка — окно варки.
     if lore_usable
-        && (keys.just_pressed(KeyCode::KeyF) || (state.container.is_none() && mouse.just_pressed(MouseButton::Right)))
+        && use_pressed
+        && let (Some(item), Some(brew)) = (mine.as_ref(), brew.as_mut())
+        && let Some(vessel) = crate::brewing::Vessel::from_item(item.info().name)
+    {
+        brew.open_vessel(item.uid, vessel);
+        return;
+    }
+    if lore_usable
+        && use_pressed
         && crate::lore_client::try_use(client, mine.as_ref().unwrap(), body.as_deref().map(|b| &b.0))
     {
         // Книги — читать, лекарства — на рану или внутрь.
