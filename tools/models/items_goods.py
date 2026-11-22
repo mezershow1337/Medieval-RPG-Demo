@@ -8,6 +8,12 @@ import random
 
 import itemkit as K
 from itemkit import Vector, item
+import zlib
+
+
+def _seed(key):
+    """Стабильное зерно случайности (hash() в Python меняется от запуска к запуску)."""
+    return zlib.crc32(key.encode()) % 1000
 
 M = K.common_materials
 
@@ -106,7 +112,7 @@ def powder_mound(radius, height, mat, z=0.004):
         t = i / 8
         rings.append((z + height * (1 - t**2) ** 1.2, radius * t + 1e-4))
     rings.reverse()
-    b = K.lathe([(z, 0.0001)] + rings[::-1] if False else [(z - 0.001, radius)] + [(z + height * (1 - (1 - i / 8) ** 2), radius * (1 - i / 8) + 1e-4) for i in range(9)], 32, cap_top=False)
+    b = K.lathe([(z - 0.001, radius)] + [(z + height * (1 - (1 - i / 8) ** 2), radius * (1 - i / 8) + 1e-4) for i in range(9)], 32, cap_top=False)
     r = random.Random(3)
     ph = [r.uniform(0, 6) for _ in range(3)]
     K.deform(b, lambda v: (v.x, v.y, v.z + 0.0015 * math.sin(v.x * 300 + ph[0]) * math.sin(v.y * 260 + ph[1]) * (v.z - z) / max(height, 1e-4)))
@@ -287,12 +293,12 @@ def pot(mat, r=0.05, h=0.07, lid=None, lid_mat=None, neck=0.7, filling=None, clo
     return top
 
 
-def codex(cover, w=0.15, h=0.21, t=0.04, clasp="bronze", page="parchment", boss=True, seed=1):
+def codex(cover, w=0.15, h=0.21, t=0.04, clasp="bronze", page="parchment", boss=True, seed=1, cross=False):
     """Кодекс: деревянные доски в коже, блок пергамента, застёжки."""
     K.mesh_obj("block", K.cbox(0.004, 0, 0, w - 0.01, t - 0.008, h - 0.012), page, bevel=0.002)
     for s in (-1, 1):
         K.mesh_obj("board", K.cbox(0, s * (t / 2 - 0.003), 0, w, 0.006, h), cover, bevel=0.003)
-    K.mesh_obj("spine", K.lathe([(-h / 2, t / 2, t / 2 * 0.6), (h / 2, t / 2, t / 2 * 0.6)], 24, axis="Z") if False else K.cbox(-w / 2 + 0.002, 0, 0, 0.012, t, h), cover, bevel=0.005, subsurf=1)
+    K.mesh_obj("spine", K.cbox(-w / 2 + 0.002, 0, 0, 0.012, t, h), cover, bevel=0.005, subsurf=1)
     # Бинты корешка и застёжки.
     for z in (-h * 0.3, 0, h * 0.3):
         K.mesh_obj("band", K.cbox(-w / 2 - 0.002, 0, z, 0.006, t + 0.004, 0.008), cover, bevel=0.002, subsurf=1)
@@ -305,9 +311,22 @@ def codex(cover, w=0.15, h=0.21, t=0.04, clasp="bronze", page="parchment", boss=
             K.rot(b, "X", 90)
             K.move(b, x, -t / 2 - 0.006 + 0.0015, z)
             K.mesh_obj("boss", b, clasp, subsurf=1)
-        # Крест на доске — обычное украшение переплёта.
+    if cross:
+        # Крест на доске — украшение церковных книг.
         K.mesh_obj("cross_v", K.cbox(0, -t / 2 - 0.0062, 0, 0.008, 0.002, h * 0.55), clasp, bevel=0.0008)
         K.mesh_obj("cross_h", K.cbox(0, -t / 2 - 0.0062, h * 0.08, w * 0.45, 0.002, 0.008), clasp, bevel=0.0008)
+    else:
+        # Светские книги: тиснёная рамка и ромб на коже.
+        y = -t / 2 - 0.0062
+        for dx, dz, ww, hh in ((0, h * 0.42, w * 0.8, 0.003), (0, -h * 0.42, w * 0.8, 0.003), (w * 0.4, 0, 0.003, h * 0.84), (-w * 0.4, 0, 0.003, h * 0.84)):
+            K.mesh_obj("tool", K.cbox(dx, y + 0.0012, dz, ww, 0.0016, hh), "leather_dark")
+        d = math.hypot(w * 0.3, h * 0.3)
+        ang = math.degrees(math.atan2(h * 0.3, w * 0.3))
+        for sx, sz in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
+            bar = K.cbox(0, 0, 0, d, 0.0016, 0.003)
+            K.rot(bar, "Y", sx * sz * ang)
+            K.move(bar, sx * w * 0.15, y + 0.0012, sz * h * 0.15)
+            K.mesh_obj("tool", bar, "leather_dark")
 
 
 def scroll(length=0.2, r=0.016, paper="papyrus", rod="wood", tag=None, tie="cord"):
@@ -446,24 +465,39 @@ def wool_bolt():
 
 @item("salted_fish", (1, 2), name="Солёная рыба", pose="flat", azimuth=14, elevation=8, margin=0.92)
 def salted_fish():
-    """Две вяленые рыбы, связанные за хвосты."""
+    """Две вяленые рыбы (тарань/кефаль), связанные бечёвкой за хвосты."""
     M()
-    K.metal_mat("fish_skin", (176, 170, 150), (110, 100, 84), rough=(0.35, 0.6), dirt=0.6, scale=4.0)
-    for s, dz in ((-1, 0.0), (1, -0.015)):
-        st = []
-        for i in range(21):
-            t = i / 20
-            w = 0.028 * math.sin(math.pi * min(1, t * 1.1)) ** 0.7 * (1 - 0.65 * t**3) + 0.003
-            st.append((0.2 * t, w, 0.008 * (1 - t) + 0.002))
-        f = K.blade(st, 10, edge=0.002)
-        K.rot(f, "Y", s * 6)
-        K.move(f, s * 0.018, 0, dz)
-        K.mesh_obj("fish", f, "fish_skin", subsurf=1, smooth_angle=80)
-        tail = K.blade([(0, 0.004, 0.002), (0.02, 0.018, 0.001), (0.026, 0.02, 0.0008)], 6)
-        K.rot(tail, "X", 180)
-        K.move(tail, s * 0.018, 0, dz)
-        K.mesh_obj("tail", tail, "fish_skin", subsurf=0)
-    K.mesh_obj("cord", K.torus((0, 0, -0.004), 0.03, 0.0016, ry=0.01), "cord")
+    K.organic_mat("fish_skin", (150, 130, 98), (84, 68, 46), rough=(0.35, 0.6), bump=0.5, bump_scale=420.0, dirt=0.6)
+    K.organic_mat("fish_fin", (120, 92, 58), (70, 50, 30), rough=(0.5, 0.7), bump=0.3, dirt=0.3)
+    K.organic_mat("fish_eye", (30, 24, 18), (16, 12, 10), rough=(0.2, 0.3), bump=0.0)
+    L = 0.2
+    for s, dz in ((-1, 0.0), (1, -0.012)):
+        # Тело: веретено, сплюснутое с боков (высота — вдоль X, толщина — вдоль Y).
+        path, radii = [], []
+        for i in range(25):
+            t = i / 24
+            h = 0.03 * math.sin(math.pi * min(1.0, 0.1 + t * 0.95)) ** 0.8 * (1 - 0.7 * t**2) + 0.004
+            path.append((0.004 * math.sin(t * 3.0), 0, dz + L * (1 - t)))
+            radii.append((h * 0.32, h))
+        body = K.loft(path, radii, 18)
+        K.move(body, s * 0.024, 0, 0)
+        K.mesh_obj("fish", body, "fish_skin", subsurf=1, smooth_angle=80)
+        # Хвост: две лопасти.
+        for side in (-1, 1):
+            fin = K.blade([(0, 0.004, 0.0012), (0.018, 0.009, 0.0008), (0.03, 0.006, 0.0005)], 6)
+            K.rot(fin, "Y", 180 + side * 28)
+            K.move(fin, s * 0.024, 0, dz + 0.004)
+            K.mesh_obj("tail", fin, "fish_fin")
+        # Спинной плавник и глаз.
+        dorsal = K.blade([(0, 0.012, 0.0008), (0.03, 0.006, 0.0006), (0.04, 0.001, 0.0004)], 6)
+        K.move(dorsal, s * 0.024 + 0.028, 0, dz + L * 0.4)
+        K.mesh_obj("dorsal", dorsal, "fish_fin")
+        for y in (-1, 1):
+            eye = K.lathe([(0, 0.0034), (0.0012, 0.0024), (0.0016, 0.0001)], 12)
+            K.rot(eye, "X", 90 * y)
+            K.move(eye, s * 0.024 + 0.006, y * 0.0062, dz + L * 0.93)
+            K.mesh_obj("eye", eye, "fish_eye")
+    K.mesh_obj("cord", K.torus((0, 0, 0.012), 0.032, 0.0016, ry=0.008), "cord")
 
 
 @item("salt_sack", (2, 2), name="Мешок соли", pose="upright", azimuth=24, elevation=24, margin=0.9)
@@ -531,19 +565,15 @@ def felt():
     """Скатка войлока, перевязанная ремешком."""
     M()
     K.organic_mat("felt_mat", (150, 136, 112), (104, 92, 72), rough=(0.85, 1.0), bump=0.6, bump_scale=260.0, dirt=0.5, sheen=0.5)
-    prof = []
-    for i in range(40):
-        a = i * 0.5
-        rr = 0.012 + 0.0042 * a
-        prof.append((rr * math.cos(a), rr * math.sin(a)))
-    # Спираль скатки, вытянутая вдоль X.
-    path = [(-0.13, 0, 0.0), (0.13, 0, 0.0)]
+    K.organic_mat("felt_end", (128, 114, 92), (90, 78, 60), rough=(0.85, 1.0), bump=0.6, bump_scale=260.0, dirt=0.6)
     outer = K.lathe([(-0.13, 0.05), (-0.128, 0.054), (0.128, 0.054), (0.13, 0.05)], 40, axis="X")
     K.move(outer, 0, 0, 0.054)
     K.mesh_obj("roll", outer, "felt_mat", subsurf=1, smooth_angle=80)
-    for x in (-0.13, 0.13):
-        spiral = K.loft([(x, p[0], 0.054 + p[1]) for p in prof], [(0.0024, 0.001)] * len(prof), 6, up=(1, 0, 0))
-        K.mesh_obj("spiral", spiral, "felt_mat", subsurf=0)
+    # Слои скатки видны на торцах тёмными кольцами.
+    for x in (-0.1302, 0.1302):
+        for i in range(6):
+            rr = 0.01 + i * 0.0075
+            K.mesh_obj("layer", K.torus((x, 0, 0.054), rr, 0.0011, plane="YZ", tube_ry=0.0011), "felt_end")
     for x in (-0.07, 0.07):
         t = K.torus((x, 0, 0.054), 0.056, 0.002, plane="YZ", tube_ry=0.007)
         K.mesh_obj("strap", t, "leather")
@@ -600,7 +630,7 @@ def _herb(key, name, leaf, flower, shape, kind, kw):
     @item(key, (1, 1), name=name, pose="flat", azimuth=14, elevation=10, margin=0.9, roll=-28)
     def build():
         herb_mats(leaf=leaf, flower=flower)
-        herb_bundle("herb", flower=flower, leaf_shape=shape, flower_kind=kind, seed=hash(key) % 1000, **kw)
+        herb_bundle("herb", flower=flower, leaf_shape=shape, flower_kind=kind, seed=_seed(key), **kw)
 
     return build
 
@@ -627,6 +657,16 @@ def rosehip():
     heap("hips", "hip", base_z=0.006, spread=0.03, count=16, size=0.007, shape="oval", height=0.014)
 
 
+@item("rhubarb", (1, 1), name="Ревень понтийский", pose="upright", azimuth=20, elevation=34, margin=0.86)
+def rhubarb():
+    """Сушёный корень «ра понтийского» — куски корня на мешковине."""
+    M()
+    K.cloth_mat("sacking", (178, 156, 118), (130, 110, 78), weave=300.0, bump=0.7)
+    substance("rhubarb_root", (196, 140, 62), (130, 78, 36), rough=(0.6, 0.85), bump=0.9)
+    cloth_square(0.12, "sacking")
+    heap("chunks", "rhubarb_root", base_z=0.004, spread=0.036, count=7, size=0.011, shape="oval", height=0.008, seed=7)
+
+
 @item("oak_galls", (1, 1), name="Дубовые галлы", pose="upright", azimuth=20, elevation=34, margin=0.86)
 def oak_galls():
     M()
@@ -641,8 +681,7 @@ ROOTS = [
     ("comfrey", "Корень окопника", (60, 44, 34), dict(n=4, thick=0.009, length=0.12, gnarl=0.3)),
     ("elecampane", "Корень девясила", (150, 116, 80), dict(n=4, thick=0.011, length=0.1, gnarl=0.25)),
     ("liquorice", "Солодковый корень", (160, 116, 66), dict(n=7, thick=0.005, length=0.15, gnarl=0.1)),
-    ("rhubarb", "Ревень понтийский", (190, 132, 58), dict(n=4, thick=0.012, length=0.07, gnarl=0.15, tie=False)),
-]
+    ]
 
 
 def _root(key, name, color, kw):
@@ -650,7 +689,7 @@ def _root(key, name, color, kw):
     def build():
         M()
         substance("root", color, rough=(0.6, 0.85), bump=0.6)
-        roots_bundle("root", seed=hash(key) % 1000, **kw)
+        roots_bundle("root", seed=_seed(key), **kw)
 
     return build
 
@@ -701,7 +740,7 @@ def _heap(key, name, color, shape, kind, on, kw):
         else:
             cloth_square(0.12, "linen")
             base = 0.004
-        heap("heap", "stuff", base_z=base, shape=shape, seed=hash(key) % 1000, height=0.012, **kw)
+        heap("heap", "stuff", base_z=base, shape=shape, seed=_seed(key), height=0.012, **kw)
 
     return build
 
@@ -991,17 +1030,17 @@ def book_mats():
 
 BOOKS = [
     # key, name, cells, kind, cover color, kwargs
-    ("dioscorides", "Диоскорид. О лекарственных веществах", (1, 2), "codex", (110, 40, 34), dict(w=0.14, h=0.24, t=0.05)),
-    ("herbal", "Иллюстрированный травник", (2, 2), "codex", (60, 82, 52), dict(w=0.22, h=0.26, t=0.06)),
+    ("dioscorides", "Диоскорид. О лекарственных веществах", (1, 2), "codex", (96, 42, 34), dict(w=0.14, h=0.24, t=0.05)),
+    ("herbal", "Иллюстрированный травник", (2, 2), "codex", (62, 72, 48), dict(w=0.22, h=0.26, t=0.06)),
     ("hippocrates", "Гиппократ. О язвах", (1, 2), "scroll", None, dict(length=0.22, tag="tag_red")),
-    ("galen_simples", "Гален. О простых лекарствах", (2, 2), "codex", (120, 76, 40), dict(w=0.2, h=0.24, t=0.07)),
-    ("galen_antidotes", "Гален. О противоядиях", (2, 2), "codex", (62, 48, 80), dict(w=0.2, h=0.24, t=0.05, clasp="silver")),
-    ("oribasius", "Орибасий. Синопсис", (2, 2), "codex", (90, 30, 30), dict(w=0.2, h=0.25, t=0.055, clasp="gilt")),
+    ("galen_simples", "Гален. О простых лекарствах", (2, 2), "codex", (104, 72, 44), dict(w=0.2, h=0.24, t=0.07)),
+    ("galen_antidotes", "Гален. О противоядиях", (2, 2), "codex", (66, 50, 62), dict(w=0.2, h=0.24, t=0.05, clasp="silver")),
+    ("oribasius", "Орибасий. Синопсис", (2, 2), "codex", (84, 36, 32), dict(w=0.2, h=0.25, t=0.055, clasp="gilt")),
     ("zosimos", "Зосим. О приборах и печах", (1, 2), "scroll", None, dict(length=0.2, tag="tag_black")),
-    ("dyer", "Книга красильщика", (1, 2), "codex", (40, 60, 110), dict(w=0.13, h=0.2, t=0.04, boss=False)),
+    ("dyer", "Книга красильщика", (1, 2), "codex", (50, 60, 84), dict(w=0.13, h=0.2, t=0.04, boss=False)),
     ("aeneas", "Эней Тактик. Об обороне городов", (1, 2), "scroll", None, dict(length=0.21, tag="tag_red")),
     ("theophrastus", "Феофраст. О камнях", (1, 2), "scroll", None, dict(length=0.18, tag="tag_black")),
-    ("celsus", "Цельс. О медицине", (2, 2), "codex", (130, 100, 60), dict(w=0.2, h=0.24, t=0.06, clasp="iron")),
+    ("celsus", "Цельс. О медицине", (2, 2), "codex", (112, 88, 60), dict(w=0.2, h=0.24, t=0.06, clasp="iron")),
 ]
 
 

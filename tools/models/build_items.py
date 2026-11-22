@@ -844,7 +844,10 @@ def build(key):
     K.setup_studio()
     K.icon_camera(K.PARTS, spec["cells"], spec["azimuth"], spec["elevation"], spec["margin"], spec["roll"])
     K.render_icon(os.path.join(K.OUT_ICONS, key + ".png"))
-    K.bake_and_export(key, spec["pose"], squash=spec["squash"])
+    w, h = spec["cells"]
+    # мелким предметам (1x1, 1x2) хватает текстур 256 — на земле они маленькие, а glb легче
+    bake = 256 if w * h <= 2 else K.BAKE_SIZE
+    K.bake_and_export(key, spec["pose"], bake_size=bake, squash=spec["squash"])
     print(f"[items] {key}: готово")
 
 
