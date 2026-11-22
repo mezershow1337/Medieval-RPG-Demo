@@ -42,6 +42,9 @@ pub struct Actor {
 /// Тело на земле. Предметы для обыска добавит система лута.
 pub struct Corpse {
     pub id: u64,
+    /// Кто погиб (id игрока или врага) и кто убил — нужны системе лута.
+    pub actor: u64,
+    pub killer: Option<u64>,
     pub kind: ActorKind,
     pub pos: Vec3,
     pub yaw: f32,
@@ -105,6 +108,7 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .insert_resource(world)
         .insert_resource(SnapshotTimer { timer: Timer::from_seconds((1.0 / SNAPSHOT_RATE_HZ) as f32, TimerMode::Repeating), tick: 0 })
         .add_observer(on_server_event)
+        .add_plugins(crate::loot_server::LootServerPlugin)
         .add_systems(Update, (receive_client_messages, run_npcs, combat_tick, respawns, send_snapshots).chain());
     info!("Сервер слушает {addr}");
     app.run();
@@ -344,7 +348,7 @@ fn kill(server: &mut RenetServer, world: &mut GameWorld, id: u64, killer: Option
 
     let corpse_id = world.next_corpse_id;
     world.next_corpse_id += 1;
-    world.corpses.push(Corpse { id: corpse_id, kind, pos, yaw });
+    world.corpses.push(Corpse { id: corpse_id, actor: id, killer, kind, pos, yaw });
     server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::CorpseSpawned { corpse_id, kind, pos: pos.into(), yaw }));
     if world.corpses.len() > MAX_CORPSES {
         let old = world.corpses.remove(0);

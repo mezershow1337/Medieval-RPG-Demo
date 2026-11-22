@@ -2,11 +2,11 @@
 
 use crate::combat::{Action, HitOutcome, WeaponKind};
 use bevy::math::Vec3;
-use bevy_renet::renet::{ConnectionConfig, DefaultChannel};
+use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendType};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_0001;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_0002;
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -19,7 +19,16 @@ pub const CH_UNRELIABLE: DefaultChannel = DefaultChannel::Unreliable;
 pub const CH_RELIABLE: DefaultChannel = DefaultChannel::ReliableOrdered;
 
 pub fn connection_config() -> ConnectionConfig {
-    ConnectionConfig::default()
+    let mut config = ConnectionConfig::default();
+    // Канал 3 — добыча и инвентарь (см. loot_net.rs).
+    let loot = ChannelConfig {
+        channel_id: crate::loot_net::CH_LOOT,
+        max_memory_usage_bytes: 5 * 1024 * 1024,
+        send_type: SendType::ReliableOrdered { resend_time: std::time::Duration::from_millis(300) },
+    };
+    config.server_channels_config.push(loot.clone());
+    config.client_channels_config.push(loot);
+    config
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]

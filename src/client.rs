@@ -99,6 +99,7 @@ pub fn run(server_addr: SocketAddr) {
             ..default()
         }))
         .add_plugins((RenetClientPlugin, NetcodeClientPlugin, PlayerPlugin, fight::FightPlugin, hud::HudPlugin, graphics::GraphicsPlugin))
+        .add_plugins(crate::loot_client::LootClientPlugin)
         .insert_resource(RenetClient::new(connection_config()))
         .insert_resource(transport)
         .insert_resource(NetState { server_addr: Some(server_addr), ..default() })
