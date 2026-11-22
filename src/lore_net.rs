@@ -2,6 +2,7 @@
 
 use crate::items::ItemUid;
 use crate::lore::{Knowledge, Substance, Teacher};
+use crate::medicine::Body;
 use crate::protocol::NetPos;
 use serde::{Deserialize, Serialize};
 
@@ -47,6 +48,8 @@ pub enum LoreClientMessage {
     PaidLesson { master: u32 },
     /// Поработать подмастерьем.
     Apprentice { master: u32 },
+    /// Приложить к ране или выпить (лекарство, а то и яд).
+    Treat { uid: ItemUid },
     /// Прервать текущее занятие.
     Stop,
 }
@@ -63,4 +66,6 @@ pub enum LoreServerMessage {
     Activity { verb: String, done: f32, total: f32 },
     ActivityEnded,
     Notice(String),
+    /// Раны, яды и прочее (раз в полсекунды, пока не здоров; пустое — выздоровел).
+    Body(Body),
 }

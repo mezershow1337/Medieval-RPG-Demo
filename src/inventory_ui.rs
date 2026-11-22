@@ -505,6 +505,7 @@ fn handle_input(
     mut held: ResMut<Held>,
     mut client: Option<ResMut<RenetClient>>,
     time: Res<Time>,
+    body: Option<Res<crate::medicine_client::MyBody>>,
 ) {
     if !state.ui_open {
         return;
@@ -572,9 +573,11 @@ fn handle_input(
     let mine = if owner == Owner::Me { owner_inv(&state, owner).and_then(|i| i.find(uid)).map(|(_, it)| it.clone()) } else { None };
     let lore_usable = mine.as_ref().is_some_and(|it| crate::lore_client::usable(it.base));
     let consumable = mine.as_ref().is_some_and(|it| it.base.consumable().is_some());
-    if lore_usable && (keys.just_pressed(KeyCode::KeyF) || (state.container.is_none() && mouse.just_pressed(MouseButton::Right))) {
-        // Книги и свитки: читать.
-        crate::lore_client::try_use(client, mine.as_ref().unwrap());
+    if lore_usable
+        && (keys.just_pressed(KeyCode::KeyF) || (state.container.is_none() && mouse.just_pressed(MouseButton::Right)))
+        && crate::lore_client::try_use(client, mine.as_ref().unwrap(), body.as_deref().map(|b| &b.0))
+    {
+        // Книги — читать, лекарства — на рану или внутрь.
         return;
     }
     if keys.just_pressed(KeyCode::KeyF) || (consumable && state.container.is_none() && mouse.just_pressed(MouseButton::Right)) {
@@ -729,6 +732,9 @@ fn update_tooltip(
             for line in k.0.describe(item.base) {
                 t.spawn(text(&fonts, line, 13.0, Color::srgb(0.85, 0.8, 0.68), false));
             }
+        }
+        if crate::medicine::is_remedy(info.name) && item.base.consumable().is_none() {
+            t.spawn(text(&fonts, "F или ПКМ — на рану или внутрь".to_string(), 13.0, Color::srgb(0.75, 0.85, 0.6), false));
         }
         if let Some(c) = item.base.consumable() {
             let how = if c.heal_over > 0.0 { format!("за {:.0} с после применения", c.heal_over) } else { "во время применения".to_string() };

@@ -2,7 +2,8 @@
 //!
 //! Управление:
 //! - E у куста — собрать; E у мастера — платный урок; R у мастера — поработать подмастерьем.
-//! - F или ПКМ по книге в сумке — читать. Шаг в сторону или удар прерывают чтение.
+//! - F или ПКМ по книге в сумке — читать; по лекарству — на рану или внутрь.
+//!   Шаг в сторону или удар прерывают занятие.
 //! - K — окно знаний.
 
 use crate::inventory_ui::UiFonts;
@@ -59,10 +60,20 @@ pub fn send(client: &mut RenetClient, msg: &LoreClientMessage) {
     client.send_message(CH_LORE, encode(msg));
 }
 
-/// Обработать «использовать» для предметов знаний (книги). true — обработано.
-pub fn try_use(client: &mut RenetClient, item: &Item) -> bool {
+/// Обработать «использовать» для книг и лекарств. true — обработано.
+pub fn try_use(client: &mut RenetClient, item: &Item, body: Option<&crate::medicine::Body>) -> bool {
     if Book::from_item(item.base).is_some() {
         send(client, &LoreClientMessage::Read { uid: item.uid });
+        return true;
+    }
+    let name = item.info().name;
+    if crate::medicine::is_remedy(name) {
+        // Бинт, когда перевязывать нечего, — обычный расходник (лечит здоровье).
+        let healthy = crate::medicine::Body::default();
+        if item.base.consumable().is_some() && crate::medicine::plan(body.unwrap_or(&healthy), name).is_none() {
+            return false;
+        }
+        send(client, &LoreClientMessage::Treat { uid: item.uid });
         return true;
     }
     false
@@ -70,7 +81,7 @@ pub fn try_use(client: &mut RenetClient, item: &Item) -> bool {
 
 /// Можно ли «использовать» предмет (для подсказок и ПКМ в сумке).
 pub fn usable(base: ItemBaseId) -> bool {
-    Book::from_item(base).is_some()
+    Book::from_item(base).is_some() || crate::medicine::is_remedy(base.base().name)
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +219,7 @@ fn receive_lore(
     mut knowledge: ResMut<MyKnowledge>,
     mut view: ResMut<LoreView>,
     mut loot: ResMut<LootState>,
+    mut body: ResMut<crate::medicine_client::MyBody>,
     assets: Res<LoreAssets>,
     time: Res<Time>,
 ) {
@@ -247,6 +259,11 @@ fn receive_lore(
             LoreServerMessage::Activity { verb, done, total } => loot.using = Some((verb, now - done, total)),
             LoreServerMessage::ActivityEnded => loot.using = None,
             LoreServerMessage::Notice(text) => loot.notify(text, now),
+            LoreServerMessage::Body(b) => {
+                if body.0 != b {
+                    body.0 = b;
+                }
+            }
         }
     }
 }
