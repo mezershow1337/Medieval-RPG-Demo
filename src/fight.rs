@@ -1,0 +1,277 @@
+//! Бой на стороне клиента: ввод (ЛКМ — удар, ПКМ — парирование), предсказание своего
+//! состояния, меч в руках от первого лица и эффекты попаданий.
+
+use crate::client::{Blade, CharacterAssets, NetState, RemoteActor, RemoteIndex};
+use crate::combat::{self, Action, Fighter, HitOutcome};
+use crate::player::{LocalPlayer, PlayerCamera};
+use crate::protocol::*;
+use bevy::prelude::*;
+use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
+use bevy_renet::RenetClient;
+
+/// Набор систем боя; сеть обрабатывается до него.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FightSet;
+
+/// Боевое состояние своего персонажа (предсказываем локально, сервер поправляет).
+#[derive(Component)]
+pub struct LocalFighter {
+    pub fighter: Fighter,
+}
+
+/// Меч в руках (вид от первого лица).
+#[derive(Component)]
+struct ViewSword;
+
+/// События боя для эффектов и интерфейса.
+#[derive(Message, Clone, Copy, Debug)]
+pub enum CombatFeedback {
+    Hit { attacker: u64, target: u64, outcome: HitOutcome, at: Vec3 },
+    Died { id: u64, killer: Option<u64> },
+}
+
+/// Последнее заметное событие для надписи в центре экрана.
+#[derive(Resource, Default)]
+pub struct Banner {
+    pub text: String,
+    pub color: Color,
+    pub time_left: f32,
+}
+
+/// Красная вспышка при получении урона (0..1).
+#[derive(Resource, Default)]
+pub struct DamageFlash(pub f32);
+
+/// Тряска камеры (0..1).
+#[derive(Resource, Default)]
+struct Shake(f32);
+
+#[derive(Component)]
+struct Spark {
+    velocity: Vec3,
+    life: f32,
+}
+
+#[derive(Resource)]
+struct SparkAssets {
+    mesh: Handle<Mesh>,
+    gold: Handle<StandardMaterial>,
+    white: Handle<StandardMaterial>,
+    blood: Handle<StandardMaterial>,
+}
+
+pub struct FightPlugin;
+
+impl Plugin for FightPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<CombatFeedback>()
+            .init_resource::<Banner>()
+            .init_resource::<DamageFlash>()
+            .init_resource::<Shake>()
+            .add_systems(Startup, setup_sparks)
+            .add_systems(
+                Update,
+                (
+                    combat_input.before(crate::player::grab_cursor),
+                    tick_local,
+                    animate_view_sword,
+                    feedback_effects,
+                    update_sparks,
+                    decay_effects,
+                )
+                    .chain()
+                    .in_set(FightSet),
+            );
+    }
+}
+
+pub fn spawn_view_sword(parent: &mut ChildSpawnerCommands, assets: &CharacterAssets) {
+    crate::client::spawn_sword(parent, assets, combat::WeaponKind::ArmingSword, ViewSword);
+}
+
+fn setup_sparks(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
+    let glow = |materials: &mut Assets<StandardMaterial>, c: Color, e: LinearRgba| materials.add(StandardMaterial { base_color: c, emissive: e, unlit: true, ..default() });
+    commands.insert_resource(SparkAssets {
+        mesh: meshes.add(Cuboid::new(0.03, 0.03, 0.03)),
+        gold: glow(&mut materials, Color::srgb(1.0, 0.8, 0.3), LinearRgba::rgb(20.0, 12.0, 3.0)),
+        white: glow(&mut materials, Color::WHITE, LinearRgba::rgb(8.0, 8.0, 8.0)),
+        blood: glow(&mut materials, Color::srgb(0.6, 0.02, 0.02), LinearRgba::rgb(0.6, 0.0, 0.0)),
+    });
+}
+
+fn cursor_locked(cursor: &CursorOptions) -> bool {
+    cursor.grab_mode != CursorGrabMode::None
+}
+
+fn combat_input(
+    mouse: Res<ButtonInput<MouseButton>>,
+    cursor: Single<&CursorOptions, With<PrimaryWindow>>,
+    client: Option<ResMut<RenetClient>>,
+    mut local: Query<(&LocalPlayer, &mut LocalFighter)>,
+) {
+    if !cursor_locked(&cursor) {
+        return;
+    }
+    let Some(mut client) = client else { return };
+    let Ok((p, mut f)) = local.single_mut() else { return };
+    if f.fighter.is_dead() {
+        return;
+    }
+    if mouse.just_pressed(MouseButton::Left) {
+        f.fighter.try_attack();
+        client.send_message(CH_RELIABLE, encode(&ClientMessage::Attack { yaw: p.yaw, pitch: p.pitch }));
+    }
+    if mouse.just_pressed(MouseButton::Right) {
+        f.fighter.try_parry();
+        client.send_message(CH_RELIABLE, encode(&ClientMessage::Parry { yaw: p.yaw, pitch: p.pitch }));
+    }
+}
+
+fn tick_local(time: Res<Time>, mut local: Query<(&mut LocalPlayer, &mut LocalFighter)>) {
+    for (mut p, mut f) in &mut local {
+        f.fighter.tick(time.delta_secs());
+        p.speed_mult = f.fighter.move_speed_mult();
+    }
+}
+
+/// Сверяем своё предсказанное состояние с сервером.
+pub fn reconcile(local: &mut LocalFighter, snap: &ActorSnapshot) {
+    local.fighter.hp = snap.hp;
+    local.fighter.max_hp = snap.max_hp;
+    let forced = matches!(snap.action, Action::Stagger { .. } | Action::Flinch { .. } | Action::BlockRecoil { .. } | Action::Dead);
+    let same = std::mem::discriminant(&snap.action) == std::mem::discriminant(&local.fighter.action);
+    if forced && !same {
+        local.fighter.action = snap.action;
+        local.fighter.queued_attack = false;
+    }
+}
+
+fn animate_view_sword(
+    time: Res<Time>,
+    assets: Res<CharacterAssets>,
+    shake: Res<Shake>,
+    local: Query<(&LocalPlayer, &LocalFighter)>,
+    mut camera: Query<&mut Transform, (With<PlayerCamera>, Without<ViewSword>)>,
+    mut sword: Query<(&mut Transform, &mut Visibility, &Children), With<ViewSword>>,
+    mut blades: Query<&mut MeshMaterial3d<StandardMaterial>, With<Blade>>,
+) {
+    let Ok((p, f)) = local.single() else { return };
+    // Поворот камеры по вертикали и тряска.
+    if let Ok(mut cam) = camera.single_mut() {
+        let s = shake.0 * 0.04;
+        let t = time.elapsed_secs() * 60.0;
+        cam.rotation = Quat::from_rotation_x(p.pitch + (t.sin() * s)) * Quat::from_rotation_z((t * 1.3).cos() * s);
+    }
+    let Ok((mut st, mut vis, children)) = sword.single_mut() else { return };
+    *vis = if f.fighter.is_dead() { Visibility::Hidden } else { Visibility::Inherited };
+    let (hilt, dir) = combat::weapon_pose(&f.fighter.action, f.fighter.weapon, time.elapsed_secs());
+    // Удар в мире наклонён на 0.6 от взгляда, а камера — на весь взгляд; компенсируем разницу.
+    let fix = Quat::from_rotation_x(-p.pitch * 0.4);
+    st.translation = Vec3::new(0.0, -0.25, 0.0) + fix * hilt;
+    st.rotation = Quat::from_rotation_arc(Vec3::Y, (fix * dir).normalize());
+    for c in children.iter() {
+        if let Ok(mut m) = blades.get_mut(c) {
+            m.0 = assets.steel.clone();
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn feedback_effects(
+    mut commands: Commands,
+    mut events: MessageReader<CombatFeedback>,
+    state: Res<NetState>,
+    sparks: Res<SparkAssets>,
+    index: Res<RemoteIndex>,
+    remotes: Query<&RemoteActor>,
+    mut banner: ResMut<Banner>,
+    mut flash: ResMut<DamageFlash>,
+    mut shake: ResMut<Shake>,
+    mut local: Query<&mut LocalFighter>,
+) {
+    let me = state.my_id;
+    let mut seed = 0x9E3779B97F4A7C15u64;
+    let mut rnd = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 40) as f32 / (1u64 << 24) as f32 - 0.5
+    };
+    let is_npc = |id: u64| index.0.get(&id).and_then(|e| remotes.get(*e).ok()).is_some_and(|r| r.kind.is_npc());
+    for ev in events.read() {
+        match *ev {
+            CombatFeedback::Hit { attacker, target, outcome, at } => {
+                let (count, mat, speed) = match outcome {
+                    HitOutcome::Parried => (18, sparks.gold.clone(), 4.0),
+                    HitOutcome::Blocked => (10, sparks.white.clone(), 3.0),
+                    HitOutcome::Damage { .. } => (12, sparks.blood.clone(), 2.0),
+                };
+                // Свою кровь не рисуем — вместо неё красная вспышка экрана.
+                let count = if Some(target) == me && matches!(outcome, HitOutcome::Damage { .. }) { 0 } else { count };
+                for _ in 0..count {
+                    let v = Vec3::new(rnd(), rnd() + 0.6, rnd()).normalize() * speed * (0.5 + rnd() + 0.5);
+                    commands.spawn((Spark { velocity: v, life: 0.45 }, Mesh3d(sparks.mesh.clone()), MeshMaterial3d(mat.clone()), Transform::from_translation(at)));
+                }
+                let mut say = |text: &str, color: Color| {
+                    banner.text = text.to_string();
+                    banner.color = color;
+                    banner.time_left = 1.2;
+                };
+                match outcome {
+                    HitOutcome::Parried if Some(target) == me => say("PARRY! Strike back!", Color::srgb(1.0, 0.85, 0.3)),
+                    HitOutcome::Parried if Some(attacker) == me => {
+                        say("PARRIED - you are staggered", Color::srgb(1.0, 0.4, 0.3));
+                        shake.0 = 0.8;
+                        if let Ok(mut f) = local.single_mut() {
+                            f.fighter.action = Action::Stagger { t: 0.0 };
+                        }
+                    }
+                    HitOutcome::Blocked if Some(attacker) == me => {
+                        say("Blocked by shield", Color::srgb(0.8, 0.8, 0.85));
+                        if let Ok(mut f) = local.single_mut() {
+                            f.fighter.action = Action::BlockRecoil { t: 0.0 };
+                        }
+                    }
+                    HitOutcome::Damage { amount, .. } if Some(target) == me => {
+                        flash.0 = (0.35 + amount / 100.0).min(0.8);
+                        shake.0 = 0.6;
+                    }
+                    HitOutcome::Damage { .. } if Some(attacker) == me && is_npc(target) => shake.0 = shake.0.max(0.2),
+                    _ => {}
+                }
+            }
+            CombatFeedback::Died { id, killer } => {
+                if Some(id) == me {
+                    banner.text = "YOU DIED".into();
+                    banner.color = Color::srgb(0.8, 0.1, 0.1);
+                    banner.time_left = 5.0;
+                } else if killer == me && me.is_some() {
+                    banner.text = "Enemy slain".into();
+                    banner.color = Color::srgb(0.9, 0.9, 0.9);
+                    banner.time_left = 1.5;
+                }
+            }
+        }
+    }
+}
+
+fn update_sparks(mut commands: Commands, time: Res<Time>, mut sparks: Query<(Entity, &mut Spark, &mut Transform)>) {
+    let dt = time.delta_secs();
+    for (e, mut s, mut t) in &mut sparks {
+        s.life -= dt;
+        if s.life <= 0.0 {
+            commands.entity(e).despawn();
+            continue;
+        }
+        s.velocity.y -= 9.8 * dt;
+        t.translation += s.velocity * dt;
+        t.scale = Vec3::splat((s.life / 0.45).max(0.05));
+    }
+}
+
+fn decay_effects(time: Res<Time>, mut banner: ResMut<Banner>, mut flash: ResMut<DamageFlash>, mut shake: ResMut<Shake>) {
+    let dt = time.delta_secs();
+    banner.time_left = (banner.time_left - dt).max(0.0);
+    flash.0 = (flash.0 - dt * 1.5).max(0.0);
+    shake.0 = (shake.0 - dt * 3.0).max(0.0);
+}
