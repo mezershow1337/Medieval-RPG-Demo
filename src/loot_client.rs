@@ -392,7 +392,7 @@ fn interact_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClien
     {
         send(&mut client, &LootClientMessage::Interact { id });
     }
-    if keys.just_pressed(KeyCode::F9) {
+    if keys.just_pressed(KeyCode::F8) {
         send(&mut client, &LootClientMessage::DebugSpawnCorpse);
     }
 }

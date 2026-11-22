@@ -335,7 +335,7 @@ fn on_spawn_ground_item(event: On<SpawnGroundItem>, mut server: ResMut<RenetServ
 /// Одно тело и немного вещей во дворе у точки появления, чтобы сразу было что обыскать.
 fn spawn_demo_loot(mut commands: Commands) {
     commands.trigger(CharacterDied {
-        pos: Vec3::new(2.5, 0.5, 14.5),
+        pos: crate::level::spawn_point(0) + Vec3::new(5.5, 0.4, -5.5),
         yaw: 0.6,
         name: "Павший рыцарь".into(),
         loot: DeathLoot::Table { table: LootTableId::Knight, luck: 0.0 },
@@ -344,7 +344,7 @@ fn spawn_demo_loot(mut commands: Commands) {
     let mut uids = UidGen(1_000_000_000);
     for (i, item) in roll_loot(LootTableId::Chest, 30.0, &mut rng, &mut uids).into_iter().enumerate() {
         let a = i as f32 * 1.3;
-        commands.trigger(SpawnGroundItem { pos: Vec3::new(5.0, 1.2, 17.0), vel: Vec3::new(a.cos() * 2.0, 2.0, a.sin() * 2.0), item });
+        commands.trigger(SpawnGroundItem { pos: crate::level::spawn_point(0) + Vec3::new(8.0, 1.1, -3.0), vel: Vec3::new(a.cos() * 2.0, 2.0, a.sin() * 2.0), item });
     }
 }
 
