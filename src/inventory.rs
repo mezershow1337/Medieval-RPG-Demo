@@ -316,13 +316,13 @@ mod tests {
     fn place_and_overlap() {
         let mut uids = UidGen::default();
         let mut inv = Inventory::new((4, 4));
-        let sword = make("Одноручный меч", &mut uids); // 1x3
+        let sword = make("Спата", &mut uids); // 1x3
         let id = sword.uid;
         assert_eq!(inv.place(sword, Target::Grid { x: 0, y: 0 }), Ok(None));
         assert!(!inv.grid.fits((1, 1), 0, 2));
         assert!(inv.grid.fits((1, 1), 0, 3));
         assert_eq!(inv.find(id).unwrap().0, Loc::Grid { x: 0, y: 0 });
-        let big = make("Латная кираса", &mut uids); // 2x3
+        let big = make("Ламеллярный панцирь", &mut uids); // 2x3
         assert!(inv.place(big, Target::Grid { x: 3, y: 0 }).is_err()); // не влезает по ширине
     }
 
@@ -330,8 +330,8 @@ mod tests {
     fn equip_and_swap() {
         let mut uids = UidGen::default();
         let mut invs = vec![Inventory::new((6, 6))];
-        let a = make("Одноручный меч", &mut uids);
-        let b = make("Длинный меч", &mut uids);
+        let a = make("Спата", &mut uids);
+        let b = make("Кавалерийская спата", &mut uids);
         let (ida, idb) = (a.uid, b.uid);
         invs[0].place(a, Target::Auto).unwrap();
         invs[0].place(b, Target::Auto).unwrap();
@@ -363,7 +363,7 @@ mod tests {
     fn full_inventory_rolls_back() {
         let mut uids = UidGen::default();
         let mut invs = vec![Inventory::new((1, 3)), Inventory::new((4, 4))];
-        invs[0].place(make("Одноручный меч", &mut uids), Target::Auto).unwrap();
+        invs[0].place(make("Спата", &mut uids), Target::Auto).unwrap();
         let axe = make("Боевой топор", &mut uids);
         let id = axe.uid;
         invs[1].place(axe, Target::Auto).unwrap();

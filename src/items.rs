@@ -316,30 +316,30 @@ use ItemShape as Sh;
 /// Все виды предметов. Индекс в этом массиве — [`ItemBaseId`].
 pub const ITEM_BASES: &[ItemBase] = &[
     // Оружие
-    base!("Одноручный меч", "Меч", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
-    base!("Длинный меч", "Длинный меч", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 42.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Спата", "Спата", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Кавалерийская спата", "Длинная спата", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 42.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
     base!("Булава", "Булава", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 34.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
     base!("Боевой топор", "Топор", Some(S::MainHand), (2, 3), Some((Stat::WeaponDamage, 38.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
-    base!("Алебарда", "Алебарда", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 50.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Пехотное копьё", "Копьё", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 50.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
     base!("Кинжал", "Кинжал", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 20.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
     // Щиты
-    base!("Каплевидный щит", "Щит", Some(S::OffHand), (2, 3), Some((Stat::Armor, 20.0)), 1, SHIELD_AFFIXES, Sh::Shield, true),
-    base!("Баклер", "Баклер", Some(S::OffHand), (2, 2), Some((Stat::Armor, 10.0)), 1, SHIELD_AFFIXES, Sh::Shield, true),
+    base!("Овальный щит", "Щит", Some(S::OffHand), (2, 3), Some((Stat::Armor, 20.0)), 1, SHIELD_AFFIXES, Sh::Shield, true),
+    base!("Круглый щит", "Круглый щит", Some(S::OffHand), (2, 2), Some((Stat::Armor, 10.0)), 1, SHIELD_AFFIXES, Sh::Shield, true),
     // Шлемы
-    base!("Топфхельм", "Топфхельм", Some(S::Head), (2, 2), Some((Stat::Armor, 18.0)), 1, HELMET_AFFIXES, Sh::Helmet, true),
-    base!("Шапель", "Шапель", Some(S::Head), (2, 2), Some((Stat::Armor, 11.0)), 1, HELMET_AFFIXES, Sh::Helmet, true),
+    base!("Спангенхельм", "Спангенхельм", Some(S::Head), (2, 2), Some((Stat::Armor, 18.0)), 1, HELMET_AFFIXES, Sh::Helmet, true),
+    base!("Гребенчатый шлем", "Шлем", Some(S::Head), (2, 2), Some((Stat::Armor, 11.0)), 1, HELMET_AFFIXES, Sh::Helmet, true),
     // Торс
-    base!("Стёганый гамбезон", "Гамбезон", Some(S::Chest), (2, 3), Some((Stat::Armor, 14.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
-    base!("Кольчужный хауберк", "Кольчуга", Some(S::Chest), (2, 3), Some((Stat::Armor, 26.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
-    base!("Латная кираса", "Кираса", Some(S::Chest), (2, 3), Some((Stat::Armor, 38.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    base!("Стёганая туника", "Стёганка", Some(S::Chest), (2, 3), Some((Stat::Armor, 14.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    base!("Кольчуга", "Кольчуга", Some(S::Chest), (2, 3), Some((Stat::Armor, 26.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    base!("Ламеллярный панцирь", "Панцирь", Some(S::Chest), (2, 3), Some((Stat::Armor, 38.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
     // Руки, ноги
-    base!("Латные рукавицы", "Рукавицы", Some(S::Hands), (2, 2), Some((Stat::Armor, 9.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    base!("Ламеллярные наручи", "Наручи", Some(S::Hands), (2, 2), Some((Stat::Armor, 9.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
     base!("Кожаные перчатки", "Перчатки", Some(S::Hands), (2, 2), Some((Stat::Armor, 4.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
-    base!("Латные поножи", "Поножи", Some(S::Legs), (2, 3), Some((Stat::Armor, 16.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    base!("Железные поножи", "Поножи", Some(S::Legs), (2, 3), Some((Stat::Armor, 16.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
     base!("Кожаные сапоги", "Сапоги", Some(S::Feet), (2, 2), Some((Stat::Armor, 5.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
     // Украшения
-    base!("Серебряное кольцо", "Кольцо", Some(S::Ring), (1, 1), None, 1, JEWEL_AFFIXES, Sh::Small, true),
-    base!("Амулет с гербом", "Амулет", Some(S::Necklace), (1, 1), None, 1, JEWEL_AFFIXES, Sh::Small, true),
+    base!("Серебряный перстень", "Перстень", Some(S::Ring), (1, 1), None, 1, JEWEL_AFFIXES, Sh::Small, true),
+    base!("Нательный крест", "Крест", Some(S::Necklace), (1, 1), None, 1, JEWEL_AFFIXES, Sh::Small, true),
     // Расходники и ценности
     // Золотой солид (номисма) Анастасия: 1/72 римского фунта золота, 4,5 г. См. economy.rs.
     base!("Солид", "Солид", None, (1, 1), None, 100, &[], Sh::Coins, false),
@@ -458,6 +458,29 @@ pub const ITEM_BASES: &[ItemBase] = &[
     base!("Зажигательный горшок", "Огонь", None, (2, 2), None, 1, &[], Sh::Small, true),
 ];
 
+/// Старое название → новое (предметы переименованы под VI век).
+pub const RENAMED: &[(&str, &str)] = &[
+    ("Одноручный меч", "Спата"),
+    ("Длинный меч", "Кавалерийская спата"),
+    ("Алебарда", "Пехотное копьё"),
+    ("Каплевидный щит", "Овальный щит"),
+    ("Баклер", "Круглый щит"),
+    ("Топфхельм", "Спангенхельм"),
+    ("Шапель", "Гребенчатый шлем"),
+    ("Стёганый гамбезон", "Стёганая туника"),
+    ("Кольчужный хауберк", "Кольчуга"),
+    ("Латная кираса", "Ламеллярный панцирь"),
+    ("Латные рукавицы", "Ламеллярные наручи"),
+    ("Латные поножи", "Железные поножи"),
+    ("Серебряное кольцо", "Серебряный перстень"),
+    ("Амулет с гербом", "Нательный крест"),
+];
+
+/// Нынешнее название предмета по старому (или то же самое).
+pub fn canonical_name(name: &str) -> &str {
+    RENAMED.iter().find(|(old, _)| *old == name).map(|(_, new)| *new).unwrap_or(name)
+}
+
 /// Номер вида предмета в [`ITEM_BASES`].
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ItemBaseId(pub u16);
@@ -470,11 +493,13 @@ impl ItemBaseId {
     /// Вид предмета по имени, если такой есть (торговцы пропускают ещё не добавленные товары;
     /// другие части игры тоже не должны паниковать).
     pub fn find(name: &str) -> Option<ItemBaseId> {
+        // Старые названия (до переноса действия в Херсонес 510 г.) продолжают работать.
+        let name = canonical_name(name);
         ITEM_BASES.iter().position(|b| b.name == name).map(|i| ItemBaseId(i as u16))
     }
 
     pub fn by_name(name: &str) -> ItemBaseId {
-        ItemBaseId(ITEM_BASES.iter().position(|b| b.name == name).unwrap_or_else(|| panic!("нет предмета «{name}»")) as u16)
+        Self::find(name).unwrap_or_else(|| panic!("нет предмета «{name}»"))
     }
 }
 
@@ -645,12 +670,12 @@ impl LootTableId {
             LootTableId::Footman => LootTable {
                 rolls: (1, 2),
                 entries: &[
-                    ("Одноручный меч", 3.0),
+                    ("Спата", 3.0),
                     ("Булава", 3.0),
                     ("Кинжал", 2.0),
-                    ("Баклер", 2.0),
-                    ("Шапель", 3.0),
-                    ("Стёганый гамбезон", 3.0),
+                    ("Круглый щит", 2.0),
+                    ("Гребенчатый шлем", 3.0),
+                    ("Стёганая туника", 3.0),
                     ("Кожаные перчатки", 2.0),
                     ("Кожаные сапоги", 2.0),
                     ("Бинт", 4.0),
@@ -664,17 +689,17 @@ impl LootTableId {
             LootTableId::Knight => LootTable {
                 rolls: (2, 3),
                 entries: &[
-                    ("Одноручный меч", 3.0),
-                    ("Длинный меч", 3.0),
+                    ("Спата", 3.0),
+                    ("Кавалерийская спата", 3.0),
                     ("Боевой топор", 2.0),
-                    ("Алебарда", 1.5),
-                    ("Каплевидный щит", 3.0),
-                    ("Топфхельм", 3.0),
-                    ("Кольчужный хауберк", 3.0),
-                    ("Латная кираса", 1.5),
-                    ("Латные рукавицы", 2.0),
-                    ("Латные поножи", 2.0),
-                    ("Серебряное кольцо", 1.0),
+                    ("Пехотное копьё", 1.5),
+                    ("Овальный щит", 3.0),
+                    ("Спангенхельм", 3.0),
+                    ("Кольчуга", 3.0),
+                    ("Ламеллярный панцирь", 1.5),
+                    ("Ламеллярные наручи", 2.0),
+                    ("Железные поножи", 2.0),
+                    ("Серебряный перстень", 1.0),
                     ("Целебное зелье", 2.0),
                     ("Бинт", 2.0),
                     ("Обрывок травника", 1.0),
@@ -687,15 +712,15 @@ impl LootTableId {
             LootTableId::KnightCaptain => LootTable {
                 rolls: (3, 4),
                 entries: &[
-                    ("Длинный меч", 3.0),
-                    ("Алебарда", 2.0),
-                    ("Каплевидный щит", 2.0),
-                    ("Топфхельм", 2.0),
-                    ("Латная кираса", 3.0),
-                    ("Латные поножи", 2.0),
-                    ("Латные рукавицы", 2.0),
-                    ("Серебряное кольцо", 2.0),
-                    ("Амулет с гербом", 2.0),
+                    ("Кавалерийская спата", 3.0),
+                    ("Пехотное копьё", 2.0),
+                    ("Овальный щит", 2.0),
+                    ("Спангенхельм", 2.0),
+                    ("Ламеллярный панцирь", 3.0),
+                    ("Железные поножи", 2.0),
+                    ("Ламеллярные наручи", 2.0),
+                    ("Серебряный перстень", 2.0),
+                    ("Нательный крест", 2.0),
                     ("Рубин", 1.0),
                     ("Целебное зелье", 2.0),
                     ("Цельс. О медицине", 0.4),
@@ -708,13 +733,13 @@ impl LootTableId {
             LootTableId::Chest => LootTable {
                 rolls: (1, 3),
                 entries: &[
-                    ("Серебряное кольцо", 2.0),
-                    ("Амулет с гербом", 2.0),
+                    ("Серебряный перстень", 2.0),
+                    ("Нательный крест", 2.0),
                     ("Рубин", 2.0),
                     ("Целебное зелье", 3.0),
                     ("Бинт", 3.0),
                     ("Кинжал", 1.0),
-                    ("Длинный меч", 1.0),
+                    ("Кавалерийская спата", 1.0),
                     // Книги и редкие вещества: свитки часто хранили в сундуках.
                     ("Обрывок травника", 2.0),
                     ("Диоскорид. О лекарственных веществах", 0.6),
@@ -780,10 +805,17 @@ mod tests {
     }
 
     #[test]
+    fn old_names_still_resolve() {
+        for (old, new) in RENAMED {
+            assert_eq!(ItemBaseId::by_name(old), ItemBaseId::by_name(new));
+        }
+    }
+
+    #[test]
     fn affix_count_follows_quality() {
         let mut rng = Rng::new(7);
         let mut uids = UidGen::default();
-        let sword = ItemBaseId::by_name("Длинный меч");
+        let sword = ItemBaseId::by_name("Кавалерийская спата");
         for q in Quality::ALL {
             let item = roll_item(sword, q, 1, &mut rng, &mut uids);
             assert_eq!(item.affixes.len(), q.affix_count());
