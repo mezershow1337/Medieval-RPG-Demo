@@ -221,6 +221,30 @@ impl MeshBuilder {
         }
     }
 
+    /// Только скаты двускатной крыши (без треугольных торцов).
+    pub fn gable_roof_slopes(&mut self, min: Vec2, max: Vec2, eave_y: f32, ridge_y: f32, ridge_x: bool) {
+        let mut tmp = MeshBuilder::default();
+        tmp.gable_roof(min, max, eave_y, ridge_y, ridge_x);
+        // Последние два треугольника (6 индексов, 6 вершин) — торцы; отрезаем их.
+        let tri_verts = 6;
+        tmp.pos.truncate(tmp.pos.len() - tri_verts);
+        tmp.nrm.truncate(tmp.nrm.len() - tri_verts);
+        tmp.uv.truncate(tmp.uv.len() - tri_verts);
+        tmp.idx.truncate(tmp.idx.len() - 6);
+        self.append(tmp);
+    }
+
+    /// Та же геометрия, но лицом в другую сторону (изнанка крыши, потолок).
+    pub fn flipped(mut self) -> MeshBuilder {
+        for n in &mut self.nrm {
+            *n = [-n[0], -n[1], -n[2]];
+        }
+        for t in self.idx.chunks_mut(3) {
+            t.swap(1, 2);
+        }
+        self
+    }
+
     /// Односкатная крыша: верхний край над линией `high`, нижний — над `low` (обе вдоль одной оси).
     pub fn lean_roof(&mut self, high: [Vec3; 2], low: [Vec3; 2]) {
         let along = (high[1] - high[0]).length();
@@ -256,8 +280,11 @@ impl MeshBuilder {
         self.idx.extend(other.idx.into_iter().map(|i| i + base));
     }
 
-    pub fn triangle_count(&self) -> usize {
-        self.idx.len() / 3
+    /// Сдвигает всю геометрию.
+    pub fn translate(&mut self, d: Vec3) {
+        for p in &mut self.pos {
+            *p = (Vec3::from(*p) + d).to_array();
+        }
     }
 
     /// Тело вращения вокруг вертикали через `base`: профиль (радиус, высота) снизу вверх.

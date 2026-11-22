@@ -121,6 +121,12 @@ fn on_quay(x: f32, z: f32) -> bool {
     x > 280.0 && x < QUAY_EDGE + 30.0 && z > QUAY_Z.0 && z < QUAY_Z.1
 }
 
+/// Ось восточной балки (пересохшее русло к Карантинной бухте) на широте z.
+/// По её дну сочится вода: родник, мята, окопник, девясил.
+pub fn balka_x(z: f32) -> f32 {
+    40.0 + (z * 0.008).sin() * 40.0 + 0.1 * z
+}
+
 /// Высота суши без учёта моря.
 fn land(x: f32, z: f32) -> f32 {
     let d = city_distance(x, z);
@@ -134,7 +140,8 @@ fn land(x: f32, z: f32) -> f32 {
         let dd = (x - line).abs();
         (-(dd / w).powi(2)).exp()
     };
-    let r = ravine(-480.0, -0.25, 30.0) * 12.0 + ravine(40.0, 0.1, 26.0) * smoothstep(320.0, 420.0, z) * 10.0;
+    let east = (-((x - balka_x(z)) / 26.0).powi(2)).exp();
+    let r = ravine(-480.0, -0.25, 30.0) * 12.0 + east * smoothstep(320.0, 420.0, z) * 10.0;
     k * (hills + rise - r - 4.0).max(-k * 2.0) + (1.0 - k) * 0.0
 }
 
@@ -173,6 +180,12 @@ pub fn heightfield(holes: Vec<(Vec2, Vec2)>) -> HeightField {
         }
     }
     HeightField { origin, cell: CELL, nx: n, nz: n, data, holes }
+}
+
+/// Высота земли (по той же сетке, по которой ходят персонажи). Сетка считается один раз.
+pub fn ground_y(x: f32, z: f32) -> f32 {
+    static HF: std::sync::OnceLock<HeightField> = std::sync::OnceLock::new();
+    HF.get_or_init(|| heightfield(Vec::new())).height(x, z)
 }
 
 /// Меши земли по участкам: внутри стен — утоптанная земля, снаружи — трава и камень.

@@ -22,6 +22,48 @@ pub const SUN_DIR: Vec3 = Vec3::new(-0.78, 0.42, 0.40);
 /// Цвет тумана — совпадает с горизонтом неба.
 const FOG_COLOR: Color = Color::srgb(0.40, 0.38, 0.46);
 
+/// Освещение уровня: готический замок — в закатной дымке; Херсонес — ясный летний день
+/// у моря (послеполуденное солнце с запада-юго-запада, морская дымка у горизонта).
+#[derive(Clone, Copy)]
+struct Mood {
+    sun: Vec3,
+    sun_color: Color,
+    lux: f32,
+    ambient: (Color, f32),
+    fog: Color,
+    fog_far: (Color, Color),
+    visibility: f32,
+    shadow_distance: f32,
+    day: bool,
+}
+
+fn mood() -> Mood {
+    match crate::level::active() {
+        crate::level::LevelKind::Castle => Mood {
+            sun: SUN_DIR,
+            sun_color: Color::srgb(1.0, 0.84, 0.66),
+            lux: 11_000.0,
+            ambient: (Color::srgb(0.62, 0.62, 0.8), 420.0),
+            fog: FOG_COLOR,
+            fog_far: (Color::srgb(0.36, 0.36, 0.46), Color::srgb(0.62, 0.56, 0.60)),
+            visibility: 380.0,
+            shadow_distance: 160.0,
+            day: false,
+        },
+        crate::level::LevelKind::Chersonesus => Mood {
+            sun: Vec3::new(-0.72, 0.62, 0.22),
+            sun_color: Color::srgb(1.0, 0.93, 0.8),
+            lux: 15_000.0,
+            ambient: (Color::srgb(0.6, 0.7, 0.9), 650.0),
+            fog: Color::srgb(0.66, 0.74, 0.84),
+            fog_far: (Color::srgb(0.55, 0.64, 0.78), Color::srgb(0.80, 0.78, 0.72)),
+            visibility: 1100.0,
+            shadow_distance: 220.0,
+            day: true,
+        },
+    }
+}
+
 pub struct GraphicsPlugin;
 
 impl Plugin for GraphicsPlugin {
@@ -116,7 +158,7 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         Mat::Roof => (Color::srgb(0.20, 0.22, 0.27), Color::srgb(0.08, 0.09, 0.11), P_SLATE, 1.0, 0.3, 1.0, 0.6, 0.0, 0.25, 0.0, 0.0),
         Mat::Iron => (Color::srgb(0.22, 0.21, 0.20), Color::srgb(0.35, 0.20, 0.12), P_METAL, 1.0, 0.3, 0.3, 0.45, 0.9, 0.0, 0.0, 0.0),
         Mat::Coals => (Color::srgb(0.08, 0.05, 0.04), Color::srgb(1.0, 0.35, 0.08), P_COALS, 1.0, 0.5, 0.5, 0.9, 0.0, 0.0, 0.0, 6.0),
-        Mat::Water => (Color::srgb(0.05, 0.09, 0.10), Color::srgb(0.10, 0.16, 0.16), P_WATER, 1.0, 0.0, 0.3, 0.05, 0.0, 0.0, 0.0, 0.0),
+        Mat::Water => (Color::srgb(0.06, 0.13, 0.16), Color::srgb(0.10, 0.2, 0.22), P_WATER, 1.0, 0.0, 0.3, 0.05, 0.0, 0.0, 0.0, 0.0),
         Mat::Leaves => (Color::srgb(0.07, 0.15, 0.07), Color::srgb(0.16, 0.24, 0.09), P_LEAVES, 1.0, 0.4, 1.0, 0.9, 0.0, 0.0, 0.0, 0.0),
         Mat::Paving => (Color::srgb(0.66, 0.61, 0.52), Color::srgb(0.36, 0.33, 0.28), P_FLAGSTONE, 0.8, 0.3, 0.9, 0.8, 0.0, 0.1, 0.0, 0.0),
         Mat::Limestone => (Color::srgb(0.70, 0.64, 0.52), Color::srgb(0.42, 0.38, 0.31), P_ASHLAR, 0.62, 0.22, 1.0, 0.9, 0.0, 0.25, 0.55, 0.0),
@@ -281,13 +323,14 @@ fn sky_mesh(radius: f32) -> Mesh {
 }
 
 fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut skies: ResMut<Assets<SkyMaterial>>) {
-    commands.insert_resource(ClearColor(FOG_COLOR));
-    commands.insert_resource(GlobalAmbientLight { color: Color::srgb(0.62, 0.62, 0.8), brightness: 420.0, ..default() });
+    let m = mood();
+    commands.insert_resource(ClearColor(m.fog));
+    commands.insert_resource(GlobalAmbientLight { color: m.ambient.0, brightness: m.ambient.1, ..default() });
 
-    let sun = SUN_DIR.normalize();
+    let sun = m.sun.normalize();
     commands.spawn((
         Mesh3d(meshes.add(sky_mesh(900.0))),
-        MeshMaterial3d(skies.add(SkyMaterial { sun: sun.extend(0.0) })),
+        MeshMaterial3d(skies.add(SkyMaterial { sun: sun.extend(if m.day { 1.0 } else { 0.0 }) })),
         Transform::IDENTITY,
         SkyDome,
         NotShadowCaster,
@@ -296,23 +339,25 @@ fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
 
     // Закатное солнце.
     commands.spawn((
-        DirectionalLight { color: Color::srgb(1.0, 0.84, 0.66), illuminance: 11_000.0, shadow_maps_enabled: true, ..default() },
+        DirectionalLight { color: m.sun_color, illuminance: m.lux, shadow_maps_enabled: true, ..default() },
         Transform::from_translation(sun * 100.0).looking_at(Vec3::ZERO, Vec3::Y),
-        CascadeShadowConfigBuilder { num_cascades: 4, first_cascade_far_bound: 12.0, maximum_distance: 160.0, ..default() }.build(),
+        CascadeShadowConfigBuilder { num_cascades: 4, first_cascade_far_bound: 12.0, maximum_distance: m.shadow_distance, ..default() }.build(),
         VolumetricLight,
     ));
-    // Лёгкая дымка над замком — в ней видны лучи из окон и от факелов.
-    commands.spawn((
-        FogVolume {
-            fog_color: Color::srgb(0.85, 0.8, 0.8),
-            density_factor: 0.03,
-            absorption: 0.0,
-            scattering: 0.25,
-            scattering_asymmetry: 0.6,
-            ..default()
-        },
-        Transform::from_xyz(0.0, 20.0, 0.0).with_scale(Vec3::new(600.0, 40.0, 600.0)),
-    ));
+    // Лёгкая дымка над замком — в ней видны лучи из окон и от факелов (днём у моря её нет).
+    if !m.day {
+        commands.spawn((
+            FogVolume {
+                fog_color: Color::srgb(0.85, 0.8, 0.8),
+                density_factor: 0.03,
+                absorption: 0.0,
+                scattering: 0.25,
+                scattering_asymmetry: 0.6,
+                ..default()
+            },
+            Transform::from_xyz(0.0, 20.0, 0.0).with_scale(Vec3::new(600.0, 40.0, 600.0)),
+        ));
+    }
 }
 
 fn follow_sky(cameras: Query<&GlobalTransform, With<Camera3d>>, mut sky: Query<&mut Transform, With<SkyDome>>) {
@@ -325,6 +370,7 @@ fn follow_sky(cameras: Query<&GlobalTransform, With<Camera3d>>, mut sky: Query<&
 // ---------- Камера и пост-обработка ----------
 
 fn setup_camera(event: On<Add<Camera3d>>, mut commands: Commands, settings: Res<GraphicsSettings>) {
+    let m = mood();
     let mut e = commands.entity(event.entity);
     e.insert((
         Hdr,
@@ -335,10 +381,10 @@ fn setup_camera(event: On<Add<Camera3d>>, mut commands: Commands, settings: Res<
             ..default()
         },
         DistanceFog {
-            color: FOG_COLOR,
-            directional_light_color: Color::srgba(1.0, 0.62, 0.35, 0.5),
+            color: m.fog,
+            directional_light_color: if m.day { Color::srgba(1.0, 0.9, 0.7, 0.3) } else { Color::srgba(1.0, 0.62, 0.35, 0.5) },
             directional_light_exponent: 18.0,
-            falloff: FogFalloff::from_visibility_colors(380.0, Color::srgb(0.36, 0.36, 0.46), Color::srgb(0.62, 0.56, 0.60)),
+            falloff: FogFalloff::from_visibility_colors(m.visibility, m.fog_far.0, m.fog_far.1),
         },
         Msaa::Off,
         TemporalAntiAliasing::default(),

@@ -7,6 +7,9 @@
 //! Коллизии — простые коробки (AABB) плюс карта высот холмов. Сложные декоративные детали
 //! (арки, своды, крыши, колонны) рисуются отдельными мешами и в физике не участвуют.
 
+// Построение геометрии естественно принимает много чисел (границы, высоты, толщины).
+#![allow(clippy::too_many_arguments)]
+
 mod castle;
 mod city;
 mod geom;
@@ -139,6 +142,9 @@ pub struct Layout {
     /// Карта высот земли (если есть) и уровень воды.
     pub ground: Option<HeightField>,
     pub water_y: Option<f32>,
+    /// Очаги (для варки отваров).
+    #[allow(dead_code)] // читает `places::hearths` для алхимии
+    pub hearths: Vec<Vec3>,
 }
 
 /// Участок карты 64×64 м: меши режутся по участкам, чтобы невидимое не рисовалось.
@@ -181,6 +187,7 @@ struct Builder {
     invisible: Vec<Aabb>,
     ground: Option<HeightField>,
     water_y: Option<f32>,
+    hearths: Vec<Vec3>,
     /// Где земля карты высот вырезана (свои полы из коробок).
     holes: Vec<(Vec2, Vec2)>,
     /// Участок, куда сейчас складываются декоративные меши (см. [`Builder::at`]).
@@ -198,6 +205,7 @@ impl Builder {
             invisible: Vec::new(),
             ground: None,
             water_y: None,
+            hearths: Vec::new(),
             holes: Vec::new(),
             chunk: (0, 0),
         }
@@ -213,6 +221,29 @@ impl Builder {
             invisible: self.invisible,
             ground: self.ground,
             water_y: self.water_y,
+            hearths: self.hearths,
+        }
+    }
+
+    /// Строит `f` в локальных координатах (пол на y = 0) и переносит всё построенное на `offset`:
+    /// так постройки за стенами ставятся на террасу на склоне.
+    fn placed(&mut self, offset: Vec3, f: impl FnOnce(&mut Builder)) {
+        let mut t = Builder::new();
+        f(&mut t);
+        let chunk = chunk_of(offset);
+        let shift = |a: Aabb| Aabb::new(a.min + offset, a.max + offset);
+        self.blocks.extend(t.blocks.into_iter().map(|b| Block { aabb: shift(b.aabb), ..b }));
+        self.invisible.extend(t.invisible.into_iter().map(shift));
+        self.torches.extend(t.torches.into_iter().map(|x| Torch { pos: x.pos + offset, ..x }));
+        self.lamps.extend(t.lamps.into_iter().map(|x| Lamp { pos: x.pos + offset, ..x }));
+        self.hearths.extend(t.hearths.into_iter().map(|p| p + offset));
+        for mut g in t.glass {
+            g.pts.iter_mut().for_each(|p| *p += offset);
+            self.glass.push(g);
+        }
+        for ((mat, _), mut mb) in t.decor {
+            mb.translate(offset);
+            self.decor.entry((mat, chunk)).or_default().append(mb);
         }
     }
 
@@ -552,7 +583,7 @@ pub fn spawn_point(index: usize) -> Vec3 {
 /// Подробнее (с фракциями) — [`npc_posts`].
 pub fn npc_spawn_hints() -> Vec<Vec3> {
     match active() {
-        LevelKind::Chersonesus => places::npc_posts().into_iter().filter(|p| p.faction.hostile()).map(|p| p.pos).collect(),
+        LevelKind::Chersonesus => places::npc_posts().into_iter().filter(|p| p.group.hostile()).map(|p| p.pos).collect(),
         LevelKind::Castle => castle::npc_spawn_hints(),
     }
 }

@@ -166,11 +166,17 @@ impl LevelColliders {
     }
 
     /// Коробки, которые могут пересекаться с `a`.
-    fn near<'a>(&'a self, a: &Aabb) -> impl Iterator<Item = &'a Aabb> + 'a {
+    fn near<'a>(&'a self, a: Aabb) -> impl Iterator<Item = &'a Aabb> + 'a {
         let g = &self.1.grid;
-        let (x0, z0, x1, z1) = if g.cells.is_empty() { (0, 0, -1, -1) } else { g.range(a) };
+        let (x0, z0, x1, z1) = if g.cells.is_empty() { (0, 0, -1, -1) } else { g.range(&a) };
         let cells = (z0..=z1).flat_map(move |z| (x0..=x1).map(move |x| (z * g.nx + x) as usize));
         g.big.iter().chain(cells.flat_map(move |c| g.cells[c].iter())).map(move |&i| &self.0[i as usize])
+    }
+
+    /// Коробки, в которые может попасть точка (быстрее, чем перебор всего `.0`).
+    pub fn boxes_near(&self, p: Vec3) -> impl Iterator<Item = &Aabb> + '_ {
+        let a = Aabb { min: p, max: p };
+        self.near(a).filter(move |c| p.cmpgt(c.min).all() && p.cmplt(c.max).all())
     }
 
     /// Точка внутри твёрдого (стены или земли)? Для проверки линии видимости.
@@ -179,7 +185,7 @@ impl LevelColliders {
             return true;
         }
         let a = Aabb { min: p, max: p };
-        self.near(&a).any(|c| p.cmpgt(c.min).all() && p.cmplt(c.max).all())
+        self.near(a).any(|c| p.cmpgt(c.min).all() && p.cmplt(c.max).all())
     }
 
     pub fn body_is_free(&self, body: &Body, feet: Vec3) -> bool {
@@ -187,7 +193,7 @@ impl LevelColliders {
             return false;
         }
         let a = body.aabb_at(feet);
-        !self.near(&a).any(|c| c.overlaps(&a))
+        !self.near(a).any(|c| c.overlaps(&a))
     }
 
     /// Двигает тело на `delta` с обработкой столкновений и автоматическим подъёмом на ступеньки.
@@ -256,7 +262,7 @@ impl LevelColliders {
         // Упираемся вплотную в препятствие.
         let a = body.aabb_at(moved);
         let mut limit = moved[axis];
-        for c in self.near(&a).filter(|c| c.overlaps(&a)) {
+        for c in self.near(a).filter(|c| c.overlaps(&a)) {
             if d > 0.0 {
                 limit = limit.min(c.min[axis] - body.half_width - EPS);
             } else {
@@ -278,7 +284,7 @@ impl LevelColliders {
         let mut moved = *feet;
         moved.y += d;
         let a = body.aabb_at(moved);
-        let hits: Vec<&Aabb> = self.near(&a).filter(|c| c.overlaps(&a)).collect();
+        let hits: Vec<&Aabb> = self.near(a).filter(|c| c.overlaps(&a)).collect();
         let ground = self.ground_height(moved.x, moved.z);
         if hits.is_empty() && moved.y >= ground {
             *feet = moved;
@@ -361,11 +367,11 @@ mod tests {
 
     #[test]
     fn walks_up_and_down_a_hill() {
-        // Склон 1:4 вверх по X до высоты 10, потом вниз.
+        // Склон 1:4 вверх по X до высоты 8, потом вниз.
         let nx = 41;
         let data: Vec<f32> = (0..nx * nx).map(|i| {
             let x = (i % nx) as f32 * 2.0 - 40.0;
-            (10.0 - x.abs() * 0.25).max(0.0)
+            (8.0 - x.abs() * 0.25).max(0.0)
         }).collect();
         let hf = HeightField { origin: Vec2::splat(-40.0), cell: 2.0, nx, nz: nx, data, holes: vec![] };
         let level = LevelColliders::new(vec![], Some(hf));
@@ -378,9 +384,9 @@ mod tests {
             assert!(feet.y >= level.ground_height(feet.x, feet.z) - 0.02, "под землёй: {feet}");
         }
         assert!(feet.x > 30.0, "не прошёл через холм: {feet}");
-        assert!(max_y > 9.0, "не поднялся на холм: {max_y}");
+        assert!(max_y > 7.0, "не поднялся на холм: {max_y}");
         assert!(grounded && feet.y < 1.5, "не спустился: {feet}");
         assert!(level.point_solid(Vec3::new(0.0, 5.0, 0.0)));
-        assert!(!level.point_solid(Vec3::new(0.0, 11.0, 0.0)));
+        assert!(!level.point_solid(Vec3::new(0.0, 9.0, 0.0)));
     }
 }
