@@ -75,7 +75,16 @@ fn cursor_locked(cursor: &CursorOptions) -> bool {
     cursor.grab_mode != CursorGrabMode::None
 }
 
-pub fn grab_cursor(mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>, mouse: Res<ButtonInput<MouseButton>>, keys: Res<ButtonInput<KeyCode>>) {
+pub fn grab_cursor(
+    mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    loot: Option<Res<crate::loot_client::LootState>>,
+) {
+    // Пока открыт инвентарь, клики принадлежат окну, а не бою.
+    if loot.is_some_and(|l| l.ui_open) {
+        return;
+    }
     if mouse.just_pressed(MouseButton::Left) {
         cursor.grab_mode = CursorGrabMode::Locked;
         cursor.visible = false;
