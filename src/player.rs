@@ -24,13 +24,15 @@ pub struct LocalPlayer {
     pub velocity: Vec3,
     pub grounded: bool,
     pub crouching: bool,
+    /// Бежит (тратит выносливость).
+    pub sprinting: bool,
     /// Замедление во время ударов и оглушения (0 — не может двигаться).
     pub speed_mult: f32,
 }
 
 impl Default for LocalPlayer {
     fn default() -> Self {
-        Self { yaw: 0.0, pitch: 0.0, velocity: Vec3::ZERO, grounded: false, crouching: false, speed_mult: 1.0 }
+        Self { yaw: 0.0, pitch: 0.0, velocity: Vec3::ZERO, grounded: false, crouching: false, sprinting: false, speed_mult: 1.0 }
     }
 }
 
@@ -50,7 +52,7 @@ pub fn spawn_local_player(commands: &mut Commands, pos: Vec3, assets: &crate::cl
     commands
         .spawn((
             LocalPlayer::default(),
-            crate::fight::LocalFighter { fighter: crate::npc::fighter_for(crate::protocol::ActorKind::Player) },
+            crate::fight::LocalFighter::new(crate::npc::fighter_for(crate::protocol::ActorKind::Player)),
             Transform::from_translation(pos),
             Visibility::default(),
         ))
@@ -115,12 +117,12 @@ fn movement(
     keys: Res<ButtonInput<KeyCode>>,
     level: Res<LevelColliders>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
-    mut player: Query<(&mut LocalPlayer, &mut Transform)>,
+    mut player: Query<(&mut LocalPlayer, &mut Transform, Option<&mut crate::fight::LocalFighter>)>,
     others: Query<&Transform, (With<crate::client::RemoteActor>, Without<LocalPlayer>)>,
 ) {
     let dt = time.delta_secs().min(1.0 / 20.0);
     let controls = cursor_locked(&cursor);
-    for (mut p, mut transform) in &mut player {
+    for (mut p, mut transform, mut fighter) in &mut player {
         let pressed = |k| controls && keys.pressed(k);
         let mut wish = Vec3::ZERO;
         if pressed(KeyCode::KeyW) {
@@ -146,7 +148,14 @@ fn movement(
         }
         let body = if p.crouching { Body::CROUCHING } else { Body::STANDING };
 
-        let sprinting = pressed(KeyCode::ShiftLeft) && !p.crouching && wish.dot(Quat::from_rotation_y(p.yaw) * Vec3::NEG_Z) > 0.5;
+        // Бег тратит выносливость; без сил не побежишь.
+        let has_stamina = fighter.as_ref().is_none_or(|f| f.fighter.can_sprint() || (p.sprinting && f.fighter.stamina > 0.0));
+        let sprinting = pressed(KeyCode::ShiftLeft) && !p.crouching && has_stamina && wish.dot(Quat::from_rotation_y(p.yaw) * Vec3::NEG_Z) > 0.5;
+        p.sprinting = sprinting;
+        let gear_mult = fighter.as_ref().map_or(1.0, |f| f.move_mult);
+        if let Some(f) = fighter.as_mut() {
+            f.fighter.sprinting = sprinting;
+        }
         let speed = if p.crouching {
             CROUCH_SPEED
         } else if sprinting {
@@ -155,7 +164,7 @@ fn movement(
             WALK_SPEED
         };
 
-        let target = wish * speed * p.speed_mult;
+        let target = wish * speed * p.speed_mult * gear_mult;
         let accel = if p.grounded { GROUND_ACCEL } else { AIR_ACCEL };
         let horizontal = Vec3::new(p.velocity.x, 0.0, p.velocity.z);
         let diff = target - horizontal;

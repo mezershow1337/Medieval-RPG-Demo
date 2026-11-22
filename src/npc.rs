@@ -1,4 +1,8 @@
-//! Искусственный интеллект рыцарей-врагов (работает только на сервере).
+//! Искусственный интеллект врагов (работает только на сервере).
+//!
+//! Люди Херсона и его округи около 510 г.: стратиоты и букелларии гарнизона (щит и спата,
+//! держат строй и закрываются), готы (топор и круглый щит, напористые), аланы (копьё,
+//! держат дистанцию) и кочевники-лучники (стреляют издали, вблизи берутся за нож).
 
 use crate::collision::{Body, LevelColliders};
 use crate::combat::{self, Action, Fighter, Pose, WeaponKind, line_of_sight};
@@ -35,27 +39,127 @@ pub struct NpcSpawn {
 
 /// Где стоят враги в начале и куда возрождаются.
 pub fn npc_spawns() -> Vec<NpcSpawn> {
-    // Места берём из уровня: пять мечников (двор, конюшня, неф собора) и тяжёлый рыцарь перед хорами.
-    // Все смотрят в сторону точки появления игроков.
+    // Места берём из уровня, типы раздаём по кругу; последний — букелларий (самый опасный).
+    const ORDER: [ActorKind; 5] = [ActorKind::Stratiotes, ActorKind::GothWarrior, ActorKind::AlanLancer, ActorKind::HunArcher, ActorKind::GothWarrior];
     let hints = crate::level::npc_spawn_hints();
     let last = hints.len().saturating_sub(1);
     hints
         .into_iter()
         .enumerate()
         .map(|(i, pos)| {
-            let kind = if i == last { ActorKind::HeavyKnight } else { ActorKind::Swordsman };
+            let kind = if i == last && i > 0 { ActorKind::Bucellarius } else { ORDER[i % ORDER.len()] };
             let (dx, dz) = (0.0 - pos.x, 32.0 - pos.z);
             NpcSpawn { kind, pos, yaw: (-dx).atan2(-dz) }
         })
         .collect()
 }
 
-pub fn fighter_for(kind: ActorKind) -> Fighter {
+/// Боевые свойства и повадки типа бойца.
+#[derive(Clone, Copy, Debug)]
+pub struct Profile {
+    pub hp: f32,
+    pub weapon: WeaponKind,
+    pub shield: bool,
+    /// Броня (см. `combat::armor_reduction`).
+    pub armor: f32,
+    pub damage_mult: f32,
+    /// Скорость ходьбы, м/с (игрок ходит 4 м/с).
+    pub speed: f32,
+    /// Вероятность поднять защиту на чужой замах.
+    pub defend_chance: f32,
+    /// Пауза между атаками, с.
+    pub cooldown: (f32, f32),
+    /// Сколько ждать, пока цель стоит в стойке, прежде чем бить в лоб.
+    pub patience: f32,
+    /// С какого расстояния замечает игрока.
+    pub aggro: f32,
+}
+
+pub fn profile(kind: ActorKind) -> Profile {
     match kind {
-        ActorKind::Player => Fighter::new(WeaponKind::ArmingSword, crate::server::PLAYER_BASE_HP, false),
-        ActorKind::Swordsman => Fighter::new(WeaponKind::ArmingSword, 140.0, true),
-        ActorKind::HeavyKnight => Fighter::new(WeaponKind::Greatsword, 220.0, false),
+        ActorKind::Player => Profile {
+            hp: crate::server::PLAYER_BASE_HP,
+            weapon: WeaponKind::Spatha,
+            shield: false,
+            armor: 0.0,
+            damage_mult: 1.0,
+            speed: crate::player::WALK_SPEED,
+            defend_chance: 0.0,
+            cooldown: (0.0, 0.0),
+            patience: 0.0,
+            aggro: 0.0,
+        },
+        // Обученный солдат: дисциплинированно закрывается щитом, бьёт выверенно.
+        ActorKind::Stratiotes => Profile {
+            hp: 130.0,
+            weapon: WeaponKind::Spatha,
+            shield: true,
+            armor: 35.0,
+            damage_mult: 0.85,
+            speed: 2.3,
+            defend_chance: 0.6,
+            cooldown: (1.8, 3.2),
+            patience: 2.5,
+            aggro: 13.0,
+        },
+        // Ветеран в ламеллярном доспехе: медленный, но крепкий и почти всегда закрывается.
+        ActorKind::Bucellarius => Profile {
+            hp: 190.0,
+            weapon: WeaponKind::Spatha,
+            shield: true,
+            armor: 75.0,
+            damage_mult: 1.1,
+            speed: 2.0,
+            defend_chance: 0.75,
+            cooldown: (1.6, 2.8),
+            patience: 2.0,
+            aggro: 13.0,
+        },
+        // Гот почти без доспеха: напирает, часто рубит, щит поднимает редко.
+        ActorKind::GothWarrior => Profile {
+            hp: 125.0,
+            weapon: WeaponKind::Axe,
+            shield: true,
+            armor: 15.0,
+            damage_mult: 1.0,
+            speed: 2.6,
+            defend_chance: 0.3,
+            cooldown: (1.2, 2.4),
+            patience: 1.5,
+            aggro: 15.0,
+        },
+        // Алан держит врага на длине копья.
+        ActorKind::AlanLancer => Profile {
+            hp: 150.0,
+            weapon: WeaponKind::Spear,
+            shield: false,
+            armor: 50.0,
+            damage_mult: 1.0,
+            speed: 2.2,
+            defend_chance: 0.3,
+            cooldown: (2.0, 3.4),
+            patience: 2.5,
+            aggro: 15.0,
+        },
+        // Кочевник стреляет издали и отходит, вблизи отбивается ножом.
+        ActorKind::HunArcher => Profile {
+            hp: 100.0,
+            weapon: WeaponKind::Bow,
+            shield: false,
+            armor: 10.0,
+            damage_mult: 1.0,
+            speed: 2.6,
+            defend_chance: 0.15,
+            cooldown: (2.2, 3.5),
+            patience: 1.5,
+            aggro: 26.0,
+        },
     }
+}
+
+pub fn fighter_for(kind: ActorKind) -> Fighter {
+    let p = profile(kind);
+    Fighter::new(p.weapon, p.hp, p.shield)
 }
 
 /// Находит свободное место рядом с точкой (на случай, если уровень поменяли).
@@ -84,8 +188,9 @@ pub struct Seen {
     pub kind: ActorKind,
     pub pose: Pose,
     pub action: Action,
-    #[allow(dead_code)] // пригодится для выбора тактики против разного оружия
     pub weapon: WeaponKind,
+    /// Защищается щитом.
+    pub shield: bool,
     pub alive: bool,
     /// Можно ли нападать (после возрождения игрок пару секунд под защитой).
     pub targetable: bool,
@@ -94,20 +199,12 @@ pub struct Seen {
 
 /// Множитель урона для разных бойцов (баланс).
 pub fn damage_mult(kind: ActorKind) -> f32 {
-    match kind {
-        ActorKind::Player => 1.0,
-        ActorKind::Swordsman => 0.8,
-        ActorKind::HeavyKnight => 1.0,
-    }
+    profile(kind).damage_mult
 }
 
 /// Броня врагов (снижает получаемый урон, см. `combat::armor_reduction`).
 pub fn armor(kind: ActorKind) -> f32 {
-    match kind {
-        ActorKind::Player => 0.0,
-        ActorKind::Swordsman => 40.0,
-        ActorKind::HeavyKnight => 80.0,
-    }
+    profile(kind).armor
 }
 
 #[derive(Default)]
@@ -170,23 +267,31 @@ pub fn think(
 ) {
     brain.attack_cooldown -= dt;
     brain.strafe_timer -= dt;
+    let prof = profile(kind);
+    // Лучник вблизи берётся за нож, отойдя — снова за лук.
+    if kind == ActorKind::HunArcher && matches!(fighter.action, Action::Idle) {
+        let close = brain.target.and_then(|id| others.iter().find(|o| o.id == id)).map(|t| t.pose.feet.distance(pose.feet));
+        match (fighter.weapon, close) {
+            (WeaponKind::Bow, Some(d)) if d < 3.2 => fighter.weapon = WeaponKind::Seax,
+            (WeaponKind::Seax, d) if d.is_none_or(|d| d > 6.0) => fighter.weapon = WeaponKind::Bow,
+            _ => {}
+        }
+    }
     let stats = fighter.weapon.stats();
-    let range = stats.reach + 0.45;
+    let ranged = fighter.weapon.ranged();
+    let range = if ranged { 22.0 } else { stats.reach + 0.45 };
     // Враги заметно медленнее игрока (4 м/с), от них можно отойти.
-    let speed = match kind {
-        ActorKind::HeavyKnight => 1.9,
-        _ => 2.3,
-    };
+    let speed = prof.speed;
 
     // --- Выбор цели ---
     let eye = pose.shoulder();
     let current = brain.target.and_then(|id| others.iter().find(|o| o.id == id && o.alive));
     let target = match current {
-        Some(t) if t.pose.feet.distance(pose.feet) < LOSE_RANGE => Some(*t),
+        Some(t) if t.pose.feet.distance(pose.feet) < LOSE_RANGE.max(prof.aggro + 8.0) => Some(*t),
         _ => others
             .iter()
-            .filter(|o| o.alive && o.targetable && o.kind == ActorKind::Player)
-            .filter(|o| o.pose.feet.distance(pose.feet) < AGGRO_RANGE)
+            .filter(|o| o.alive && o.targetable && kind.hostile(o.kind))
+            .filter(|o| o.pose.feet.distance(pose.feet) < prof.aggro.max(AGGRO_RANGE * 0.5))
             .filter(|o| line_of_sight(level, eye, o.pose.shoulder()))
             .min_by(|a, b| a.pose.feet.distance(pose.feet).total_cmp(&b.pose.feet.distance(pose.feet)))
             .copied(),
@@ -219,9 +324,21 @@ pub fn think(
             brain.patience = 0.0;
         }
 
-        if dist > range {
+        let sees = line_of_sight(level, eye, t.pose.shoulder());
+        if ranged {
+            // Стрелок держит дистанцию 9–18 м и подходит, только если не видит цель.
+            if !sees || dist > 18.0 {
+                wish += forward;
+            } else if dist < 9.0 {
+                wish -= forward * 0.8;
+            }
+            // Целимся с упреждением на падение стрелы.
+            let aim_to = t.pose.feet + Vec3::Y * 1.2;
+            let want_pitch = combat::ballistic_pitch(combat::arrow_launch(pose).0, aim_to);
+            pose.pitch += (want_pitch - pose.pitch).clamp(-2.0 * dt, 2.0 * dt);
+        } else if dist > range {
             wish += forward;
-        } else if dist < range - 0.7 {
+        } else if dist < range - if fighter.weapon.thrust_only() { 0.9 } else { 0.7 } {
             wish -= forward * 0.6;
         }
         if dist < range + 1.5 {
@@ -237,13 +354,11 @@ pub fn think(
 
         // --- Защита: на начало вражеского замаха решаем, поднимать ли стойку ---
         let winding = matches!(t.action, Action::Windup { .. });
-        if winding && !brain.target_was_winding_up && dist < range + 2.0 {
-            let p = match kind {
-                ActorKind::Swordsman => 0.6,  // щит
-                ActorKind::HeavyKnight => 0.3, // парирование двуручником
-                ActorKind::Player => 0.0,
-            };
-            brain.want_guard = rng.chance(p);
+        // Угроза — когда цель в замахе и её оружие почти достаёт.
+        let threat_range = if t.weapon.ranged() { 30.0 } else { t.weapon.stats().reach + 2.0 };
+        if winding && !brain.target_was_winding_up && dist < threat_range {
+            // Без сил стойку не держат.
+            brain.want_guard = fighter.weapon.can_guard() && fighter.stamina > 15.0 && rng.chance(prof.defend_chance);
         }
         brain.target_was_winding_up = winding;
         let threat = matches!(t.action, Action::Windup { .. } | Action::Strike { .. });
@@ -273,18 +388,21 @@ pub fn think(
         let punish = matches!(t.action, Action::Stagger { .. });
         let in_reach = dist <= range + 0.15;
         // По защищающемуся бьём, только если зашли сбоку или он слишком долго стоит в стойке.
-        let blocked_by_guard = target_guarding && brain.patience < 2.5;
-        if can_act && in_reach && aligned && !brain.want_guard && !blocked_by_guard && (brain.attack_cooldown <= 0.0 || punish) {
+        // Стрелы щит держит, а оружием их не отбить, так что лучнику стойка цели не помеха.
+        let shield_up = target_guarding && others.iter().any(|o| o.id == t.id && o.shield);
+        let blocked_by_guard = if ranged { shield_up && brain.patience < prof.patience } else { target_guarding && brain.patience < prof.patience };
+        let ready = if ranged { sees && (pose.pitch - combat::ballistic_pitch(combat::arrow_launch(pose).0, t.pose.feet + Vec3::Y * 1.2)).abs() < 0.08 } else { true };
+        // Если сил мало, отдыхаем, а не машем впустую.
+        let rested = fighter.stamina >= stats.stamina_cost;
+        if can_act && in_reach && aligned && ready && rested && !brain.want_guard && !blocked_by_guard && (brain.attack_cooldown <= 0.0 || punish) {
             if fighter.try_attack() {
-                brain.attack_cooldown = match kind {
-                    ActorKind::HeavyKnight => rng.range(2.4, 4.0),
-                    _ => rng.range(1.8, 3.2),
-                };
+                brain.attack_cooldown = rng.range(prof.cooldown.0, prof.cooldown.1);
                 brain.patience = 0.0;
             }
         }
     } else {
         brain.want_guard = false;
+        pose.pitch *= 1.0 - (3.0 * dt).min(1.0);
         if fighter.guard_held {
             fighter.set_guard(false);
         }
@@ -319,6 +437,7 @@ pub fn think(
 #[cfg(test)]
 mod tests {
     use super::*;
+    const PI_: f32 = std::f32::consts::PI;
     use crate::combat::{Contact, HitOutcome, blade_segment, resolve_contact, trace_blade};
 
     /// Прогоняет поединок игрока со стратегией `player_brain` против врага. Возвращает статистику.
@@ -335,6 +454,14 @@ mod tests {
         let mut stats = [0u32; 3]; // урон по врагу, отражено врагом, урон по игроку
         for _ in 0..(seconds / dt) as usize {
             player_pose.yaw = yaw_towards(player_pose.feet, npc_pose.feet);
+            // Игрок сближается до длины меча (против копья иначе не достать).
+            let to = npc_pose.feet - player_pose.feet;
+            if Vec2::new(to.x, to.z).length() > 1.2 {
+                let step = Vec3::new(to.x, 0.0, to.z).normalize_or_zero() * 4.0 * player.move_speed_mult() * dt;
+                let mut feet = player_pose.feet;
+                level.move_body(&Body::STANDING, &mut feet, step, true);
+                player_pose.feet = feet;
+            }
             if player_guard {
                 // Держим защиту, а после парирования бьём в ответ.
                 if player.can_riposte() {
@@ -345,7 +472,7 @@ mod tests {
             } else {
                 player.try_attack();
             }
-            let seen = [Seen { id: 1, kind: ActorKind::Player, pose: player_pose, action: player.action, weapon: player.weapon, alive: true, targetable: true }];
+            let seen = [Seen { id: 1, kind: ActorKind::Player, pose: player_pose, action: player.action, weapon: player.weapon, shield: false, alive: true, targetable: true }];
             think(&mut brain, kind, &mut npc_pose, &mut npc, &seen, &level, &mut rng, dt);
             npc.tick(dt);
             player.tick(dt);
@@ -384,17 +511,17 @@ mod tests {
     #[test]
     fn knight_hits_idle_player() {
         let level = crate::level::level_colliders();
-        let spawn = NpcSpawn { kind: ActorKind::Swordsman, pos: Vec3::new(10.0, 0.0, 0.0), yaw: 0.0 };
+        let spawn = NpcSpawn { kind: ActorKind::Stratiotes, pos: Vec3::new(10.0, 0.0, 0.0), yaw: 0.0 };
         let mut brain = Brain::new(&spawn);
         let mut pose = Pose { feet: find_free_spot(&level, spawn.pos), yaw: 0.0, pitch: 0.0, crouching: false };
-        let mut knight = fighter_for(ActorKind::Swordsman);
+        let mut knight = fighter_for(ActorKind::Stratiotes);
         let player_pose = Pose { feet: find_free_spot(&level, Vec3::new(10.0, 0.0, 6.0)), yaw: 0.0, pitch: 0.0, crouching: false };
         let mut player = fighter_for(ActorKind::Player);
         let mut rng = Rng::new(42);
         let dt = 1.0 / 60.0;
         for _ in 0..(60 * 20) {
-            let seen = [Seen { id: 1, kind: ActorKind::Player, pose: player_pose, action: player.action, weapon: player.weapon, alive: true, targetable: true }];
-            think(&mut brain, ActorKind::Swordsman, &mut pose, &mut knight, &seen, &level, &mut rng, dt);
+            let seen = [Seen { id: 1, kind: ActorKind::Player, pose: player_pose, action: player.action, weapon: player.weapon, shield: false, alive: true, targetable: true }];
+            think(&mut brain, ActorKind::Stratiotes, &mut pose, &mut knight, &seen, &level, &mut rng, dt);
             knight.tick(dt);
             player.tick(dt);
             if let Some((swing, p)) = knight.strike_progress() {
@@ -413,18 +540,74 @@ mod tests {
     /// Игрок просто машет мечом: мечник часто закрывается щитом, но в итоге погибает,
     /// а бой длится заметно дольше пары секунд.
     #[test]
-    fn swordsman_defends_with_shield() {
-        let (npc, player, stats) = fight(ActorKind::Swordsman, false, 120.0);
+    fn stratiotes_defends_with_shield() {
+        let (npc, player, stats) = fight(ActorKind::Stratiotes, false, 120.0);
         eprintln!("урон по врагу {}, отражено {}, урон по игроку {}, hp игрока {}", stats[0], stats[1], stats[2], player.hp);
         assert!(stats[1] > 0, "мечник ни разу не закрылся щитом");
         assert!(npc.is_dead() || player.is_dead());
         assert!(stats[0] + stats[1] >= 6, "бой слишком короткий: {stats:?}");
     }
 
-    /// Игрок держит стойку и отвечает после парирования: тяжёлый рыцарь должен проиграть.
+    /// Кочевник издали стреляет в стоящего игрока и попадает; щит в стойке стрелы держит.
     #[test]
-    fn parry_and_riposte_beats_heavy_knight() {
-        let (npc, player, stats) = fight(ActorKind::HeavyKnight, true, 180.0);
+    fn archer_shoots_from_distance() {
+        use crate::combat::{Arrow, ArrowStep, arrow_launch, resolve_arrow, step_arrow};
+        let level = crate::level::level_colliders();
+        for shield in [false, true] {
+            let spawn = NpcSpawn { kind: ActorKind::HunArcher, pos: Vec3::new(10.0, 0.0, -6.0), yaw: PI_ };
+            let mut brain = Brain::new(&spawn);
+            let mut pose = Pose { feet: find_free_spot(&level, spawn.pos), yaw: 0.0, pitch: 0.0, crouching: false };
+            let mut archer = fighter_for(ActorKind::HunArcher);
+            let player_pose = Pose { feet: find_free_spot(&level, Vec3::new(10.0, 0.0, 6.0)), yaw: 0.0, pitch: 0.0, crouching: false };
+            let mut player = Fighter::new(WeaponKind::Spatha, 150.0, shield);
+            let mut rng = Rng::new(3);
+            let dt = 1.0 / 60.0;
+            let (mut arrows, mut shots, mut hits, mut blocked) = (Vec::<Arrow>::new(), 0, 0, 0);
+            for _ in 0..(60 * 30) {
+                // Игрок смотрит на лучника; со щитом держит стойку.
+                let mut pp = player_pose;
+                pp.yaw = yaw_towards(pp.feet, pose.feet);
+                if shield {
+                    player.set_guard(true);
+                }
+                let seen = [Seen { id: 1, kind: ActorKind::Player, pose: pp, action: player.action, weapon: player.weapon, shield, alive: true, targetable: true }];
+                think(&mut brain, ActorKind::HunArcher, &mut pose, &mut archer, &seen, &level, &mut rng, dt);
+                if archer.tick(dt) == Some(crate::combat::TickEvent::StrikeStarted) && archer.weapon.ranged() {
+                    let (p, v) = arrow_launch(&pose);
+                    arrows.push(Arrow { id: shots, owner: 2, pos: p, vel: v, damage: 30.0, life: 4.0 });
+                    shots += 1;
+                }
+                player.tick(dt);
+                let targets = [(1, pp), (2, pose)];
+                arrows.retain_mut(|a| match step_arrow(a, dt, &level, &targets) {
+                    ArrowStep::Flying => true,
+                    ArrowStep::Hit { head, shield_facing, .. } => {
+                        match resolve_arrow(&mut player, shield_facing, head, 30.0) {
+                            HitOutcome::Damage { .. } => hits += 1,
+                            _ => blocked += 1,
+                        }
+                        false
+                    }
+                    _ => false,
+                });
+                if player.is_dead() {
+                    break;
+                }
+            }
+            eprintln!("щит {shield}: выстрелов {shots}, попаданий {hits}, в щит {blocked}");
+            assert!(shots >= 3, "лучник почти не стреляет");
+            if shield {
+                assert!(blocked > 0 && hits == 0, "щит не держит стрелы");
+            } else {
+                assert!(hits > 0, "ни одна стрела не попала");
+            }
+        }
+    }
+
+    /// Игрок держит стойку и отвечает после парирования: копейщик должен проиграть.
+    #[test]
+    fn parry_and_riposte_beats_lancer() {
+        let (npc, player, stats) = fight(ActorKind::AlanLancer, true, 180.0);
         eprintln!("урон по врагу {}, отражено {}, урон по игроку {}, hp игрока {}", stats[0], stats[1], stats[2], player.hp);
         assert!(stats[0] > 0, "ни одного ответного удара");
         assert!(!player.is_dead(), "игрок в стойке проиграл: {stats:?}");

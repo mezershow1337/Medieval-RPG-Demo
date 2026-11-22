@@ -11,6 +11,9 @@
 //! * Щитом — **блок**: урона нет, но защитника отбрасывает тем сильнее, чем больше
 //!   «сила удара» оружия по сравнению с «устойчивостью» щита. Тяжёлый удар серию не прерывает.
 //! * Клинок, задевший стену, отскакивает: короткое оглушение и сброс серии.
+//! * Выносливость: удары, бег и принятые на защиту удары тратят силы. Когда силы кончаются
+//!   в стойке, защиту пробивает.
+//! * Оружие — эпохи Херсонеса 510 г.: спата, топор, сакс, копьё-контос и составной лук.
 
 use crate::collision::LevelColliders;
 use bevy::prelude::*;
@@ -18,10 +21,16 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WeaponKind {
-    /// Одноручный меч игрока и мечника.
-    ArmingSword,
-    /// Двуручный меч тяжёлого рыцаря.
-    Greatsword,
+    /// Спата: прямой длинный меч поздней Римской империи (клинок ~80 см). Оружие гарнизона и игрока.
+    Spatha,
+    /// Бородовидный топор: короткий, сильный удар, слабо парирует. Оружие готов.
+    Axe,
+    /// Сакс: длинный боевой нож. Быстрый, но короткий и слабый.
+    Seax,
+    /// Контос: тяжёлое копьё двумя руками (~2,6 м), только колющие удары. Оружие аланов.
+    Spear,
+    /// Составной лук степняков: удар — это натяжение и выстрел.
+    Bow,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -37,16 +46,64 @@ pub struct WeaponStats {
     pub impact_power: i32,
     /// Устойчивость оружия в стойке парирования.
     pub guard_resist: i32,
+    /// Сколько выносливости стоит удар.
+    pub stamina_cost: f32,
 }
 
 impl WeaponKind {
     pub fn stats(self) -> WeaponStats {
         match self {
-            WeaponKind::ArmingSword => WeaponStats { windup: 0.45, strike: 0.22, recovery: 0.5, damage: 22.0, reach: 1.0, impact_power: 3, guard_resist: 3 },
-            WeaponKind::Greatsword => WeaponStats { windup: 1.0, strike: 0.34, recovery: 0.9, damage: 38.0, reach: 1.5, impact_power: 5, guard_resist: 4 },
+            WeaponKind::Spatha => WeaponStats { windup: 0.45, strike: 0.22, recovery: 0.5, damage: 22.0, reach: 0.95, impact_power: 3, guard_resist: 3, stamina_cost: 12.0 },
+            WeaponKind::Axe => WeaponStats { windup: 0.5, strike: 0.2, recovery: 0.55, damage: 26.0, reach: 0.75, impact_power: 5, guard_resist: 2, stamina_cost: 15.0 },
+            WeaponKind::Seax => WeaponStats { windup: 0.3, strike: 0.15, recovery: 0.35, damage: 13.0, reach: 0.5, impact_power: 1, guard_resist: 1, stamina_cost: 7.0 },
+            WeaponKind::Spear => WeaponStats { windup: 0.55, strike: 0.2, recovery: 0.6, damage: 24.0, reach: 2.1, impact_power: 4, guard_resist: 3, stamina_cost: 14.0 },
+            // У лука «замах» — натяжение тетивы, «удар» — выстрел.
+            WeaponKind::Bow => WeaponStats { windup: 1.1, strike: 0.05, recovery: 0.7, damage: 30.0, reach: 0.0, impact_power: 2, guard_resist: 0, stamina_cost: 10.0 },
+        }
+    }
+    /// Бьёт только уколом (копьё).
+    pub fn thrust_only(self) -> bool {
+        matches!(self, WeaponKind::Spear)
+    }
+    /// Стреляет, а не рубит.
+    pub fn ranged(self) -> bool {
+        matches!(self, WeaponKind::Bow)
+    }
+    /// Можно ли этим оружием держать защиту.
+    pub fn can_guard(self) -> bool {
+        !self.ranged()
+    }
+
+    /// Какое оружие соответствует предмету (по названию предмета).
+    pub fn from_item_name(name: &str) -> WeaponKind {
+        let n = name.to_lowercase();
+        let has = |w: &[&str]| w.iter().any(|k| n.contains(k));
+        if has(&["топор", "секира"]) {
+            WeaponKind::Axe
+        } else if has(&["кинжал", "нож", "сакс"]) {
+            WeaponKind::Seax
+        } else if has(&["копь", "контос", "алебард", "пика", "дротик"]) {
+            WeaponKind::Spear
+        } else if has(&["лук"]) {
+            WeaponKind::Bow
+        } else {
+            WeaponKind::Spatha
         }
     }
 }
+
+/// Полёт стрелы: скорость и гравитация.
+pub const ARROW_SPEED: f32 = 42.0;
+pub const ARROW_GRAVITY: f32 = 9.8;
+
+/// Выносливость.
+pub const STAMINA_MAX: f32 = 100.0;
+pub const STAMINA_REGEN: f32 = 22.0;
+/// Пауза после траты, прежде чем силы начнут восстанавливаться.
+pub const STAMINA_REGEN_DELAY: f32 = 0.9;
+pub const SPRINT_DRAIN: f32 = 12.0;
+/// Оглушение, когда силы кончились в стойке и защиту пробило.
+pub const GUARD_BREAK_STAGGER: f32 = 1.3;
 
 /// Устойчивость щита.
 pub const SHIELD_RESIST: i32 = 4;
@@ -93,6 +150,16 @@ impl ImpactTier {
             ImpactTier::Heavy => 1.5,
         }
     }
+    /// Сколько выносливости теряет защитник, принявший удар.
+    pub fn guard_stamina(self, shield: bool) -> f32 {
+        let base = match self {
+            ImpactTier::Weak => 6.0,
+            ImpactTier::Medium => 11.0,
+            ImpactTier::Heavy => 18.0,
+        };
+        // Оружием держать удар тяжелее, чем щитом.
+        if shield { base } else { base * 1.2 }
+    }
     /// Сколько вздрагивает защитник после парирования оружием (это и есть окно для ответного удара).
     pub fn parry_stagger(self) -> f32 {
         match self {
@@ -112,6 +179,8 @@ pub enum Swing {
     LeftToRight,
     /// Сверху вниз.
     Overhead,
+    /// Укол вперёд (копьё).
+    Thrust,
 }
 
 impl Swing {
@@ -120,6 +189,7 @@ impl Swing {
             Swing::RightToLeft => Swing::LeftToRight,
             Swing::LeftToRight => Swing::Overhead,
             Swing::Overhead => Swing::RightToLeft,
+            Swing::Thrust => Swing::Thrust,
         }
     }
 }
@@ -180,6 +250,18 @@ pub struct Fighter {
     pub riposte_bonus: f32,
     /// Сколько прошло с конца последнего удара (для сброса серии).
     idle_time: f32,
+    pub stamina: f32,
+    pub max_stamina: f32,
+    /// Пока > 0, выносливость не восстанавливается.
+    pub stamina_delay: f32,
+    /// Бежит (тратит выносливость).
+    pub sprinting: bool,
+    /// Множитель скорости ударов (экипировка «Скорость действий»).
+    pub action_speed: f32,
+    /// Доля снижения потерь выносливости при блоке (экипировка «Устойчивость блока»), 0..0.8.
+    pub block_stability: f32,
+    /// Множитель восстановления выносливости (тяжёлая броня замедляет).
+    pub stamina_regen_mult: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -203,6 +285,13 @@ impl Fighter {
             riposte_timer: 0.0,
             riposte_bonus: 0.0,
             idle_time: 0.0,
+            stamina: STAMINA_MAX,
+            max_stamina: STAMINA_MAX,
+            stamina_delay: 0.0,
+            sprinting: false,
+            action_speed: 1.0,
+            block_stability: 0.0,
+            stamina_regen_mult: 1.0,
         }
     }
 
@@ -237,7 +326,22 @@ impl Fighter {
         }
     }
 
+    /// Потратить выносливость.
+    pub fn spend_stamina(&mut self, amount: f32) {
+        self.stamina = (self.stamina - amount).max(0.0);
+        self.stamina_delay = STAMINA_REGEN_DELAY;
+    }
+
+    /// Хватает ли сил на бег.
+    pub fn can_sprint(&self) -> bool {
+        self.stamina > 1.0
+    }
+
     pub fn try_attack(&mut self) -> bool {
+        // Без сил не замахнуться.
+        if self.stamina < 1.0 {
+            return false;
+        }
         // Ответный удар после парирования: прямо из вздрагивания.
         if self.can_riposte() && matches!(self.action, Action::Idle | Action::Guard { .. } | Action::GuardStagger { .. }) {
             self.riposte_timer = 0.0;
@@ -260,8 +364,16 @@ impl Fighter {
         if self.idle_time > COMBO_RESET {
             self.next_swing = Swing::RightToLeft;
         }
-        let swing = if riposte { Swing::LeftToRight } else { self.next_swing };
-        self.next_swing = swing.next();
+        let swing = if self.weapon.thrust_only() {
+            Swing::Thrust
+        } else if riposte {
+            Swing::LeftToRight
+        } else {
+            self.next_swing
+        };
+        self.next_swing = if self.weapon.thrust_only() { Swing::RightToLeft } else { swing.next() };
+        let cost = self.weapon.stats().stamina_cost * if riposte { 0.5 } else { 1.0 };
+        self.spend_stamina(cost);
         self.queued_attack = false;
         self.action = Action::Windup { t: 0.0, swing, riposte };
     }
@@ -274,6 +386,7 @@ impl Fighter {
 
     /// Зажать или отпустить защиту.
     pub fn set_guard(&mut self, on: bool) {
+        let on = on && self.weapon.can_guard();
         self.guard_held = on;
         match (on, self.action) {
             (true, Action::Idle) => self.action = Action::Guard { t: 0.0 },
@@ -296,9 +409,13 @@ impl Fighter {
         let stats = self.weapon.stats();
         let mut event = None;
         self.riposte_timer = (self.riposte_timer - dt).max(0.0);
+        self.tick_stamina(dt);
+        // Скорость ударов меняется экипировкой.
+        let real_dt = dt;
+        let dt_attack = dt * self.action_speed.clamp(0.5, 1.6);
         self.action = match self.action {
             Action::Windup { t, swing, riposte } => {
-                let t = t + dt;
+                let t = t + dt_attack;
                 let windup = if riposte { RIPOSTE_WINDUP } else { stats.windup };
                 if t >= windup {
                     self.hit_this_swing.clear();
@@ -309,7 +426,7 @@ impl Fighter {
                 }
             }
             Action::Strike { t, swing, riposte } => {
-                let t = t + dt;
+                let t = t + dt_attack;
                 if t >= stats.strike {
                     event = Some(TickEvent::StrikeEnded);
                     Action::Recovery { t: 0.0, swing }
@@ -318,7 +435,7 @@ impl Fighter {
                 }
             }
             Action::Recovery { t, swing } => {
-                let t = t + dt;
+                let t = t + dt_attack;
                 if t >= stats.recovery {
                     self.idle_time = 0.0;
                     self.after_busy()
@@ -347,7 +464,7 @@ impl Fighter {
             a @ (Action::Idle | Action::Dead) => a,
         };
         if matches!(self.action, Action::Idle | Action::Guard { .. }) {
-            self.idle_time += dt;
+            self.idle_time += real_dt;
         }
         if self.queued_attack && matches!(self.action, Action::Idle | Action::Guard { .. }) {
             self.start_attack(false);
@@ -355,9 +472,36 @@ impl Fighter {
         event
     }
 
+    fn tick_stamina(&mut self, dt: f32) {
+        if matches!(self.action, Action::Dead) {
+            return;
+        }
+        if self.sprinting {
+            self.stamina = (self.stamina - SPRINT_DRAIN * dt).max(0.0);
+            self.stamina_delay = self.stamina_delay.max(0.3);
+            if self.stamina <= 0.0 {
+                self.sprinting = false;
+            }
+            return;
+        }
+        if self.stamina_delay > 0.0 {
+            self.stamina_delay -= dt;
+            return;
+        }
+        let k = match self.action {
+            Action::Guard { .. } | Action::GuardStagger { .. } => 0.4,
+            Action::Windup { .. } | Action::Strike { .. } | Action::Recovery { .. } => 0.0,
+            _ => 1.0,
+        };
+        self.stamina = (self.stamina + STAMINA_REGEN * self.stamina_regen_mult * k * dt).min(self.max_stamina);
+    }
+
     /// Нормализованный прогресс фазы удара 0..1 (для анимации и трассировки клинка).
     pub fn strike_progress(&self) -> Option<(Swing, f32)> {
         let stats = self.weapon.stats();
+        if self.weapon.ranged() {
+            return None;
+        }
         match self.action {
             Action::Strike { t, swing, .. } => Some((swing, (t / stats.strike).clamp(0.0, 1.0))),
             _ => None,
@@ -407,6 +551,15 @@ pub fn blade_local_dir(swing: Swing, progress: f32) -> Vec3 {
             let a = (80.0 - 130.0 * p).to_radians();
             Vec3::new(0.08, a.sin(), -a.cos()).normalize()
         }
+        Swing::Thrust => Vec3::new(0.0, -0.06, -1.0).normalize(),
+    }
+}
+
+/// Рукоять (передняя рука) во время удара: при уколе руки выбрасывают копьё вперёд.
+pub fn strike_hilt(swing: Swing, progress: f32) -> Vec3 {
+    match swing {
+        Swing::Thrust => Vec3::new(0.12, -0.12, 0.25 - 0.75 * smooth(progress.clamp(0.0, 1.0))),
+        _ => STRIKE_HILT,
     }
 }
 
@@ -452,17 +605,32 @@ pub fn weapon_pose(action: &Action, weapon: WeaponKind, time: f32) -> (Vec3, Vec
             Swing::RightToLeft => Vec3::new(0.4, 0.05, -0.15),
             Swing::LeftToRight => Vec3::new(-0.35, 0.0, -0.15),
             Swing::Overhead => Vec3::new(0.1, 0.25, -0.05),
+            Swing::Thrust => return (strike_hilt(Swing::Thrust, 0.0) + Vec3::new(0.0, 0.0, 0.1), Vec3::new(0.0, 0.0, -1.0)),
         };
         (hilt, (start + Vec3::Y * 0.6 + Vec3::Z * 0.4).normalize())
     };
+    if weapon.ranged() {
+        // Лук: держим перед собой вертикально, пока натягиваем и стреляем.
+        let aim = (Vec3::new(-0.05, 0.0, -0.55), Vec3::Y);
+        let low = (Vec3::new(0.3, -0.35, -0.3), Vec3::new(0.2, 1.0, -0.4).normalize());
+        return match *action {
+            Action::Windup { t, .. } => mix(low, aim, t / (stats.windup * 0.4)),
+            Action::Strike { .. } => aim,
+            Action::Recovery { t, .. } => mix(aim, low, t / stats.recovery),
+            _ => low,
+        };
+    }
     match *action {
         Action::Windup { t, swing, riposte } => {
             let dur = if riposte { RIPOSTE_WINDUP } else { stats.windup };
             let from = if riposte { guard } else { rest };
             mix(from, windup_pose(swing), t / dur)
         }
-        Action::Strike { t, swing, .. } => (STRIKE_HILT, blade_local_dir(swing, (t / stats.strike).clamp(0.0, 1.0))),
-        Action::Recovery { t, swing } => mix((STRIKE_HILT, blade_local_dir(swing, 1.0)), rest, t / stats.recovery),
+        Action::Strike { t, swing, .. } => {
+            let p = (t / stats.strike).clamp(0.0, 1.0);
+            (strike_hilt(swing, p), blade_local_dir(swing, p))
+        }
+        Action::Recovery { t, swing } => mix((strike_hilt(swing, 1.0), blade_local_dir(swing, 1.0)), rest, t / stats.recovery),
         Action::Guard { t } => mix(rest, guard, t / GUARD_RAISE_WEAPON),
         Action::GuardStagger { t, dur } => {
             // Клинок отбрасывает назад и он возвращается в стойку.
@@ -486,7 +654,7 @@ pub fn blade_segment(pose: &Pose, weapon: WeaponKind, swing: Swing, progress: f3
     // Наклон по вертикали частично следует за взглядом, чтобы можно было бить вниз/вверх.
     let rot = Quat::from_rotation_y(pose.yaw) * Quat::from_rotation_x(pose.pitch * 0.6);
     let dir = rot * blade_local_dir(swing, progress);
-    let hilt = pose.shoulder() + rot * STRIKE_HILT;
+    let hilt = pose.shoulder() + rot * strike_hilt(swing, progress);
     let tip = hilt + dir * stats.reach;
     (hilt, tip)
 }
@@ -576,7 +744,8 @@ pub fn line_of_sight(level: &LevelColliders, from: Vec3, to: Vec3) -> bool {
 pub fn guard_blade_segment(pose: &Pose, weapon: WeaponKind) -> (Vec3, Vec3) {
     let rot = Quat::from_rotation_y(pose.yaw) * Quat::from_rotation_x(pose.pitch * 0.6);
     let hilt = pose.shoulder() + rot * GUARD_HILT;
-    (hilt, hilt + rot * guard_dir() * weapon.stats().reach)
+    // Длинное древко держат поперёк, защищает только его середина.
+    (hilt, hilt + rot * guard_dir() * weapon.stats().reach.min(1.1))
 }
 
 /// Защищающийся смотрит в сторону атакующего?
@@ -639,12 +808,19 @@ pub enum HitOutcome {
     Blocked { tier: ImpactTier },
     /// Клинок отскочил от стены.
     Bounced,
+    /// У защитника кончились силы: защиту пробило, он оглушён.
+    GuardBroken,
 }
 
 /// Применяет контакт клинка. `damage` — урон с учётом оружия и брони (до множителей головы и ответного удара).
 pub fn resolve_contact(attacker: &mut Fighter, defender: &mut Fighter, contact: Contact, damage: f32) -> HitOutcome {
     let stats = attacker.weapon.stats();
     match contact {
+        Contact::Guard(_) if guard_breaks(defender, stats.impact_power) => {
+            defender.action = Action::Stagger { t: 0.0, dur: GUARD_BREAK_STAGGER };
+            defender.riposte_timer = 0.0;
+            HitOutcome::GuardBroken
+        }
         Contact::Guard(_) if defender.has_shield => {
             let tier = ImpactTier::from_diff(stats.impact_power, SHIELD_RESIST);
             defender.action = Action::GuardStagger { t: 0.0, dur: tier.shield_stagger() };
@@ -685,6 +861,116 @@ pub fn resolve_contact(attacker: &mut Fighter, defender: &mut Fighter, contact: 
     }
 }
 
+/// Тратит выносливость защитника на принятый удар. true — сил не хватило, защиту пробило.
+fn guard_breaks(defender: &mut Fighter, impact_power: i32) -> bool {
+    let resist = if defender.has_shield { SHIELD_RESIST } else { defender.weapon.stats().guard_resist };
+    let cost = ImpactTier::from_diff(impact_power, resist).guard_stamina(defender.has_shield) * (1.0 - defender.block_stability.clamp(0.0, 0.8));
+    let broken = defender.stamina < cost;
+    defender.spend_stamina(cost);
+    broken
+}
+
+/// Стрела попала в бойца. Щит её останавливает, оружием стрелу не отбить.
+pub fn resolve_arrow(defender: &mut Fighter, shield_facing: bool, head: bool, damage: f32) -> HitOutcome {
+    if shield_facing && defender.has_shield && defender.guard_active() {
+        defender.spend_stamina(ImpactTier::Weak.guard_stamina(true) * (1.0 - defender.block_stability.clamp(0.0, 0.8)));
+        return HitOutcome::Blocked { tier: ImpactTier::Weak };
+    }
+    let amount = if head { damage * HEAD_MULT } else { damage };
+    defender.hp = (defender.hp - amount).max(0.0);
+    let killed = defender.hp <= 0.0;
+    if killed {
+        defender.action = Action::Dead;
+    } else if matches!(defender.action, Action::Windup { .. } | Action::Idle | Action::Recovery { .. }) {
+        defender.action = Action::Flinch { t: 0.0 };
+        defender.queued_attack = false;
+    }
+    HitOutcome::Damage { amount, killed, head }
+}
+
+/// Начальная точка и скорость стрелы при выстреле из позы.
+pub fn arrow_launch(pose: &Pose) -> (Vec3, Vec3) {
+    let dir = Quat::from_rotation_y(pose.yaw) * Quat::from_rotation_x(pose.pitch) * Vec3::NEG_Z;
+    (pose.feet + Vec3::Y * (pose.eye_height() - 0.1) + dir * 0.6, dir * ARROW_SPEED)
+}
+
+/// Наклон, под которым надо стрелять, чтобы попасть из `from` в `to` (с учётом падения стрелы).
+pub fn ballistic_pitch(from: Vec3, to: Vec3) -> f32 {
+    let d = to - from;
+    let flat = Vec2::new(d.x, d.z).length().max(0.1);
+    let t = flat / ARROW_SPEED;
+    let drop = 0.5 * ARROW_GRAVITY * t * t;
+    (d.y + drop).atan2(flat)
+}
+
+/// Летящая стрела (считается на сервере).
+#[derive(Clone, Copy, Debug)]
+pub struct Arrow {
+    pub id: u64,
+    pub owner: u64,
+    pub pos: Vec3,
+    pub vel: Vec3,
+    /// Урон до брони цели.
+    pub damage: f32,
+    pub life: f32,
+}
+
+pub enum ArrowStep {
+    Flying,
+    /// Воткнулась в стену или землю.
+    Stuck,
+    /// Попала в бойца `targets[index]`. `shield_facing` — цель стоит к стреле лицом.
+    Hit { index: usize, point: Vec3, head: bool, shield_facing: bool },
+    Expired,
+}
+
+/// Продвигает стрелу на `dt`. `targets` — (id, поза) живых бойцов.
+pub fn step_arrow(arrow: &mut Arrow, dt: f32, level: &LevelColliders, targets: &[(u64, Pose)]) -> ArrowStep {
+    arrow.life -= dt;
+    if arrow.life <= 0.0 {
+        return ArrowStep::Expired;
+    }
+    let from = arrow.pos;
+    arrow.vel.y -= ARROW_GRAVITY * dt;
+    let to = from + arrow.vel * dt;
+    arrow.pos = to;
+    // Ближайшее попадание в тело вдоль отрезка полёта.
+    let mut best: Option<(f32, usize, Vec3)> = None;
+    for (i, (id, pose)) in targets.iter().enumerate() {
+        if *id == arrow.owner {
+            continue;
+        }
+        let (a, b, _) = body_capsule(pose);
+        const R: f32 = 0.3;
+        if segment_distance_sq(from, to, a, b) > R * R {
+            continue;
+        }
+        // Точка входа: шагаем по отрезку до первого касания.
+        for k in 0..=10 {
+            let p = from.lerp(to, k as f32 / 10.0);
+            if segment_distance_sq(p, p, a, b) <= R * R {
+                let d = from.distance(p);
+                if best.is_none_or(|(bd, _, _)| d < bd) {
+                    best = Some((d, i, p));
+                }
+                break;
+            }
+        }
+    }
+    let wall = !line_of_sight(level, from, to) || to.y < -10.0;
+    if let Some((d, index, point)) = best {
+        // Стена ближе бойца — стрела в стене.
+        if !wall || line_of_sight(level, from, point) {
+            let pose = &targets[index].1;
+            let head_line = pose.feet.y + if pose.crouching { 0.9 } else { 1.42 };
+            let came_from = from - arrow.vel.normalize_or_zero() * 5.0;
+            let _ = d;
+            return ArrowStep::Hit { index, point, head: point.y > head_line, shield_facing: facing(pose, came_from) };
+        }
+    }
+    if wall { ArrowStep::Stuck } else { ArrowStep::Flying }
+}
+
 /// Броня снижает урон: 50 брони ≈ −25%, 100 ≈ −40%.
 pub fn armor_reduction(armor: f32) -> f32 {
     let a = armor.max(0.0);
@@ -722,7 +1008,7 @@ mod tests {
     }
 
     fn sword() -> Fighter {
-        Fighter::new(WeaponKind::ArmingSword, 150.0, false)
+        Fighter::new(WeaponKind::Spatha, 150.0, false)
     }
 
     #[test]
@@ -790,7 +1076,7 @@ mod tests {
     fn guard_too_late_takes_damage() {
         let (mut a, mut d) = (sword(), sword());
         // Стойка поднята за пару кадров до удара — не успевает подняться.
-        let frames_to_strike = (WeaponKind::ArmingSword.stats().windup * 60.0) as usize;
+        let frames_to_strike = (WeaponKind::Spatha.stats().windup * 60.0) as usize;
         let out = duel(&mut a, &mut d, PI, Some(frames_to_strike - 2));
         assert!(matches!(out, Some(HitOutcome::Damage { .. })), "{out:?}");
     }
@@ -799,14 +1085,14 @@ mod tests {
     fn shield_blocks_by_impact() {
         // Меч против щита: слабый удар, атакующий отскакивает.
         let mut a = sword();
-        let mut d = Fighter::new(WeaponKind::ArmingSword, 150.0, true);
+        let mut d = Fighter::new(WeaponKind::Spatha, 150.0, true);
         let out = duel(&mut a, &mut d, PI, Some(0));
         assert_eq!(out, Some(HitOutcome::Blocked { tier: ImpactTier::Weak }));
         assert!(matches!(a.action, Action::Stagger { .. }));
         assert!(!d.can_riposte());
-        // Двуручник против щита: тяжёлый удар, атакующий продолжает серию.
-        let mut a = Fighter::new(WeaponKind::Greatsword, 200.0, false);
-        let mut d = Fighter::new(WeaponKind::ArmingSword, 150.0, true);
+        // Топор против щита: тяжёлый удар, атакующий продолжает серию.
+        let mut a = Fighter::new(WeaponKind::Axe, 200.0, false);
+        let mut d = Fighter::new(WeaponKind::Spatha, 150.0, true);
         let out = duel(&mut a, &mut d, PI, Some(0));
         assert_eq!(out, Some(HitOutcome::Blocked { tier: ImpactTier::Heavy }));
         assert!(matches!(a.action, Action::Strike { .. }));
@@ -840,6 +1126,95 @@ mod tests {
         f.tick(0.1);
         f.set_guard(true);
         assert!(matches!(f.action, Action::Guard { .. }));
+    }
+
+    #[test]
+    fn spear_thrust_reaches_far() {
+        let mut a = Fighter::new(WeaponKind::Spear, 150.0, false);
+        let mut d = sword();
+        // Копейщик достаёт цель в 2,3 м, меч — нет.
+        let ap = pose(0.0, 0.0, 0.0);
+        let dp = pose(0.0, -2.3, PI);
+        a.try_attack();
+        let mut hit = false;
+        for _ in 0..120 {
+            a.tick(1.0 / 60.0);
+            if let Some((s, p)) = a.strike_progress() {
+                assert_eq!(s, Swing::Thrust);
+                let (h, t) = blade_segment(&ap, a.weapon, s, p);
+                hit |= trace_blade(h, t, &ap, &d, &dp).is_some();
+            }
+        }
+        assert!(hit, "копьё не достало");
+        d.tick(0.0);
+    }
+
+    #[test]
+    fn stamina_runs_out_and_guard_breaks() {
+        let mut a = Fighter::new(WeaponKind::Axe, 150.0, false);
+        let mut d = Fighter::new(WeaponKind::Spatha, 150.0, true);
+        let mut broken = false;
+        for _ in 0..20 {
+            a.stamina = STAMINA_MAX;
+            a.action = Action::Idle;
+            d.guard_held = false;
+            d.action = Action::Idle;
+            if let Some(out) = duel(&mut a, &mut d, PI, Some(0)) {
+                if out == HitOutcome::GuardBroken {
+                    broken = true;
+                    assert!(matches!(d.action, Action::Stagger { .. }));
+                    break;
+                }
+            }
+        }
+        assert!(broken, "защиту так и не пробило, выносливость {}", d.stamina);
+        // Без сил не замахнуться.
+        let mut f = sword();
+        f.stamina = 0.0;
+        assert!(!f.try_attack());
+    }
+
+    #[test]
+    fn arrow_hits_and_shield_blocks() {
+        let level = LevelColliders(Vec::new());
+        let shooter = pose(0.0, 0.0, 0.0);
+        let target = pose(0.0, -15.0, PI);
+        let (pos, _) = arrow_launch(&shooter);
+        let mut sp = shooter;
+        sp.pitch = ballistic_pitch(pos, target.feet + Vec3::Y * 1.2);
+        let (pos, vel) = arrow_launch(&sp);
+        let mut arrow = Arrow { id: 1, owner: 1, pos, vel, damage: 30.0, life: 5.0 };
+        let targets = [(1, sp), (2, target)];
+        let mut hit = None;
+        for _ in 0..300 {
+            match step_arrow(&mut arrow, 1.0 / 60.0, &level, &targets) {
+                ArrowStep::Flying => {}
+                ArrowStep::Hit { index, shield_facing, head, .. } => {
+                    hit = Some((index, shield_facing, head));
+                    break;
+                }
+                _ => break,
+            }
+        }
+        let (index, shield_facing, head) = hit.expect("стрела не попала");
+        assert_eq!(index, 1);
+        let mut d = Fighter::new(WeaponKind::Spatha, 150.0, true);
+        d.set_guard(true);
+        d.tick(0.5);
+        assert_eq!(resolve_arrow(&mut d, shield_facing, head, 30.0), HitOutcome::Blocked { tier: ImpactTier::Weak });
+        // Оружием стрелу не отбить.
+        let mut d = sword();
+        d.set_guard(true);
+        d.tick(0.5);
+        assert!(matches!(resolve_arrow(&mut d, shield_facing, head, 30.0), HitOutcome::Damage { .. }));
+    }
+
+    #[test]
+    fn weapon_from_item_name() {
+        assert_eq!(WeaponKind::from_item_name("Боевой топор"), WeaponKind::Axe);
+        assert_eq!(WeaponKind::from_item_name("Кинжал"), WeaponKind::Seax);
+        assert_eq!(WeaponKind::from_item_name("Алебарда"), WeaponKind::Spear);
+        assert_eq!(WeaponKind::from_item_name("Длинный меч"), WeaponKind::Spatha);
     }
 
     #[test]
