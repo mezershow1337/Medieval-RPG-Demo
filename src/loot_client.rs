@@ -534,6 +534,7 @@ fn update_prompt(
     corpses: Query<&CorpseView>,
     ground: Query<&GroundView>,
     index: Res<LootIndex>,
+    knowledge: Option<Res<crate::lore_client::MyKnowledge>>,
     mut text: Single<(&mut Text, &mut TextColor), With<PromptText>>,
 ) {
     let (ref mut t, ref mut color) = *text;
@@ -550,7 +551,9 @@ fn update_prompt(
             let base = g.base.base();
             let count = if g.count > 1 { format!(" ×{}", g.count) } else { String::new() };
             let quality = if base.has_quality { format!(" ({})", g.quality.name().to_lowercase()) } else { String::new() };
-            (format!("[E] Подобрать: {}{count}{quality}", base.name), quality_color(g.quality))
+            // Незнакомую траву персонаж не может назвать.
+            let name = knowledge.as_ref().map(|k| k.0.item_name(g.base)).unwrap_or_else(|| base.name.to_string());
+            (format!("[E] Подобрать: {name}{count}{quality}"), quality_color(g.quality))
         }
         _ => (String::new(), Color::WHITE),
     };

@@ -7,6 +7,8 @@ use crate::items::{ITEM_BASES, ItemBaseId};
 
 #[path = "trade_icons.rs"]
 mod trade_icons;
+/// Травы, вещества, книги и посуда.
+mod lore_icons;
 use bevy::asset::RenderAssetUsages;
 use bevy::image::Image;
 use bevy::prelude::*;
@@ -368,8 +370,10 @@ fn draw(base: ItemBaseId, c: &mut Canvas) {
         }
         // Монеты и товары торговли рисует trade_icons.rs.
         _ if trade_icons::draw(name, c) => {}
-        _ => {
-            c.circle(0.5, 0.5, 0.3, STEEL);
+        other => {
+            if !lore_icons::draw(other, c) {
+                c.circle(0.5, 0.5, 0.3, STEEL);
+            }
         }
     }
     c.outline();
