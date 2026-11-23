@@ -677,9 +677,14 @@ pub fn loom(b: &mut Builder, p: Vec3, along_x: bool) {
 
 /// Навес из небелёного льна на жердях перед лавкой.
 pub fn awning(b: &mut Builder, a: Vec3, c: Vec3, out: Vec3, depth: f32, h: f32) {
+    awning_of(b, a, c, out, depth, h, Mat::Canvas);
+}
+
+/// Навес из полотна `cloth` (некрашеный холст, крашенная мареной или вайдой шерсть).
+pub fn awning_of(b: &mut Builder, a: Vec3, c: Vec3, out: Vec3, depth: f32, h: f32, cloth: Mat) {
     let low = h - 0.5;
     let p = [a + Vec3::Y * h, c + Vec3::Y * h, c + out * depth + Vec3::Y * low, a + out * depth + Vec3::Y * low];
-    let m = b.mesh(Mat::Canvas);
+    let m = b.mesh(cloth);
     m.quad(p, Vec3::Y + out * 0.3);
     m.quad(p, -Vec3::Y - out * 0.3);
     // Подзор: полотно свисает с переднего края полосой с вырезами-«языками».

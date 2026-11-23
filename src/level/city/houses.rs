@@ -346,7 +346,8 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, m
         for (k, &(u0, u1)) in rooms.iter().enumerate() {
             if k != vestibule && rng.chance(0.7) {
                 let out = f.front_side().out();
-                kit::awning(b, f.p(u0 + 0.2, 0.0, -0.02), f.p(u1 - 0.2, 0.0, -0.02), out, 1.6, 2.9);
+                let cloth = [Mat::Canvas, Mat::Canvas, Mat::Canvas, Mat::Rug, Mat::Felt, Mat::Cloth][frng.int(6)];
+                kit::awning_of(b, f.p(u0 + 0.2, 0.0, -0.02), f.p(u1 - 0.2, 0.0, -0.02), out, 1.6, 2.9, cloth);
                 shop_front(b, &f, u0, u1, &mut frng);
             }
         }
@@ -525,7 +526,7 @@ fn facade_details(b: &mut Builder, f: &Frame, windows: &[(f32, f32, f32, f32)], 
 /// Только декор у самой стены (проход в лавку и улица свободны), зерно — своё.
 fn shop_front(b: &mut Builder, f: &Frame, u0: f32, u1: f32, rng: &mut Rng) {
     for (u, dir) in [(u0 + 0.45, 1.0f32), (u1 - 0.45, -1.0)] {
-        if rng.chance(0.25) {
+        if rng.chance(0.1) {
             continue;
         }
         let at = |du: f32, dv: f32| f.p(u + du * dir, 0.0, -0.35 - dv);
@@ -575,7 +576,7 @@ fn basket(b: &mut Builder, p: Vec3, r: f32, fill: Mat) {
 /// Мешок из грубого холста, завязанный у горла.
 fn sack(b: &mut Builder, p: Vec3, h: f32) {
     let r = h * 0.36;
-    b.mesh(Mat::Canvas).lathe(p, &[(0.0, 0.0), (r * 0.9, 0.0), (r * 1.05, h * 0.3), (r, h * 0.62), (r * 0.55, h * 0.85), (r * 0.18, h * 0.9), (r * 0.3, h), (0.0, h)], 10);
+    b.mesh(Mat::Felt).lathe(p, &[(0.0, 0.0), (r * 0.9, 0.0), (r * 1.05, h * 0.3), (r, h * 0.62), (r * 0.55, h * 0.85), (r * 0.18, h * 0.9), (r * 0.3, h), (0.0, h)], 10);
 }
 
 fn shop_fittings(b: &mut Builder, f: &Frame, u0: f32, u1: f32, kind: Shop, rng: &mut Rng) {
