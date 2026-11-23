@@ -181,33 +181,23 @@ fn setup_law_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
             p.spawn((
                 Node {
                     flex_direction: FlexDirection::Column,
-                    width: px(520),
-                    padding: UiRect::all(px(18)),
+                    width: px(560),
+                    padding: crate::ui_theme::Skin::Wood.padding(),
                     row_gap: px(10),
-                    border: UiRect::all(px(3)),
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.16, 0.11, 0.07, 0.94)),
-                BorderColor::all(Color::srgb(0.55, 0.42, 0.2)),
+                crate::ui_theme::theme().skin(crate::ui_theme::Skin::Wood),
             ))
             .with_children(|w| {
-                w.spawn((Text::new("Стражник гарнизона"), font(24.0, true), TextColor(Color::srgb(0.93, 0.8, 0.5))));
+                w.spawn(crate::ui_theme::theme().title("Стражник гарнизона", 28.0));
+                crate::ui_theme::theme().divider(w);
                 w.spawn((LawText, Text::new(""), font(17.0, false), TextColor(Color::srgb(0.95, 0.9, 0.8))));
                 for (answer, label) in [
                     (LawAnswer::Pay, "1. Уплатить пеню"),
                     (LawAnswer::Jail, "2. Сдаться: карцер претории, пеня спишется"),
                     (LawAnswer::Resist, "3. Сопротивляться"),
                 ] {
-                    w.spawn((
-                        LawButton(answer),
-                        Interaction::default(),
-                        Node { padding: UiRect::axes(px(12), px(7)), border: UiRect::all(px(1)), ..default() },
-                        BackgroundColor(Color::srgb(0.3, 0.21, 0.12)),
-                        BorderColor::all(Color::srgb(0.6, 0.47, 0.25)),
-                    ))
-                    .with_children(|b| {
-                        b.spawn((Text::new(label), font(17.0, false), TextColor(Color::srgb(0.97, 0.92, 0.82))));
-                    });
+                    crate::ui_theme::theme().button_sized(w, label, 17.0, LawButton(answer), true);
                 }
             });
         });
@@ -223,7 +213,7 @@ fn law_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut client: Option<ResMut<RenetClient>>,
     ui: Res<LawUi>,
-    mut buttons: Query<(&Interaction, &LawButton, &mut BackgroundColor), Changed<Interaction>>,
+    buttons: Query<(&Interaction, &LawButton), Changed<Interaction>>,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if !ui.open() {
@@ -239,11 +229,10 @@ fn law_input(
             send_answer(&mut client, answer);
         }
     }
-    for (interaction, button, mut bg) in &mut buttons {
-        match interaction {
-            Interaction::Pressed => send_answer(&mut client, button.0),
-            Interaction::Hovered => bg.0 = Color::srgb(0.42, 0.3, 0.16),
-            Interaction::None => bg.0 = Color::srgb(0.3, 0.21, 0.12),
+    // Подсветку кнопок делает тема (ThemeButton).
+    for (interaction, button) in &buttons {
+        if *interaction == Interaction::Pressed {
+            send_answer(&mut client, button.0);
         }
     }
 }

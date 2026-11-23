@@ -296,16 +296,17 @@ pub fn gable_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32, ridge_x: bool,
     {
         let m = b.mesh(Mat::Wood);
         let mut under = MeshBuilder::default();
-        under.gable_roof_slopes(Vec2::new(ro.x0, ro.z0), Vec2::new(ro.x1, ro.z1), e - 0.08, top - 0.08, ridge_x);
+        under.gable_roof_slopes(Vec2::new(ro.x0, ro.z0), Vec2::new(ro.x1, ro.z1), e - ROOF_T, top - ROOF_T, ridge_x);
         m.append(under.flipped());
     }
-    // Конёк — ряд калиптеров.
-    let ridge = if ridge_x {
-        (Vec3::new(ro.x0, top + 0.05, r.cz()), Vec3::new(ro.x1, top + 0.05, r.cz()))
-    } else {
-        (Vec3::new(r.cx(), top + 0.05, ro.z0), Vec3::new(r.cx(), top + 0.05, ro.z1))
-    };
-    b.mesh(Mat::Tile).beam(ridge.0, ridge.1, 0.13, 0.09, Vec3::Y);
+    // Толщина кровли по краям: торцы черепицы на карнизах и на свесах у фронтонов.
+    // Точки — в осях крыши: `al` вдоль конька, `ac` поперёк.
+    let w = |al: f32, y: f32, ac: f32| if ridge_x { Vec3::new(al, y, ac) } else { Vec3::new(ac, y, al) };
+    let (a0, a1, c0, c1, cm) = if ridge_x { (ro.x0, ro.x1, ro.z0, ro.z1, r.cz()) } else { (ro.z0, ro.z1, ro.x0, ro.x1, r.cx()) };
+    let slope = Vec2::new((c1 - c0) / 2.0, top - e).length();
+    roof_edges(b.mesh(Mat::Tile), &w, (a0, a1), [(c0, -1.0), (c1, 1.0)], e, top, cm, slope);
+    // Конёк — ряд полукруглых калиптеров на растворе.
+    b.mesh(Mat::Tile).ridge_pipe(w(a0 - 0.04, top - 0.03, cm), w(a1 + 0.04, top - 0.03, cm), 0.13, 8);
     // Фронтоны.
     let m = b.mesh(gable_mat);
     if ridge_x {
@@ -315,6 +316,31 @@ pub fn gable_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32, ridge_x: bool,
     } else {
         for (z, s) in [(r.z0, -1.0f32), (r.z1, 1.0)] {
             m.tri(Vec3::new(r.x0, eave, z), Vec3::new(r.x1, eave, z), Vec3::new(r.cx(), top, z), Vec3::Z * s);
+        }
+    }
+}
+
+/// Толщина кровли: тегула с калиптером над обрешёткой.
+const ROOF_T: f32 = 0.11;
+
+/// Торцы кровли двускатной крыши: полосы черепицы на карнизах (последние сантиметры развёртки
+/// загнуты вниз — тон и стыки те же, что у нижнего ряда) и на свесах у фронтонов (крайний
+/// калиптер). `w` переводит (вдоль конька, высота, поперёк) в мир.
+fn roof_edges(t: &mut MeshBuilder, w: &dyn Fn(f32, f32, f32) -> Vec3, (a0, a1): (f32, f32), eaves: [(f32, f32); 2], e: f32, top: f32, cm: f32, slope: f32) {
+    let l = a1 - a0;
+    let lip = 0.12;
+    for (ce, s) in eaves {
+        t.quad_uv(
+            [w(a0, e, ce), w(a1, e, ce), w(a1, e - ROOF_T, ce), w(a0, e - ROOF_T, ce)],
+            [Vec2::new(0.0, slope), Vec2::new(l, slope), Vec2::new(l, slope - lip), Vec2::new(0.0, slope - lip)],
+            w(0.0, 0.0, s),
+        );
+        for (ae, u0, u1, out) in [(a0, 0.0, lip, -1.0f32), (a1, l, l - lip, 1.0)] {
+            t.quad_uv(
+                [w(ae, e, ce), w(ae, top, cm), w(ae, top - ROOF_T, cm), w(ae, e - ROOF_T, ce)],
+                [Vec2::new(u0, slope), Vec2::new(u0, 0.0), Vec2::new(u1, 0.0), Vec2::new(u1, slope)],
+                w(out, 0.0, 0.0),
+            );
         }
     }
 }
@@ -344,7 +370,7 @@ impl Side {
 
 /// Односкатная крыша: высокий край над стороной `high` прямоугольника, низкий — над противоположной.
 pub fn lean_roof(b: &mut Builder, r: Rect, high: Side, y_high: f32, y_low: f32, over: f32) {
-    let (span, along) = if high.along_x() { (r.d(), r.w()) } else { (r.w(), r.d()) };
+    let span = if high.along_x() { r.d() } else { r.w() };
     let slope = (y_high - y_low) / span;
     let yh = y_high + slope * 0.25;
     let yl = y_low - slope * over;
@@ -355,16 +381,31 @@ pub fn lean_roof(b: &mut Builder, r: Rect, high: Side, y_high: f32, y_low: f32, 
         Side::W => ([Vec3::new(r.x0 - 0.25, yh, ro.z0), Vec3::new(r.x0 - 0.25, yh, ro.z1)], [Vec3::new(r.x1 + over, yl, ro.z0), Vec3::new(r.x1 + over, yl, ro.z1)]),
         Side::E => ([Vec3::new(r.x1 + 0.25, yh, ro.z0), Vec3::new(r.x1 + 0.25, yh, ro.z1)], [Vec3::new(r.x0 - over, yl, ro.z0), Vec3::new(r.x0 - over, yl, ro.z1)]),
     };
-    let _ = along;
     b.mesh(Mat::Tile).lean_roof(hi, lo);
-    let down = Vec3::Y * -0.07;
+    let down = Vec3::Y * -ROOF_T;
     let mut under = MeshBuilder::default();
     under.lean_roof([hi[0] + down, hi[1] + down], [lo[0] + down, lo[1] + down]);
     b.mesh(Mat::Wood).append(under.flipped());
+    // Торцы черепицы: на карнизе и на боковых свесах (как у двускатной).
+    let along = (hi[1] - hi[0]).length();
+    let slope_len = (lo[0] - hi[0]).length();
+    let out = (lo[0] - hi[0]).with_y(0.0).normalize_or_zero();
+    let ax = (hi[1] - hi[0]).normalize_or_zero();
+    let lip = 0.12;
+    let t = b.mesh(Mat::Tile);
+    t.quad_uv(
+        [lo[0], lo[1], lo[1] + down, lo[0] + down],
+        [Vec2::new(0.0, slope_len), Vec2::new(along, slope_len), Vec2::new(along, slope_len - lip), Vec2::new(0.0, slope_len - lip)],
+        out,
+    );
+    for (h, l, u0, u1, f) in [(hi[0], lo[0], 0.0, lip, -ax), (hi[1], lo[1], along, along - lip, ax)] {
+        t.quad_uv([h, l, l + down, h + down], [Vec2::new(u0, 0.0), Vec2::new(u0, slope_len), Vec2::new(u1, slope_len), Vec2::new(u1, 0.0)], f);
+    }
     // Треугольные торцы между стеной и скатом закрываем кладкой — делает вызывающий (стены выше),
-    // а здесь — торцевые доски.
+    // а здесь — концы стропил под карнизом.
     let m = b.mesh(Mat::Wood);
-    m.beam(lo[0] + Vec3::Y * -0.06, lo[1] + Vec3::Y * -0.06, 0.06, 0.06, Vec3::Y);
+    let inward = -out * 0.18 + Vec3::Y * -(ROOF_T + 0.05);
+    m.beam(lo[0] + inward, lo[1] + inward, 0.05, 0.05, Vec3::Y);
 }
 
 /// Треугольный кусок кладки под односкатной крышей на торце крыла.

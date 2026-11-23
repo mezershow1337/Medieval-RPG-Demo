@@ -538,6 +538,43 @@ def hair_shader(style, color=(0.2, 0.13, 0.08)):
 # Сборка
 
 
+def make_skirt(bld, hem, off, narrow=0.78):
+    """Юбка туники/доспеха из юбки MakeHuman: сужена к подолу, не врезается в ноги, висит на бёдрах."""
+    part = bld.extract("helper-skirt", lambda c: c[1] > hem, uv_box=True)
+    part = bld.shell(part, off, 1)
+    # Юбка MakeHuman рассчитана на расставленные ноги: сужаем к подолу и перевешиваем на бёдра.
+    pos = part.pos.copy()
+    y = pos[:, 1]
+    k = 1 - (1 - narrow) * smooth(1.0, hem, y)
+    pos[:, 0] *= k
+    pos[:, 2] = (pos[:, 2] + 0.015) * (0.92 + 0.08 * k) - 0.015
+    # Сужая, не даём подолу врезаться в ноги: держим зазор от колготок (бёдер) по их нормали.
+    legs = np.array(sorted({i for f, g in zip(bld.base.faces, bld.base.fgroups) if g == "helper-tights" for i in f}))
+    legs = legs[(bld.v[legs, 1] < 1.0) & (bld.v[legs, 1] > hem - 0.1)]
+    lp, ln = bld.v[legs], bld.normals[legs]
+    clear = off + 0.012
+    for _ in range(2):
+        for s0 in range(0, len(pos), 512):
+            q = pos[s0:s0 + 512]
+            d2 = ((q[:, None, :] - lp[None, :, :]) ** 2).sum(-1)
+            j = d2.argmin(1)
+            t, n = lp[j], ln[j]
+            d = ((q - t) * n).sum(1)
+            low = (d < clear) & (q[:, 1] < 0.98)
+            q[low] += (clear - d[low])[:, None] * n[low]
+            pos[s0:s0 + 512] = q
+    part.pos = pos
+    W = np.zeros((len(pos), len(BONES)))
+    # У подола юбка идёт почти целиком за бедром — иначе при приседе бедро прорывает её спереди.
+    a = 0.95 * smooth(0.98, hem + 0.05, y)
+    side = 1 / (1 + np.exp(-pos[:, 0] / 0.03))
+    W[:, B["pelvis"]] = 1 - a
+    W[:, B["thigh_r"]] = a * side
+    W[:, B["thigh_l"]] = a * (1 - side)
+    part.W = W
+    return part
+
+
 def build():
     bld = Builder()
     rig = bld.rig
@@ -548,8 +585,9 @@ def build():
     wrist_y = rig.rest_world()[B["hand_r"]][1, 3]
 
     def is_head(c):
-        # Голова и шея (под воротом туники кожа заходит на пару сантиметров).
-        return c[1] > 1.5 or (c[1] > 1.405 and abs(c[0]) < 0.075)
+        # Голова и шея. Под ворот кожа заходит с запасом: края выреза у туники и кожи шеи —
+        # «зубцы» по граням, и без запаса между ними видна изнанка одежды.
+        return c[1] > 1.5 or (c[1] > 1.37 and abs(c[0]) < 0.1)
 
     def is_hand(c):
         return c[1] < wrist_y + 0.035 and abs(c[0]) > 0.14 and c[1] > 0.55
@@ -609,23 +647,7 @@ def build():
         return bld.shell(part, off, iters)
 
     def skirt(hem, off, narrow=0.78):
-        part = bld.extract("helper-skirt", lambda c: c[1] > hem, uv_box=True)
-        part = bld.shell(part, off, 1)
-        # Юбка MakeHuman рассчитана на расставленные ноги: сужаем к подолу и перевешиваем на бёдра.
-        pos = part.pos.copy()
-        y = pos[:, 1]
-        k = 1 - (1 - narrow) * smooth(1.0, hem, y)
-        pos[:, 0] *= k
-        pos[:, 2] = (pos[:, 2] + 0.015) * (0.92 + 0.08 * k) - 0.015
-        part.pos = pos
-        W = np.zeros((len(pos), len(BONES)))
-        a = 0.75 * smooth(0.98, hem + 0.05, y)
-        side = 1 / (1 + np.exp(-pos[:, 0] / 0.03))
-        W[:, B["pelvis"]] = 1 - a
-        W[:, B["thigh_r"]] = a * side
-        W[:, B["thigh_l"]] = a * (1 - side)
-        part.W = W
-        return part
+        return make_skirt(bld, hem, off, narrow)
 
     neck = 1.455
 

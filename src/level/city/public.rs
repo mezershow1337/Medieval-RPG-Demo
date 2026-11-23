@@ -247,50 +247,73 @@ pub fn agora(b: &mut Builder) {
     let top = c + Vec3::Y * 7.0;
     b.mesh(Mat::Bronze).cuboid(top + Vec3::new(-0.06, 0.0, -0.06), top + Vec3::new(0.06, 1.3, 0.06));
     b.mesh(Mat::Bronze).cuboid(top + Vec3::new(-0.45, 0.75, -0.06), top + Vec3::new(0.45, 0.87, 0.06));
-    // Торговые ряды: столы под навесами с товаром.
-    let stalls = [(a.x0 + 12.0, a.z0 + 13.0), (a.x0 + 20.0, a.z0 + 13.0), (a.x0 + 12.0, a.z0 + 21.0), (a.x0 + 32.0, a.z0 + 13.0), (a.x0 + 40.0, a.z0 + 31.0), (a.x0 + 12.0, a.z0 + 29.0)];
-    for (k, (x, z)) in stalls.into_iter().enumerate() {
-        stall(b, Vec3::new(x, 0.0, z), k, &mut rng);
+    // Торговые ряды: столы под навесами с товаром. Первые лотки занимают торговцы
+    // (стол, навес и товар у них свои), остальные стоят с товаром сами по себе.
+    let staffed = super::super::places::staffed_stalls("agora");
+    for (k, (p, facing)) in agora_stalls().into_iter().enumerate().skip(staffed) {
+        stall(b, p, facing, k, &mut rng);
     }
 }
 
-/// Торговый лоток: стол, полотняный навес на четырёх жердях, товар.
-pub fn stall(b: &mut Builder, p: Vec3, kind: usize, rng: &mut Rng) {
-    let t = Rect::new(p.x - 1.2, p.z - 0.5, p.x + 1.2, p.z + 0.5);
+/// Лотки агоры: середина стола и куда он обращён (к покупателям). Первый ряд — вдоль северной
+/// стои лицом на площадь, второй — вдоль западной стои лицом на восток, последний — у главной улицы.
+pub fn agora_stalls() -> [(Vec3, Vec3); 6] {
+    let a = agora_rect();
+    let at = |x: f32, z: f32| Vec3::new(a.x0 + x, 0.0, a.z0 + z);
+    [
+        (at(12.0, 13.0), Vec3::Z),
+        (at(20.0, 13.0), Vec3::Z),
+        (at(32.0, 13.0), Vec3::Z),
+        (at(12.0, 21.0), Vec3::X),
+        (at(12.0, 29.0), Vec3::X),
+        (at(40.0, 31.0), Vec3::Z),
+    ]
+}
+
+/// Торговый лоток: стол, полотняный навес на четырёх жердях, товар. `facing` — куда обращён
+/// стол (к покупателям, одно из ±X/±Z); продавец стоит с другой стороны, под высоким краем навеса.
+pub fn stall(b: &mut Builder, p: Vec3, facing: Vec3, kind: usize, rng: &mut Rng) {
+    let right = Vec3::new(facing.z, 0.0, -facing.x);
+    // Точка в осях лотка: `u` — вдоль стола, `v` — к покупателю.
+    let w = |u: f32, y: f32, v: f32| p + right * u + facing * v + Vec3::Y * y;
+    let (c0, c1) = (w(-1.2, 0.0, -0.5), w(1.2, 0.0, 0.5));
+    let t = Rect::new(c0.x.min(c1.x), c0.z.min(c1.z), c0.x.max(c1.x), c0.z.max(c1.z));
     kit::table(b, t, 0.85);
     let m = b.mesh(Mat::Wood);
-    for (x, z) in [(t.x0 - 0.2, t.z0 - 0.6), (t.x1 + 0.2, t.z0 - 0.6), (t.x0 - 0.2, t.z1 + 0.3), (t.x1 + 0.2, t.z1 + 0.3)] {
-        m.beam(Vec3::new(x, 0.0, z), Vec3::new(x, 2.4, z), 0.035, 0.035, Vec3::X);
+    for (u, v) in [(-1.4, -1.1), (1.4, -1.1), (-1.4, 0.8), (1.4, 0.8)] {
+        m.beam(w(u, 0.0, v), w(u, 2.4, v), 0.035, 0.035, right);
     }
     let c = b.mesh(Mat::Canvas);
-    let q = [Vec3::new(t.x0 - 0.35, 2.5, t.z0 - 0.75), Vec3::new(t.x1 + 0.35, 2.5, t.z0 - 0.75), Vec3::new(t.x1 + 0.35, 2.25, t.z1 + 0.45), Vec3::new(t.x0 - 0.35, 2.25, t.z1 + 0.45)];
+    let q = [w(-1.55, 2.5, -1.25), w(1.55, 2.5, -1.25), w(1.55, 2.25, 0.95), w(-1.55, 2.25, 0.95)];
     c.quad(q, Vec3::Y);
     c.quad(q, Vec3::NEG_Y);
     let top = p + Vec3::Y * 0.85;
+    // Товар раскладывается вдоль стола.
+    let along = |u: f32, y: f32, v: f32| right * u + facing * v + Vec3::Y * y;
     match kind % 4 {
         0 => {
             for k in 0..5 {
-                kit::jug(b, top + Vec3::new(-0.9 + k as f32 * 0.45, 0.0, 0.0), rng.range(0.15, 0.3), Mat::Ceramic);
+                kit::jug(b, top + along(-0.9 + k as f32 * 0.45, 0.0, 0.0), rng.range(0.15, 0.3), Mat::Ceramic);
             }
         }
         1 => {
             // Рыба (солёная и вяленая).
             for k in 0..8 {
-                let q = top + Vec3::new(-0.9 + k as f32 * 0.25, 0.04, rng.range(-0.2, 0.2));
-                b.mesh(Mat::Iron).beam(q - Vec3::Z * 0.15, q + Vec3::Z * 0.15, 0.04, 0.025, Vec3::Y);
+                let q = top + along(-0.9 + k as f32 * 0.25, 0.04, rng.range(-0.2, 0.2));
+                b.mesh(Mat::Iron).beam(q - facing * 0.15, q + facing * 0.15, 0.04, 0.025, Vec3::Y);
             }
         }
         2 => {
             // Ткани в рулонах.
             for k in 0..4 {
-                let q = top + Vec3::new(-0.8 + k as f32 * 0.5, 0.1, 0.0);
-                b.mesh(if k % 2 == 0 { Mat::Canvas } else { Mat::Banner }).beam(q - Vec3::Z * 0.4, q + Vec3::Z * 0.4, 0.1, 0.1, Vec3::Y);
+                let q = top + along(-0.8 + k as f32 * 0.5, 0.1, 0.0);
+                b.mesh(if k % 2 == 0 { Mat::Canvas } else { Mat::Banner }).beam(q - facing * 0.4, q + facing * 0.4, 0.1, 0.1, Vec3::Y);
             }
         }
         _ => {
             // Корзины с зерном и бобами.
             for k in 0..3 {
-                let q = top + Vec3::new(-0.7 + k as f32 * 0.7, 0.0, 0.0);
+                let q = top + along(-0.7 + k as f32 * 0.7, 0.0, 0.0);
                 b.mesh(Mat::Thatch).lathe(q, &[(0.15, 0.0), (0.25, 0.22), (0.0, 0.22)], 10);
                 b.mesh(Mat::Earth).disc(q + Vec3::Y * 0.2, 0.23, 10, true);
             }

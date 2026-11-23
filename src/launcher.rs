@@ -85,6 +85,8 @@ pub fn run_menu() -> Choice {
     println!("   Medieval RPG — Херсонес, 510 год");
     println!("==============================================");
     println!();
+    ask_name();
+    println!();
     println!("  1 — Создать игру (ты хост, друзья подключаются к тебе)");
     println!("  2 — Подключиться к другу");
     println!();
@@ -102,6 +104,44 @@ pub fn run_menu() -> Choice {
             "2" => return Choice::Join(ask_address()),
             _ => println!("Нужно ввести цифру 1 или 2."),
         }
+    }
+}
+
+/// Файл с именем персонажа — рядом с exe.
+fn name_file() -> Option<PathBuf> {
+    Some(std::env::current_exe().ok()?.parent()?.join("name.txt"))
+}
+
+/// Привести имя к виду, годному для карты и подписей: без управляющих символов, не длиннее 20 знаков.
+pub fn clean_name(s: &str) -> String {
+    let s: String = s.chars().filter(|c| !c.is_control()).collect();
+    let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    s.chars().take(20).collect()
+}
+
+/// Имя игрока, которое видят товарищи на карте и над головой:
+/// `MRPG_NAME`, затем name.txt рядом с exe (его пишет меню), затем имя пользователя системы.
+pub fn player_name() -> String {
+    let from_env = std::env::var("MRPG_NAME").ok();
+    let from_file = name_file().and_then(|f| std::fs::read_to_string(f).ok());
+    let from_os = std::env::var("USERNAME").or_else(|_| std::env::var("USER")).ok();
+    [from_env, from_file, from_os]
+        .into_iter()
+        .flatten()
+        .map(|s| clean_name(&s))
+        .find(|s| !s.is_empty())
+        .unwrap_or_else(|| "Странник".to_string())
+}
+
+fn ask_name() {
+    let file = name_file();
+    let last = file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()).map(|s| clean_name(&s)).filter(|s| !s.is_empty());
+    let hint = last.as_ref().map(|l| format!(" [Enter — {l}]")).unwrap_or_default();
+    let input = clean_name(&prompt(&format!("Как тебя зовут (имя видно друзьям на карте){hint}: ")));
+    if !input.is_empty()
+        && let Some(f) = &file
+    {
+        let _ = std::fs::write(f, &input);
     }
 }
 

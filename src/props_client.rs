@@ -175,9 +175,10 @@ fn grab_input(
     local: Query<(&LocalPlayer, &LocalFighter)>,
     items: Query<(&GroundView, &Transform)>,
     index: Res<crate::loot_client::LootIndex>,
+    work: Option<Res<crate::work_client::MyWork>>,
 ) {
     let Some(mut client) = client else { return };
-    let busy = loot.ui_open || trade.is_some_and(|t| t.window_open()) || !cursor_locked(&cursor);
+    let busy = loot.ui_open || trade.is_some_and(|t| t.window_open()) || !cursor_locked(&cursor) || crate::work_client::hands_busy(work.as_deref());
     let Ok(cam) = camera.single() else { return };
     let Ok((player, fighter)) = local.single() else { return };
     let idle = matches!(fighter.fighter.action, crate::combat::Action::Idle) && !fighter.fighter.is_dead();

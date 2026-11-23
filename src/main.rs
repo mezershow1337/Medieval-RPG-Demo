@@ -4,8 +4,10 @@
 //!   cargo run                     — хост: сервер + игра на этом компьютере
 //!   cargo run -- join 192.168.1.5 — подключиться к другу (порт по умолчанию 5000)
 //!   cargo run -- server           — только сервер, без окна
+//!   cargo run -- bot 127.0.0.1 Имя  — бот-товарищ (ходит и ставит метку) для проверки карты
 
 mod alchemy_fx;
+mod bot;
 mod brewing;
 mod brewing_client;
 mod civil_client;
@@ -14,11 +16,16 @@ mod civilians;
 mod client;
 mod collision;
 mod combat;
+mod console;
+mod console_net;
+mod console_server;
 mod consumables;
 mod doors;
 mod economy;
 mod factions;
 mod fight;
+mod guide;
+mod hints;
 mod gear_look;
 mod hotbar;
 mod graphics;
@@ -36,6 +43,8 @@ mod loot_server;
 mod lore;
 mod lore_client;
 mod lore_net;
+mod map;
+mod map_render;
 mod medicine;
 mod medicine_server;
 mod medicine_client;
@@ -49,6 +58,9 @@ mod protocol;
 mod residents;
 mod rig;
 mod server;
+mod skill_book;
+mod skill_tree;
+mod skills_server;
 mod archery;
 mod arsenal;
 mod smithing;
@@ -65,8 +77,12 @@ mod trade_client;
 mod trade_net;
 mod trade_server;
 mod trade_ui;
+mod ui_theme;
 mod vegetation;
 mod weight;
+mod work;
+mod work_client;
+mod worn;
 
 use protocol::DEFAULT_PORT;
 use std::net::SocketAddr;
@@ -77,6 +93,8 @@ fn parse_addr(s: &str) -> SocketAddr {
 
 /// Хост: сервер в отдельном потоке и окно игры, подключённое к нему же.
 fn host(port: u16) {
+    // Секрет хозяина: консоль разработчика даёт читы только этому окну (см. console_net.rs).
+    console_net::make_host_token();
     let socket = match server::bind_socket(port) {
         Ok(s) => s,
         Err(e) => panic!("порт {port} занят ({e}): возможно, игра или сервер уже запущены"),
@@ -107,6 +125,10 @@ fn main() {
             let port = args.get(1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
             let socket = server::bind_socket(port).expect("порт занят");
             server::run(socket, true);
+        }
+        Some("bot") => {
+            let addr = parse_addr(args.get(1).map(String::as_str).unwrap_or("127.0.0.1"));
+            bot::run(addr, args.get(2).cloned().unwrap_or_else(|| "Бот".to_string()));
         }
         Some("join") => {
             let addr = parse_addr(args.get(1).map(String::as_str).unwrap_or("127.0.0.1"));

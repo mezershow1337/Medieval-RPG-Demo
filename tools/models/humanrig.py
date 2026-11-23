@@ -57,7 +57,8 @@ def merge_map(name):
         return {"pelvis": 1.0}
     if base == "spine04":
         return {"pelvis": 0.55, "torso": 0.45}
-    if base in ("spine03", "spine02", "spine01", "breast") or base.startswith("levator"):
+    # levator02–06 у MakeHuman — мышцы верхней губы (лицо), а не плеча: они уходят в голову ниже.
+    if base in ("spine03", "spine02", "spine01", "breast"):
         return {"torso": 1.0}
     if base == "clavicle":
         return {"torso": 0.85, f"upper_arm_{side}": 0.15}

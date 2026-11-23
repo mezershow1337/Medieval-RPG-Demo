@@ -28,7 +28,7 @@ impl Plugin for LoreClientPlugin {
             .insert_resource(LoreView::default())
             .add_systems(Startup, (setup_lore_assets, setup_lore_ui).after(crate::inventory_ui::setup_fonts))
             .add_systems(Update, (receive_lore, lore_input).chain().run_if(client_connected))
-            .add_systems(Update, (aim_lore_target, update_lore_prompt, update_patch_looks, update_knowledge_window, update_tending_hud).chain());
+            .add_systems(Update, (aim_lore_target, update_lore_prompt, update_patch_looks, update_tending_hud).chain());
     }
 }
 
@@ -59,10 +59,6 @@ pub struct LoreView {
     masters: HashMap<u32, (MasterView, Entity)>,
     stations: HashMap<u32, (StationView, Entity)>,
     pub target: Option<LoreTarget>,
-    window_open: bool,
-    /// Окно знаний перестраивается, когда это число меняется.
-    rev: u64,
-    built_rev: u64,
 }
 
 pub fn send(client: &mut RenetClient, msg: &LoreClientMessage) {
@@ -325,6 +321,7 @@ fn receive_lore(
     mut body: ResMut<crate::medicine_client::MyBody>,
     mut fx: ResMut<crate::alchemy_fx::FxQueue>,
     mut tending: ResMut<MyTending>,
+    mut work: ResMut<crate::work_client::MyWork>,
     assets: Res<LoreAssets>,
     time: Res<Time>,
 ) {
@@ -334,7 +331,6 @@ fn receive_lore(
         match msg {
             LoreServerMessage::Knowledge(k) => {
                 knowledge.0 = k;
-                view.rev += 1;
                 // Имена трав в сумке могли поменяться.
                 loot.rev += 1;
             }
@@ -379,10 +375,15 @@ fn receive_lore(
                     view.masters.insert(m.id, (m, e));
                 }
             }
-            LoreServerMessage::Activity { verb, done, total } => loot.using = Some((verb, now - done, total)),
+            LoreServerMessage::Activity { verb, done, total, drill, skill } => {
+                work.begin(drill, skill, crate::work_client::Via::Lore, &verb, done / total.max(0.01));
+                loot.using = Some((verb, now - done, total));
+            }
+            LoreServerMessage::Progress(p) => work.progress = p,
             LoreServerMessage::ActivityEnded => {
                 loot.using = None;
                 tending.0 = None;
+                work.end(crate::work_client::Via::Lore);
             }
             LoreServerMessage::Tending(t) => tending.0 = Some(t),
             LoreServerMessage::Notice(text) => loot.notify(text, now),
@@ -401,7 +402,7 @@ fn receive_lore(
 
 fn aim_lore_target(mut view: ResMut<LoreView>, loot: Res<LootState>, camera: Query<&GlobalTransform, With<PlayerCamera>>) {
     let target = (|| {
-        if loot.ui_open || loot.target.is_some() || view.window_open {
+        if loot.ui_open || loot.target.is_some() {
             return None;
         }
         let cam = camera.single().ok()?;
@@ -445,7 +446,7 @@ fn aim_lore_target(mut view: ResMut<LoreView>, loot: Res<LootState>, camera: Que
     }
 }
 
-fn lore_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, mut view: ResMut<LoreView>, loot: Res<LootState>, tending: Res<MyTending>) {
+fn lore_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, view: Res<LoreView>, loot: Res<LootState>, tending: Res<MyTending>) {
     // Огонь под сосудом: 1 — мехи, 2 — заслонка, 3 — мокрая тряпица на купол.
     if loot.using.is_some() && tending.0.is_some() {
         for (key, action) in [(KeyCode::Digit1, TendAction::Bellows), (KeyCode::Digit2, TendAction::Damper), (KeyCode::Digit3, TendAction::CoolDome)] {
@@ -453,14 +454,6 @@ fn lore_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, 
                 send(&mut client, &LoreClientMessage::Tend(action));
             }
         }
-    }
-    if keys.just_pressed(KeyCode::KeyK) && !loot.ui_open {
-        view.window_open = !view.window_open;
-        view.rev += 1;
-    }
-    if view.window_open && keys.just_pressed(KeyCode::Escape) {
-        view.window_open = false;
-        view.rev += 1;
     }
     if loot.ui_open {
         return;
@@ -486,15 +479,12 @@ fn lore_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, 
 #[derive(Component)]
 struct LorePrompt;
 
-#[derive(Component)]
-struct KnowledgeWindow;
-
 /// Строка про огонь под сосудом.
 #[derive(Component)]
 struct TendingHud;
 
 /// Знающий видит жар и нагрев купола; новичок — только слышит кипение и видит дым.
-fn tending_lines(t: &TendView, k: &Knowledge) -> (String, bool) {
+fn tending_lines(t: &TendView, k: &Knowledge, pumping: bool) -> (String, bool) {
     let mut out = Vec::new();
     let reads_fire = k.knows(Lore::Technique(Technique::Decoction)) || k.knows(Lore::Technique(Technique::Distillation)) || k.skill(Skill::Alchemy) >= 25.0;
     let diff = t.fire - t.target;
@@ -532,7 +522,7 @@ fn tending_lines(t: &TendView, k: &Knowledge) -> (String, bool) {
         };
         out.push(cue.to_string());
     }
-    let mut keys = "[1] мехи   [2] заслонка".to_string();
+    let mut keys = if pumping { "Мехи — мышью вверх-вниз   [2] заслонка".to_string() } else { "[1] мехи   [2] заслонка".to_string() };
     if t.dome.is_some() {
         keys.push_str("   [3] мокрая тряпица на купол");
     }
@@ -543,14 +533,21 @@ fn tending_lines(t: &TendView, k: &Knowledge) -> (String, bool) {
 /// Предел шкалы жара (раскалено сверх сильного).
 const FIRE_SCALE: f32 = 3.6;
 
-fn update_tending_hud(tending: Res<MyTending>, knowledge: Res<MyKnowledge>, loot: Res<LootState>, mut hud: Single<(&mut Text, &mut TextColor, &mut Node), With<TendingHud>>) {
+fn update_tending_hud(
+    tending: Res<MyTending>,
+    knowledge: Res<MyKnowledge>,
+    loot: Res<LootState>,
+    work: Res<crate::work_client::MyWork>,
+    mut hud: Single<(&mut Text, &mut TextColor, &mut Node), With<TendingHud>>,
+) {
     if !tending.is_changed() && !knowledge.is_changed() && !loot.is_changed() {
         return;
     }
+    let pumping = work.meter.as_ref().is_some_and(|m| m.drill == crate::work::Drill::Pump);
     let (text, color, node) = &mut *hud;
     match tending.0.as_ref().filter(|_| loot.using.is_some()) {
         Some(t) => {
-            let (line, danger) = tending_lines(t, &knowledge.0);
+            let (line, danger) = tending_lines(t, &knowledge.0, pumping);
             text.0 = line;
             color.0 = if danger { Color::srgb(1.0, 0.45, 0.3) } else { Color::srgb(0.95, 0.88, 0.7) };
             node.display = Display::Flex;
@@ -563,47 +560,45 @@ fn setup_lore_ui(mut commands: Commands, fonts: Res<UiFonts>) {
     commands
         .spawn(Node { position_type: PositionType::Absolute, width: percent(100), bottom: px(150), justify_content: JustifyContent::Center, ..default() })
         .with_children(|p| {
-            p.spawn((
-                TendingHud,
-                Text::new(""),
-                TextFont { font: fonts.bold.clone().into(), font_size: bevy::text::FontSize::Px(17.0), ..default() },
-                TextColor(Color::WHITE),
-                TextLayout::justify(Justify::Center),
-                TextShadow::default(),
-                Node { display: Display::None, ..default() },
-            ));
+            crate::ui_theme::theme().plaque(p).with_children(|p| {
+                p.spawn((
+                    TendingHud,
+                    Text::new(""),
+                    TextFont {
+                        font: fonts.bold.clone().into(),
+                        font_size: bevy::text::FontSize::Px(17.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    TextLayout::justify(Justify::Center),
+                    TextShadow::default(),
+                    Node {
+                        display: Display::None,
+                        ..default()
+                    },
+                    crate::ui_theme::Plaque,
+                ));
+            });
         });
     commands
         .spawn(Node { position_type: PositionType::Absolute, width: percent(100), top: percent(56), justify_content: JustifyContent::Center, ..default() })
         .with_children(|p| {
-            p.spawn((
-                LorePrompt,
-                Text::new(""),
-                TextFont { font: fonts.bold.clone().into(), font_size: bevy::text::FontSize::Px(20.0), ..default() },
-                TextColor(Color::WHITE),
-                TextLayout::justify(Justify::Center),
-                TextShadow::default(),
-            ));
+            crate::ui_theme::theme().plaque(p).with_children(|p| {
+                p.spawn((
+                    LorePrompt,
+                    Text::new(""),
+                    TextFont {
+                        font: fonts.bold.clone().into(),
+                        font_size: bevy::text::FontSize::Px(20.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    TextLayout::justify(Justify::Center),
+                    TextShadow::default(),
+                    crate::ui_theme::Plaque,
+                ));
+            });
         });
-    commands.spawn((
-        KnowledgeWindow,
-        Node {
-            position_type: PositionType::Absolute,
-            display: Display::None,
-            left: percent(8),
-            top: percent(6),
-            width: percent(84),
-            max_height: percent(88),
-            padding: UiRect::all(px(16)),
-            column_gap: px(28),
-            border: UiRect::all(px(2)),
-            overflow: Overflow::clip(),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.09, 0.075, 0.06, 0.96)),
-        BorderColor::all(Color::srgb(0.45, 0.36, 0.22)),
-        GlobalZIndex(20),
-    ));
 }
 
 fn update_lore_prompt(view: Res<LoreView>, knowledge: Res<MyKnowledge>, mut text: Single<&mut Text, With<LorePrompt>>) {
@@ -658,27 +653,12 @@ fn update_patch_looks(view: Res<LoreView>, mut patches: Query<(&PatchModel, &Chi
     }
 }
 
-fn column(p: &mut ChildSpawnerCommands, fonts: &UiFonts, title: &str, lines: &[String]) {
-    p.spawn(Node { flex_direction: FlexDirection::Column, row_gap: px(3), flex_basis: percent(33), flex_grow: 1.0, ..default() }).with_children(|c| {
-        c.spawn((
-            Text::new(title),
-            TextFont { font: fonts.bold.clone().into(), font_size: bevy::text::FontSize::Px(19.0), ..default() },
-            TextColor(Color::srgb(0.93, 0.83, 0.6)),
-        ));
-        let body = if lines.is_empty() { "—".to_string() } else { lines.join("\n") };
-        c.spawn((
-            Text::new(body),
-            TextFont { font: fonts.regular.clone().into(), font_size: bevy::text::FontSize::Px(14.0), ..default() },
-            TextColor(Color::srgb(0.86, 0.82, 0.75)),
-        ));
-    });
-}
-
 /// Строки окна знаний (отдельно — чтобы проверить тестом).
-fn knowledge_lines(k: &Knowledge) -> [Vec<String>; 3] {
+pub fn knowledge_lines(k: &Knowledge) -> [Vec<String>; 3] {
     let mut left = Vec::new();
     for s in Skill::ALL {
-        left.push(format!("{}: {:.0}", s.name(), k.skill(s)));
+        let (base, bonus) = (k.base_skill(s), k.skill(s) - k.base_skill(s));
+        left.push(if bonus > 0.05 { format!("{}: {base:.0} (+{bonus:.0} от умений)", s.name()) } else { format!("{}: {base:.0}", s.name()) });
     }
     left.push(String::new());
     for lang in [Language::Greek, Language::Latin] {
@@ -734,30 +714,6 @@ fn knowledge_lines(k: &Knowledge) -> [Vec<String>; 3] {
     [left, mid, right]
 }
 
-fn update_knowledge_window(
-    mut commands: Commands,
-    mut view: ResMut<LoreView>,
-    knowledge: Res<MyKnowledge>,
-    fonts: Res<UiFonts>,
-    mut window: Single<(Entity, &mut Node), With<KnowledgeWindow>>,
-) {
-    if view.built_rev == view.rev {
-        return;
-    }
-    view.built_rev = view.rev;
-    let (entity, ref mut node) = *window;
-    node.display = if view.window_open { Display::Flex } else { Display::None };
-    if !view.window_open {
-        return;
-    }
-    let [left, mid, right] = knowledge_lines(&knowledge.0);
-    commands.entity(entity).despawn_children().with_children(|p| {
-        column(p, &fonts, "Навыки и грамота", &left);
-        column(p, &fonts, "Травы и вещества", &mid);
-        column(p, &fonts, "Приёмы (K — закрыть)", &right);
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -784,6 +740,7 @@ mod tests {
 
 /// `MRPG_SHOT=файл.png` — через `MRPG_SHOT_DELAY` секунд (по умолчанию 8) сохранить
 /// снимок экрана и выйти. `MRPG_SHOT_UI=knowledge` — перед снимком открыть окно знаний,
+/// `MRPG_SHOT_UI=inventory` — открыть сумку,
 /// `MRPG_SHOT_UI=brew` — открыть сумку и окно варки у горшка (нужен `MRPG_DEBUG_KIT=1`),
 /// `MRPG_SHOT_UI=fx` — сосуды на огне и вспышки перед камерой, `MRPG_SHOT_PITCH=градусы` — наклон,
 /// `MRPG_SHOT_UI=brazier|table` — поставить жаровню (и собрать стол), `MRPG_SHOT_YAW=градусы` —
@@ -802,13 +759,14 @@ impl Plugin for DevShotPlugin {
 fn dev_shot(
     mut commands: Commands,
     time: Res<Time>,
-    mut view: ResMut<LoreView>,
+    view: Res<LoreView>,
     mut player: Query<(&mut crate::player::LocalPlayer, &mut Transform)>,
     mut loot: ResMut<LootState>,
     mut brew: ResMut<crate::brewing_client::BrewState>,
     mut done: Local<u8>,
     mut placed: Local<u8>,
     mut frames: Local<u32>,
+    mut since_shot: Local<u32>,
     mut client: Option<ResMut<RenetClient>>,
     mut fx: ResMut<crate::alchemy_fx::FxQueue>,
     mut exit: MessageWriter<AppExit>,
@@ -820,7 +778,8 @@ fn dev_shot(
     if let Some(n) = std::env::var("MRPG_SHOT_FRAMES").ok().and_then(|s| s.parse::<u32>().ok()) {
         *frames += 1;
         info!("снимок: кадр {} из {n}", *frames);
-        t = if *frames >= n + 12 { delay + 3.0 } else if *frames >= n { delay + 1.0 } else { 0.0 };
+        // Сначала открыть окна (кадр n), снимок — через 4 кадра, когда интерфейс уже построен.
+        t = if *frames >= n + 12 { delay + 3.0 } else if *frames >= n + 4 { delay + 1.0 } else if *frames >= n { delay - 0.5 } else { 0.0 };
     }
     let ui = std::env::var("MRPG_SHOT_UI").unwrap_or_default();
     // `MRPG_SHOT_UI=fx` — выставить перед камерой сосуды на огне и показать вспышку и осколки.
@@ -914,9 +873,9 @@ fn dev_shot(
                 brew.open_vessel(uid, crate::brewing::Vessel::ClayPot);
             }
         }
-        if std::env::var("MRPG_SHOT_UI").as_deref() == Ok("knowledge") {
-            view.window_open = true;
-            view.rev += 1;
+        if std::env::var("MRPG_SHOT_UI").as_deref() == Ok("inventory") {
+            loot.ui_open = true;
+            loot.rev += 1;
         }
         if let Some(yaw) = std::env::var("MRPG_SHOT_YAW").ok().and_then(|s| s.parse::<f32>().ok()) {
             for (mut p, mut tf) in &mut player {
@@ -934,7 +893,12 @@ fn dev_shot(
         commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(path));
         *done = 2;
     }
-    if *done == 2 && t > delay + 2.0 {
+    if *done == 2 {
+        *since_shot += 1;
+    }
+    // Снимок сохраняется не сразу (кадр читается из видеокарты), даём ему несколько кадров.
+    let saved = std::env::var("MRPG_SHOT").is_ok_and(|p| std::path::Path::new(&p).exists());
+    if *done == 2 && t > delay + 2.0 && (saved && *since_shot > 4 || *since_shot > 120) {
         exit.write(AppExit::Success);
     }
 }
