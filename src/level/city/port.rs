@@ -278,8 +278,9 @@ fn market(b: &mut Builder) {
     let mut rng = Rng::new(1818);
     let peri = peristyle(b, r, 6.0, 4.2, Mat::Rubble, &[(Side::N, r.cx()), (Side::E, r.cz())], [1, 2, 3, 3], false);
     b.decor([peri.court.x0, 0.0, peri.court.z0], [peri.court.x1, 0.03, peri.court.z1], Mat::Paving);
-    for (k, p) in [(peri.court.x0 + 3.0, peri.court.z0 + 4.0), (peri.court.x1 - 3.0, peri.court.z0 + 4.0), (peri.court.x0 + 3.0, peri.court.z1 - 4.0), (peri.court.x1 - 3.0, peri.court.z1 - 4.0)].into_iter().enumerate() {
-        stall(b, Vec3::new(p.0, 0.0, p.1), k + 1, &mut rng);
+    let staffed = super::super::places::staffed_stalls("port_market");
+    for (k, (p, facing)) in market_stalls().into_iter().enumerate().skip(staffed) {
+        stall(b, p, facing, k + 1, &mut rng);
     }
     for (side, room) in &peri.rooms {
         match side {
@@ -327,6 +328,22 @@ pub fn tavern_port_point() -> Vec3 {
 pub fn customs_point() -> Vec3 {
     let c = customs_rect().inset(6.5);
     Vec3::new(c.cx(), 0.0, c.z0 + 3.0)
+}
+
+/// Лотки портового торга: середина стола и куда он обращён. Двор узкий и длинный, поэтому
+/// лотки стоят у западной и восточной стен лицом друг к другу — посередине остаётся проход
+/// от северных ворот к корчме; ставятся между дверями лавок, чтобы их не загораживать.
+pub fn market_stalls() -> [(Vec3, Vec3); 4] {
+    let c = market_rect().inset(6.0);
+    let (z0, z1) = (c.z0 + c.d() / 3.0, c.z0 + c.d() * 2.0 / 3.0);
+    let w = c.x0 + 1.95;
+    let e = c.x1 - 1.95;
+    [
+        (Vec3::new(w, 0.0, z0), Vec3::X),
+        (Vec3::new(e, 0.0, z0), Vec3::NEG_X),
+        (Vec3::new(w, 0.0, z1), Vec3::X),
+        (Vec3::new(e, 0.0, z1), Vec3::NEG_X),
+    ]
 }
 
 pub fn market_point() -> Vec3 {

@@ -23,7 +23,7 @@ use crate::towns::{TownId, TownState, TownView};
 use serde::{Deserialize, Serialize};
 
 /// Канал renet для городов и домов (надёжный, по порядку). Настроен в `protocol::connection_config`.
-pub const CH_TOWN: u8 = 11;
+pub const CH_TOWN: u8 = 12;
 
 /// Сколько недель в месяце аренды.
 pub const RENT_WEEKS: u32 = 4;

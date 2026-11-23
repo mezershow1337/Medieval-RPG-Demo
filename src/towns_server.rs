@@ -333,6 +333,20 @@ fn notice(server: &mut RenetServer, player: u64, text: impl Into<String>) {
 }
 
 /// Включить нужные группы, заморозить двери строек, сундуки усадеб сделать личными, разложить сохранённые вещи.
+/// Для снимков: `MRPG_SITE_STAGES=0,1,2,3` — стройки стоят на заданных стадиях и не двигаются.
+fn pinned_sites() -> Option<Vec<u8>> {
+    let v = std::env::var("MRPG_SITE_STAGES").ok()?;
+    Some(v.split(',').filter_map(|s| s.trim().parse::<u8>().ok()).map(|s| s.min(crate::towns::SITE_DONE)).collect())
+}
+
+fn pin_sites(towns: &mut Towns) -> bool {
+    let Some(pin) = pinned_sites() else { return false };
+    for (site, st) in towns.sites.iter_mut().zip(pin) {
+        *site = st;
+    }
+    true
+}
+
 fn setup_world(mut tw: ResMut<TownWorld>, mut locks: ResMut<Locks>, level: Res<LevelColliders>, mut loot: ResMut<LootWorld>) {
     let cat = estates();
     for (i, spec) in cat.estates.iter().enumerate() {
@@ -364,6 +378,7 @@ fn setup_world(mut tw: ResMut<TownWorld>, mut locks: ResMut<Locks>, level: Res<L
             inv.grid.items = placed;
         }
     }
+    pin_sites(&mut tw.towns);
     apply_switches(&tw, &level, &mut locks);
     for i in 0..cat.estates.len() {
         tw.changed.insert(i as u16);
@@ -666,7 +681,10 @@ fn tick_towns(
     tw.next_week_at = now + tw.week_secs;
     let news_before = tw.towns.news.len();
     let last_news_week = tw.towns.news.last().map(|n| n.week);
-    let cues = tw.towns.tick_week();
+    let mut cues = tw.towns.tick_week();
+    if pin_sites(&mut tw.towns) {
+        cues.retain(|c| !matches!(c, WorldCue::SiteStage { .. } | WorldCue::HouseBuilt { .. }));
+    }
     let week = tw.towns.week;
     let cat = estates();
     for cue in cues {

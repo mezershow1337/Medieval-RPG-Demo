@@ -144,9 +144,10 @@ fn estate_name(f: &Frame, two_storey: bool) -> String {
         .filter(|p| crate::level::inside_city(p.pos.x, p.pos.z))
         .min_by(|a, b| a.pos.distance_squared(c).total_cmp(&b.pos.distance_squared(c)))
         .map(|p| p.name)
-        .unwrap_or("главной улицы");
+        .unwrap_or("Главная улица");
     let what = if two_storey { "Двухэтажная усадьба" } else { "Усадьба" };
-    format!("{what} — рядом {}", near.to_lowercase())
+    // Ближнее место — как адрес: «Усадьба · Западная церковь».
+    format!("{what} · {near}")
 }
 
 /// Сгоревшая усадьба: двор с цистерной есть всегда, а дом — по стадиям стройки.
@@ -171,7 +172,9 @@ fn site(b: &mut Builder, f: Frame, rng: &mut Rng) {
     // Обстановку готового дома собираем по его же стенам и дверям.
     let bl0 = b.blocks.len();
     b.blocks.extend(t.blocks.iter().copied());
-    let name = format!("Новая {}", estate_name(&f, info.two_storey).to_lowercase());
+    let name = estate_name(&f, info.two_storey);
+    let mut chars = name.chars();
+    let name = format!("Новая {}{}", chars.next().map(|c| c.to_lowercase().to_string()).unwrap_or_default(), chars.as_str());
     estate::register(b, name, crate::towns::TownId::Herson, f.r, info.top, info.entrance, d0..d1, c0..c1, bl0, info.rooms, info.two_storey, Some(s));
     // Блоки дома живут только в группах стадий.
     b.blocks.truncate(bl0);
@@ -211,6 +214,16 @@ pub fn shop_point(i: i32, j: i32, front: Side) -> Vec3 {
     let f = Frame { r: lot, front, mirror: rng.chance(0.5) };
     let (u0, u1) = front_rooms(&f)[SHOP_ROOM];
     f.p((u0 + u1) / 2.0, 0.0, FRONT_D * 0.55)
+}
+
+/// Прилавок особой лавки: середина стола и куда он обращён (к двери на улицу). Стол стоит
+/// в глубине комнаты, чтобы у входа оставалось место покупателю.
+pub fn shop_counter(i: i32, j: i32, front: Side) -> (Vec3, Vec3) {
+    let p = shop_point(i, j, front);
+    let facing = if front == Side::N { Vec3::NEG_Z } else { Vec3::Z };
+    // `shop_point` — на 0.55 глубины корпуса (3.1 м от улицы): стол на 0.3 м ближе к двери,
+    // продавец — за ним, у задней стены лавки; у входа остаётся 1.8 м.
+    (p + facing * 0.3, facing)
 }
 
 const SHOP_ROOM: usize = 1;

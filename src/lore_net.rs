@@ -139,6 +139,8 @@ pub enum LoreClientMessage {
     Tend(TendAction),
     /// Прервать текущее занятие.
     Stop,
+    /// Движение руками закончено (см. work.rs): качество 0..1.
+    Stroke { q: f32 },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,7 +184,11 @@ pub enum LoreServerMessage {
     /// Огонь под своим сосудом.
     Tending(TendView),
     /// Началось занятие: подпись, сколько уже прошло и сколько всего (секунды).
-    Activity { verb: String, done: f32, total: f32 },
+    /// `drill` — каким движением работать (None — просто подождать, например выпить настой);
+    /// `skill` 0..1 — насколько привычны руки.
+    Activity { verb: String, done: f32, total: f32, drill: Option<crate::work::Drill>, skill: f32 },
+    /// Сколько дела сделано (0..1), пока работают руками.
+    Progress(f32),
     ActivityEnded,
     Notice(String),
     /// Раны, яды и прочее (раз в полсекунды, пока не здоров; пустое — выздоровел).

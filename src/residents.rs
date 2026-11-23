@@ -231,14 +231,21 @@ fn setup_speech(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
     commands
         .spawn(Node { position_type: PositionType::Absolute, width: percent(100), top: percent(60), justify_content: JustifyContent::Center, ..default() })
         .with_children(|p| {
-            p.spawn((
-                SpeechText,
-                Text::new(""),
-                TextFont { font: fonts.regular.clone().into(), font_size: bevy::text::FontSize::Px(19.0), ..default() },
-                TextColor(Color::srgb(0.95, 0.9, 0.78)),
-                TextLayout::justify(Justify::Center),
-                TextShadow::default(),
-            ));
+            crate::ui_theme::theme().plaque(p).with_children(|p| {
+                p.spawn((
+                    SpeechText,
+                    Text::new(""),
+                    TextFont {
+                        font: fonts.regular.clone().into(),
+                        font_size: bevy::text::FontSize::Px(19.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.95, 0.9, 0.78)),
+                    TextLayout::justify(Justify::Center),
+                    TextShadow::default(),
+                    crate::ui_theme::Plaque,
+                ));
+            });
         });
 }
 

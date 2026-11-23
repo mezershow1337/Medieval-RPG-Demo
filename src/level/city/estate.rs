@@ -145,10 +145,10 @@ pub fn site_stages(b: &mut Builder, site: u16, house: &Builder, outline: Rect, f
         // Кладка (коробки).
         for k in &house.blocks {
             match cut {
-                Cut::Full => g.blocks.push(*k),
+                Cut::Full => g.blocks.push(Block { mat: bare(k.mat, stage), ..*k }),
                 Cut::Flat(top) => {
                     if k.aabb.min.y < top - 0.02 {
-                        g.blocks.push(Block { aabb: Aabb::new(k.aabb.min, Vec3::new(k.aabb.max.x, k.aabb.max.y.min(top), k.aabb.max.z)), ..*k });
+                        g.blocks.push(Block { aabb: Aabb::new(k.aabb.min, Vec3::new(k.aabb.max.x, k.aabb.max.y.min(top), k.aabb.max.z)), mat: bare(k.mat, stage), ..*k });
                     }
                 }
                 Cut::Ruin(_) => {
@@ -173,7 +173,7 @@ pub fn site_stages(b: &mut Builder, site: u16, house: &Builder, outline: Rect, f
                         }
                         let min = Vec3::new(if along == Vec3::X { a.x } else { k.aabb.min.x }, k.aabb.min.y, if along == Vec3::Z { a.z } else { k.aabb.min.z });
                         let max = Vec3::new(if along == Vec3::X { c.x } else { k.aabb.max.x }, k.aabb.max.y.min(top), if along == Vec3::Z { c.z } else { k.aabb.max.z });
-                        g.blocks.push(Block { aabb: Aabb::new(min, max), ..*k });
+                        g.blocks.push(Block { aabb: Aabb::new(min, max), mat: bare(k.mat, stage), ..*k });
                     }
                 }
             }
@@ -183,7 +183,14 @@ pub fn site_stages(b: &mut Builder, site: u16, house: &Builder, outline: Rect, f
         }
         // Меши: черепица — только на готовом доме; остальное — по высоте стадии.
         for ((mat, _), mb) in &house.decor {
-            if mb.is_empty() || (*mat == Mat::Tile && stage < SITE_DONE) {
+            if mb.is_empty() {
+                continue;
+            }
+            if *mat == Mat::Tile && stage < SITE_DONE {
+                // Под кровлю: стропила и обрешётка по скатам будущей крыши.
+                if stage == SITE_DONE - 1 {
+                    g.decor.push((Mat::Wood, roof_frame(mb)));
+                }
                 continue;
             }
             let part = match cut {
@@ -199,7 +206,7 @@ pub fn site_stages(b: &mut Builder, site: u16, house: &Builder, outline: Rect, f
                 }
             };
             if !part.is_empty() {
-                g.decor.push((*mat, part));
+                g.decor.push((bare(*mat, stage), part));
             }
         }
         if stage == SITE_DONE {
@@ -231,7 +238,29 @@ pub fn site_stages(b: &mut Builder, site: u16, house: &Builder, outline: Rect, f
     }
 }
 
+/// Стропила и обрешётка: полосы по скатам крыши (решёткой по обеим осям), чуть ниже черепицы.
+fn roof_frame(tiles: &crate::level::geom::MeshBuilder) -> crate::level::geom::MeshBuilder {
+    let mut out = crate::level::geom::MeshBuilder::default();
+    let Some((lo, hi)) = tiles.bounds() else { return out };
+    for (axis, step, half) in [(Vec3::X, 0.62, 0.06), (Vec3::Z, 0.62, 0.06)] {
+        let (a, b) = (lo.dot(axis), hi.dot(axis));
+        let mut v = a + 0.15;
+        while v < b {
+            let strip = tiles.clipped(|p| p.dot(axis) - (v - half)).clipped(|p| (v + half) - p.dot(axis));
+            out.append(strip);
+            v += step;
+        }
+    }
+    out.shifted(Vec3::Y * -0.05)
+}
+
 /// Пепелище: кучи обломков и золы в комнатах, обгорелые балки, сорная трава.
+/// Штукатурка — последнее дело: на пепелище она обгорела и осыпалась, на стройке её ещё нет,
+/// видна бутовая кладка.
+fn bare(mat: Mat, stage: u8) -> Mat {
+    if stage < SITE_DONE && mat == Mat::Plaster { Mat::Rubble } else { mat }
+}
+
 fn rubble(b: &mut Builder, r: Rect, rng: &mut Rng) {
     let inner = r.inset(1.2);
     for _ in 0..7 {

@@ -808,9 +808,9 @@ impl Towns {
                 let inbound = (r.a == TownId::Herson) != (forward > total / 2.0);
                 let text = match (r.kind, inbound) {
                     (RouteKind::Sea, true) => format!("В Карантинную бухту вошёл корабль из {}: {goods}.", from_name(other)),
-                    (RouteKind::Sea, false) => format!("Корабль ушёл в {}: везёт {goods}.", to_name(other)),
+                    (RouteKind::Sea, false) => format!("Корабль ушёл в {}: на борту {goods}.", to_name(other)),
                     (_, true) => format!("Пришёл обоз из {}: {goods}.", from_name(other)),
-                    (_, false) => format!("Обоз ушёл в {}: везёт {goods}.", to_name(other)),
+                    (_, false) => format!("Обоз ушёл в {}: в возах {goods}.", to_name(other)),
                 };
                 lines.push((TownId::Herson, if r.kind == RouteKind::Sea { NewsKind::Ship } else { NewsKind::Trade }, text));
             }

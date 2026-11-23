@@ -265,6 +265,49 @@ impl MeshBuilder {
         );
     }
 
+    /// Коньковый ряд калиптеров: полутруба над отрезком a→b (радиус `r`, чуть приплюснута).
+    /// UV — под фото черепицы: u в узкой полосе вокруг оси калиптера (0.5 м развёртки),
+    /// v — вдоль конька, поэтому видны стыки и нахлёсты калиптеров через каждые полметра.
+    pub fn ridge_pipe(&mut self, a: Vec3, b: Vec3, r: f32, segs: usize) {
+        let len = (b - a).length();
+        let dir = (b - a).normalize_or_zero();
+        if len < 1e-4 || segs == 0 {
+            return;
+        }
+        let side = dir.cross(Vec3::Y).normalize_or(Vec3::X);
+        let ring = |ang: f32| (side * ang.cos() * r + Vec3::Y * ang.sin() * r * 0.75, (side * ang.cos() + Vec3::Y * ang.sin()).normalize());
+        let mut ids = Vec::with_capacity((segs + 1) * 2);
+        for i in 0..=segs {
+            let ang = std::f32::consts::PI * i as f32 / segs as f32;
+            let (o, n) = ring(ang);
+            let u = 0.5 + ang.cos() * 0.1;
+            ids.push((self.vert(a + o, n, Vec2::new(u, 0.0)), self.vert(b + o, n, Vec2::new(u, len))));
+        }
+        for i in 0..segs {
+            let (a0, b0) = ids[i];
+            let (a1, b1) = ids[i + 1];
+            // Лицом наружу: от a к b вдоль `dir`, по дуге от `side` вверх.
+            self.idx.extend_from_slice(&[a0, b0, b1, a0, b1, a1]);
+        }
+        // Торцы забиты раствором — полукруглые заглушки той же черепицы.
+        for (p, out) in [(a, -dir), (b, dir)] {
+            let c = self.vert(p, out, Vec2::new(0.5, 0.25));
+            let rim: Vec<u32> = (0..=segs)
+                .map(|i| {
+                    let ang = std::f32::consts::PI * i as f32 / segs as f32;
+                    self.vert(p + ring(ang).0, out, Vec2::new(0.5 + ang.cos() * 0.1, 0.25 + ang.sin() * 0.05))
+                })
+                .collect();
+            for w in rim.windows(2) {
+                if out.dot(dir) > 0.0 {
+                    self.idx.extend_from_slice(&[c, w[1], w[0]]);
+                } else {
+                    self.idx.extend_from_slice(&[c, w[0], w[1]]);
+                }
+            }
+        }
+    }
+
     /// Вершина с явной нормалью (для гладких тел вращения и рельефа).
     pub fn vert(&mut self, p: Vec3, n: Vec3, uv: Vec2) -> u32 {
         self.pos.push(p.to_array());
@@ -275,6 +318,21 @@ impl MeshBuilder {
 
     pub fn index_tri(&mut self, a: u32, b: u32, c: u32) {
         self.idx.extend_from_slice(&[a, b, c]);
+    }
+
+    /// Границы вершин (None — пусто).
+    pub fn bounds(&self) -> Option<(Vec3, Vec3)> {
+        let mut it = self.pos.iter().map(|p| Vec3::from(*p));
+        let first = it.next()?;
+        Some(it.fold((first, first), |(lo, hi), p| (lo.min(p), hi.max(p))))
+    }
+
+    /// Сдвинуть все вершины.
+    pub fn shifted(mut self, d: Vec3) -> MeshBuilder {
+        for p in &mut self.pos {
+            *p = (Vec3::from(*p) + d).into();
+        }
+        self
     }
 
     pub fn append(&mut self, other: MeshBuilder) {

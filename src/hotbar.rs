@@ -373,14 +373,13 @@ fn draw_hotbar(
                 Node {
                     width: px(SIZE),
                     height: px(SIZE),
-                    border: UiRect::all(px(if on { 3 } else { 1 })),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
-                    padding: UiRect::all(px(4)),
+                    padding: UiRect::all(px(5)),
                     ..default()
                 },
-                BorderColor::all(if on { Color::srgb(0.95, 0.78, 0.35) } else { Color::srgba(0.55, 0.45, 0.3, 0.8) }),
-                BackgroundColor(if on { Color::srgba(0.25, 0.18, 0.08, 0.85) } else { Color::srgba(0.06, 0.05, 0.04, 0.7) }),
+                // Ячейка темы: бронзовый ободок, у выбранной — золотое свечение.
+                crate::ui_theme::theme().slot(on),
             ))
             .with_children(|s| {
                 let label = |t: String, size: f32, color: Color| {
