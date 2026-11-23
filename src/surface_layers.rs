@@ -11,7 +11,7 @@ pub struct Layer {
 
 pub const LAYERS: &[Layer] = &[
     // 0 — крупные тёсаные блоки известняка, выветренные, с лишайником (фотоскан Poly Haven)
-    Layer { name: "ashlar", source: "large_sandstone_blocks_01", meters: 3.00, mean: [0.1953, 0.1597, 0.0975] },
+    Layer { name: "ashlar", source: "large_sandstone_blocks_01", meters: 3.00, mean: [0.1955, 0.1598, 0.0974] },
     // 1 — бутовая кладка из рваного известняка на растворе (фотоскан Poly Haven)
     Layer { name: "rubble", source: "medieval_blocks_05", meters: 2.00, mean: [0.3079, 0.2013, 0.1142] },
     // 2 — старая известковая штукатурка в потёках (фотоскан Poly Haven)
