@@ -216,15 +216,13 @@ fn setup_work_hud(mut commands: Commands, fonts: Res<UiFonts>) {
                 display: Display::None,
                 right: px(36),
                 bottom: px(150),
-                width: px(GAUGE_W + 24.0),
-                padding: UiRect::all(px(12)),
+                width: px(GAUGE_W + 32.0),
+                padding: crate::ui_theme::Skin::Leather.padding(),
                 flex_direction: FlexDirection::Column,
                 row_gap: px(6),
-                border: UiRect::all(px(1)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.06, 0.05, 0.035, 0.72)),
-            BorderColor::all(Color::srgba(0.55, 0.44, 0.27, 0.8)),
+            crate::ui_theme::theme().skin(crate::ui_theme::Skin::Leather),
         ))
         .with_children(|p| {
             p.spawn((Part::Title, text(&fonts, 16.0, true)));

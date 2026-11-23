@@ -424,14 +424,13 @@ fn predict(time: Res<Time>, mut state: ResMut<SmithState>) {
 // Окно
 // ---------------------------------------------------------------------------
 
-const BG: Color = Color::srgba(0.07, 0.055, 0.04, 0.96);
-const BORDER: Color = Color::srgb(0.45, 0.36, 0.22);
-const TITLE: Color = Color::srgb(0.95, 0.85, 0.6);
-const TEXT: Color = Color::srgb(0.88, 0.84, 0.74);
-const DIM: Color = Color::srgb(0.62, 0.58, 0.5);
-const BTN: Color = Color::srgb(0.22, 0.17, 0.11);
-const BTN_ON: Color = Color::srgb(0.5, 0.36, 0.14);
-const BAD: Color = Color::srgb(0.9, 0.45, 0.35);
+use crate::ui_theme::{Skin, ThemeButton, ink, theme};
+
+const BORDER: Color = Color::srgba(0.55, 0.42, 0.24, 0.7);
+const TITLE: Color = ink::TITLE;
+const TEXT: Color = ink::TEXT;
+const DIM: Color = ink::DIM;
+const BAD: Color = ink::BAD;
 
 #[derive(Component)]
 struct SmithPanel;
@@ -460,17 +459,18 @@ fn setup_smith_ui(mut commands: Commands, fonts: Res<UiFonts>) {
             display: Display::None,
             left: px(12),
             top: px(50),
-            width: px(560),
-            max_height: percent(90),
+            width: px(600),
+            max_height: percent(92),
             flex_direction: FlexDirection::Column,
-            padding: UiRect::all(px(10)),
+            padding: Skin::Wood.padding(),
             row_gap: px(5),
-            border: UiRect::all(px(2)),
-            overflow: Overflow::clip_y(),
+            // Длинный список рецептов — прокрутка колесом.
+            overflow: Overflow::scroll_y(),
             ..default()
         },
-        BackgroundColor(BG),
-        BorderColor::all(BORDER),
+        ScrollPosition::default(),
+        crate::ui_theme::ScrollWheel,
+        theme().skin(Skin::Wood),
         GlobalZIndex(31),
         Interaction::default(),
         FocusPolicy::Block,
@@ -478,14 +478,21 @@ fn setup_smith_ui(mut commands: Commands, fonts: Res<UiFonts>) {
     commands
         .spawn(Node { position_type: PositionType::Absolute, width: percent(100), top: percent(62), justify_content: JustifyContent::Center, ..default() })
         .with_children(|p| {
-            p.spawn((
-                SmithPrompt,
-                Text::new(""),
-                TextFont { font: fonts.bold.clone().into(), font_size: bevy::text::FontSize::Px(18.0), ..default() },
-                TextColor(Color::srgb(1.0, 0.8, 0.5)),
-                TextLayout::justify(Justify::Center),
-                TextShadow::default(),
-            ));
+            crate::ui_theme::theme().plaque(p).with_children(|p| {
+                p.spawn((
+                    SmithPrompt,
+                    Text::new(""),
+                    TextFont {
+                        font: fonts.bold.clone().into(),
+                        font_size: bevy::text::FontSize::Px(18.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(1.0, 0.8, 0.5)),
+                    TextLayout::justify(Justify::Center),
+                    TextShadow::default(),
+                    crate::ui_theme::Plaque,
+                ));
+            });
         });
 }
 
@@ -498,17 +505,8 @@ fn label(fonts: &UiFonts, s: impl Into<String>, size: f32, color: Color, bold: b
 }
 
 fn button(p: &mut ChildSpawnerCommands, fonts: &UiFonts, text: &str, act: Act, on: bool) {
-    p.spawn((
-        SmithButton(act),
-        Interaction::default(),
-        FocusPolicy::Block,
-        Node { padding: UiRect::axes(px(7), px(2)), border: UiRect::all(px(1)), justify_content: JustifyContent::Center, ..default() },
-        BackgroundColor(if on { BTN_ON } else { BTN }),
-        BorderColor::all(BORDER),
-    ))
-    .with_children(|b| {
-        b.spawn(label(fonts, text, 13.0, TEXT, true));
-    });
+    let _ = fonts;
+    theme().toggle_button(p, text, (SmithButton(act), FocusPolicy::Block), on);
 }
 
 fn row<'a>(p: &'a mut ChildSpawnerCommands<'_>) -> EntityCommands<'a> {
@@ -576,11 +574,34 @@ fn metal_count(loot: &LootState, pattern: Pattern) -> u32 {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn rebuild_panel(mut commands: Commands, mut state: ResMut<SmithState>, loot: Res<LootState>, knowledge: Res<MyKnowledge>, fonts: Res<UiFonts>, mut panel: Query<(Entity, &mut Node), With<SmithPanel>>) {
-    let Ok((entity, mut node)) = panel.single_mut() else { return };
-    let want = if state.open { Display::Flex } else { Display::None };
+fn rebuild_panel(
+    mut commands: Commands,
+    mut dock: ResMut<crate::ui_theme::SideDock>,
+    mut state: ResMut<SmithState>,
+    loot: Res<LootState>,
+    knowledge: Res<MyKnowledge>,
+    fonts: Res<UiFonts>,
+    mut panel: Query<(Entity, &mut Node), With<SmithPanel>>,
+) {
+    let Ok((entity, mut node)) = panel.single_mut() else {
+        return;
+    };
+    let want = if state.open {
+        Display::Flex
+    } else {
+        Display::None
+    };
     if node.display != want {
+        if state.open {
+            commands
+                .entity(entity)
+                .insert(crate::ui_theme::Appear::default());
+        }
         node.display = want;
+    }
+    let w = if state.open { 600.0 } else { 0.0 };
+    if dock.smith != w {
+        dock.smith = w;
     }
     if !state.open {
         return;
@@ -597,12 +618,29 @@ fn rebuild_panel(mut commands: Commands, mut state: ResMut<SmithState>, loot: Re
     commands.entity(entity).despawn_children();
     commands.entity(entity).with_children(|p| {
         row(p).with_children(|r| {
-            let title = station.as_ref().map_or("Кузница".to_string(), |s| s.name.clone());
-            r.spawn((label(fonts, title, 19.0, TITLE, true), Node { flex_grow: 1.0, ..default() }));
-            r.spawn(label(fonts, format!("Кузнечное дело: {:.0}", k.skill(Skill::Smithing)), 13.0, DIM, false));
+            let title = station
+                .as_ref()
+                .map_or("Кузница".to_string(), |s| s.name.clone());
+            r.spawn((
+                theme().title(title, 26.0),
+                Node {
+                    flex_grow: 1.0,
+                    ..default()
+                },
+            ));
+            r.spawn(label(
+                fonts,
+                format!("Кузнечное дело: {:.0}", k.skill(Skill::Smithing)),
+                13.0,
+                DIM,
+                false,
+            ));
             button(r, fonts, "×", Act::Close, false);
         });
-        let forge = station.as_ref().is_none_or(|s| s.kind == StationKind::Forge);
+        theme().divider(p);
+        let forge = station
+            .as_ref()
+            .is_none_or(|s| s.kind == StationKind::Forge);
         if forge {
             row(p).with_children(|r| {
                 r.spawn((label(fonts, "", 13.0, TEXT, false), Live::Fuel));
@@ -620,10 +658,26 @@ fn rebuild_panel(mut commands: Commands, mut state: ResMut<SmithState>, loot: Re
 }
 
 fn bar(r: &mut ChildSpawnerCommands, w: f32, color: Color, live: Live) {
-    r.spawn((Node { width: px(w), height: px(10), border: UiRect::all(px(1)), ..default() }, BorderColor::all(BORDER), BackgroundColor(Color::srgb(0.12, 0.1, 0.08))))
-        .with_children(|b| {
-            b.spawn((Node { width: percent(0), height: percent(100), ..default() }, BackgroundColor(color), live));
-        });
+    r.spawn((
+        Node {
+            width: px(w),
+            height: px(16),
+            padding: UiRect::axes(px(5), px(4)),
+            ..default()
+        },
+        theme().bar_frame(),
+    ))
+    .with_children(|b| {
+        b.spawn((
+            Node {
+                width: percent(0),
+                height: percent(100),
+                ..default()
+            },
+            BackgroundColor(color),
+            live,
+        ));
+    });
 }
 
 fn begin_menu(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, loot: &LootState, k: &crate::lore::Knowledge, forge: bool) {
@@ -794,12 +848,46 @@ fn begin_menu(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
 fn swing_bar(p: &mut ChildSpawnerCommands, fonts: &UiFonts) {
     row(p).with_children(|r| {
         r.spawn(label(fonts, "Замах:", 13.0, DIM, false));
-        r.spawn((Node { width: px(300), height: px(14), border: UiRect::all(px(1)), justify_content: JustifyContent::Center, ..default() }, BorderColor::all(BORDER), BackgroundColor(Color::srgb(0.12, 0.1, 0.08))))
-            .with_children(|b| {
-                b.spawn((Node { position_type: PositionType::Absolute, width: percent(30), height: percent(100), left: percent(35), ..default() }, BackgroundColor(Color::srgba(0.5, 0.75, 0.35, 0.45)), Live::Sweet));
-                b.spawn((Node { position_type: PositionType::Absolute, width: px(4), height: percent(100), left: percent(50), ..default() }, BackgroundColor(Color::srgb(0.95, 0.9, 0.7)), Live::Swing));
-            });
-        r.spawn(label(fonts, "ЛКМ — лёгкий молот, ПКМ — тяжёлый", 12.0, DIM, false));
+        r.spawn((
+            Node {
+                width: px(300),
+                height: px(18),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            theme().bar_frame(),
+        ))
+        .with_children(|b| {
+            b.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: percent(30),
+                    height: percent(100),
+                    left: percent(35),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.5, 0.75, 0.35, 0.45)),
+                Live::Sweet,
+            ));
+            b.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: px(4),
+                    height: percent(100),
+                    left: percent(50),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.95, 0.9, 0.7)),
+                Live::Swing,
+            ));
+        });
+        r.spawn(label(
+            fonts,
+            "ЛКМ — лёгкий молот, ПКМ — тяжёлый",
+            12.0,
+            DIM,
+            false,
+        ));
     });
 }
 
@@ -853,10 +941,30 @@ fn work_panel(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
                 });
             }
             if f.spot == Spot::Grindstone {
-                p.spawn((GrindPad, Interaction::default(), FocusPolicy::Block, Node { padding: UiRect::all(px(6)), border: UiRect::all(px(1)), justify_content: JustifyContent::Center, ..default() }, BackgroundColor(Color::srgb(0.25, 0.24, 0.22)), BorderColor::all(BORDER)))
-                    .with_children(|b| {
-                        b.spawn(label(fonts, "Точило: щёлкайте в такт замаху", 14.0, TEXT, true));
-                    });
+                p.spawn((
+                    GrindPad,
+                    Interaction::default(),
+                    FocusPolicy::Block,
+                    Node {
+                        padding: UiRect::all(px(10)),
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    theme().button_image(true),
+                    ThemeButton {
+                        enabled: true,
+                        on: false,
+                    },
+                ))
+                .with_children(|b| {
+                    b.spawn(label(
+                        fonts,
+                        "Точило: щёлкайте в такт замаху",
+                        14.0,
+                        TEXT,
+                        true,
+                    ));
+                });
             }
             row(p).with_children(|r| {
                 button(r, fonts, "Собрать", Act::Finish(false), f.shaped());
@@ -895,19 +1003,62 @@ fn work_panel(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
             row(p).with_children(|r| {
                 button(r, fonts, "Тигель в горн", Act::Move(Spot::Fire), c.spot == Spot::Fire);
                 button(r, fonts, "Снять шлак", Act::Skim, false);
-                button(r, fonts, if c.mould_warm { "Убрать форму от горна" } else { "Поставить форму греться" }, Act::Warm(!c.mould_warm), c.mould_warm);
-                r.spawn((PourButton, Interaction::default(), FocusPolicy::Block, Node { padding: UiRect::axes(px(8), px(3)), border: UiRect::all(px(1)), ..default() }, BackgroundColor(Color::srgb(0.45, 0.22, 0.08)), BorderColor::all(BORDER)))
-                    .with_children(|b| {
-                        b.spawn(label(fonts, "ЛИТЬ (держать)", 13.0, TEXT, true));
-                    });
+                button(
+                    r,
+                    fonts,
+                    if c.mould_warm {
+                        "Убрать форму от горна"
+                    } else {
+                        "Поставить форму греться"
+                    },
+                    Act::Warm(!c.mould_warm),
+                    c.mould_warm,
+                );
+                r.spawn((
+                    PourButton,
+                    Interaction::default(),
+                    FocusPolicy::Block,
+                    Node {
+                        padding: UiRect::axes(px(14), px(6)),
+                        ..default()
+                    },
+                    theme().button_image(true),
+                    ThemeButton {
+                        enabled: true,
+                        on: false,
+                    },
+                ))
+                .with_children(|b| {
+                    b.spawn(label(fonts, "ЛИТЬ (держать)", 13.0, TEXT, true));
+                });
                 button(r, fonts, "Раскрыть форму", Act::OpenMould, false);
             });
             if c.opened {
                 swing_bar(p, fonts);
-                p.spawn((Segment(0), Interaction::default(), FocusPolicy::Block, Node { padding: UiRect::all(px(8)), border: UiRect::all(px(1)), justify_content: JustifyContent::Center, ..default() }, BackgroundColor(Color::srgb(0.35, 0.27, 0.12)), BorderColor::all(BORDER)))
-                    .with_children(|b| {
-                        b.spawn(label(fonts, "Отливка: чеканить и опиливать (щёлкать в такт)", 13.0, TEXT, true));
-                    });
+                p.spawn((
+                    Segment(0),
+                    Interaction::default(),
+                    FocusPolicy::Block,
+                    Node {
+                        padding: UiRect::all(px(12)),
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    theme().button_image(true),
+                    ThemeButton {
+                        enabled: true,
+                        on: false,
+                    },
+                ))
+                .with_children(|b| {
+                    b.spawn(label(
+                        fonts,
+                        "Отливка: чеканить и опиливать (щёлкать в такт)",
+                        13.0,
+                        TEXT,
+                        true,
+                    ));
+                });
             }
             row(p).with_children(|r| {
                 button(r, fonts, "Готово", Act::Finish(false), c.opened);
@@ -946,10 +1097,30 @@ fn work_panel(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
                 bar(r, 200.0, Color::srgb(0.6, 0.8, 0.5), Live::Progress);
             });
             swing_bar(p, fonts);
-            p.spawn((GrindPad, Interaction::default(), FocusPolicy::Block, Node { padding: UiRect::all(px(8)), border: UiRect::all(px(1)), justify_content: JustifyContent::Center, ..default() }, BackgroundColor(Color::srgb(0.25, 0.24, 0.22)), BorderColor::all(BORDER)))
-                .with_children(|b| {
-                    b.spawn(label(fonts, "Править и точить: щёлкайте в такт", 14.0, TEXT, true));
-                });
+            p.spawn((
+                GrindPad,
+                Interaction::default(),
+                FocusPolicy::Block,
+                Node {
+                    padding: UiRect::all(px(12)),
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                theme().button_image(true),
+                ThemeButton {
+                    enabled: true,
+                    on: false,
+                },
+            ))
+            .with_children(|b| {
+                b.spawn(label(
+                    fonts,
+                    "Править и точить: щёлкайте в такт",
+                    14.0,
+                    TEXT,
+                    true,
+                ));
+            });
             button(p, fonts, "Бросить и забрать вещь", Act::Abandon, false);
         }
         Job::Fletch { what, .. } => {
@@ -962,11 +1133,31 @@ fn work_panel(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
                 crate::archery::Fletch::Shafts => "Колоть, строгать и править древки: щёлкайте в такт",
                 crate::archery::Fletch::Arrows(_) => "Насадить наконечник, вклеить перья, обмотать: щёлкайте в такт",
             };
-            p.spawn((GrindPad, Interaction::default(), FocusPolicy::Block, Node { padding: UiRect::all(px(8)), border: UiRect::all(px(1)), justify_content: JustifyContent::Center, ..default() }, BackgroundColor(Color::srgb(0.3, 0.26, 0.2)), BorderColor::all(BORDER)))
-                .with_children(|b| {
-                    b.spawn(label(fonts, hint, 14.0, TEXT, true));
-                });
-            button(p, fonts, "Бросить (материал вернётся, клей — нет)", Act::Abandon, false);
+            p.spawn((
+                GrindPad,
+                Interaction::default(),
+                FocusPolicy::Block,
+                Node {
+                    padding: UiRect::all(px(12)),
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                theme().button_image(true),
+                ThemeButton {
+                    enabled: true,
+                    on: false,
+                },
+            ))
+            .with_children(|b| {
+                b.spawn(label(fonts, hint, 14.0, TEXT, true));
+            });
+            button(
+                p,
+                fonts,
+                "Бросить (материал вернётся, клей — нет)",
+                Act::Abandon,
+                false,
+            );
         }
     }
     let _ = st;
