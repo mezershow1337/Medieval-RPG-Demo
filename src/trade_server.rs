@@ -1909,6 +1909,7 @@ mod tests {
             quality: Quality::Common,
             affixes: vec![],
             count: 50,
+            make: None,
         };
         inv.place(folles, Target::Auto).unwrap();
         let out = deal(
@@ -1930,6 +1931,7 @@ mod tests {
             quality: Quality::Common,
             affixes: vec![],
             count: 1,
+            make: None,
         };
         loot.inventories
             .get_mut(&1)
@@ -1993,6 +1995,7 @@ mod tests {
             quality: Quality::Common,
             affixes: vec![],
             count: 1,
+            make: None,
         };
         loot.inventories
             .get_mut(&1)
@@ -2048,6 +2051,7 @@ mod tests {
             quality: Quality::Common,
             affixes: vec![],
             count: 1,
+            make: None,
         };
         inv2.place(sword, Target::Auto).unwrap();
         loot.inventories.insert(2, inv2);

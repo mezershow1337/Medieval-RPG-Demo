@@ -31,8 +31,11 @@ pub fn outside(b: &mut Builder) {
     kleros(b);
     spring(b);
     goth_village(b);
+    goth_smithy(b);
     steppe_camp(b);
     alan_camp(b);
+    camp_forge(b, steppe_forge_rect(), "Горн кочевого кузнеца");
+    camp_forge(b, alan_forge_rect(), "Горн аланского кузнеца");
     brigand_camps(b);
     herbs(b);
     wilderness(b, &roads);
@@ -986,4 +989,68 @@ fn rock(b: &mut Builder, p: Vec2, size: f32, rng: &mut Rng) {
             b.invisible.push(Aabb::new(Vec3::new(c.x - r, y - 0.3, c.z - r), Vec3::new(c.x + r, c.y + half.y * 0.8, c.z + r)));
         }
     }
+}
+
+// ---------------- кузницы за стенами ----------------
+
+/// Кузница готского селения — на западном краю, подальше от соломенных крыш.
+pub fn goth_smithy_rect() -> Rect {
+    let c = GOTH_VILLAGE;
+    Rect::new(c.x - 38.0, c.z - 7.0, c.x - 29.0, c.z)
+}
+
+/// Сыродутный горн готов, рядом с кузницей.
+pub fn goth_bloomery_rect() -> Rect {
+    let c = GOTH_VILLAGE;
+    Rect::new(c.x - 37.0, c.z + 4.5, c.x - 31.0, c.z + 10.0)
+}
+
+/// Полевой горн кочевников между юртами.
+pub fn steppe_forge_rect() -> Rect {
+    let c = STEPPE_CAMP;
+    Rect::new(c.x + 3.4, c.z + 4.6, c.x + 8.8, c.z + 8.8)
+}
+
+/// Горн аланов внутри кольца повозок.
+pub fn alan_forge_rect() -> Rect {
+    let c = ALAN_CAMP;
+    Rect::new(c.x - 2.6, c.z + 4.8, c.x + 2.6, c.z + 8.6)
+}
+
+/// Высота пола площадки кузницы за стенами.
+pub fn smith_floor(r: Rect) -> f32 {
+    terrace_levels(r.inset(-0.6)).1
+}
+
+fn goth_smithy(b: &mut Builder) {
+    let r = goth_smithy_rect();
+    let y = terrace(b, r.inset(-0.6), Mat::Rubble);
+    let (w, d) = (r.w(), r.d());
+    b.placed(Vec3::new(r.cx(), y, r.cz()), move |t| {
+        let l = Rect::new(-w / 2.0, -d / 2.0, w / 2.0, d / 2.0);
+        // Навес на столбах под камышом: в кузнице должно продувать.
+        for (x, z) in [(l.x0, l.z0), (l.x1, l.z0), (l.x0, l.z1), (l.x1, l.z1)] {
+            t.solid([x - 0.12, 0.0, z - 0.12], [x + 0.12, 2.5, z + 0.12], Mat::Wood);
+        }
+        thatch_roof(t, l, 2.5, 1.5, true, 0.5, Mat::Wood);
+        t.decor([l.x0, 0.0, l.z0], [l.x1, 0.03, l.z1], Mat::Earth);
+        kit::forge_set(t, "Готская кузница", Vec3::new(l.x0 + 1.8, 0.0, l.z0 + 2.2), Vec3::X, true);
+        kit::woodpile(t, Rect::new(l.x1 - 2.6, l.z1 - 0.9, l.x1 - 0.3, l.z1 - 0.3), 0.9);
+    });
+    let rb = goth_bloomery_rect();
+    let y = terrace(b, rb.inset(-0.6), Mat::Rubble);
+    b.placed(Vec3::new(rb.cx(), y, rb.cz()), |t| {
+        t.decor([-3.0, 0.0, -2.75], [3.0, 0.03, 2.75], Mat::Earth);
+        kit::bloomery(t, "Сыродутный горн готов", Vec3::new(-1.0, 0.0, 0.0), Vec3::X);
+    });
+}
+
+/// Полевой горн: камни и глина, кожаные мехи, наковальня на колоде.
+fn camp_forge(b: &mut Builder, r: Rect, name: &'static str) {
+    let y = terrace(b, r.inset(-0.6), Mat::Earth);
+    let (w, d) = (r.w(), r.d());
+    b.placed(Vec3::new(r.cx(), y, r.cz()), move |t| {
+        let l = Rect::new(-w / 2.0, -d / 2.0, w / 2.0, d / 2.0);
+        kit::forge_set(t, name, Vec3::new(l.x0 + 1.3, 0.0, l.cz() + 0.15), Vec3::X, true);
+    });
 }

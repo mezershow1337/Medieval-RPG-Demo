@@ -1135,6 +1135,32 @@ pub fn citadel(b: &mut Builder) {
     b.solid([pell.x - 0.15, 0.0, pell.z - 0.15], [pell.x + 0.15, 1.9, pell.z + 0.15], Mat::Wood);
     kit::cistern_mouth(b, Vec3::new(c.x0 + 62.0, 0.0, c.z0 + 30.0));
     b.torch(c.x0 + 45.0, 3.0, c.z1 - 9.5, Vec3::NEG_Z);
+    // Оружейная мастерская гарнизона (фабрика): навес у восточной стены цитадели.
+    let ar = armoury_rect();
+    b.at(ar.cx(), ar.cz());
+    kit::wall_x(b, ar.x0, ar.x1, ar.z0 + 0.3, 0.6, 4.2, &[], Mat::Rubble);
+    kit::wall_z(b, ar.z0 + 0.6, ar.z1, ar.x0 + 0.3, 0.6, 4.2, &[], Mat::Rubble);
+    kit::wall_z(b, ar.z0 + 0.6, ar.z1, ar.x1 - 0.3, 0.6, 4.2, &[], Mat::Rubble);
+    for x in [ar.x0 + 5.5, ar.x1 - 5.5] {
+        b.solid([x - 0.2, 0.0, ar.z1 - 0.5], [x + 0.2, 3.6, ar.z1 - 0.1], Mat::Wood);
+    }
+    b.mesh(Mat::Wood).cuboid(Vec3::new(ar.x0, 3.6, ar.z1 - 0.5), Vec3::new(ar.x1, 3.9, ar.z1 - 0.1));
+    kit::lean_roof(b, ar, Side::N, 5.0, 3.9, 0.5);
+    kit::forge_set(b, "Оружейная гарнизона", Vec3::new(ar.x0 + 2.4, 0.0, ar.z0 + 3.0), Vec3::X, false);
+    // Кольчуги на крестовинах и связки копий у стены.
+    for k in 0..3 {
+        let p = Vec3::new(ar.x1 - 1.2 - k as f32 * 1.4, 0.0, ar.z0 + 1.0);
+        b.mesh(Mat::Wood).cuboid(p - Vec3::new(0.04, 0.0, 0.04), p + Vec3::new(0.04, 1.6, 0.04));
+        b.mesh(Mat::Iron).lathe(p + Vec3::Y * 0.8, &[(0.0, 0.0), (0.32, 0.05), (0.3, 0.7), (0.22, 0.78), (0.0, 0.8)], 8);
+        kit::hidden(b, p - Vec3::new(0.35, 0.0, 0.35), p + Vec3::new(0.35, 1.6, 0.35));
+    }
+    kit::woodpile(b, Rect::new(ar.x1 - 4.0, ar.z1 - 2.0, ar.x1 - 1.0, ar.z1 - 1.0), 0.8);
+}
+
+/// Оружейная мастерская гарнизона в цитадели.
+pub fn armoury_rect() -> Rect {
+    let c = CITADEL;
+    Rect::new(c.x1 - 24.0, c.z0 + 19.0, c.x1 - 8.0, c.z0 + 29.0)
 }
 
 pub fn garrison_point() -> Vec3 {

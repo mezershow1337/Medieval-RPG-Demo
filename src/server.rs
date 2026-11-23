@@ -71,6 +71,8 @@ pub struct GameWorld {
     next_arrow_id: u64,
     /// Попадания по игрокам за кадр: из них medicine_server.rs делает раны.
     pub hits_taken: Vec<crate::medicine::HitTaken>,
+    /// Износ вещей игроков от ударов (применяет smithing_server.rs).
+    pub gear_wear: Vec<(u64, crate::smithing_server::Wear)>,
 }
 
 #[derive(Resource)]
@@ -112,6 +114,7 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         arrows: Vec::new(),
         next_arrow_id: 1,
         hits_taken: Vec::new(),
+        gear_wear: Vec::new(),
     };
     for spawn in npc::npc_spawns() {
         spawn_npc(&mut world, &level, spawn, 0.0);
@@ -127,6 +130,7 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .add_plugins(crate::doors::DoorServerPlugin)
         .add_plugins(crate::trade_server::TradeServerPlugin)
         .add_plugins(crate::knowledge::KnowledgeServerPlugin)
+        .add_plugins(crate::smithing_server::SmithingServerPlugin)
         .add_systems(Update, (receive_client_messages, run_npcs, combat_tick, respawns, send_snapshots).chain());
     info!("Сервер слушает {addr}");
     app.run();
@@ -552,8 +556,17 @@ fn combat_tick(
             continue;
         }
         let outcome = combat::resolve_arrow(&mut t.fighter, shield_facing, head, damage);
+        let player = t.kind == ActorKind::Player;
+        if player {
+            use crate::smithing_server::Wear;
+            match outcome {
+                HitOutcome::Damage { .. } => world.gear_wear.push((tid, Wear::Armour { head, amount: 1.0 })),
+                HitOutcome::Blocked { .. } => world.gear_wear.push((tid, Wear::Shield(0.7))),
+                _ => {}
+            }
+        }
         if let HitOutcome::Damage { amount, head, .. } = outcome
-            && t.kind == ActorKind::Player
+            && player
         {
             world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon: combat::WeaponKind::Bow, amount, head });
         }
@@ -592,6 +605,7 @@ fn combat_tick(
                 world.actors.insert(aid, attacker);
                 let Some(outcome) = outcome else { continue };
                 debug!("Попадание {aid} -> {tid}: {outcome:?}");
+                record_wear(&mut world, aid, tid, outcome);
                 if let HitOutcome::Damage { amount, head, .. } = outcome
                     && world.actors.get(&tid).is_some_and(|t| t.kind == ActorKind::Player)
                 {
@@ -606,6 +620,41 @@ fn combat_tick(
                 }
             }
         }
+    }
+}
+
+/// Удар изнашивает оружие нападавшего и доспех, щит или клинок защитника (только у игроков).
+fn record_wear(world: &mut GameWorld, attacker: u64, target: u64, outcome: HitOutcome) {
+    use crate::smithing_server::Wear;
+    let is_player = |id: u64| world.actors.get(&id).is_some_and(|a| a.kind == ActorKind::Player);
+    let (a, t) = (is_player(attacker), is_player(target));
+    let mut push = |id: u64, w: Wear| world.gear_wear.push((id, w));
+    match outcome {
+        HitOutcome::Damage { head, .. } => {
+            if a {
+                push(attacker, Wear::Weapon(1.0));
+            }
+            if t {
+                push(target, Wear::Armour { head, amount: 1.0 });
+            }
+        }
+        HitOutcome::Parried => {
+            if a {
+                push(attacker, Wear::Weapon(1.2));
+            }
+            if t {
+                push(target, Wear::Weapon(1.5));
+            }
+        }
+        HitOutcome::Blocked { .. } | HitOutcome::GuardBroken => {
+            if a {
+                push(attacker, Wear::Weapon(0.8));
+            }
+            if t {
+                push(target, Wear::Shield(1.2));
+            }
+        }
+        HitOutcome::Bounced => {}
     }
 }
 

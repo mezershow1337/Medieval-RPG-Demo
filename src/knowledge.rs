@@ -328,6 +328,10 @@ pub fn teacher_from_trade(t: crate::trade::TeacherKind) -> Teacher {
         K::Alchemist => Teacher::Alchemist,
         K::Grammarian => Teacher::Grammarian,
         K::SteppeHealer => Teacher::SteppeHealer,
+        K::Smith => Teacher::Smith,
+        K::Armourer => Teacher::Armourer,
+        K::GothSmith => Teacher::GothSmith,
+        K::SteppeSmith => Teacher::SteppeSmith,
     }
 }
 
@@ -470,6 +474,7 @@ fn apprentice_chore(teacher: Teacher) -> &'static str {
         Teacher::Dyer => "Мешаете чан и полощете ткань",
         Teacher::Glassblower | Teacher::Potter => "Носите дрова к печи",
         Teacher::Scribe | Teacher::Grammarian => "Растираете чернила и чините перья",
+        Teacher::Smith | Teacher::Armourer | Teacher::GothSmith | Teacher::SteppeSmith => "Качаете меха, носите уголь, бьёте молотом-кувалдой",
     }
 }
 

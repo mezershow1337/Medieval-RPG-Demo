@@ -458,6 +458,30 @@ pub const ITEM_BASES: &[ItemBase] = &[
     base!("Зажигательный горшок", "Огонь", None, (2, 2), None, 1, &[], Sh::Small, true),
     // Неудачная варка (brewing.rs).
     base!("Испорченное варево", "Бурда", None, (1, 1), None, 3, &[], Sh::Flask, false),
+    // -----------------------------------------------------------------------
+    // Кузнечное и литейное дело (smithing.rs). Качество полос и криц — чистота железа.
+    // -----------------------------------------------------------------------
+    // Боспорская руда с Керченского полуострова (бурый железняк), уголь из горных лесов.
+    base!("Железная руда", "Руда", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Древесный уголь", "Уголь", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Крица", "Крица", None, (1, 1), None, 1, &[], Sh::Small, true),
+    base!("Железная полоса", "Железо", None, (1, 2), None, 5, &[], Sh::Small, true),
+    base!("Стальная полоса", "Сталь", None, (1, 2), None, 5, &[], Sh::Small, true),
+    base!("Железный лом", "Лом", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Олово", "Олово", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Бронзовый лом", "Бронза", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Серебряный лом", "Серебро", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Чугунная корка", "Чугун", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Ясеневая заготовка", "Ясень", None, (1, 3), None, 3, &[], Sh::Polearm, false),
+    base!("Гончарная глина", "Глина", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Каменная литейная форма", "Форма", None, (2, 1), None, 1, &[], Sh::Small, false),
+    // Изделия.
+    base!("Наконечники стрел", "Стрелы", None, (1, 1), None, 30, &[], Sh::Small, true),
+    base!("Бронзовая пряжка", "Пряжка", None, (1, 1), None, 5, &[], Sh::Small, true),
+    base!("Бронзовая фибула", "Фибула", None, (1, 1), None, 5, &[], Sh::Small, true),
+    base!("Бронзовое навершие", "Навершие", None, (1, 1), None, 3, &[], Sh::Small, true),
+    base!("Свинцовые грузила", "Грузила", None, (1, 1), None, 30, &[], Sh::Small, false),
+    base!("Плиний. Естественная история", "Плиний", None, (2, 2), None, 1, &[], Sh::Small, false),
 ];
 
 /// Старое название → новое (предметы переименованы под VI век).
@@ -520,6 +544,134 @@ pub struct Item {
     /// Случайные свойства.
     pub affixes: Vec<(Stat, f32)>,
     pub count: u16,
+    /// Как сделана вещь (кузнец, изъяны, прочность). У оружия и доспехов есть всегда,
+    /// у полос и криц — состав металла. См. [`Make`].
+    pub make: Option<Box<Make>>,
+}
+
+// ---------------------------------------------------------------------------
+// Работа мастера: изъяны, прочность, вид поверхности
+// ---------------------------------------------------------------------------
+
+/// Изъян поковки или отливки. Видно в подсказке и на самой вещи.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Flaw {
+    /// Трещина (ковали холодным или закалка рванула).
+    Crack,
+    /// Непровар: слои не сварились.
+    ColdShut,
+    /// Пережог: металл горел в горне, зерно крупное.
+    Burnt,
+    /// Шлак в теле металла (плохо проковали крицу).
+    Slag,
+    /// Окалина въелась раковинами.
+    Pitted,
+    /// Повело при закалке.
+    Warped,
+    /// Перекован: тонкое место.
+    ThinSpot,
+    /// Недокован: толсто и тяжело.
+    Unfinished,
+    /// Закалён без отпуска: хрупкий.
+    Brittle,
+    /// Не закалился: мягкий, гнётся.
+    Soft,
+    /// Пористая отливка.
+    Porous,
+    /// Недолив: форма заполнилась не вся.
+    Misrun,
+    /// Сточен лишнего.
+    Overground,
+    /// Забоины от молота.
+    Dented,
+}
+
+impl Flaw {
+    pub fn name(self) -> &'static str {
+        match self {
+            Flaw::Crack => "трещина",
+            Flaw::ColdShut => "непровар",
+            Flaw::Burnt => "пережог",
+            Flaw::Slag => "шлак в металле",
+            Flaw::Pitted => "раковины от окалины",
+            Flaw::Warped => "повело",
+            Flaw::ThinSpot => "перекован, тонкое место",
+            Flaw::Unfinished => "недокован, тяжёл",
+            Flaw::Brittle => "хрупок (без отпуска)",
+            Flaw::Soft => "мягок, не держит заточку",
+            Flaw::Porous => "пористая отливка",
+            Flaw::Misrun => "недолив",
+            Flaw::Overground => "сточен лишнего",
+            Flaw::Dented => "забоины от молота",
+        }
+    }
+}
+
+/// Как сделана вещь. Числа 0..1, если не сказано иное.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct Make {
+    /// Кто сделал («Филипп», «вы»); пусто — неизвестный мастер.
+    pub smith: String,
+    /// Поверхность: 0 — грубая, в раковинах и окалине, 1 — чисто отполирована.
+    pub finish: f32,
+    /// Закалка кромки (у доспехов 0).
+    pub edge: f32,
+    /// Развесовка: 0 — как надо, минус — тяжёл к рукояти, плюс — к острию.
+    pub balance: f32,
+    pub flaws: Vec<Flaw>,
+    /// Прочность: сейчас и наибольшая (0 — вещь сломана).
+    pub dur: f32,
+    pub dur_max: f32,
+    /// Углерод, % (у криц и полос).
+    pub carbon: f32,
+}
+
+/// Сколько ударов выдерживает вещь обычного качества.
+pub fn base_durability(base: &ItemBase) -> f32 {
+    match (base.shape, base.slot) {
+        (ItemShape::Blade, _) => 140.0,
+        (ItemShape::Blunt, _) => 180.0,
+        (ItemShape::Polearm, _) => 120.0,
+        (ItemShape::Shield, _) => 160.0,
+        (ItemShape::Armor | ItemShape::Helmet, _) => 200.0,
+        _ => 0.0,
+    }
+}
+
+impl Make {
+    /// Вещь из лавки или с трупа: мастер неизвестен, всё по качеству.
+    pub fn stock(base: &ItemBase, quality: Quality) -> Make {
+        let q = quality.index() as f32;
+        let dur_max = (base_durability(base) * (0.75 + 0.1 * q)).round();
+        Make { smith: String::new(), finish: (0.3 + 0.13 * q).min(1.0), edge: if base.slot == Some(EquipSlot::MainHand) { 0.4 + 0.1 * q } else { 0.0 }, balance: 0.0, flaws: Vec::new(), dur: dur_max, dur_max, carbon: 0.0 }
+    }
+
+    /// Доля прочности 0..1 (у вещей без прочности — 1).
+    pub fn condition(&self) -> f32 {
+        if self.dur_max <= 0.0 { 1.0 } else { (self.dur / self.dur_max).clamp(0.0, 1.0) }
+    }
+
+    pub fn broken(&self) -> bool {
+        self.dur_max > 0.0 && self.dur <= 0.0
+    }
+
+    /// Во сколько раз износ меняет урон или броню: до половины прочности — никак,
+    /// потом всё хуже, сломанная вещь — треть силы.
+    pub fn wear_mult(&self) -> f32 {
+        if self.dur_max <= 0.0 {
+            return 1.0;
+        }
+        if self.broken() {
+            return 0.35;
+        }
+        let c = self.condition();
+        if c >= 0.5 { 1.0 } else { 0.7 + 0.6 * c }
+    }
+
+    /// Как выглядит поверхность с учётом износа (для модели и иконки).
+    pub fn look(&self) -> f32 {
+        (self.finish * (0.55 + 0.45 * self.condition())).clamp(0.0, 1.0)
+    }
 }
 
 impl Item {
@@ -536,9 +688,23 @@ impl Item {
         if self.count > 1 { format!("{} ×{}", base.name, self.count) } else { base.name.to_string() }
     }
 
-    /// Основная характеристика с учётом качества.
+    /// Основная характеристика с учётом качества и износа.
     pub fn main_stat(&self) -> Option<(Stat, f32)> {
-        self.info().base_stat.map(|(s, v)| (s, (v * self.quality.stat_multiplier()).round()))
+        let wear = self.make.as_ref().map_or(1.0, |m| m.wear_mult());
+        self.info().base_stat.map(|(s, v)| (s, (v * self.quality.stat_multiplier() * wear).round()))
+    }
+
+    /// Прочность сейчас и наибольшая, если у вещи она есть.
+    pub fn durability(&self) -> Option<(f32, f32)> {
+        self.make.as_ref().filter(|m| m.dur_max > 0.0).map(|m| (m.dur, m.dur_max))
+    }
+
+    /// Как выглядит поверхность: 0 — грубая и ржавая, 1 — полированная.
+    pub fn look(&self) -> f32 {
+        match &self.make {
+            Some(m) => m.look(),
+            None => (0.3 + 0.13 * self.quality.index() as f32).min(1.0),
+        }
     }
 
     /// Все характеристики предмета: основная + случайные.
@@ -560,7 +726,7 @@ impl Item {
     }
 
     pub fn can_stack_with(&self, other: &Item) -> bool {
-        self.base == other.base && self.info().max_stack > 1 && self.quality == other.quality
+        self.base == other.base && self.info().max_stack > 1 && self.quality == other.quality && self.make == other.make
     }
 }
 
@@ -607,7 +773,15 @@ pub fn roll_item(base_id: ItemBaseId, quality: Quality, count: u16, rng: &mut Rn
         let value = if stat == Stat::ParryWindow { value.round() } else { (value * 10.0).round() / 10.0 };
         affixes.push((stat, value));
     }
-    Item { uid: uids.next(), base: base_id, quality, affixes, count: count.clamp(1, base.max_stack) }
+    let make = if base_durability(base) > 0.0 { Some(Box::new(Make::stock(base, quality))) } else { None };
+    Item { uid: uids.next(), base: base_id, quality, affixes, count: count.clamp(1, base.max_stack), make }
+}
+
+/// Предмет без случайных свойств (сырьё, изделия кузнеца — у них свойства от работы).
+pub fn plain_item(base_id: ItemBaseId, quality: Quality, count: u16, uids: &mut UidGen) -> Item {
+    let base = base_id.base();
+    let quality = if base.has_quality { quality } else { Quality::Common };
+    Item { uid: uids.next(), base: base_id, quality, affixes: Vec::new(), count: count.clamp(1, base.max_stack), make: None }
 }
 
 // ---------------------------------------------------------------------------

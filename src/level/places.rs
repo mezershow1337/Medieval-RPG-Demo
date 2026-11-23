@@ -122,6 +122,12 @@ fn city_places() -> Vec<Place> {
     let gw = crafts::glassworks_rect();
     let pt = crafts::pottery_rect();
     let sm = crafts::smithy_rect();
+    let ar = public::armoury_rect();
+    let gs = city::outside::goth_smithy_rect();
+    let gb = city::outside::goth_bloomery_rect();
+    let sf = city::outside::steppe_forge_rect();
+    let af = city::outside::alan_forge_rect();
+    let smith_point = |r: city::kit::Rect, dx: f32, dz: f32| Vec3::new(r.cx() + dx, city::outside::smith_floor(r), r.cz() + dz);
     let wn = crafts::winery_rect();
     let fw = city::block(8, -3);
     let hr = city::block(18, 2);
@@ -159,6 +165,7 @@ fn city_places() -> Vec<Place> {
         p("glassworks", "Стекольная мастерская", "ὑελουργεῖον", Glassworks, flat(gw.cx(), gw.z1 - 3.0), 10.0),
         p("pottery", "Гончарная мастерская", "κεραμεῖον", Pottery, flat(pt.cx(), pt.z0 + 3.0), 10.0),
         p("smithy", "Кузница", "χαλκεῖον", Smithy, flat(sm.cx() + 1.5, sm.z0 + 3.0), 8.0),
+        p("armoury", "Оружейная мастерская гарнизона", "φαβρίκα", Smithy, flat(ar.x0 + 7.0, ar.z0 + 6.5), 8.0),
         p("winery", "Винодельня (тарапан)", "ληνός", Winery, flat(wn.cx(), wn.z0 + 3.0), 10.0),
         p("church_west", "Западная церковь", "ἐκκλησία", Church, flat(wc.x0 + 4.0, wc.cz()), 8.0),
         p("quay", "Набережная Карантинной бухты", "λιμήν", Quay, flat(293.0, 60.0), 30.0),
@@ -168,7 +175,17 @@ fn city_places() -> Vec<Place> {
         p("steppe_camp", "Стан кочевников", "—", SteppeCamp, on_ground(STEPPE_CAMP.x, STEPPE_CAMP.z + 3.0), 25.0),
         p("goth_village", "Готское селение", "—", GothVillage, on_ground(GOTH_VILLAGE.x, GOTH_VILLAGE.z), 30.0),
         p("alan_camp", "Аланский стан", "—", AlanCamp, on_ground(ALAN_CAMP.x, ALAN_CAMP.z + 3.0), 25.0),
+        p("goth_smithy", "Кузница готов", "—", Smithy, smith_point(gs, 1.6, 1.4), 6.0),
+        p("goth_bloomery", "Сыродутный горн готов", "—", Smithy, smith_point(gb, 1.6, -1.6), 4.0),
+        p("steppe_forge", "Горн кочевого кузнеца", "—", Smithy, smith_point(sf, 1.6, 1.4), 4.0),
+        p("alan_forge", "Горн аланского кузнеца", "—", Smithy, smith_point(af, 1.4, 1.3), 4.0),
     ]
+}
+
+/// Кузнечные и сыродутные горны активного уровня.
+pub fn forges() -> &'static [super::ForgeSpec] {
+    static F: OnceLock<Vec<super::ForgeSpec>> = OnceLock::new();
+    F.get_or_init(|| super::layout().forges)
 }
 
 /// Очаги, на которых можно варить (в домах, корчмах, кухне ксенона, станах).

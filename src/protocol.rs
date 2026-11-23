@@ -6,7 +6,7 @@ use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendTyp
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_0009;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_000A;
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -52,6 +52,14 @@ pub fn connection_config() -> ConnectionConfig {
     };
     config.server_channels_config.push(doors.clone());
     config.client_channels_config.push(doors);
+    // Канал 9 — кузницы (см. smithing_net.rs).
+    let smith = ChannelConfig {
+        channel_id: crate::smithing_net::CH_SMITH,
+        max_memory_usage_bytes: 2 * 1024 * 1024,
+        send_type: SendType::ReliableOrdered { resend_time: std::time::Duration::from_millis(300) },
+    };
+    config.server_channels_config.push(smith.clone());
+    config.client_channels_config.push(smith);
     config
 }
 
