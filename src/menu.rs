@@ -140,6 +140,16 @@ const CONNECTION_TIMEOUT_SECS: i32 = 60;
 /// Срок жизни билета: с запасом, чтобы часы хоста и друга могли расходиться до часа.
 const CONNECT_TOKEN_EXPIRE_SECS: u64 = 3600;
 
+/// Профиль с диска (ключ хозяина) с ником из меню.
+fn profile_with_name(name: &str) -> crate::estates::Profile {
+    let mut p = crate::estates::local_profile();
+    let nick = crate::protocol::clean_name(name);
+    if !nick.is_empty() {
+        p.name = nick;
+    }
+    p
+}
+
 fn connect(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time: &Time, addr: SocketAddr, name: &str) {
     let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
     let client_id = now.as_nanos() as u64;
@@ -155,7 +165,8 @@ fn connect(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, ti
             client_id,
             CONNECTION_TIMEOUT_SECS,
             vec![addr],
-            Some(&crate::protocol::encode_name(name)),
+            // Постоянный профиль (ключ дома и ник): по ключу сервер узнаёт хозяина усадьбы.
+            Some(&crate::estates::pack_profile(&profile_with_name(name))),
             &[0; NETCODE_KEY_BYTES],
         )
         .map_err(|e| e.to_string())?;

@@ -1,12 +1,12 @@
 //! Общий сетевой протокол: сообщения между клиентом и сервером.
 
-use crate::combat::{Action, HitOutcome, WeaponKind};
+use crate::combat::{Action, HitOutcome, Swing, WeaponKind};
 use bevy::math::Vec3;
 use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendType};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_001A;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_001D;
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -84,6 +84,14 @@ pub fn connection_config() -> ConnectionConfig {
     };
     config.server_channels_config.push(map.clone());
     config.client_channels_config.push(map);
+    // Канал 13 — города, вести и свои дома (см. estates.rs).
+    let town = ChannelConfig {
+        channel_id: crate::estates::CH_TOWN,
+        max_memory_usage_bytes: 2 * 1024 * 1024,
+        send_type: SendType::ReliableOrdered { resend_time: std::time::Duration::from_millis(300) },
+    };
+    config.server_channels_config.push(town.clone());
+    config.client_channels_config.push(town);
     config
 }
 
@@ -107,8 +115,11 @@ impl From<NetPos> for Vec3 {
 pub enum ClientMessage {
     /// Состояние своего персонажа (ненадёжный канал). Сервер проверяет, что скорость правдоподобная.
     PlayerState { pos: NetPos, yaw: f32, pitch: f32, crouching: bool, sprinting: bool },
-    /// Начать удар (надёжный канал).
-    Attack { yaw: f32, pitch: f32 },
+    /// Начать удар (надёжный канал). `swing` — направление, выбранное мышью
+    /// (`None` — по серии). Во время замаха — морф, после парирования — рипост.
+    Attack { yaw: f32, pitch: f32, swing: Option<Swing> },
+    /// Финт: бросить свой замах.
+    Feint,
     /// Зажать / отпустить защиту (надёжный канал).
     Guard { on: bool, yaw: f32, pitch: f32 },
     /// Убрать оружие и драться кулаками / снова взять оружие (хотбар).
@@ -182,6 +193,8 @@ pub enum ServerMessage {
     CivilianBack { civ: crate::civilians::Civ },
     /// Закон: свидетели, стража, карцер.
     Law(crate::civilians::LawMessage),
+    /// Часы мира: игровые секунды от полуночи первого дня (см. `world_clock.rs`).
+    Clock { game: f64 },
     /// Имя игрока (ник из главного меню). Приходит всем при входе игрока и новичку — про всех.
     PlayerName { id: u64, name: String },
 }
@@ -189,24 +202,6 @@ pub enum ServerMessage {
 /// Ник игрока: не длиннее 24 символов, без управляющих символов.
 pub fn clean_name(s: &str) -> String {
     s.chars().filter(|c| !c.is_control()).take(24).collect::<String>().trim().to_string()
-}
-
-/// Ник едет на сервер в `user_data` подключения (256 байт): длина и UTF-8.
-pub fn encode_name(name: &str) -> [u8; 256] {
-    let name = clean_name(name);
-    let mut out = [0u8; 256];
-    let bytes = name.as_bytes();
-    let n = bytes.len().min(250);
-    // Не режем букву посередине.
-    let n = (0..=n).rev().find(|&i| name.is_char_boundary(i)).unwrap_or(0);
-    out[0] = n as u8;
-    out[1..1 + n].copy_from_slice(&bytes[..n]);
-    out
-}
-
-pub fn decode_name(data: &[u8; 256]) -> String {
-    let n = (data[0] as usize).min(255);
-    clean_name(&String::from_utf8_lossy(&data[1..1 + n]))
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -264,11 +259,9 @@ mod name_tests {
     use super::*;
 
     #[test]
-    fn names_survive_user_data() {
-        assert_eq!(decode_name(&encode_name("  Феодор Херсонит ")), "Феодор Херсонит");
-        assert_eq!(decode_name(&encode_name("")), "");
-        let long = "Ж".repeat(100);
-        assert_eq!(decode_name(&encode_name(&long)).chars().count(), 24);
+    fn names_are_cleaned() {
+        assert_eq!(clean_name("  Феодор Херсонит "), "Феодор Херсонит");
+        assert_eq!(clean_name(&"Ж".repeat(100)).chars().count(), 24);
         assert_eq!(clean_name("a\nb\tc"), "abc");
     }
 }

@@ -87,9 +87,10 @@ pub fn grab_cursor(
     law: Option<Res<crate::civil_client::LawUi>>,
     book: Option<Res<crate::skill_book::BookUi>>,
     map: Option<Res<crate::map::MapView>>,
+    towns: Option<Res<crate::towns_client::TownUi>>,
 ) {
-    // Пока открыт инвентарь, окно торговли, книга навыков, разговор со стражей, карта или меню, клики принадлежат окну, а не бою.
-    if loot.is_some_and(|l| l.ui_open) || trade.is_some_and(|t| t.window_open()) || law.is_some_and(|l| l.open()) || book.is_some_and(|b| b.open) || map.is_some_and(|m| m.open) || menu.is_some_and(|m| m.is_open()) {
+    // Пока открыт инвентарь, окно торговли, книга навыков, разговор со стражей, карта, окно дома или меню, клики принадлежат окну, а не бою.
+    if loot.is_some_and(|l| l.ui_open) || trade.is_some_and(|t| t.window_open()) || law.is_some_and(|l| l.open()) || book.is_some_and(|b| b.open) || map.is_some_and(|m| m.open) || towns.is_some_and(|t| t.open()) || menu.is_some_and(|m| m.is_open()) {
         return;
     }
     if mouse.just_pressed(MouseButton::Left) {
@@ -103,10 +104,11 @@ pub fn grab_cursor(
 }
 
 fn mouse_look(
+    time: Res<Time>,
     motion: Res<AccumulatedMouseMotion>,
     settings: Option<Res<crate::settings::Settings>>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
-    mut player: Query<(&mut LocalPlayer, &mut Transform)>,
+    mut player: Query<(&mut LocalPlayer, &mut Transform, Option<&crate::fight::LocalFighter>)>,
     work: Option<Res<crate::work_client::MyWork>>,
 ) {
     // Руки заняты работой: мышь водит пестик, а не голову.
@@ -114,9 +116,18 @@ fn mouse_look(
         return;
     }
     let k = MOUSE_SENSITIVITY * settings.map_or(1.0, |s| s.sensitivity);
-    for (mut p, mut transform) in &mut player {
-        p.yaw -= motion.delta.x * k;
-        p.pitch = (p.pitch - motion.delta.y * k).clamp(-1.5, 1.5);
+    let dt = time.delta_secs().max(1.0 / 240.0);
+    for (mut p, mut transform, fighter) in &mut player {
+        let mut dyaw = -motion.delta.x * k;
+        let mut dpitch = -motion.delta.y * k;
+        // Ограничение поворота во время удара (как в Chivalry/Mordhau): разворотом можно
+        // ускорить или придержать удар, но не крутануть клинок на полкруга мгновенно.
+        if let Some(cap) = fighter.and_then(|f| crate::combat::turn_cap(&f.fighter.action)) {
+            dyaw = dyaw.clamp(-cap * dt, cap * dt);
+            dpitch = dpitch.clamp(-cap * dt, cap * dt);
+        }
+        p.yaw += dyaw;
+        p.pitch = (p.pitch + dpitch).clamp(-1.5, 1.5);
         transform.rotation = Quat::from_rotation_y(p.yaw);
     }
 }

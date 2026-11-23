@@ -160,6 +160,8 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .insert_resource(PlayerNames::default())
         .insert_resource(civil)
         .add_plugins(crate::civil_server::CivilServerPlugin)
+        .add_plugins(crate::world_clock::ClockServerPlugin)
+        .add_plugins(crate::daily_life::LifeServerPlugin)
         .insert_resource(SnapshotTimer { timer: Timer::from_seconds((1.0 / SNAPSHOT_RATE_HZ) as f32, TimerMode::Repeating), tick: 0 })
         .add_observer(on_server_event)
         .add_plugins(crate::loot_server::LootServerPlugin)
@@ -168,10 +170,30 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .add_plugins(crate::trade_server::TradeServerPlugin)
         .add_plugins(crate::knowledge::KnowledgeServerPlugin)
         .add_plugins(crate::smithing_server::SmithingServerPlugin)
+        .add_plugins(crate::towns_server::TownServerPlugin)
         .add_plugins(crate::console_server::ConsoleServerPlugin)
         .add_systems(Update, (receive_client_messages, run_npcs, combat_tick, respawns, send_snapshots).chain());
     info!("Сервер слушает {addr}");
     app.run();
+}
+
+impl GameWorld {
+    /// Налётчик (набег на селение): не возвращается после смерти. Возвращает номер.
+    pub fn spawn_raider(&mut self, level: &LevelColliders, spawn: NpcSpawn, now: f64) -> u64 {
+        let id = spawn_npc(self, level, spawn, now);
+        if let Some(a) = self.actors.get_mut(&id) {
+            a.forget_spawn();
+        }
+        id
+    }
+
+    /// Убрать NPC из мира (налётчики ушли в степь).
+    pub fn remove_npc(&mut self, server: &mut RenetServer, id: u64) {
+        if self.actors.get(&id).is_some_and(|a| a.kind.is_npc()) {
+            self.actors.remove(&id);
+            server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::PlayerLeft { id }));
+        }
+    }
 }
 
 pub(crate) fn spawn_npc(world: &mut GameWorld, level: &LevelColliders, spawn: NpcSpawn, now: f64) -> u64 {
@@ -222,7 +244,7 @@ fn on_server_event(
             let id = *client_id;
             let spawn = level::spawn_point(world.joined_count);
             world.joined_count += 1;
-            let name = transport.user_data(id).map(|d| decode_name(&d)).filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Странник {}", id % 1000));
+            let name = transport.user_data(id).and_then(|d| crate::estates::unpack_profile(&d)).map(|p| p.name).filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Странник {}", id % 1000));
             info!("Игрок «{name}» ({id}) подключился");
             server.send_message(id, CH_RELIABLE, encode(&ServerMessage::Welcome { your_id: id, spawn: spawn.into() }));
             // Новичку — имена всех, кто уже в игре; всем — имя новичка.
@@ -288,10 +310,13 @@ fn receive_client_messages(mut server: ResMut<RenetServer>, mut world: ResMut<Ga
                 continue;
             }
             match msg {
-                ClientMessage::Attack { yaw, pitch } => {
+                ClientMessage::Attack { yaw, pitch, swing } => {
                     actor.pose.yaw = yaw;
                     actor.pose.pitch = pitch.clamp(-1.6, 1.6);
-                    actor.fighter.try_attack();
+                    actor.fighter.try_attack(swing);
+                }
+                ClientMessage::Feint => {
+                    actor.fighter.feint();
                 }
                 ClientMessage::Guard { on, yaw, pitch } => {
                     actor.pose.yaw = yaw;
@@ -773,10 +798,8 @@ fn combat_tick(
                 if head {
                     damage *= combat::HEAD_MULT;
                 }
-                if let Some(a) = world.actors.get(&attacker)
-                    && a.fighter.is_riposte_strike()
-                {
-                    damage *= combat::RIPOSTE_DAMAGE_MULT;
+                if let Some(a) = world.actors.get(&attacker) {
+                    damage *= a.fighter.strike_damage_mult();
                 }
                 world.gear_wear.push((attacker, crate::smithing_server::Wear::Weapon(1.0)));
                 crate::civil_server::hurt(&mut server, &mut world, &mut civil, &level, trade.as_deref_mut(), person, attacker, damage, point, head, now);
@@ -849,6 +872,14 @@ fn record_wear(world: &mut GameWorld, attacker: u64, target: u64, outcome: HitOu
                 push(target, Wear::Shield(1.2));
             }
         }
+        HitOutcome::Chambered => {
+            if a {
+                push(attacker, Wear::Weapon(1.2));
+            }
+            if t {
+                push(target, Wear::Weapon(1.2));
+            }
+        }
         HitOutcome::Bounced => {}
     }
 }
@@ -866,7 +897,7 @@ pub(crate) fn kill(server: &mut RenetServer, world: &mut GameWorld, id: u64, kil
         world.actors.remove(&id);
         world.npc_respawns.push((now + NPC_RESPAWN_SECS, spawn));
     } else {
-        // Вызванный консолью враг: тело остаётся, сам он не возвращается.
+        // Налётчик или вызванный консолью враг: тело остаётся, сам он не возвращается.
         world.actors.remove(&id);
     }
     info!("{kind:?} {id} погиб");
