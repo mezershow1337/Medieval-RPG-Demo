@@ -5,6 +5,7 @@
 //!   cargo run -- join 192.168.1.5 — подключиться к другу (порт по умолчанию 5000)
 //!   cargo run -- server           — только сервер, без окна
 
+mod alchemy_fx;
 mod brewing;
 mod brewing_client;
 mod client;
@@ -34,6 +35,9 @@ mod medicine_server;
 mod medicine_client;
 mod npc;
 mod player;
+mod props;
+mod props_client;
+mod props_server;
 mod protocol;
 mod residents;
 mod rig;
@@ -48,6 +52,7 @@ mod trade_client;
 mod trade_net;
 mod trade_server;
 mod trade_ui;
+mod weight;
 
 use protocol::DEFAULT_PORT;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -62,6 +67,12 @@ fn parse_addr(s: &str) -> SocketAddr {
 }
 
 fn main() {
+    // Загрузка больших glTF (serde_json) в пуле ввода-вывода Bevy уходит глубоко в стек, и
+    // стандартных 2 МБ на поток не хватает: игра падала с «stack overflow» при запуске.
+    if std::env::var_os("RUST_MIN_STACK").is_none() {
+        // SAFETY: других потоков ещё нет — переменную окружения никто не читает одновременно.
+        unsafe { std::env::set_var("RUST_MIN_STACK", (16 * 1024 * 1024).to_string()) };
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("server") => {

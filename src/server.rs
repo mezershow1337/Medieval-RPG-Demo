@@ -354,7 +354,10 @@ fn sync_equipment(world: &mut GameWorld, loot: Option<&LootWorld>) {
         actor.fighter.stamina_regen_mult = e.stamina_regen * m.stamina_regen;
         actor.fighter.max_stamina = e.max_stamina * m.max_stamina;
         actor.fighter.stamina = actor.fighter.stamina.min(actor.fighter.max_stamina);
-        actor.move_mult = e.move_mult * m.move_mult;
+        // Ноша: сверх грузоподъёмности идёшь медленнее (вес — `weight.rs`).
+        let load = inv.map(crate::weight::inventory_weight).unwrap_or(0.0);
+        let burden = crate::weight::encumbrance(load, crate::weight::carry_capacity(stats.get(Stat::Strength)));
+        actor.move_mult = e.move_mult * m.move_mult * burden;
     }
 }
 

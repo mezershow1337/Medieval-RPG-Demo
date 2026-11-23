@@ -739,6 +739,10 @@ def write_art_table():
         f.write("//! Создаётся tools/models/build_items.py — руками не править.\n\n")
         f.write("/// Название предмета (как в `ITEM_BASES`) -> ключ 3D-модели и иконки.\n")
         f.write("pub const ITEM_ART: &[(&str, &str)] = &[\n" + "\n".join(rows) + "\n];\n")
+    # Размеры моделей для физики предметов (src/icons/shapes.rs).
+    import item_bounds
+
+    item_bounds.main()
 
 
 # =========================================================================== студия и иконка

@@ -6,7 +6,7 @@ use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendTyp
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_000C;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_000E;
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -52,7 +52,15 @@ pub fn connection_config() -> ConnectionConfig {
     };
     config.server_channels_config.push(doors.clone());
     config.client_channels_config.push(doors);
-    // Канал 9 — кузницы (см. smithing_net.rs).
+    // Канал 9 — положения движущихся предметов (см. props_server.rs), терять не страшно.
+    let props = ChannelConfig {
+        channel_id: crate::loot_net::CH_PROPS,
+        max_memory_usage_bytes: 2 * 1024 * 1024,
+        send_type: SendType::Unreliable,
+    };
+    config.server_channels_config.push(props.clone());
+    config.client_channels_config.push(props);
+    // Канал 10 — кузницы (см. smithing_net.rs).
     let smith = ChannelConfig {
         channel_id: crate::smithing_net::CH_SMITH,
         max_memory_usage_bytes: 2 * 1024 * 1024,

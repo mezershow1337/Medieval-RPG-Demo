@@ -253,7 +253,13 @@ fn spawn_station(commands: &mut Commands, assets: &LoreAssets, s: &StationView) 
         for (x, z, r) in [(0.0, 0.0, 0.13), (0.08, 0.05, 0.09), (-0.07, 0.06, 0.1), (0.02, -0.08, 0.09), (-0.06, -0.05, 0.08)] {
             c.spawn(part(&assets.ball, &assets.coals, Transform::from_translation(base + Vec3::new(x, 0.48, z) * k).with_scale(Vec3::new(r, r * 0.55, r) * k)));
         }
-        c.spawn((PointLight { color: Color::srgb(1.0, 0.55, 0.25), intensity: 9000.0, range: 4.0, shadow_maps_enabled: false, ..default() }, Transform::from_translation(base + Vec3::Y * 0.7 * k)));
+        c.spawn((
+            PointLight { color: Color::srgb(1.0, 0.55, 0.25), intensity: 9000.0, range: 4.0, shadow_maps_enabled: false, ..default() },
+            Transform::from_translation(base + Vec3::Y * 0.7 * k),
+            crate::graphics::Flicker { base: 9000.0, phase: base.x * 3.1 + k },
+        ));
+        // Пламя, искры и дымок над углями добавят эффекты.
+        c.spawn((crate::alchemy_fx::BrazierFire { scale: k }, Transform::from_translation(base + Vec3::Y * 0.5 * k), Visibility::default()));
     };
     commands
         .spawn((Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(s.yaw)), Visibility::default()))
@@ -312,6 +318,7 @@ fn receive_lore(
     mut view: ResMut<LoreView>,
     mut loot: ResMut<LootState>,
     mut body: ResMut<crate::medicine_client::MyBody>,
+    mut fx: ResMut<crate::alchemy_fx::FxQueue>,
     assets: Res<LoreAssets>,
     time: Res<Time>,
 ) {
@@ -350,6 +357,8 @@ fn receive_lore(
                     view.stations.insert(s.id, (s, e));
                 }
             }
+            LoreServerMessage::Work { player, work } => fx.works.push((player, work)),
+            LoreServerMessage::Burst { pos, fx: kind } => fx.bursts.push((pos.into(), kind)),
             LoreServerMessage::PatchCharges { id, charges } => {
                 if let Some((p, _)) = view.patches.get_mut(&id) {
                     p.charges = charges;
@@ -675,6 +684,7 @@ mod tests {
 /// `MRPG_SHOT=файл.png` — через `MRPG_SHOT_DELAY` секунд (по умолчанию 8) сохранить
 /// снимок экрана и выйти. `MRPG_SHOT_UI=knowledge` — перед снимком открыть окно знаний,
 /// `MRPG_SHOT_UI=brew` — открыть сумку и окно варки у горшка (нужен `MRPG_DEBUG_KIT=1`),
+/// `MRPG_SHOT_UI=fx` — сосуды на огне и вспышки перед камерой, `MRPG_SHOT_PITCH=градусы` — наклон,
 /// `MRPG_SHOT_UI=brazier|table` — поставить жаровню (и собрать стол), `MRPG_SHOT_YAW=градусы` —
 /// повернуть камеру.
 pub struct DevShotPlugin;
@@ -697,12 +707,38 @@ fn dev_shot(
     mut done: Local<u8>,
     mut placed: Local<u8>,
     mut client: Option<ResMut<RenetClient>>,
+    mut fx: ResMut<crate::alchemy_fx::FxQueue>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let delay: f32 = std::env::var("MRPG_SHOT_DELAY").ok().and_then(|s| s.parse().ok()).unwrap_or(8.0);
     let t = time.elapsed_secs();
-    // `MRPG_SHOT_UI=brazier|table` — поставить жаровню из набора (и собрать на ней стол).
     let ui = std::env::var("MRPG_SHOT_UI").unwrap_or_default();
+    // `MRPG_SHOT_UI=fx` — выставить перед камерой сосуды на огне и показать вспышку и осколки.
+    if ui == "fx"
+        && let Some((p, tf)) = player.iter().next()
+    {
+        let fwd = Quat::from_rotation_y(p.yaw) * Vec3::NEG_Z;
+        let right = Quat::from_rotation_y(p.yaw) * Vec3::X;
+        let feet = Vec3::new(tf.translation.x, crate::level::ground_y(tf.translation.x, tf.translation.z).max(tf.translation.y - 1.7).min(tf.translation.y), tf.translation.z);
+        let at = |side: f32, ahead: f32| feet + fwd * ahead + right * side;
+        if *placed == 0 && t > delay - 6.0 {
+            use crate::brewing::{Heat, Vessel};
+            let rigs = [(Vessel::ClayPot, Heat::High, -0.85, 2.1, true), (Vessel::Alembic, Heat::Medium, -0.1, 2.4, true), (Vessel::Crucible, Heat::High, 0.6, 2.1, true), (Vessel::Mortar, Heat::None, 1.15, 1.9, false)];
+            for (i, (vessel, heat, side, ahead, own_fire)) in rigs.into_iter().enumerate() {
+                fx.works.push((900 + i as u64, Some(WorkView { vessel, heat, pos: at(side, ahead).into(), yaw: p.yaw + std::f32::consts::PI, own_fire })));
+            }
+            *placed = 1;
+        }
+        if *placed == 1 && t > delay - 0.7 {
+            fx.bursts.push((at(2.2, 4.5), BurstFx::Ignition));
+            *placed = 2;
+        }
+        if *placed == 2 && t > delay - 0.3 {
+            fx.bursts.push((at(-1.6, 2.8), BurstFx::Shatter { glass: true }));
+            *placed = 3;
+        }
+    }
+    // `MRPG_SHOT_UI=brazier|table` — поставить жаровню из набора (и собрать на ней стол).
     if (ui == "brazier" || ui == "table")
         && let Some(client) = client.as_mut()
     {
@@ -735,6 +771,9 @@ fn dev_shot(
         }
         if let Some(yaw) = std::env::var("MRPG_SHOT_YAW").ok().and_then(|s| s.parse::<f32>().ok()) {
             for (mut p, mut tf) in &mut player {
+                if let Some(pitch) = std::env::var("MRPG_SHOT_PITCH").ok().and_then(|s| s.parse::<f32>().ok()) {
+                    p.pitch = pitch.to_radians();
+                }
                 p.yaw = yaw.to_radians();
                 tf.rotation = Quat::from_rotation_y(p.yaw);
             }

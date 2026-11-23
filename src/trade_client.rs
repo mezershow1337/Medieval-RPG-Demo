@@ -145,28 +145,48 @@ fn spawn_stall(
         perceptual_roughness: 0.85,
         ..default()
     });
-    // Прилавок перед торговцем (торговец смотрит в −Z).
-    if info.faction.outside_walls() {
+    // Прилавок (торговец смотрит в −Z): те же столешницы, что у сервера, — на них лежит товар.
+    for b in &info.stall {
+        let c = Vec3::from_array(b.center);
+        let h = Vec3::from_array(b.half);
+        if b.felt {
+            p.spawn((Mesh3d(meshes.add(Cuboid::new(h.x * 2.0, h.y * 2.0, h.z * 2.0))), MeshMaterial3d(cloth.clone()), Transform::from_translation(c)));
+            continue;
+        }
+        // Столешница и ножки.
+        let top = 0.04;
         p.spawn((
-            Mesh3d(meshes.add(Cuboid::new(2.2, 0.03, 1.4))),
-            MeshMaterial3d(cloth.clone()),
-            Transform::from_xyz(0.0, 0.015, -1.1),
+            Mesh3d(meshes.add(Cuboid::new(h.x * 2.0, top, h.z * 2.0))),
+            MeshMaterial3d(wood.clone()),
+            Transform::from_translation(c + Vec3::Y * (h.y - top * 0.5)),
         ));
-        for (i, x) in [-0.7f32, 0.0, 0.7].into_iter().enumerate() {
+        // Передняя доска закрывает низ (как у настоящих лавок), сзади — ножки.
+        p.spawn((
+            Mesh3d(meshes.add(Cuboid::new(h.x * 2.0, h.y * 2.0 - top, 0.03))),
+            MeshMaterial3d(wood.clone()),
+            Transform::from_translation(c + Vec3::new(0.0, -top * 0.5, -h.z + 0.015)),
+        ));
+        for x in [-h.x + 0.05, h.x - 0.05] {
+            p.spawn((
+                Mesh3d(meshes.add(Cuboid::new(0.06, h.y * 2.0 - top, 0.06))),
+                MeshMaterial3d(wood.clone()),
+                Transform::from_translation(c + Vec3::new(x, -top * 0.5, h.z - 0.05)),
+            ));
+        }
+    }
+    if info.faction.outside_walls() {
+        // Тюки с остальным товаром — за спиной торговца.
+        for (i, x) in [-0.6f32, 0.0, 0.6].into_iter().enumerate() {
             let size = 0.32 + i as f32 * 0.05;
             p.spawn((
                 Mesh3d(meshes.add(Cuboid::new(size, size * 0.7, size * 1.2))),
                 MeshMaterial3d(wood.clone()),
-                Transform::from_xyz(x, size * 0.35, -1.2),
+                Transform::from_xyz(x, size * 0.35, 0.8),
             ));
         }
+        let _ = clay;
         return;
     }
-    p.spawn((
-        Mesh3d(meshes.add(Cuboid::new(2.0, 0.9, 0.7))),
-        MeshMaterial3d(wood.clone()),
-        Transform::from_xyz(0.0, 0.45, -0.95),
-    ));
     // Навес.
     for (x, z) in [
         (-1.05f32, -1.35f32),
@@ -185,15 +205,7 @@ fn spawn_stall(
         MeshMaterial3d(cloth),
         Transform::from_xyz(0.0, 2.42, -0.45).with_rotation(Quat::from_rotation_x(-0.12)),
     ));
-    // Товар на столе: пара амфор и горшков.
-    for (i, x) in [-0.65f32, -0.2, 0.3, 0.7].into_iter().enumerate() {
-        let h = 0.2 + (i % 2) as f32 * 0.18;
-        p.spawn((
-            Mesh3d(meshes.add(Capsule3d::new(0.09 + (i % 2) as f32 * 0.03, h))),
-            MeshMaterial3d(clay.clone()),
-            Transform::from_xyz(x, 0.9 + h * 0.5 + 0.08, -0.95),
-        ));
-    }
+    let _ = clay;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -217,6 +229,9 @@ fn receive_trade(
                 for e in &npcs {
                     commands.entity(e).despawn();
                 }
+                // Прилавки для физики своего предмета в руках.
+                let statics = list.iter().flat_map(|i| crate::trade::stall_obbs(i.pos.into(), i.yaw, &i.stall)).collect();
+                commands.insert_resource(crate::props_server::PropStatics(statics));
                 for (i, info) in list.iter().enumerate() {
                     let pos: Vec3 = info.pos.into();
                     commands

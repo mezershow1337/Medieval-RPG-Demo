@@ -690,6 +690,8 @@ pub struct BrewResult {
     pub technique: Option<Technique>,
     /// Надышался: (яд, доз).
     pub poison: Option<(Toxin, f32)>,
+    /// Смесь вспыхнула (для огненной вспышки на экране).
+    pub ignited: bool,
     /// Сосуд ушёл в изделие.
     pub vessel_used: bool,
 }
@@ -813,7 +815,7 @@ fn quality_index(score: f32, skill: f32) -> Option<usize> {
 /// `roll` 0..1 — случай (лопнет ли стекло). `bench` — работа за алхимическим столом:
 /// ровный жар жаровни и подставки для приборов (стекло лопается вдвое реже, точнее выходит).
 pub fn brew(spec: &BrewSpec, vessel: Vessel, k: &Knowledge, flasks: u16, roll: f32, bench: bool) -> BrewResult {
-    let mut result = BrewResult { product: None, flasks_used: 0, vessel_broken: false, burn: 0.0, text: String::new(), technique: None, poison: None, vessel_used: false };
+    let mut result = BrewResult { product: None, flasks_used: 0, vessel_broken: false, burn: 0.0, text: String::new(), technique: None, poison: None, vessel_used: false, ignited: false };
     let water = spec.water as f32;
     let left = (water - spec.heat.boil_off() * spec.hours).max(0.0);
     // Всухую на огне: пригорает, глина лопается.
@@ -847,6 +849,7 @@ pub fn brew(spec: &BrewSpec, vessel: Vessel, k: &Knowledge, flasks: u16, roll: f
     let flammable = spec.items.iter().any(|(n, _)| matches!(n.as_str(), "Сосновая смола" | "Сера" | "Нефть" | "Ладан"));
     if dry_fire && flammable {
         result.burn = 0.4;
+        result.ignited = true;
         result.product = Some((SPOILED, 1, 0));
         result.text = "Смесь вспыхнула на сильном огне! Вы обожглись".into();
         return result;
@@ -876,6 +879,7 @@ pub fn brew(spec: &BrewSpec, vessel: Vessel, k: &Knowledge, flasks: u16, roll: f
         && spec.heat >= at
     {
         result.burn = 0.4;
+        result.ignited = true;
         result.product = Some((SPOILED, 1, 0));
         result.text = "Смесь вспыхнула! Всё сгорело, вы обожглись".into();
         if vessel == Vessel::ClayPot && recipe.consumes_vessel {

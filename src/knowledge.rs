@@ -137,6 +137,8 @@ struct Activity {
     total: f32,
     start: Vec3,
     last_hp: f32,
+    /// Сосуд на огне — его видят все (пар, дым, капли).
+    work: Option<WorkView>,
 }
 
 #[derive(Resource)]
@@ -332,10 +334,17 @@ fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, m
             send(&mut server, id, &LoreServerMessage::Patches(world.patch_views()));
             send(&mut server, id, &LoreServerMessage::Masters(world.master_views()));
             send(&mut server, id, &LoreServerMessage::Stations(world.station_views()));
+            for (player, a) in &world.activities {
+                if let Some(work) = a.work {
+                    send(&mut server, id, &LoreServerMessage::Work { player: *player, work: Some(work) });
+                }
+            }
         }
         ServerEvent::ClientDisconnected { client_id, .. } => {
             world.players.remove(client_id);
-            world.activities.remove(client_id);
+            if let Some(a) = world.activities.remove(client_id) {
+                end_work(&mut server, *client_id, &a);
+            }
         }
     }
 }
@@ -424,8 +433,41 @@ fn in_reach(feet: Vec3, target: Vec3) -> bool {
     Vec2::new(d.x, d.z).length() <= LORE_REACH + 0.4 && d.y.abs() < 2.0
 }
 
+/// Работа у сосуда кончилась — убрать сосуд и пар у всех.
+fn end_work(server: &mut RenetServer, pid: u64, a: &Activity) {
+    if a.work.is_some() {
+        server.broadcast_message(CH_LORE, encode(&LoreServerMessage::Work { player: pid, work: None }));
+    }
+}
+
+fn burst(server: &mut RenetServer, pos: Vec3, fx: BurstFx) {
+    server.broadcast_message(CH_LORE, encode(&LoreServerMessage::Burst { pos: pos.into(), fx }));
+}
+
+/// Где стоит сосуд: на очаге, на жаровне, на столе или на земле перед игроком.
+fn work_view(world: &KnowledgeWorld, spec: &BrewSpec, vessel: Vessel, feet: Vec3, yaw: f32) -> WorkView {
+    let fire = spec.heat != brewing::Heat::None;
+    let forward = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
+    let view = |pos: Vec3, yaw: f32, own_fire: bool| WorkView { vessel, heat: spec.heat, pos: pos.into(), yaw, own_fire };
+    if fire
+        && let Some(h) = crate::level::hearths().iter().filter(|h| Vec2::new(h.x - feet.x, h.z - feet.z).length() <= HEARTH_REACH && (h.y - feet.y).abs() < 2.5).min_by(|a, b| a.distance(feet).total_cmp(&b.distance(feet)))
+    {
+        return view(*h + Vec3::Y * 0.3, yaw, false);
+    }
+    if let Some((_, s)) = world.station_near(feet, HEARTH_REACH) {
+        let rot = Quat::from_rotation_y(s.yaw);
+        match (s.kind, fire) {
+            (StationKind::Brazier, true) => return view(s.pos + Vec3::Y * 0.5, s.yaw, false),
+            (StationKind::Table, true) => return view(s.pos + rot * Vec3::new(0.45, 1.12, 0.0), s.yaw, false),
+            (StationKind::Table, false) => return view(s.pos + rot * Vec3::new(-0.02, 0.85, 0.14), s.yaw, false),
+            (StationKind::Brazier, false) => {}
+        }
+    }
+    view(feet + forward * 0.65, yaw, fire)
+}
+
 fn start(server: &mut RenetServer, world: &mut KnowledgeWorld, player: u64, task: Task, verb: String, done: f32, total: f32, feet: Vec3, hp: f32) {
-    world.activities.insert(player, Activity { task, elapsed: done, total, start: feet, last_hp: hp });
+    world.activities.insert(player, Activity { task, elapsed: done, total, start: feet, last_hp: hp, work: None });
     send(server, player, &LoreServerMessage::Activity { verb, done, total });
 }
 
@@ -443,7 +485,8 @@ fn receive_lore_messages(
             let Some(actor) = game.actors.get(&pid).filter(|a| a.alive && !a.fighter.is_dead()) else { continue };
             let (feet, hp) = (actor.pose.feet, actor.fighter.hp);
             if let LoreClientMessage::Stop = msg {
-                if world.activities.remove(&pid).is_some() {
+                if let Some(a) = world.activities.remove(&pid) {
+                    end_work(&mut server, pid, &a);
                     send(&mut server, pid, &LoreServerMessage::ActivityEnded);
                 }
                 continue;
@@ -544,7 +587,12 @@ fn receive_lore_messages(
                             };
                             let verb = format!("{}: {what}", v.name());
                             let secs = spec.real_secs();
+                            let work = work_view(&world, &spec, v, feet, actor.pose.yaw);
                             start(&mut server, &mut world, pid, Task::Brew { vessel, spec }, verb, 0.0, secs, feet, hp);
+                            if let Some(a) = world.activities.get_mut(&pid) {
+                                a.work = Some(work);
+                            }
+                            server.broadcast_message(CH_LORE, encode(&LoreServerMessage::Work { player: pid, work: Some(work) }));
                         }
                         Err(e) => notice(&mut server, pid, e),
                     }
@@ -688,6 +736,7 @@ fn tick_activities(
 
     for (pid, ok) in ended {
         let Some(a) = world.activities.remove(&pid) else { continue };
+        end_work(&mut server, pid, &a);
         send(&mut server, pid, &LoreServerMessage::ActivityEnded);
         if !ok {
             if let Task::Read { .. } = a.task {
@@ -698,11 +747,12 @@ fn tick_activities(
         }
         match a.task {
             Task::Read { uid, text } => finish_reading(&mut server, &mut world, &mut loot, pid, uid, text),
-            Task::Gather { patch } => finish_gathering(&mut server, &mut world, &mut loot, pid, patch),
+            Task::Gather { patch } => finish_gathering(&mut server, &mut world, &mut loot, pid, patch, a.start),
             Task::Treat { uid } => finish_treatment(&mut server, &mut world, &mut loot, &mut game, &mut bodies, pid, uid),
             Task::Brew { vessel, spec } => {
                 let feet = game.actors.get(&pid).map(|a| a.pose.feet).unwrap_or_default();
-                finish_brewing(&mut server, &mut commands, &mut world, &mut loot, &mut bodies, pid, vessel, &spec, feet)
+                let at = a.work.map_or(feet, |w| w.pos.into());
+                finish_brewing(&mut server, &mut commands, &mut world, &mut loot, &mut bodies, pid, vessel, &spec, feet, at)
             }
             Task::Lesson { master, mode } => {
                 let Some(m) = world.masters.get(&master) else { continue };
@@ -786,7 +836,7 @@ fn finish_reading(server: &mut RenetServer, world: &mut KnowledgeWorld, loot: &m
     sync_knowledge(server, world, pid);
 }
 
-fn finish_gathering(server: &mut RenetServer, world: &mut KnowledgeWorld, loot: &mut LootWorld, pid: u64, patch: u32) {
+fn finish_gathering(server: &mut RenetServer, world: &mut KnowledgeWorld, loot: &mut LootWorld, pid: u64, patch: u32, feet: Vec3) {
     let Some(p) = world.patches.get(&patch) else { return };
     if p.charges == 0 {
         return;
@@ -815,6 +865,8 @@ fn finish_gathering(server: &mut RenetServer, world: &mut KnowledgeWorld, loot: 
     }
     let p = world.patches.get_mut(&patch).unwrap();
     p.charges = p.charges.saturating_sub(damage);
+    let at = if p.radius > 1.0 { feet } else { p.pos };
+    burst(server, at, BurstFx::Gathered);
     let charges = p.charges;
     server.broadcast_message(CH_LORE, encode(&LoreServerMessage::PatchCharges { id: patch, charges }));
     if let Some(k) = world.players.get_mut(&pid) {
@@ -1013,6 +1065,7 @@ fn finish_brewing(
     vessel: ItemUid,
     spec: &BrewSpec,
     feet: Vec3,
+    at: Vec3,
 ) {
     let Some(inv) = loot.inventories.get(&pid) else { return };
     let v = match check_brew(inv, vessel, spec) {
@@ -1040,6 +1093,9 @@ fn finish_brewing(
     if result.product.is_none() && !result.vessel_broken {
         notice(server, pid, result.text);
         return;
+    }
+    for fx in brew_bursts(&result, v) {
+        burst(server, at, fx);
     }
     for (name, n) in &spec.items {
         take_named(inv, name, *n as u32);
@@ -1077,6 +1133,33 @@ fn finish_brewing(
     notice(server, pid, result.text);
     sync_knowledge(server, world, pid);
     sync_inventory(server, loot, pid);
+}
+
+/// Что увидят все вокруг, когда варка кончилась.
+fn brew_bursts(r: &brewing::BrewResult, v: Vessel) -> Vec<BurstFx> {
+    let mut out = Vec::new();
+    if r.ignited {
+        out.push(BurstFx::Ignition);
+    }
+    if r.vessel_broken {
+        out.push(BurstFx::Shatter { glass: v.glass() });
+    }
+    if r.burn > 0.0 && !r.ignited && !r.vessel_broken {
+        out.push(BurstFx::BoilOver);
+    }
+    if r.poison.is_some() {
+        out.push(BurstFx::Fumes);
+    }
+    match r.product {
+        Some((name, ..)) if name == brewing::SPOILED => {
+            if !r.ignited {
+                out.push(BurstFx::Spoiled);
+            }
+        }
+        Some(_) => out.push(BurstFx::Done),
+        None => {}
+    }
+    out
 }
 
 /// Для проверки: `MRPG_DEBUG_KIT=1` — каждый вошедший получает горшок, ступку, травы и флаконы.

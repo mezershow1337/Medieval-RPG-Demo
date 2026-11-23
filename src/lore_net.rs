@@ -2,7 +2,7 @@
 
 use crate::items::ItemUid;
 use crate::lore::{Knowledge, Substance, Teacher};
-use crate::brewing::BrewSpec;
+use crate::brewing::{BrewSpec, Heat, Vessel};
 use crate::medicine::Body;
 use crate::protocol::NetPos;
 use serde::{Deserialize, Serialize};
@@ -64,6 +64,37 @@ pub struct StationView {
     pub yaw: f32,
 }
 
+/// Кто-то работает у огня: где стоит сосуд и что в нём творится (для пара, дыма, капель).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct WorkView {
+    pub vessel: Vessel,
+    pub heat: Heat,
+    /// Где стоит сосуд (дно).
+    pub pos: NetPos,
+    pub yaw: f32,
+    /// Огонь разведён прямо под сосудом (нет ни очага, ни жаровни рядом).
+    pub own_fire: bool,
+}
+
+/// Чем кончилось дело — разовый эффект для всех вокруг.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BurstFx {
+    /// Получилось: клуб пара.
+    Done,
+    /// Бурда: бурый чад.
+    Spoiled,
+    /// Кипело через край: брызги и пар.
+    BoilOver,
+    /// Сосуд лопнул: осколки (стекло или глина).
+    Shatter { glass: bool },
+    /// Смесь вспыхнула: огненный шар и чёрный дым.
+    Ignition,
+    /// Едкие или ядовитые пары.
+    Fumes,
+    /// Траву сорвали: листья и пыль.
+    Gathered,
+}
+
 /// Временный мастер, пока в городе нет настоящих NPC.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MasterView {
@@ -114,6 +145,10 @@ pub enum LoreServerMessage {
     Masters(Vec<MasterView>),
     /// Все поставленные жаровни и столы (после каждого изменения).
     Stations(Vec<StationView>),
+    /// Игрок начал (Some) или закончил (None) работу у сосуда.
+    Work { player: u64, work: Option<WorkView> },
+    /// Разовый эффект в точке.
+    Burst { pos: NetPos, fx: BurstFx },
     /// Началось занятие: подпись, сколько уже прошло и сколько всего (секунды).
     Activity { verb: String, done: f32, total: f32 },
     ActivityEnded,

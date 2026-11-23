@@ -35,6 +35,9 @@ const GRUDGE_SECS: f64 = 600.0;
 /// Сколько живёт приглашение к обмену.
 const INVITE_SECS: f64 = 30.0;
 
+#[path = "trade_shelves.rs"]
+mod shelves;
+
 pub struct TradeServerPlugin;
 
 impl Plugin for TradeServerPlugin {
@@ -53,7 +56,8 @@ impl Plugin for TradeServerPlugin {
                     send_standing,
                 )
                     .chain(),
-            );
+            )
+            .add_systems(Update, shelves::tick_shelves.after(crate::props_server::tick_props).after(receive_trade_messages));
     }
 }
 
@@ -109,6 +113,8 @@ pub struct MerchantState {
     grudges: HashMap<u64, f64>,
     /// Когда у него крали.
     thefts: Vec<f64>,
+    /// Прилавок (в системе торговца): на нём лежит товар.
+    pub stall: Vec<StallBox>,
 }
 
 struct Order {
@@ -294,6 +300,14 @@ fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
             *slot += 1;
             let pos = crate::npc::find_free_spot(&level, anchor + side);
             let yaw = open_yaw(&level, pos);
+            // Боковой столик — только если справа от торговца свободно.
+            let side = {
+                let rot = Quat::from_rotation_y(yaw);
+                [Vec3::new(1.3, 0.1, -0.25), Vec3::new(2.05, 0.1, -0.25), Vec3::new(1.3, 0.1, -0.95), Vec3::new(2.05, 0.1, -0.95)]
+                    .iter()
+                    .all(|p| level.body_is_free(&crate::collision::Body { half_width: 0.12, height: 0.8 }, pos + rot * *p))
+            };
+            let stall = stall_layout(def.faction.outside_walls(), side);
             let mut m = MerchantState {
                 id: MerchantId(i as u16),
                 pos,
@@ -305,11 +319,14 @@ fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
                 next_restock: RESTOCK_SECS,
                 grudges: HashMap::new(),
                 thefts: Vec::new(),
+                stall,
             };
             restock(&mut m, &mut rng, &mut uids, true);
             m
         })
-        .collect();
+        .collect::<Vec<MerchantState>>();
+    let statics = merchants.iter().flat_map(|m| stall_obbs(m.pos, m.yaw, &m.stall)).collect();
+    commands.insert_resource(crate::props_server::PropStatics(statics));
     commands.insert_resource(TradeWorld {
         merchants,
         reps: HashMap::new(),
@@ -952,37 +969,7 @@ fn steal(
     let chance = theft_detection(&attempt);
     m.thefts.push(now);
     if tw.rng.f32() < chance {
-        // Попался с поличным.
-        let m = tw.merchant(id);
-        m.grudges.insert(player, now + GRUDGE_SECS);
-        m.attention = Attention::Watching;
-        m.attention_until = now + 30.0;
-        let name = item.info().name;
-        if def.faction.outside_walls() {
-            tw.change_rep(player, def.faction, -25.0);
-            return Ok(format!(
-                "{} схватил вас за руку! За стенами суда нет: он запомнит, и его люди тоже.",
-                def.name
-            ));
-        }
-        let fine = item.value() * Crime::TheftCaught.fine_multiplier();
-        tw.add_fine(player, fine);
-        tw.change_rep(player, def.faction, -12.0);
-        if def.faction != Faction::Garrison {
-            tw.change_rep(player, Faction::Garrison, -4.0);
-        }
-        crimes.push(CrimeCommitted {
-            player,
-            crime: Crime::TheftCaught,
-            victim: def.faction,
-            at: actor.pose.feet,
-            fine,
-        });
-        return Ok(format!(
-            "«Держи вора!» {} поймал вас с «{name}». По закону — штраф в четверную цену: {}",
-            def.name,
-            format_money(fine)
-        ));
+        return Ok(caught_stealing(tw, player, id, &item, actor.pose.feet, now, crimes));
     }
     let mut uids = loot.uids.clone();
     let part = split_from(&mut tw.merchant(id).shelf, uid, 1, &mut uids).unwrap();
@@ -999,6 +986,43 @@ fn steal(
         "Вы незаметно спрятали «{name}». Не продавайте это {} — узнает.",
         def.name
     ))
+}
+
+/// Вора поймали за руку: торговец запомнит, штраф (в городе) или вражда (за стенами).
+#[allow(clippy::too_many_arguments)]
+fn caught_stealing(tw: &mut TradeWorld, player: u64, id: MerchantId, item: &Item, at: Vec3, now: f64, crimes: &mut Vec<CrimeCommitted>) -> String {
+    let def = id.def();
+    // Попался с поличным.
+    let m = tw.merchant(id);
+    m.grudges.insert(player, now + GRUDGE_SECS);
+    m.attention = Attention::Watching;
+    m.attention_until = now + 30.0;
+    let name = item.info().name;
+    if def.faction.outside_walls() {
+        tw.change_rep(player, def.faction, -25.0);
+        return format!(
+            "{} схватил вас за руку! За стенами суда нет: он запомнит, и его люди тоже.",
+            def.name
+        );
+    }
+    let fine = item.value() * Crime::TheftCaught.fine_multiplier();
+    tw.add_fine(player, fine);
+    tw.change_rep(player, def.faction, -12.0);
+    if def.faction != Faction::Garrison {
+        tw.change_rep(player, Faction::Garrison, -4.0);
+    }
+    crimes.push(CrimeCommitted {
+        player,
+        crime: Crime::TheftCaught,
+        victim: def.faction,
+        at,
+        fine,
+    });
+    format!(
+        "«Держи вора!» {} поймал вас с «{name}». По закону — штраф в четверную цену: {}",
+        def.name,
+        format_money(fine)
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1107,6 +1131,7 @@ fn merchant_list(tw: &TradeWorld) -> Vec<MerchantInfo> {
                 pos: m.pos.into(),
                 yaw: m.yaw,
                 look: def.look,
+                stall: m.stall.clone(),
             }
         })
         .collect()
@@ -1850,6 +1875,7 @@ mod tests {
                     next_restock: 0.0,
                     grudges: HashMap::new(),
                     thefts: vec![],
+                    stall: stall_layout(false, true),
                 };
                 restock(&mut m, &mut rng, &mut uids, true);
                 m

@@ -735,9 +735,9 @@ fn forge_fires(
                 ))
                 .with_children(|c| {
                     // Куча углей: тлеют и разгораются, когда качают мехи.
-                    let r = if st.kind == StationKind::Bloomery { 0.2 } else { 0.42 };
+                    let r = if st.kind == StationKind::Bloomery { 0.2 } else { 0.58 };
                     let mut n = Noise(st.id * 7919 + 1);
-                    for _ in 0..if st.kind == StationKind::Bloomery { 10 } else { 26 } {
+                    for _ in 0..if st.kind == StationKind::Bloomery { 10 } else { 44 } {
                         let (ang, d) = ((n.next() * 0.5 + 0.5) * TAU, (n.next() * 0.5 + 0.5).sqrt() * r);
                         let s = 0.05 + (n.next() * 0.5 + 0.5) * 0.05;
                         let p = Vec3::new(ang.cos() * d, -0.35 + s * 0.3, ang.sin() * d);
@@ -761,7 +761,7 @@ fn forge_fires(
         let flicker = 0.85 + 0.1 * (t * 13.0 + f.phase).sin() + 0.05 * (t * 31.0 + f.phase * 2.0).sin();
         let heat = if lit { 0.35 + blast * 0.9 } else { 0.0 };
         if let Some(mut m) = materials.get_mut(&f.coal) {
-            m.emissive = LinearRgba::rgb(1.0, 0.32 + blast * 0.3, 0.06 + blast * 0.15) * (heat * heat * 9.0 * flicker);
+            m.emissive = LinearRgba::rgb(1.0, 0.32 + blast * 0.3, 0.06 + blast * 0.15) * (heat * heat * 5.0 * flicker);
         }
         light.intensity = 60_000.0 * heat * flicker;
         light.color = Color::srgb(1.0, 0.42 + blast * 0.25, 0.14 + blast * 0.2);

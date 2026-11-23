@@ -1598,6 +1598,41 @@ pub fn bid_price(
     ))
 }
 
+// ---------------------------------------------------------------------------
+// Прилавок
+// ---------------------------------------------------------------------------
+
+/// Столешница прилавка в системе торговца (он смотрит в −Z): центр и половинные размеры.
+/// `felt` — войлок на земле (за стенами), иначе деревянный стол.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct StallBox {
+    pub center: [f32; 3],
+    pub half: [f32; 3],
+    pub felt: bool,
+}
+
+/// Из чего состоит прилавок: в городе — стол перед торговцем (и боковой столик, если есть место),
+/// за стенами — войлок на земле.
+pub fn stall_layout(outside: bool, side_table: bool) -> Vec<StallBox> {
+    if outside {
+        return vec![StallBox { center: [0.0, 0.015, -1.15], half: [1.2, 0.015, 0.75], felt: true }];
+    }
+    let mut v = vec![StallBox { center: [0.0, 0.45, -0.95], half: [1.0, 0.45, 0.35], felt: false }];
+    if side_table {
+        v.push(StallBox { center: [1.65, 0.38, -0.6], half: [0.45, 0.38, 0.4], felt: false });
+    }
+    v
+}
+
+/// Столешницы прилавка в мире.
+pub fn stall_obbs(pos: bevy::math::Vec3, yaw: f32, boxes: &[StallBox]) -> Vec<crate::props::Obb> {
+    let rot = bevy::math::Quat::from_rotation_y(yaw);
+    boxes
+        .iter()
+        .map(|b| crate::props::Obb { center: pos + rot * bevy::math::Vec3::from_array(b.center), rot, half: bevy::math::Vec3::from_array(b.half) })
+        .collect()
+}
+
 /// Продажа оружия и доспехов варварам запрещена законом.
 pub fn is_contraband_for(def: &MerchantDef, base: ItemBaseId) -> bool {
     def.faction.outside_walls() && matches!(category(base), Category::Weapon | Category::Armor)
