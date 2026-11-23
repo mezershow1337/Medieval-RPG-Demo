@@ -148,6 +148,8 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .insert_resource(world)
         .insert_resource(civil)
         .add_plugins(crate::civil_server::CivilServerPlugin)
+        .add_plugins(crate::world_clock::ClockServerPlugin)
+        .add_plugins(crate::daily_life::LifeServerPlugin)
         .insert_resource(SnapshotTimer { timer: Timer::from_seconds((1.0 / SNAPSHOT_RATE_HZ) as f32, TimerMode::Repeating), tick: 0 })
         .add_observer(on_server_event)
         .add_plugins(crate::loot_server::LootServerPlugin)

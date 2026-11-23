@@ -66,6 +66,9 @@ mod trade_net;
 mod trade_server;
 mod trade_ui;
 mod weight;
+mod world_clock;
+mod daily_life;
+mod life_client;
 
 use protocol::DEFAULT_PORT;
 use std::net::SocketAddr;

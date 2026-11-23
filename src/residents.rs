@@ -1,11 +1,11 @@
 //! Жители: горожане в домах, мастерских, лавках, церквях, банях и казармах.
 //!
-//! Где кто стоит, задаёт уровень (`level::Layout::residents`, одинаково у сервера и клиента);
-//! тело — невидимая коробка в коллизиях уровня. Рисует их только клиент: жители не дерутся
-//! и не ходят, а дышат, поглядывают по сторонам и отвечают парой слов на «E».
+//! Где кто живёт, задаёт уровень (`level::Layout::residents`, одинаково у сервера и клиента);
+//! тело — невидимая коробка в коллизиях уровня. Днём жители живут по распорядку
+//! (`daily_life.rs`, рисует и двигает их `life_client.rs`) и отвечают парой слов на «E».
 
 use crate::level::{Resident, Role};
-use crate::rig::{Beard, FootGear, Hair, HeadGear, LegGear, NeedsRig, Outfit, RigPose, Tunic};
+use crate::rig::{Beard, FootGear, Hair, HeadGear, LegGear, NeedsRig, Outfit, Tunic};
 use bevy::prelude::*;
 
 pub struct ResidentsPlugin;
@@ -15,7 +15,7 @@ impl Plugin for ResidentsPlugin {
         app.insert_resource(ResidentAim::default())
             .insert_resource(Speech::default())
             .add_systems(Startup, setup_speech.after(crate::inventory_ui::setup_fonts))
-            .add_systems(Update, (aim_resident, talk, update_speech, idle_residents, cull_residents).chain().before(crate::doors::DoorSystems));
+            .add_systems(Update, (aim_resident, talk, update_speech).chain().after(crate::life_client::LifeSystems).before(crate::doors::DoorSystems));
     }
 }
 
@@ -152,39 +152,6 @@ pub fn spawn_residents(commands: &mut Commands, residents: &[Resident]) {
     }
 }
 
-/// Работающие склоняются над делом, остальные стоят прямо.
-fn working(role: Role) -> bool {
-    matches!(role, Role::Craftsman | Role::Weaver | Role::Cook | Role::Scholar | Role::Student)
-}
-
-fn idle_residents(time: Res<Time>, people: Query<(&ResidentView, &Children, &Visibility)>, mut poses: Query<&mut RigPose>) {
-    let t = time.elapsed_secs();
-    for (r, children, vis) in &people {
-        if *vis == Visibility::Hidden {
-            continue;
-        }
-        for child in children.iter() {
-            let Ok(mut pose) = poses.get_mut(child) else { continue };
-            let sway = (t * 0.35 + r.phase).sin();
-            let lean = if working(r.role) { -0.28 + 0.06 * (t * 0.9 + r.phase).sin() } else { 0.0 };
-            let solved = crate::rig::solve_pose(&crate::rig::PoseInput { twist: sway * 0.12, lean, pitch: if working(r.role) { -0.4 } else { 0.0 }, time: t + r.phase, ..default() });
-            *pose = solved.pose;
-        }
-    }
-}
-
-/// Дальних жителей не рисуем (их сотни, а видно — десяток).
-fn cull_residents(camera: Query<&GlobalTransform, With<crate::player::PlayerCamera>>, mut people: Query<(&Transform, &mut Visibility), (With<ResidentView>, Without<crate::civil_client::Fallen>)>) {
-    let Ok(cam) = camera.single() else { return };
-    let c = cam.translation();
-    for (t, mut vis) in &mut people {
-        let want = if t.translation.distance_squared(c) < 45.0 * 45.0 { Visibility::Inherited } else { Visibility::Hidden };
-        if *vis != want {
-            *vis = want;
-        }
-    }
-}
-
 fn aim_resident(
     mut aim: ResMut<ResidentAim>,
     loot: Res<crate::loot_client::LootState>,
@@ -212,16 +179,52 @@ fn aim_resident(
     aim.0 = best.map(|(_, i, r)| (i, r));
 }
 
-fn talk(keys: Res<ButtonInput<KeyCode>>, aim: Res<ResidentAim>, loot: Res<crate::loot_client::LootState>, time: Res<Time>, mut speech: ResMut<Speech>, mut said: Local<u32>) {
+#[allow(clippy::too_many_arguments)]
+fn talk(
+    keys: Res<ButtonInput<KeyCode>>,
+    aim: Res<ResidentAim>,
+    loot: Res<crate::loot_client::LootState>,
+    time: Res<Time>,
+    acts: Res<crate::life_client::LiveActs>,
+    clock: Res<crate::world_clock::WorldClock>,
+    mut speech: ResMut<Speech>,
+    mut said: Local<u32>,
+) {
     if loot.ui_open || !keys.just_pressed(KeyCode::KeyE) {
         return;
     }
     let Some((i, role)) = aim.0 else { return };
-    let l = lines(role);
     *said += 1;
-    let line = l[(i + *said as usize) % l.len()];
-    speech.line = format!("{}: «{line}»", title(role));
+    let act = acts.0.get(i).copied().unwrap_or(crate::daily_life::Act::Idle);
+    speech.line = match busy_line(act, clock.night(), *said as usize + i) {
+        Some(l) if l.starts_with('(') => format!("{}: {l}", title(role)),
+        Some(l) => format!("{}: «{l}»", title(role)),
+        None => {
+            let l = lines(role);
+            format!("{}: «{}»", title(role), l[(i + *said as usize) % l.len()])
+        }
+    };
     speech.until = time.elapsed_secs() + 5.0;
+}
+
+/// Что отвечает занятый человек (спящий, молящийся, испуганный…); `None` — обычная речь.
+fn busy_line(act: crate::daily_life::Act, night: bool, k: usize) -> Option<&'static str> {
+    use crate::daily_life::Act::*;
+    let pick = |l: &'static [&'static str]| Some(l[k % l.len()]);
+    match act {
+        Sleep => pick(&["(спит и что-то бормочет во сне)", "(храпит)", "Ммм… кто здесь? Ночь же… (переворачивается на другой бок)"]),
+        Lie => pick(&["(тяжело дышит) Воды бы…", "Лекарь сказал лежать…"]),
+        Pray | Preach => pick(&["(шепчет молитву и не отвечает)", "Не мешай, сын мой, идёт служба."]),
+        Cower => pick(&["Не трогай меня! Я ничего не видел!", "Стража! Помогите!"]),
+        Hammer => pick(&["Отойди, искры летят!", "Железо остывает, говори быстрей."]),
+        Fish => pick(&["Тише, рыбу распугаешь.", "Клюёт сегодня плохо."]),
+        Carry => pick(&["Посторонись, амфора тяжёлая!", "Некогда, груз ждут в хорреях."]),
+        Drink => pick(&["Выпей с нами! Вино с Боспора, разбавленное как положено.", "Хозяин, ещё кувшин!"]),
+        Eat => pick(&["Садись, раздели хлеб.", "Не мешай человеку обедать."]),
+        Guard if night => pick(&["Ночью по городу не шатайся.", "Проходи. Ворота до рассвета закрыты."]),
+        Talk => pick(&["Мы тут о своём… Тебе чего?", "А ты что думаешь, путник?"]),
+        _ => None,
+    }
 }
 
 #[derive(Component)]
