@@ -5,6 +5,7 @@ use crate::collision::{Body, LevelColliders};
 use crate::inventory::{Inventory, Target};
 use crate::items::{ItemBaseId, ItemUid, Quality};
 use crate::protocol::NetPos;
+use crate::trade::MerchantId;
 use bevy::math::Vec3;
 use serde::{Deserialize, Serialize};
 
@@ -45,6 +46,24 @@ pub enum LootClientMessage {
     CancelUse,
     /// Отладка, пока нет врагов: положить перед игроком тело рыцаря с добычей (F8).
     DebugSpawnCorpse,
+    /// Зажал ЛКМ на предмете: взять в руки и держать на расстоянии `dist` от глаз.
+    Grab { id: LootId, dist: f32 },
+    /// Колесо мыши: ближе или дальше.
+    HoldDistance { dist: f32 },
+    /// Отпустил ЛКМ: предмет летит дальше сам.
+    Release,
+    /// ПКМ с предметом в руках: бросить.
+    Throw,
+    /// «G» на товаре прилавка: стащить в сумку.
+    ShelfSteal { id: LootId },
+    /// Навёл прицел на товар: сколько стоит.
+    ShelfQuery { id: LootId },
+}
+
+/// Товар, выложенный на прилавке торговца.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct ShelfMark {
+    pub merchant: MerchantId,
 }
 
 /// Сервер -> клиент.
@@ -60,8 +79,14 @@ pub enum LootServerMessage {
     /// (`CorpseMarker` с тем же id), нужно только привязать к ней обыск.
     CorpseSpawned { id: LootId, pos: NetPos, yaw: f32, name: String, empty: bool, own_model: bool },
     CorpseEmpty { id: LootId, empty: bool },
-    /// Предмет падает на землю: из точки `start` со скоростью `vel`, остановится в `rest`.
-    GroundSpawned { id: LootId, start: NetPos, vel: NetPos, rest: NetPos, base: ItemBaseId, quality: Quality, count: u16 },
+    /// Предмет в мире (твёрдое тело): центр коробки, поворот, скорость. `shelf` — товар на прилавке.
+    GroundSpawned { id: LootId, pos: NetPos, rot: [f32; 4], vel: NetPos, base: ItemBaseId, quality: Quality, count: u16, asleep: bool, shelf: Option<ShelfMark> },
+    /// Предмет улёгся: точное положение.
+    PropRest { id: LootId, pos: NetPos, rot: [f32; 4] },
+    /// Кто держит предмет (None — никто).
+    PropHeld { id: LootId, holder: Option<u64> },
+    /// Ответ на `ShelfQuery`: цена для этого игрока, сколько всего, у кого и чем занят торговец.
+    ShelfInfo { id: LootId, price: u32, stock: u16, merchant: String, attention: String, pocketable: bool, refuse: Option<String> },
     Removed { id: LootId },
     /// Началось применение расходника: подпись и длительность полоски.
     UseStarted { verb: String, duration: f32 },
@@ -111,3 +136,31 @@ pub fn simulate_drop(level: &LevelColliders, start: Vec3, vel: Vec3) -> Vec3 {
     }
     pos
 }
+
+/// Канал renet для частых положений летящих и перетаскиваемых предметов (ненадёжный).
+pub const CH_PROPS: u8 = 9;
+
+/// Положение одного движущегося предмета (ненадёжный канал, ~30 раз в секунду).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct PropState {
+    pub id: LootId,
+    pub pos: [f32; 3],
+    /// Поворот, сжатый в i16 (×32767).
+    pub rot: [i16; 4],
+    pub vel: [f32; 3],
+}
+
+impl PropState {
+    pub fn new(id: LootId, pos: Vec3, rot: bevy::math::Quat, vel: Vec3) -> Self {
+        let q = rot.normalize().to_array().map(|c| (c.clamp(-1.0, 1.0) * 32767.0).round() as i16);
+        Self { id, pos: pos.to_array(), rot: q, vel: vel.to_array() }
+    }
+
+    pub fn rotation(&self) -> bevy::math::Quat {
+        bevy::math::Quat::from_array(self.rot.map(|c| c as f32 / 32767.0)).normalize()
+    }
+}
+
+/// Сервер -> клиент по `CH_PROPS`.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PropsSnapshot(pub Vec<PropState>);

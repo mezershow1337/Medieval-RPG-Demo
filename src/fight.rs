@@ -143,21 +143,24 @@ fn combat_input(
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     client: Option<ResMut<RenetClient>>,
     mut local: Query<(&LocalPlayer, &mut LocalFighter)>,
+    grab: Option<Res<crate::props_client::PropGrab>>,
 ) {
     if !cursor_locked(&cursor) {
         return;
     }
+    // ЛКМ по предмету — захват (props_client), ПКМ с предметом в руках — бросок.
+    let (no_attack, no_guard) = grab.map(|g| (g.blocks_attack(), g.blocks_guard())).unwrap_or((false, false));
     let Some(mut client) = client else { return };
     let Ok((p, mut f)) = local.single_mut() else { return };
     if f.fighter.is_dead() {
         return;
     }
-    if mouse.just_pressed(MouseButton::Left) {
+    if mouse.just_pressed(MouseButton::Left) && !no_attack {
         f.fighter.try_attack();
         client.send_message(CH_RELIABLE, encode(&ClientMessage::Attack { yaw: p.yaw, pitch: p.pitch }));
     }
     // Защита: держим ПКМ. Оружием — парирование, щитом — блок.
-    if mouse.just_pressed(MouseButton::Right) {
+    if mouse.just_pressed(MouseButton::Right) && !no_guard {
         f.fighter.set_guard(true);
         client.send_message(CH_RELIABLE, encode(&ClientMessage::Guard { on: true, yaw: p.yaw, pitch: p.pitch }));
     }

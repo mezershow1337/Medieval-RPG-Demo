@@ -299,7 +299,19 @@ fn rebuild_ui(
                 let value: u32 = inv.all_items().filter(|i| crate::economy::coin_value(i.base).is_none()).map(Item::value).sum();
                 p.spawn(text(
                     &fonts,
-                    format!("Кошель: {}\nВещи примерно на {}", crate::economy::format_money(purse), crate::economy::format_money(value)),
+                    {
+                        let load = crate::weight::inventory_weight(inv);
+                        let cap = crate::weight::carry_capacity(inv.equipped_stats().get(crate::items::Stat::Strength));
+                        let slow = crate::weight::encumbrance(load, cap);
+                        let burden = if slow < 1.0 { format!(" — перегруз, шаг медленнее на {:.0}%", (1.0 - slow) * 100.0) } else { String::new() };
+                        format!(
+                            "Кошель: {}\nВещи примерно на {}\nНоша: {} из {}{burden}",
+                            crate::economy::format_money(purse),
+                            crate::economy::format_money(value),
+                            crate::weight::format_weight(load),
+                            crate::weight::format_weight(cap)
+                        )
+                    },
                     15.0,
                     Color::srgb(0.9, 0.75, 0.35),
                     false,
@@ -771,7 +783,7 @@ fn update_tooltip(
         for (s, v) in &item.affixes {
             t.spawn(text(&fonts, format!("{} {}", s.format(*v), s.name()), 14.0, Color::srgb(0.55, 0.75, 1.0), false));
         }
-        t.spawn(text(&fonts, format!("Размер {}×{}   Цена ≈ {}", info.size.0, info.size.1, crate::economy::format_money(item.value())), 12.0, DIM, false));
+        t.spawn(text(&fonts, format!("Размер {}×{}   Вес {}   Цена ≈ {}", info.size.0, info.size.1, crate::weight::format_weight(crate::weight::item_weight(&item)), crate::economy::format_money(item.value())), 12.0, DIM, false));
         // Сравнение с надетым.
         if let (Some(slot), Some(me)) = (info.slot, state.inventory.as_ref())
             && let Some(worn) = me.equipped(slot).filter(|w| w.uid != item.uid)

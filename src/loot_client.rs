@@ -23,7 +23,8 @@ impl Plugin for LootClientPlugin {
             .insert_resource(PendingCorpses::default())
             .add_systems(Startup, (setup_loot_assets, crate::icons::setup_models, setup_prompt, setup_use_bar).chain().after(crate::inventory_ui::setup_fonts))
             .add_systems(Update, (receive_loot, attach_corpse_views, interact_input).chain().run_if(client_connected))
-            .add_systems(Update, (animate_drops, aim_target, update_prompt, update_notices, update_use_bar).chain());
+            .add_plugins(crate::props_client::PropsClientPlugin)
+            .add_systems(Update, (aim_target, update_prompt, update_notices, update_use_bar).chain());
     }
 }
 
@@ -65,7 +66,7 @@ pub fn send(client: &mut RenetClient, msg: &LootClientMessage) {
 }
 
 #[derive(Resource, Default)]
-struct LootIndex(HashMap<LootId, Entity>);
+pub struct LootIndex(pub HashMap<LootId, Entity>);
 
 /// Сведения о телах боевой системы, к которым ещё не привязали обыск.
 #[derive(Resource, Default)]
@@ -93,9 +94,10 @@ pub struct GroundView {
     pub base: ItemBaseId,
     pub quality: Quality,
     pub count: u16,
-    rest: Vec3,
-    vel: Vec3,
-    settled: bool,
+    /// Половинные размеры тела (для прицела и подсветки).
+    pub half: Vec3,
+    /// Товар на прилавке этого торговца.
+    pub shelf: Option<crate::trade::MerchantId>,
 }
 
 #[derive(Resource)]
@@ -146,19 +148,23 @@ fn setup_loot_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
 }
 
 /// Предмет на земле: его 3D-модель (та же, что на иконке) и подсветка по качеству.
-fn spawn_item_model(p: &mut ChildSpawnerCommands, assets: &LootAssets, models: &ItemModels, base: ItemBaseId, quality: Quality) {
-    p.spawn((WorldAssetRoot(models.get(base)), Transform::default()));
+fn spawn_item_model(p: &mut ChildSpawnerCommands, assets: &LootAssets, models: &ItemModels, base: ItemBaseId, quality: Quality, offset: Vec3, shelf: bool) {
+    p.spawn((WorldAssetRoot(models.get(base)), Transform::from_translation(offset)));
+    // Товар на прилавке не светится: его и так видно, а луч над столом выглядел бы странно.
+    if shelf {
+        return;
+    }
     // Добротные и лучше слегка светятся снизу, редкие — ещё и лучом, чтобы их было видно издалека.
     if quality >= Quality::Uncommon {
         p.spawn((
             Mesh3d(assets.halo.clone()),
             MeshMaterial3d(assets.halo_mat[quality.index()].clone()),
-            Transform::from_xyz(0.0, 0.004, 0.0).with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+            Transform::from_translation(offset + Vec3::Y * 0.004).with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
             bevy::light::NotShadowCaster,
         ));
     }
     if quality >= Quality::Rare {
-        p.spawn((Mesh3d(assets.beam.clone()), MeshMaterial3d(assets.beam_mat[quality.index()].clone()), Transform::from_xyz(0.0, 0.8, 0.0), bevy::light::NotShadowCaster));
+        p.spawn((Mesh3d(assets.beam.clone()), MeshMaterial3d(assets.beam_mat[quality.index()].clone()), Transform::from_translation(offset + Vec3::Y * 0.8), bevy::light::NotShadowCaster));
     }
 }
 
@@ -174,7 +180,11 @@ fn receive_loot(
     mut pending: ResMut<PendingCorpses>,
     mut mats: Query<&mut MeshMaterial3d<StandardMaterial>>,
     time: Res<Time>,
+    mut grab: ResMut<crate::props_client::PropGrab>,
+    mut motions: Query<&mut crate::props_client::PropMotion>,
+    net: Option<Res<crate::client::NetState>>,
 ) {
+    let me = net.as_ref().and_then(|n| n.my_id);
     let now = time.elapsed_secs();
     while let Some(bytes) = client.receive_message(CH_LOOT) {
         let Some(msg) = decode::<LootServerMessage>(&bytes) else { continue };
@@ -247,21 +257,41 @@ fn receive_loot(
                     }
                 }
             }
-            LootServerMessage::GroundSpawned { id, start, vel, rest, base, quality, count } => {
-                let yaw = (id % 1000) as f32 * 2.399 % std::f32::consts::TAU;
+            LootServerMessage::GroundSpawned { id, pos, rot, vel, base, quality, count, asleep, shelf } => {
+                let pos: Vec3 = pos.into();
+                let rot = Quat::from_array(rot).normalize();
+                let body = crate::props::PropBody::for_item(base, count, pos, rot);
+                let (half, offset) = (body.half, body.model_offset());
+                // Тот же предмет пересоздаётся (украли с прилавка, часть стопки подобрали): не прыгаем.
+                let start = index.0.get(&id).and_then(|e| motions.get(*e).ok()).map(|_| pos).unwrap_or(pos);
                 let e = commands
                     .spawn((
-                        GroundView { id, base, quality, count, rest: rest.into(), vel: vel.into(), settled: false },
-                        Transform::from_translation(start.into()).with_rotation(Quat::from_rotation_y(yaw)),
+                        GroundView { id, base, quality, count, half, shelf: shelf.map(|s| s.merchant) },
+                        crate::props_client::PropMotion { pos, rot, vel: vel.into(), at: now, asleep },
+                        Transform::from_translation(start).with_rotation(rot),
                         Visibility::default(),
                     ))
-                    .with_children(|p| spawn_item_model(p, &assets, &models, base, quality))
+                    .with_children(|p| spawn_item_model(p, &assets, &models, base, quality, offset, shelf.is_some()))
                     .id();
                 if let Some(old) = index.0.insert(id, e) {
                     commands.entity(old).despawn();
                 }
             }
+            LootServerMessage::PropRest { id, pos, rot } => {
+                if let Some(mut m) = index.0.get(&id).and_then(|e| motions.get_mut(*e).ok()) {
+                    m.pos = pos.into();
+                    m.rot = Quat::from_array(rot).normalize();
+                    m.vel = Vec3::ZERO;
+                    m.asleep = true;
+                    m.at = now;
+                }
+            }
+            LootServerMessage::PropHeld { id, holder } => grab.set_holder(id, holder, me),
+            LootServerMessage::ShelfInfo { id, price, stock, merchant, attention, pocketable, refuse } => {
+                grab.shelf_info.insert(id, crate::props_client::ShelfInfoData { price, stock, merchant, attention, pocketable, refuse });
+            }
             LootServerMessage::Removed { id } => {
+                grab.forget(id);
                 pending.0.remove(&id);
                 if let Some(e) = index.0.remove(&id) {
                     commands.entity(e).despawn();
@@ -279,25 +309,6 @@ fn receive_loot(
     }
 }
 
-/// Предметы падают с той же физикой, что считал сервер, и ложатся в его точку.
-fn animate_drops(time: Res<Time>, level: Res<LevelColliders>, mut items: Query<(&mut GroundView, &mut Transform)>) {
-    let dt = time.delta_secs().min(1.0 / 20.0);
-    for (mut g, mut t) in &mut items {
-        if g.settled {
-            continue;
-        }
-        let mut pos = t.translation;
-        let mut vel = g.vel;
-        let landed = step_drop(&level, &mut pos, &mut vel, dt);
-        g.vel = vel;
-        t.translation = pos;
-        if landed || pos.distance(g.rest) < 0.05 || pos.y < g.rest.y - 1.0 {
-            t.translation = g.rest;
-            g.settled = true;
-        }
-    }
-}
-
 /// На что смотрит игрок: ближайшее тело или предмет на линии взгляда.
 fn aim_target(
     mut state: ResMut<LootState>,
@@ -305,6 +316,7 @@ fn aim_target(
     corpses: Query<(&CorpseView, &Transform)>,
     ground: Query<(&GroundView, &Transform)>,
     level: Res<LevelColliders>,
+    grab: Res<crate::props_client::PropGrab>,
 ) {
     state.target = None;
     if state.ui_open {
@@ -329,8 +341,24 @@ fn aim_target(
             }
         }
     };
+    // Предметы: точный луч по их коробке (чуть больше, чтобы мелочь было легко поймать).
+    let mut item: Option<(f32, LootId)> = None;
     for (g, t) in &ground {
-        test(t.translation + Vec3::Y * 0.08, 0.35, g.id);
+        if grab.holding == Some(g.id) {
+            continue;
+        }
+        let obb = crate::props::Obb { center: t.translation, rot: t.rotation, half: g.half + Vec3::splat(0.03) };
+        if let Some(d) = obb.ray(origin, dir).filter(|d| *d <= INTERACT_RANGE + 0.5)
+            && item.is_none_or(|(b, _)| d < b)
+        {
+            item = Some((d, g.id));
+        }
+    }
+    if let Some((d, id)) = item
+        && crate::combat::line_of_sight(&level, origin, origin + dir * (d - 0.05).max(0.0))
+    {
+        state.target = Some(id);
+        return;
     }
     for (c, t) in &corpses {
         if c.id >= CONTAINER_ID_BASE {
@@ -346,7 +374,7 @@ fn aim_target(
     state.target = best.map(|(_, id)| id);
 }
 
-fn interact_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, mut state: ResMut<LootState>, time: Res<Time>) {
+fn interact_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, mut state: ResMut<LootState>, time: Res<Time>, ground: Query<&GroundView>) {
     if state.ui_open {
         return;
     }
@@ -365,6 +393,13 @@ fn interact_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClien
                 None => notices.push(format!("Нет предмета: {name}")),
             }
         }
+    }
+    // «G» на товаре прилавка — стащить в сумку.
+    if keys.just_pressed(KeyCode::KeyG)
+        && let Some(id) = state.target
+        && ground.iter().any(|g| g.id == id && g.shelf.is_some())
+    {
+        send(&mut client, &LootClientMessage::ShelfSteal { id });
     }
     if keys.just_pressed(KeyCode::F8) {
         send(&mut client, &LootClientMessage::DebugSpawnCorpse);
@@ -483,8 +518,12 @@ fn setup_prompt(mut commands: Commands, fonts: Res<UiFonts>) {
         });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_prompt(
     state: Res<LootState>,
+    mut grab: ResMut<crate::props_client::PropGrab>,
+    client: Option<ResMut<RenetClient>>,
+    time: Res<Time>,
     corpses: Query<&CorpseView>,
     ground: Query<&GroundView>,
     index: Res<LootIndex>,
@@ -492,6 +531,17 @@ fn update_prompt(
     mut text: Single<(&mut Text, &mut TextColor), With<PromptText>>,
 ) {
     let (ref mut t, ref mut color) = *text;
+    let now = time.elapsed_secs();
+    // В руках: подсказка, как отпустить и бросить.
+    if let Some(g) = grab.holding.and_then(|id| index.0.get(&id)).and_then(|e| ground.get(*e).ok()) {
+        let w = crate::weight::format_weight(crate::weight::unit_weight(g.base) * g.count.max(1) as f32);
+        let line = format!("{} ({w}) — отпустите ЛКМ, чтобы положить · [ПКМ] бросить · колесо — ближе/дальше", g.base.base().name);
+        if t.0 != line {
+            t.0 = line;
+        }
+        color.0 = Color::srgb(0.95, 0.9, 0.75);
+        return;
+    }
     let corpse = state.target.and_then(|id| corpses.iter().find(|c| c.id == id));
     let entity = state.target.and_then(|id| index.0.get(&id).copied());
     let (line, c) = match entity {
@@ -508,7 +558,29 @@ fn update_prompt(
             let quality = if base.has_quality { format!(" ({})", g.quality.name().to_lowercase()) } else { String::new() };
             // Незнакомую траву персонаж не может назвать.
             let name = knowledge.as_ref().map(|k| k.0.item_name(g.base)).unwrap_or_else(|| base.name.to_string());
-            (format!("[E] Подобрать: {name}{count}{quality}"), quality_color(g.quality))
+            let weight = crate::weight::format_weight(crate::weight::unit_weight(g.base) * g.count.max(1) as f32);
+            if g.shelf.is_some() {
+                // Товар: цена для нас (спрашиваем сервер), сколько есть и чем занят торговец.
+                if let Some(mut c) = client {
+                    grab.ask_price(&mut c, g.id, now);
+                }
+                let line = match grab.shelf_info.get(&g.id) {
+                    Some(info) => {
+                        let price = crate::economy::format_money(info.price);
+                        let stock = if info.stock > 1 { format!(", есть {} шт.", info.stock) } else { String::new() };
+                        let steal = if info.pocketable { " · [G] стащить" } else { "" };
+                        let head = format!("{name}{quality} — {price} ({weight}{stock})");
+                        match &info.refuse {
+                            Some(why) => format!("{head}\n{why}"),
+                            None => format!("{head}\n[E] купить · [ЛКМ] взять в руки{steal}\n{} {}", info.merchant, info.attention),
+                        }
+                    }
+                    None => format!("{name}{quality} — товар ({weight})\n[E] купить · [ЛКМ] взять в руки"),
+                };
+                (line, Color::srgb(1.0, 0.85, 0.45))
+            } else {
+                (format!("[E] Подобрать: {name}{count}{quality} ({weight}) · [ЛКМ] взять в руки"), quality_color(g.quality))
+            }
         }
         _ => (String::new(), Color::WHITE),
     };
