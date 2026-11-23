@@ -34,6 +34,9 @@ mod medicine_server;
 mod medicine_client;
 mod npc;
 mod player;
+mod props;
+mod props_client;
+mod props_server;
 mod protocol;
 mod residents;
 mod rig;
@@ -43,6 +46,7 @@ mod trade_client;
 mod trade_net;
 mod trade_server;
 mod trade_ui;
+mod weight;
 
 use protocol::DEFAULT_PORT;
 use std::net::{SocketAddr, ToSocketAddrs};

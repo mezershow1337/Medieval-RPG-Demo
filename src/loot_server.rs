@@ -25,7 +25,9 @@ use crate::items::*;
 use crate::loot_net::*;
 use crate::protocol::{decode, encode};
 use crate::protocol::ActorKind;
+use crate::props::{GRAB_RANGE, HOLD_MAX, HOLD_MIN, PropBody, throw_speed};
 use crate::server::GameWorld;
+use crate::trade::MerchantId;
 use bevy::prelude::*;
 use bevy_renet::{RenetServer, RenetServerEvent, renet::ServerEvent};
 use std::collections::{HashMap, HashSet};
@@ -44,7 +46,7 @@ impl Plugin for LootServerPlugin {
             .add_observer(on_spawn_ground_item)
             .add_systems(Startup, (spawn_demo_loot, spawn_world_containers))
             .add_systems(Update, refill_world_containers)
-            .add_systems(Update, (sync_combat_corpses, receive_loot_messages, close_far_containers).chain());
+            .add_systems(Update, (sync_combat_corpses, receive_loot_messages, close_far_containers, crate::props_server::tick_props).chain());
     }
 }
 
@@ -96,11 +98,51 @@ pub struct Corpse {
     own_model: bool,
 }
 
+/// Предмет в мире: твёрдое тело со своей физикой (`props.rs`).
 pub struct GroundItem {
-    pub pos: Vec3,
-    pub start: Vec3,
-    pub vel: Vec3,
+    pub body: PropBody,
     pub item: Item,
+    /// Товар на прилавке (чей и где его место). Купить — «E», унести — кража.
+    pub shelf: Option<ShelfTag>,
+    /// Кто держит в руках.
+    pub holder: Option<u64>,
+}
+
+impl GroundItem {
+    pub fn pos(&self) -> Vec3 {
+        self.body.pos
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ShelfTag {
+    pub merchant: MerchantId,
+    /// Номер стопки на полке торговца (`MerchantState::shelf`).
+    pub shelf_uid: ItemUid,
+    /// Место на прилавке.
+    pub home: (Vec3, Quat),
+    /// Сколько секунд лежит не на месте (торговец вернёт).
+    pub away: f32,
+}
+
+/// Игрок держит предмет.
+#[derive(Clone, Debug)]
+pub struct HoldState {
+    pub id: LootId,
+    pub dist: f32,
+    /// Взгляд и поворот предмета в момент захвата: предмет поворачивается вместе с игроком.
+    pub yaw0: f32,
+    pub rot0: Quat,
+    /// Сколько секунд предмет застрял и не идёт за рукой.
+    pub stuck: f32,
+}
+
+/// Что игрок сделал с товаром на прилавке (разбирает торговля, `trade_server`).
+#[derive(Clone, Copy, Debug)]
+pub enum ShelfRequest {
+    Buy { player: u64, id: LootId },
+    Pocket { player: u64, id: LootId },
+    Query { player: u64, id: LootId },
 }
 
 #[derive(Resource)]
@@ -117,6 +159,10 @@ pub struct LootWorld {
     pub uids: UidGen,
     /// Сундуки уровня: что в них кладётся и с какого времени пусты.
     fixed: HashMap<LootId, (LootTableId, Option<f32>)>,
+    /// Кто что держит в руках.
+    pub holds: HashMap<u64, HoldState>,
+    /// Покупки и кражи с прилавка за кадр.
+    pub shelf_requests: Vec<ShelfRequest>,
 }
 
 impl Default for LootWorld {
@@ -132,6 +178,8 @@ impl Default for LootWorld {
             rng: Rng::from_time(),
             uids: UidGen::default(),
             fixed: HashMap::new(),
+            holds: HashMap::new(),
+            shelf_requests: Vec::new(),
         }
     }
 }
@@ -193,13 +241,46 @@ impl LootWorld {
         self.corpses.insert(id, Corpse { pos, yaw, name, inv, created: self.next_id, own_model });
     }
 
-    fn spawn_ground(&mut self, server: &mut RenetServer, level: &LevelColliders, start: Vec3, vel: Vec3, item: Item) -> LootId {
-        let rest = simulate_drop(level, start, vel);
+    /// Бросить предмет в мир из точки `start` (центр) со скоростью `vel`: дальше его ведёт физика.
+    pub fn spawn_ground(&mut self, server: &mut RenetServer, start: Vec3, vel: Vec3, item: Item) -> LootId {
+        let rot = Quat::from_rotation_y(self.rng.range_f32(-std::f32::consts::PI, std::f32::consts::PI)) * Quat::from_rotation_x(self.rng.range_f32(-0.3, 0.3));
+        let mut body = PropBody::for_item(item.base, item.count, start, rot);
+        body.vel = vel;
+        body.ang = Vec3::new(self.rng.range_f32(-2.0, 2.0), self.rng.range_f32(-2.0, 2.0), self.rng.range_f32(-2.0, 2.0));
+        self.insert_ground(server, GroundItem { body, item, shelf: None, holder: None })
+    }
+
+    /// Положить готовое тело в мир (для прилавков) и разослать всем.
+    pub fn insert_ground(&mut self, server: &mut RenetServer, ground: GroundItem) -> LootId {
         let id = self.new_id();
-        let ground = GroundItem { pos: rest, start, vel, item };
         server.broadcast_message(CH_LOOT, encode(&ground_message(id, &ground)));
         self.ground.insert(id, ground);
         id
+    }
+
+    /// Убрать предмет из мира (подобрали, купили, исчез). Держащий его отпускает руки.
+    pub fn remove_ground(&mut self, server: &mut RenetServer, id: LootId) -> Option<GroundItem> {
+        let g = self.ground.remove(&id)?;
+        if let Some(h) = g.holder {
+            self.holds.remove(&h);
+        }
+        server.broadcast_message(CH_LOOT, encode(&LootServerMessage::Removed { id }));
+        Some(g)
+    }
+
+    /// Отпустить предмет в руках игрока; `throw` — направление броска.
+    pub fn release(&mut self, server: &mut RenetServer, player: u64, throw: Option<Vec3>) {
+        let Some(h) = self.holds.remove(&player) else { return };
+        let strength = self.equipped_stats(player).get(Stat::Strength);
+        if let Some(g) = self.ground.get_mut(&h.id) {
+            g.holder = None;
+            g.body.wake();
+            match throw {
+                Some(dir) => g.body.vel += dir.normalize_or_zero() * throw_speed(g.body.mass, strength),
+                None => g.body.vel = g.body.vel.clamp_length_max(6.0),
+            }
+        }
+        server.broadcast_message(CH_LOOT, encode(&LootServerMessage::PropHeld { id: h.id, holder: None }));
     }
 
     /// Вынимает инвентарь на время операции (вернуть через `put_inv`).
@@ -251,15 +332,17 @@ impl LootWorld {
     }
 }
 
-fn ground_message(id: LootId, g: &GroundItem) -> LootServerMessage {
+pub fn ground_message(id: LootId, g: &GroundItem) -> LootServerMessage {
     LootServerMessage::GroundSpawned {
         id,
-        start: g.start.into(),
-        vel: g.vel.into(),
-        rest: g.pos.into(),
+        pos: g.body.pos.into(),
+        rot: g.body.rot.to_array(),
+        vel: g.body.vel.into(),
         base: g.item.base,
         quality: g.item.quality,
         count: g.item.count,
+        asleep: g.body.asleep,
+        shelf: g.shelf.as_ref().map(|t| ShelfMark { merchant: t.merchant }),
     }
 }
 
@@ -294,9 +377,13 @@ fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, m
             }
             for (gid, g) in &world.ground {
                 server.send_message(id, CH_LOOT, encode(&ground_message(*gid, g)));
+                if let Some(h) = g.holder {
+                    server.send_message(id, CH_LOOT, encode(&LootServerMessage::PropHeld { id: *gid, holder: Some(h) }));
+                }
             }
         }
         ServerEvent::ClientDisconnected { client_id, .. } => {
+            world.release(&mut server, *client_id, None);
             world.inventories.remove(client_id);
             world.open.remove(client_id);
         }
@@ -332,9 +419,9 @@ fn on_character_died(event: On<CharacterDied>, mut server: ResMut<RenetServer>, 
     world.spawn_corpse(&mut server, &level, ev.pos, ev.yaw, ev.name, inv);
 }
 
-fn on_spawn_ground_item(event: On<SpawnGroundItem>, mut server: ResMut<RenetServer>, level: Res<LevelColliders>, mut world: ResMut<LootWorld>) {
+fn on_spawn_ground_item(event: On<SpawnGroundItem>, mut server: ResMut<RenetServer>, mut world: ResMut<LootWorld>) {
     let ev = event.event().clone();
-    world.spawn_ground(&mut server, &level, ev.pos, ev.vel, ev.item);
+    world.spawn_ground(&mut server, ev.pos, ev.vel, ev.item);
 }
 
 /// Через сколько секунд опустевший сундук снова наполняется (хозяева докупают, воры приходят снова).
@@ -432,8 +519,17 @@ fn receive_loot_messages(
                         server.send_message(pid, CH_LOOT, encode(&msg));
                         world.open.insert(pid, id);
                     } else if let Some(g) = world.ground.get(&id) {
-                        if !in_reach(feet, g.pos) {
+                        if !in_reach(feet, g.pos()) {
                             notice(&mut server, pid, "Слишком далеко");
+                            continue;
+                        }
+                        if g.shelf.is_some() {
+                            // Товар на прилавке: «E» — купить.
+                            world.shelf_requests.push(ShelfRequest::Buy { player: pid, id });
+                            continue;
+                        }
+                        if g.holder.is_some_and(|h| h != pid) {
+                            notice(&mut server, pid, "Это держит другой");
                             continue;
                         }
                         let item = g.item.clone();
@@ -441,18 +537,15 @@ fn receive_loot_messages(
                         let inv = world.inventories.get_mut(&pid).unwrap();
                         match inv.place(item, Target::Auto) {
                             Ok(_) => {
-                                world.ground.remove(&id);
-                                server.broadcast_message(CH_LOOT, encode(&LootServerMessage::Removed { id }));
+                                world.remove_ground(&mut server, id);
                             }
                             Err(rest) => {
                                 if rest.count != before {
                                     // Часть стопки влезла — на земле остаётся меньше.
                                     let g = world.ground.get_mut(&id).unwrap();
                                     g.item.count = rest.count;
-                                    g.start = g.pos;
-                                    g.vel = Vec3::ZERO;
+                                    g.body.mass = crate::weight::item_weight(&g.item).max(0.002);
                                     let msg = ground_message(id, g);
-                                    server.broadcast_message(CH_LOOT, encode(&LootServerMessage::Removed { id }));
                                     server.broadcast_message(CH_LOOT, encode(&msg));
                                 }
                                 notice(&mut server, pid, MoveError::NoSpace.message());
@@ -508,7 +601,7 @@ fn receive_loot_messages(
                         start = feet + Vec3::Y * 1.0;
                     }
                     let vel = dir * 3.5 + Vec3::Y * 1.5;
-                    world.spawn_ground(&mut server, &level, start, vel, item);
+                    world.spawn_ground(&mut server, start, vel, item);
                     world.sync(&mut server, pid, &[from], &was_empty);
                 }
                 LootClientMessage::Close => {
@@ -529,6 +622,47 @@ fn receive_loot_messages(
                     inv.fill(items, true);
                     let yaw = world.rng.range_f32(-3.1, 3.1);
                     world.spawn_corpse(&mut server, &level, feet + dir * 1.8 + Vec3::Y * 0.5, yaw, name.into(), inv);
+                }
+                LootClientMessage::Grab { id, dist } => {
+                    if world.holds.contains_key(&pid) {
+                        continue;
+                    }
+                    let eye = feet + Vec3::Y * actor.pose.eye_height();
+                    let Some(g) = world.ground.get_mut(&id) else { continue };
+                    let refuse = if g.holder.is_some() {
+                        Some("Это держит другой")
+                    } else if g.body.pos.distance(eye) > GRAB_RANGE + 0.4 || !crate::combat::line_of_sight(&level, eye, g.body.pos) {
+                        Some("Не дотянуться")
+                    } else {
+                        None
+                    };
+                    if let Some(why) = refuse {
+                        server.send_message(pid, CH_LOOT, encode(&LootServerMessage::PropHeld { id, holder: g.holder }));
+                        notice(&mut server, pid, why);
+                        continue;
+                    }
+                    g.holder = Some(pid);
+                    g.body.wake();
+                    let rot0 = g.body.rot;
+                    world.holds.insert(pid, HoldState { id, dist: dist.clamp(HOLD_MIN, HOLD_MAX), yaw0: yaw, rot0, stuck: 0.0 });
+                    server.broadcast_message(CH_LOOT, encode(&LootServerMessage::PropHeld { id, holder: Some(pid) }));
+                }
+                LootClientMessage::HoldDistance { dist } => {
+                    if let Some(h) = world.holds.get_mut(&pid) {
+                        h.dist = dist.clamp(HOLD_MIN, HOLD_MAX);
+                    }
+                }
+                LootClientMessage::Release => world.release(&mut server, pid, None),
+                LootClientMessage::Throw => world.release(&mut server, pid, Some(forward(yaw, pitch))),
+                LootClientMessage::ShelfSteal { id } | LootClientMessage::ShelfQuery { id } => {
+                    let Some(g) = world.ground.get(&id).filter(|g| g.shelf.is_some()) else { continue };
+                    if !in_reach(feet, g.pos()) {
+                        continue;
+                    }
+                    world.shelf_requests.push(match msg {
+                        LootClientMessage::ShelfSteal { .. } => ShelfRequest::Pocket { player: pid, id },
+                        _ => ShelfRequest::Query { player: pid, id },
+                    });
                 }
             }
         }

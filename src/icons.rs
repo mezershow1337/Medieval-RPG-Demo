@@ -25,6 +25,20 @@ pub const ICON_PX_PER_CELL: u32 = 128;
 mod art;
 pub use art::ITEM_ART;
 
+/// Ключ модели -> половинные размеры её коробки (файл создаёт `item_bounds.py`), для физики предметов.
+mod shapes;
+pub use shapes::ITEM_SHAPES;
+
+/// Половинные размеры коробки, в которую вписана 3D-модель предмета (низ модели — на y = 0).
+pub fn model_half_extents(base: ItemBaseId) -> [f32; 3] {
+    let key = art_key(base);
+    ITEM_SHAPES.iter().find(|(k, _)| *k == key).map(|(_, h)| *h).unwrap_or_else(|| {
+        // Модели ещё нет и размеров нет: оцениваем по клеткам инвентаря (клетка ≈ 9 см).
+        let (w, h) = base.base().size;
+        [0.045 * w as f32, 0.04, 0.045 * h as f32]
+    })
+}
+
 /// Модель для предметов, у которых своей пока нет.
 pub const FALLBACK_ART: &str = "sack";
 

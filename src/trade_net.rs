@@ -3,7 +3,7 @@
 use crate::factions::{Faction, Reputation};
 use crate::items::{Item, ItemUid};
 use crate::protocol::NetPos;
-use crate::trade::{Attention, Look, MerchantId, MoneyPolicy};
+use crate::trade::{Attention, Look, MerchantId, MoneyPolicy, StallBox};
 use serde::{Deserialize, Serialize};
 
 /// Канал renet для торговли (надёжный, по порядку). Настроен в `protocol::connection_config`.
@@ -85,6 +85,8 @@ pub struct MerchantInfo {
     pub pos: NetPos,
     pub yaw: f32,
     pub look: Look,
+    /// Прилавок (в системе торговца), на нём лежит товар.
+    pub stall: Vec<StallBox>,
 }
 
 /// Товар на полке.

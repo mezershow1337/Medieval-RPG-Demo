@@ -228,6 +228,11 @@ impl LevelColliders {
             .map(move |&i| &self.0[i as usize])
     }
 
+    /// Коробки (с учётом дверей), которые пересекаются с `a` — для физики предметов.
+    pub fn boxes_touching(&self, a: Aabb) -> impl Iterator<Item = &Aabb> + '_ {
+        self.near(a).filter(move |c| c.overlaps(&a))
+    }
+
     /// Коробки, в которые может попасть точка (быстрее, чем перебор всего `.0`).
     pub fn boxes_near(&self, p: Vec3) -> impl Iterator<Item = &Aabb> + '_ {
         let a = Aabb { min: p, max: p };
