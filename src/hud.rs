@@ -197,7 +197,7 @@ fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
              ЛКМ — удар оттуда, куда ведёте мышь (вправо, влево, вверх, наискось; вниз — укол), СКМ — укол\n\
              ПКМ вовремя — парирование и рипост (ЛКМ); держать — глухой блок (дорого, без рипоста)\n\
              Q или ПКМ на замахе — финт | другой удар на замахе — морф | встречный зеркальный удар — чембер\n\
-             1 — кулаки | 2–9 / колесо — хотбар",
+             1 — кулаки | 2–9 / колесо — хотбар | F7 — подсказки боя у прицела",
             14.0,
             Color::srgba(1.0, 1.0, 1.0, 0.8),
         ),
@@ -214,10 +214,11 @@ fn update_aim(
     local: Query<&LocalFighter>,
     mut dots: Query<(&AimDot, &mut BackgroundColor)>,
     mut ring: Single<&mut BorderColor, With<ParryRing>>,
+    hints: Res<crate::fight::CombatHints>,
 ) {
     use crate::combat::{Action, Swing};
     let Ok(f) = local.single() else { return };
-    let melee = !f.fighter.weapon.ranged() && !f.fighter.is_dead();
+    let melee = !f.fighter.weapon.ranged() && !f.fighter.is_dead() && hints.0;
     let active = f.fighter.action.swing().filter(|_| f.fighter.action.is_attacking());
     let riposte = matches!(f.fighter.action, Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. });
     let pulse = 0.6 + 0.4 * (time.elapsed_secs() * 14.0).sin();

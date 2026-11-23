@@ -175,7 +175,8 @@ pub fn run(server_addr: SocketAddr) {
         client_id,
         CONNECTION_TIMEOUT_SECS,
         vec![server_addr],
-        None,
+        // Постоянный профиль (ключ и имя): по нему сервер узнаёт хозяина дома после перезапуска.
+        Some(&crate::estates::pack_profile(&crate::estates::local_profile())),
         &[0; NETCODE_KEY_BYTES],
     )
     .expect("не удалось создать билет подключения");
@@ -193,11 +194,15 @@ pub fn run(server_addr: SocketAddr) {
         .add_plugins(crate::doors::DoorClientPlugin)
         .add_plugins(crate::map::MapClientPlugin)
         .add_plugins(crate::residents::ResidentsPlugin)
+        .add_plugins(crate::world_clock::ClockClientPlugin)
+        .add_plugins(crate::life_client::LifeClientPlugin)
         .add_plugins(crate::civil_client::CivilClientPlugin)
         .add_plugins(crate::trade_client::TradeClientPlugin)
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))
         .add_plugins(crate::smithing_client::SmithingClientPlugin)
+        .add_plugins(crate::towns_client::TownClientPlugin)
         .add_plugins(crate::ui_theme::UiThemePlugin)
+        .add_plugins((crate::skill_book::SkillBookPlugin, crate::hints::HintsPlugin))
         .add_plugins(crate::work_client::WorkClientPlugin)
         .add_plugins(crate::console::ConsolePlugin)
         .add_systems(Update, (hide_ui_for_shots, mute_player_camera_for_shots).run_if(|| std::env::var("MRPG_CAM").is_ok()))
@@ -312,13 +317,12 @@ fn setup_character_assets(mut commands: Commands, mut materials: ResMut<Assets<S
         steel: materials.add(StandardMaterial { base_color: Color::srgb(0.72, 0.74, 0.78), metallic: 0.9, perceptual_roughness: 0.3, ..default() }),
         blade_red: materials.add(StandardMaterial {
             base_color: Color::srgb(0.9, 0.2, 0.1),
-            emissive: LinearRgba::rgb(6.0, 0.6, 0.2),
+            emissive: LinearRgba::rgb(1.2, 0.15, 0.05),
             ..default()
         }),
         glow_mesh: meshes.add(Cylinder::new(0.022, 1.0)),
         glow: materials.add(StandardMaterial {
-            base_color: Color::srgba(1.0, 0.25, 0.1, 0.45),
-            emissive: LinearRgba::rgb(5.0, 0.5, 0.15),
+            base_color: Color::srgba(0.7, 0.12, 0.05, 0.22),
             alpha_mode: AlphaMode::Add,
             unlit: true,
             ..default()
@@ -477,6 +481,8 @@ fn receive_reliable(
     time: Res<Time>,
     mut welcomed_at: Local<Option<f32>>,
     mut civil: MessageWriter<crate::civil_client::CivilNet>,
+    mut clock: MessageWriter<crate::world_clock::ClockSync>,
+    mut alarm: MessageWriter<crate::daily_life::Alarm>,
 ) {
     while let Some(bytes) = client.receive_message(CH_RELIABLE) {
         let Some(msg) = decode::<ServerMessage>(&bytes) else { continue };
@@ -545,6 +551,7 @@ fn receive_reliable(
                 feedback.write(CombatFeedback::Hit { attacker: 0, target: u64::MAX, outcome: combat::HitOutcome::Damage { amount, killed: false, head }, at: at.into() });
                 let _ = civ;
                 civil.write(crate::civil_client::CivilNet::Hit);
+                alarm.write(crate::daily_life::Alarm(at.into()));
             }
             ServerMessage::CivilianDead { civ, corpse } => {
                 let fresh = welcomed_at.is_some_and(|t| time.elapsed_secs() - t > 1.5);
@@ -555,6 +562,9 @@ fn receive_reliable(
             }
             ServerMessage::Law(msg) => {
                 civil.write(crate::civil_client::CivilNet::Law(msg));
+            }
+            ServerMessage::Clock { game } => {
+                clock.write(crate::world_clock::ClockSync(game));
             }
             ServerMessage::CorpseRemoved { corpse_id } => {
                 if let Some(e) = corpses.0.remove(&corpse_id) {
@@ -963,6 +973,7 @@ fn animate_remote(
     mut swords: Query<(&mut Transform, &Children), (With<RemoteSword>, Without<RemoteActor>, Without<RemoteShield>)>,
     mut shields: Query<&mut Transform, (With<RemoteShield>, Without<RemoteActor>, Without<RemoteSword>)>,
     mut glows: Query<(&mut Transform, &mut Visibility), (With<RiposteGlow>, Without<RemoteActor>, Without<RemoteSword>, Without<RemoteShield>)>,
+    hints: Option<Res<crate::fight::CombatHints>>,
     mut rigs: Query<&mut RigPose, With<BodyRig>>,
     mut blades: Query<(&Blade, &mut MeshMaterial3d<StandardMaterial>)>,
     mut tints: ResMut<rig::BladeTints>,
@@ -1010,7 +1021,7 @@ fn animate_remote(
         };
         r.weapon_smooth = Some((hilt, dir));
         // Ответный удар после парирования подсвечиваем.
-        let riposte = matches!(r.fighter.action, Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. });
+        let riposte = matches!(r.fighter.action, Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. }) && hints.as_ref().is_none_or(|h| h.0);
         // Корпус работает вместе с клинком: на замахе торс закручен в сторону удара, в ударе
         // раскручивается, сверху — наклон вперёд, укол — выпад, отбитый — откинут назад.
         let d = aim * dir;

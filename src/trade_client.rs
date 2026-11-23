@@ -476,7 +476,7 @@ fn aim_merchants(
     }
 }
 
-/// Торговцы дышат и чуть переминаются.
+/// Торговцы дышат, переминаются и время от времени поправляют товар.
 fn idle_merchants(
     time: Res<Time>,
     npcs: Query<(&MerchantNpc, &Children)>,
@@ -488,12 +488,7 @@ fn idle_merchants(
             let Ok(mut pose) = poses.get_mut(child) else {
                 continue;
             };
-            let sway = (t * 0.4 + npc.phase).sin();
-            let solved = crate::rig::solve_pose(&crate::rig::PoseInput {
-                twist: sway * 0.08,
-                time: t + npc.phase,
-                ..default()
-            });
+            let solved = crate::rig::solve_pose(&crate::life_client::merchant_pose(t, npc.phase));
             *pose = solved.pose;
         }
     }

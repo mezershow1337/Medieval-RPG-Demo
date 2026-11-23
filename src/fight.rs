@@ -97,6 +97,8 @@ impl Plugin for FightPlugin {
             .init_resource::<DamageFlash>()
             .init_resource::<Shake>()
             .init_resource::<AttackAim>()
+            .insert_resource(CombatHints::from_env())
+            .add_systems(Update, toggle_combat_hints)
             .add_systems(Startup, setup_sparks)
             .add_systems(
                 Update,
@@ -120,6 +122,27 @@ impl Plugin for FightPlugin {
 const VIEW_SHOULDER: Vec3 = Vec3::new(0.24, -0.3, 0.12);
 /// Насколько меч от первого лица выше, чем в мире (только внешний вид).
 const VIEW_LIFT: f32 = 0.36;
+
+/// Подсказки боя: метки направления и кольцо парирования у прицела, свечение рипоста.
+/// Игра реалистичная, поэтому подсказки сдержанные и выключаются F7
+/// (`MRPG_COMBAT_HINTS=0` — выключены с самого начала).
+#[derive(Resource, Clone, Copy)]
+pub struct CombatHints(pub bool);
+
+impl CombatHints {
+    fn from_env() -> Self {
+        CombatHints(std::env::var("MRPG_COMBAT_HINTS").map(|v| v != "0").unwrap_or(true))
+    }
+}
+
+fn toggle_combat_hints(keys: Res<ButtonInput<KeyCode>>, mut hints: ResMut<CombatHints>, mut banner: ResMut<Banner>) {
+    if keys.just_pressed(KeyCode::F7) {
+        hints.0 = !hints.0;
+        banner.text = if hints.0 { "Подсказки боя включены (F7)" } else { "Подсказки боя выключены (F7)" }.into();
+        banner.color = Color::srgb(0.85, 0.85, 0.85);
+        banner.time_left = 1.5;
+    }
+}
 
 /// Свечение рипоста у меча от первого лица.
 #[derive(Component)]
@@ -304,7 +327,6 @@ pub fn reconcile(local: &mut LocalFighter, snap: &ActorSnapshot) {
 fn animate_view_sword(
     time: Res<Time>,
     assets: Res<CharacterAssets>,
-    models: Option<Res<crate::rig::CharacterModels>>,
     shake: Res<Shake>,
     local: Query<(&LocalPlayer, &LocalFighter)>,
     mut camera: Query<&mut Transform, (With<PlayerCamera>, Without<ViewSword>)>,
@@ -315,6 +337,7 @@ fn animate_view_sword(
     mut arm: Query<(&crate::rig::ViewArm, &mut Visibility), (With<ViewArmRoot>, Without<ViewSword>)>,
     mut joints: Query<&mut Transform, (Without<ViewSword>, Without<PlayerCamera>, Without<ViewArmRoot>, Without<ViewGlow>)>,
     mut glow: Query<(&mut Transform, &mut Visibility), (With<ViewGlow>, Without<ViewSword>, Without<PlayerCamera>, Without<ViewArmRoot>)>,
+    hints: Res<CombatHints>,
     mut cam_motion: Local<CamMotion>,
     mut smoothed: Local<Option<(Vec3, Quat)>>,
     work: Option<Res<crate::work_client::MyWork>>,
@@ -353,9 +376,9 @@ fn animate_view_sword(
     }
     *smoothed = Some((st.translation, st.rotation));
     let riposte = matches!(f.fighter.action, Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. });
-    let _ = (&assets, &models);
+    let _ = &assets;
     if let Ok((mut gt, mut gv)) = glow.single_mut() {
-        let g = riposte.then(|| crate::client::riposte_glow_transform(&st, f.fighter.weapon)).flatten().filter(|_| *vis != Visibility::Hidden);
+        let g = (riposte && hints.0).then(|| crate::client::riposte_glow_transform(&st, f.fighter.weapon)).flatten().filter(|_| *vis != Visibility::Hidden);
         *gv = if g.is_some() { Visibility::Inherited } else { Visibility::Hidden };
         if let Some(g) = g {
             *gt = g;
@@ -363,7 +386,7 @@ fn animate_view_sword(
     }
     for c in children.iter() {
         if let Ok((b, mut m)) = blades.get_mut(c) {
-            m.0 = if riposte { assets.blade_red.clone() } else { tints.get(&mut materials, &b.0, f.finish) };
+            m.0 = if riposte && hints.0 { assets.blade_red.clone() } else { tints.get(&mut materials, &b.0, f.finish) };
         }
     }
     // Рука держит рукоять.
