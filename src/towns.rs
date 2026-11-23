@@ -27,9 +27,13 @@ use serde::{Deserialize, Serialize};
 // Время
 // ---------------------------------------------------------------------------
 
-/// Сколько секунд реального времени длится игровая неделя.
+/// Темп хозяйства: сколько секунд реального времени длится неделя поселений (4 минуты).
+/// Сутки на часах мира (`world_clock.rs`) идут отдельно: 72 минуты.
+pub const DEFAULT_WEEK_SECS: f64 = 240.0;
+
+/// Длина недели поселений: хост может задать её переменной `MRPG_WEEK_SECS`, иначе [`DEFAULT_WEEK_SECS`].
 pub fn week_secs() -> f64 {
-    std::env::var("MRPG_WEEK_SECS").ok().and_then(|s| s.parse::<f64>().ok()).filter(|s| *s >= 1.0).unwrap_or(240.0)
+    std::env::var("MRPG_WEEK_SECS").ok().and_then(|s| s.parse::<f64>().ok()).filter(|s| *s >= 1.0).unwrap_or(DEFAULT_WEEK_SECS)
 }
 
 pub const WEEKS_PER_YEAR: u32 = 52;
