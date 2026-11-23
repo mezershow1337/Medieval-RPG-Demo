@@ -83,6 +83,16 @@ impl Plugin for GraphicsPlugin {
         .add_systems(Startup, setup_environment)
         .add_systems(Update, (billboard_flames, flicker_lights, cull_far_lights, follow_sky, toggle_heavy));
     }
+
+    fn finish(&self, app: &mut App) {
+        // Фотоматериалы нужны раньше, чем уровень создаст свои материалы.
+        let mut images = app.world_mut().resource_mut::<Assets<Image>>();
+        let tex = load_surface_textures(&mut images);
+        if tex.is_none() {
+            warn!("Фотоматериалы не загружены — остаются процедурные поверхности");
+        }
+        let _ = SURFACE_TEXTURES.set(tex);
+    }
 }
 
 #[derive(Resource)]
@@ -94,7 +104,7 @@ pub struct GraphicsSettings {
 
 pub type SurfaceMaterial = ExtendedMaterial<StandardMaterial, SurfaceExt>;
 
-/// Параметры процедурной поверхности (см. shaders/surface.wesl).
+/// Параметры поверхности (см. shaders/surface.wesl): процедурный узор + фотоматериал.
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
 pub struct SurfaceExt {
     /// Второй цвет: шов кладки, волокна дерева, тёмная плитка и т. п.
@@ -106,6 +116,23 @@ pub struct SurfaceExt {
     /// x — мох, y — грязь у земли, z — свечение (угли), w — запас.
     #[uniform(100)]
     pub params2: Vec4,
+    /// Фотоматериал: x — слой на горизонтальных гранях (−1 — без фото), y — 1/метров на тайл,
+    /// z — слой на вертикальных гранях, w — 1/метров на тайл для него.
+    #[uniform(100)]
+    pub photo: Vec4,
+    /// rgb — средний линейный цвет слоя x, w — насколько перекрашивать фото в цвет материала (0..1).
+    #[uniform(100)]
+    pub photo_mean: Vec4,
+    /// rgb — средний линейный цвет слоя z, w — сила рельефа нормалей фото.
+    #[uniform(100)]
+    pub photo_mean_b: Vec4,
+    /// Цвет фото (массив слоёв, sRGB).
+    #[texture(101, dimension = "2d_array")]
+    #[sampler(102)]
+    pub albedo: Option<Handle<Image>>,
+    /// Нормаль (RG) и шероховатость (B).
+    #[texture(103, dimension = "2d_array")]
+    pub nrm: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for SurfaceExt {
@@ -189,14 +216,112 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         Mat::PetalRed => (Color::srgb(0.80, 0.08, 0.05), Color::srgb(0.6, 0.05, 0.03), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
         Mat::PetalPink => (Color::srgb(0.85, 0.50, 0.65), Color::srgb(0.7, 0.4, 0.5), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
     };
+    let photo = photo_layers(mat);
+    let tex = surface_textures();
+    let has_photo = tex.is_some() && photo.is_some();
+    let (top, side, tint, relief) = photo.unwrap_or((0, 0, 0.0, 0.0));
+    let layer = |l: u32| &crate::surface_layers::LAYERS[l as usize];
+    let mean = |l: u32| Vec3::from_array(layer(l).mean);
     ExtendedMaterial {
         base: StandardMaterial { base_color: a, perceptual_roughness: rough, metallic: metal, reflectance: 0.4, ..default() },
         extension: SurfaceExt {
             color_b: lin(b),
             params: Vec4::new(pattern, scale, var, bump),
             params2: Vec4::new(moss, grime, glow, 0.0),
+            photo: if has_photo { Vec4::new(top as f32, 1.0 / layer(top).meters, side as f32, 1.0 / layer(side).meters) } else { Vec4::new(-1.0, 1.0, -1.0, 1.0) },
+            photo_mean: mean(top).extend(tint),
+            photo_mean_b: mean(side).extend(relief),
+            albedo: tex.map(|t| t.0.clone()),
+            nrm: tex.map(|t| t.1.clone()),
         },
     }
+}
+
+/// Какие фотослои берёт материал: (горизонтальные грани, вертикальные, перекраска 0..1, сила нормалей).
+/// `None` — остаётся чисто процедурным (мозаика, листва, вода, угли, знамёна, лепестки).
+fn photo_layers(mat: Mat) -> Option<(u32, u32, f32, f32)> {
+    use crate::surface_layers::*;
+    Some(match mat {
+        Mat::DarkStone => (L_ASHLAR, L_ASHLAR, 0.85, 1.0),
+        // Местный известняк Херсонеса — тёплый серо-бежевый: оставляем фото почти как есть.
+        Mat::Stone | Mat::Trim => (L_ASHLAR, L_ASHLAR, 0.5, 1.0),
+        Mat::Limestone => (L_ASHLAR, L_ASHLAR, 0.75, 1.0),
+        Mat::Floor => (L_FLAGSTONE, L_ASHLAR, 0.8, 0.8),
+        Mat::Paving => (L_FLAGSTONE, L_ASHLAR, 0.6, 0.9),
+        Mat::Cobble => (L_COBBLE, L_ASHLAR, 0.5, 1.0),
+        Mat::Grass => (L_GRASS, L_SOIL, 0.55, 0.8),
+        Mat::Rubble => (L_RUBBLE, L_RUBBLE, 0.6, 1.0),
+        Mat::Plaster => (L_PLASTER, L_PLASTER, 0.9, 0.6),
+        Mat::Signinum => (L_PLASTER, L_PLASTER, 1.0, 0.5),
+        Mat::Brick => (L_BRICK, L_BRICK, 0.5, 1.0),
+        Mat::OpusMixtum => (L_ASHLAR, L_BRICK, 0.7, 1.0),
+        Mat::Marble => (L_MARBLE, L_MARBLE, 0.6, 0.4),
+        Mat::Earth => (L_EARTH, L_EARTH, 0.6, 0.9),
+        Mat::Terrain => (L_GRASS, L_ROCK, 0.5, 1.0),
+        Mat::Wood => (L_WOOD, L_WOOD, 0.85, 0.9),
+        Mat::Tile => (L_ROOF, L_ROOF, 0.7, 1.0),
+        Mat::Iron => (L_IRON, L_IRON, 0.9, 0.6),
+        Mat::Bronze => (L_BRONZE, L_BRONZE, 0.5, 0.6),
+        Mat::Gold => (L_GOLD, L_GOLD, 0.4, 0.5),
+        Mat::Canvas | Mat::Felt | Mat::Rug | Mat::Cloth => (L_WOOL, L_WOOL, 1.0, 0.7),
+        _ => return None,
+    })
+}
+
+static SURFACE_TEXTURES: std::sync::OnceLock<Option<(Handle<Image>, Handle<Image>)>> = std::sync::OnceLock::new();
+
+fn surface_textures() -> Option<&'static (Handle<Image>, Handle<Image>)> {
+    SURFACE_TEXTURES.get().and_then(|t| t.as_ref())
+}
+
+/// Собирает массивы слоёв фотоматериалов (assets/textures/surface) с мип-уровнями.
+fn load_surface_textures(images: &mut Assets<Image>) -> Option<(Handle<Image>, Handle<Image>)> {
+    use bevy::image::{CompressedImageFormats, ImageSampler, ImageType};
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension};
+    let dir = bevy::asset::io::file::FileAssetReader::get_base_path().join("assets/textures/surface");
+    let layers = crate::surface_layers::LAYERS;
+    let load = |suffix: &str, srgb: bool| -> Option<Image> {
+        // Слои декодируем и уменьшаем параллельно — это ~40 картинок 1024².
+        let decoded: Vec<Option<Image>> = std::thread::scope(|s| {
+            let jobs: Vec<_> = layers
+                .iter()
+                .map(|l| {
+                    let path = dir.join(format!("{}_{}.jpg", l.name, suffix));
+                    s.spawn(move || {
+                        let bytes = std::fs::read(&path).map_err(|e| warn!("нет текстуры {}: {e}", path.display())).ok()?;
+                        let mut img = Image::from_buffer(&bytes, ImageType::Extension("jpg"), CompressedImageFormats::NONE, srgb, ImageSampler::Default, RenderAssetUsages::default()).ok()?;
+                        crate::textures::generate_mips(&mut img, suffix == "nrm");
+                        Some(img)
+                    })
+                })
+                .collect();
+            jobs.into_iter().map(|j| j.join().ok().flatten()).collect()
+        });
+        let decoded: Vec<Image> = decoded.into_iter().collect::<Option<_>>()?;
+        let first = &decoded[0];
+        let (w, h) = (first.width(), first.height());
+        if decoded.iter().any(|i| i.width() != w || i.height() != h) {
+            warn!("слои фотоматериалов разного размера");
+            return None;
+        }
+        let levels = first.texture_descriptor.mip_level_count;
+        let mut data = Vec::new();
+        for img in &decoded {
+            data.extend_from_slice(img.data.as_ref()?);
+        }
+        let format = if srgb { TextureFormat::Rgba8UnormSrgb } else { TextureFormat::Rgba8Unorm };
+        let mut arr = Image::new_uninit(Extent3d { width: w, height: h, depth_or_array_layers: decoded.len() as u32 }, TextureDimension::D2, format, RenderAssetUsages::RENDER_WORLD);
+        arr.data = Some(data);
+        arr.texture_descriptor.mip_level_count = levels;
+        arr.sampler = crate::textures::quality_sampler(true);
+        arr.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::D2Array), ..default() });
+        Some(arr)
+    };
+    let started = std::time::Instant::now();
+    let albedo = load("albedo", true)?;
+    let nrm = load("nrm", false)?;
+    info!("Фотоматериалы: {} слоёв за {:.2} с", layers.len(), started.elapsed().as_secs_f32());
+    Some((images.add(albedo), images.add(nrm)))
 }
 
 // ---------- Витражи ----------
@@ -346,6 +471,8 @@ fn sky_mesh(radius: f32) -> Mesh {
 fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut skies: ResMut<Assets<SkyMaterial>>) {
     let m = mood();
     commands.insert_resource(ClearColor(m.fog));
+    // Тени в 4096² на каскад: края теней от карнизов и колонн не «лесенкой».
+    commands.insert_resource(bevy::light::DirectionalLightShadowMap { size: 4096 });
     commands.insert_resource(GlobalAmbientLight { color: m.ambient.0, brightness: m.ambient.1, ..default() });
 
     let sun = m.sun.normalize();
@@ -431,6 +558,29 @@ fn toggle_heavy(keys: Res<ButtonInput<KeyCode>>, mut settings: ResMut<GraphicsSe
             commands.entity(e).insert(heavy_effects());
         } else {
             commands.entity(e).remove::<(ScreenSpaceAmbientOcclusion, VolumetricFog)>();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::surface_layers::*;
+
+    /// Шейдер рельефа берёт почву и гальку по номерам слоёв напрямую.
+    #[test]
+    fn terrain_layers_match_shader() {
+        assert_eq!(L_SOIL, 8);
+        assert_eq!(L_GRAVEL, 18);
+    }
+
+    #[test]
+    fn every_surface_layer_file_exists() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/textures/surface");
+        for l in LAYERS {
+            for suffix in ["albedo", "nrm"] {
+                let p = dir.join(format!("{}_{}.jpg", l.name, suffix));
+                assert!(p.exists(), "нет {}", p.display());
+            }
         }
     }
 }
