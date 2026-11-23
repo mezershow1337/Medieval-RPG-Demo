@@ -458,6 +458,15 @@ pub const ITEM_BASES: &[ItemBase] = &[
     base!("Зажигательный горшок", "Огонь", None, (2, 2), None, 1, &[], Sh::Small, true),
     // Неудачная варка (brewing.rs).
     base!("Испорченное варево", "Бурда", None, (1, 1), None, 3, &[], Sh::Flask, false),
+    // Отвары (brewing.rs) и рабочее место алхимика (жаровня, стол).
+    base!("Отвар полыни", "Полынь", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Мятный отвар", "Мята", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Отвар шиповника", "Шиповн.", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Отвар девясила", "Девясил", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Жаровня", "Жаровня", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Алхимический стол", "Стол", None, (3, 2), None, 1, &[], Sh::Small, false),
+    // Топливо для жаровни.
+    base!("Древесный уголь", "Уголь", None, (1, 1), None, 10, &[], Sh::Small, false),
 ];
 
 /// Старое название → новое (предметы переименованы под VI век).
