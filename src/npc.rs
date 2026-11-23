@@ -5,7 +5,7 @@
 //! держат дистанцию) и кочевники-лучники (стреляют издали, вблизи берутся за нож).
 
 use crate::collision::{Body, LevelColliders};
-use crate::combat::{self, Action, Fighter, Pose, WeaponKind, line_of_sight};
+use crate::combat::{self, Action, Fighter, Pose, Swing, WeaponKind, line_of_sight};
 use crate::factions::Faction;
 use crate::level::NpcGroup;
 use crate::protocol::ActorKind;
@@ -299,6 +299,13 @@ impl Training {
                 max_stamina: 90.0,
                 cooldown_mult: 0.85,
                 fatigue_rate: 0.0015,
+                timing_err: 0.14,
+                alert: 0.0,
+                timed_shield: 0.0,
+                chamber: 0.0,
+                feint: 0.0,
+                morph: 0.0,
+                read_feint: 0.1,
             },
             Training::Regular => Skill {
                 reaction: (0.27, 0.07),
@@ -311,6 +318,13 @@ impl Training {
                 max_stamina: 100.0,
                 cooldown_mult: 1.0,
                 fatigue_rate: 0.001,
+                timing_err: 0.08,
+                alert: 0.15,
+                timed_shield: 0.2,
+                chamber: 0.03,
+                feint: 0.06,
+                morph: 0.05,
+                read_feint: 0.4,
             },
             Training::Veteran => Skill {
                 reaction: (0.21, 0.05),
@@ -323,6 +337,13 @@ impl Training {
                 max_stamina: 110.0,
                 cooldown_mult: 1.1,
                 fatigue_rate: 0.0007,
+                timing_err: 0.05,
+                alert: 0.3,
+                timed_shield: 0.5,
+                chamber: 0.12,
+                feint: 0.14,
+                morph: 0.12,
+                read_feint: 0.7,
             },
         }
     }
@@ -351,6 +372,41 @@ pub struct Skill {
     pub cooldown_mult: f32,
     /// Как быстро копится усталость от потраченных сил.
     pub fatigue_rate: f32,
+    /// Насколько охотнее типа вообще встречает удар защитой (прибавка к `Profile::defend_chance`).
+    pub alert: f32,
+    /// Разброс в расчёте момента парирования, с (окно парирования ~0,3 с).
+    pub timing_err: f32,
+    /// Со щитом: доля случаев, когда парирует вовремя, а не просто держит щит.
+    pub timed_shield: f32,
+    /// Шанс встретить удар зеркальным встречным (чембер).
+    pub chamber: f32,
+    /// Шанс задумать финт и морф на своём ударе.
+    pub feint: f32,
+    pub morph: f32,
+    /// Шанс распознать чужой финт и не парировать в пустоту.
+    pub read_feint: f32,
+}
+
+/// Какой удар выбрать: у каждого оружия свои любимые, тот же подряд — реже.
+pub fn choose_swing(rng: &mut Rng, weapon: WeaponKind, last: Swing) -> Swing {
+    use Swing::*;
+    let table: &[(Swing, f32)] = match weapon {
+        WeaponKind::Spear | WeaponKind::Bow => return Thrust,
+        WeaponKind::Fists => &[(Thrust, 0.5), (RightToLeft, 0.25), (LeftToRight, 0.25)],
+        WeaponKind::Axe => &[(Overhead, 0.3), (UpperRight, 0.2), (UpperLeft, 0.15), (RightToLeft, 0.15), (LeftToRight, 0.12), (LowerRight, 0.08)],
+        WeaponKind::Seax => &[(Thrust, 0.35), (RightToLeft, 0.2), (LeftToRight, 0.2), (LowerRight, 0.1), (UpperRight, 0.1), (Overhead, 0.05)],
+        WeaponKind::Spatha => &[(RightToLeft, 0.2), (LeftToRight, 0.18), (Overhead, 0.15), (UpperRight, 0.12), (UpperLeft, 0.1), (Thrust, 0.12), (LowerRight, 0.07), (LowerLeft, 0.06)],
+    };
+    let weight = |s: Swing, w: f32| if s == last { w * 0.35 } else { w };
+    let total: f32 = table.iter().map(|(s, w)| weight(*s, *w)).sum();
+    let mut r = rng.next_f32() * total;
+    for (s, w) in table {
+        r -= weight(*s, *w);
+        if r <= 0.0 {
+            return *s;
+        }
+    }
+    table[0].0
 }
 
 /// Тяжёлый доспех замедляет восстановление сил (как у игрока с тяжёлой бронёй).
@@ -389,8 +445,20 @@ pub struct Brain {
     /// Усталость от долгого боя, 0..0.8: медленнее восстанавливается и реагирует.
     pub fatigue: f32,
     last_stamina: f32,
-    /// Через сколько поднимет защиту на замеченный замах (человеческая задержка).
-    guard_react: Option<f32>,
+    /// Через сколько поднимет защиту на замеченный замах (реакция и расчёт времени удара).
+    parry_at: Option<f32>,
+    /// Через сколько начнёт встречный зеркальный удар (чембер) и какой.
+    chamber_at: Option<(f32, Swing)>,
+    /// Какой удар цели видел в прошлый раз (чтобы заметить морф).
+    seen_swing: Option<Swing>,
+    /// Куда поднять взгляд, встречая удар.
+    parry_pitch: f32,
+    /// Последний свой удар (не бить одно и то же).
+    last_swing: Swing,
+    /// Задуманный финт: на какой доле замаха бросить.
+    plan_feint: Option<f32>,
+    /// Задуманный морф: на какой доле замаха и в какой удар.
+    plan_morph: Option<(f32, Swing)>,
     /// Через сколько ответит после своего парирования (бесконечность — упустил момент).
     riposte_wait: Option<f32>,
     /// Через сколько ударит оглушённую цель.
@@ -539,6 +607,7 @@ pub fn think(
             Action::Strike { .. } => 0.8,
             Action::Windup { .. } => 2.0,
             Action::Stagger { .. } | Action::GuardStagger { .. } => 0.0,
+            Action::Recoil { .. } => 1.5,
             _ => 3.5,
         };
         pose.yaw = turn_towards(pose.yaw, desired_yaw, turn_rate * dt);
@@ -587,26 +656,60 @@ pub fn think(
             wish += right * brain.strafe;
         }
 
-        // --- Защита: на начало вражеского замаха решаем, поднимать ли стойку ---
+        // --- Защита: на начало вражеского замаха (или его морф) решаем, как встречать удар ---
         let winding = matches!(t.action, Action::Windup { .. });
+        let t_swing = t.action.swing();
         // Угроза — когда цель в замахе и её оружие почти достаёт.
         let threat_range = if t.weapon.ranged() { 30.0 } else { t.weapon.stats().reach + 2.0 };
-        if winding && !brain.target_was_winding_up && dist < threat_range && combat::facing(pose, t.pose.feet) {
+        let morphed = winding && brain.target_was_winding_up && brain.seen_swing.is_some() && t_swing != brain.seen_swing;
+        if winding && (!brain.target_was_winding_up || morphed) && dist < threat_range && combat::facing(pose, t.pose.feet) {
             // Сколько сил уйдёт на этот удар. Опытный боец без сил не подставляет стойку, а отходит;
             // новобранец закрывается всё равно, и его защиту пробивают.
             let resist = if fighter.has_shield { combat::SHIELD_RESIST } else { stats.guard_resist };
             let cost = combat::ImpactTier::from_diff(t.weapon.stats().impact_power, resist).guard_stamina(fighter.has_shield);
             let can_hold = !skill.knows_limits || fighter.stamina >= cost;
-            brain.notice = Some(react(rng));
+            let reaction = react(rng);
+            brain.notice = Some(reaction);
             brain.evade_on_notice = false;
-            if fighter.weapon.can_guard() && !brain.want_guard && rng.chance(prof.defend_chance * skill.read) {
+            brain.parry_at = None;
+            brain.chamber_at = None;
+            // Когда клинок дойдёт: остаток замаха и примерно треть самого удара.
+            let swing = t_swing.unwrap_or_default();
+            let eta = t.action.time_to_release().unwrap_or(0.0) + t.weapon.timing(swing).release * 0.35;
+            if fighter.weapon.can_guard_with(fighter.has_shield) && (brain.want_guard || rng.chance((prof.defend_chance + skill.alert) * skill.read)) {
                 if can_hold {
-                    // Человек замечает замах не сразу, а иногда и ошибается со временем.
-                    let mut delay = react(rng);
-                    if rng.chance(skill.misjudge) {
-                        delay += rng.range(0.12, 0.3);
+                    let can_chamber = !t.weapon.ranged()
+                        && fighter.weapon.normalize(swing.mirror()) == swing.mirror()
+                        && matches!(fighter.action, Action::Idle)
+                        && fighter.stamina >= combat::CHAMBER_STAMINA + stats.stamina_cost
+                        && dist <= range + 0.3;
+                    if can_chamber && rng.chance(skill.chamber) {
+                        // Встречный зеркальный удар в самом начале чужого удара.
+                        let at = eta - combat::CHAMBER_WINDOW * 0.6;
+                        brain.chamber_at = Some((at.max(reaction), swing.mirror()));
+                    } else if fighter.has_shield && !rng.chance(skill.timed_shield) {
+                        // Щитоносец просто закрывается, как заметил, и держит щит.
+                        let mut delay = reaction;
+                        if rng.chance(skill.misjudge) {
+                            delay += rng.range(0.12, 0.3);
+                        }
+                        brain.parry_at = Some(delay.max(0.08));
+                    } else {
+                        // Парирование: нажать примерно за «подъём + пол-окна» до удара.
+                        // Новобранец ошибается сильнее и чаще жмёт рано (тогда это глухой блок) или поздно.
+                        // Стойка ещё поднята с прошлого удара, но окно уже закрыто — опускаем,
+                        // чтобы поднять заново вовремя (иначе выйдет лишь глухой блок).
+                        if fighter.guard_held && !fighter.in_parry_window() && matches!(fighter.action, Action::Guard { .. }) {
+                            brain.want_guard = false;
+                            fighter.set_guard(false);
+                        }
+                        let lead = fighter.guard_raise() + combat::PARRY_ACTIVE * 0.45;
+                        let mut at = eta - lead + rng.range(-skill.timing_err, skill.timing_err);
+                        if rng.chance(skill.misjudge) {
+                            at += if rng.chance(0.5) { rng.range(0.12, 0.3) } else { -rng.range(0.15, 0.35) };
+                        }
+                        brain.parry_at = Some(at.max(reaction));
                     }
-                    brain.guard_react = Some(delay.max(0.08));
                 } else {
                     brain.evade_on_notice = true;
                 }
@@ -614,13 +717,51 @@ pub fn think(
                 // Не закрывается, так хоть шаг назад из-под удара.
                 brain.evade_on_notice = true;
             }
+            // Удар сверху встречают, подняв взгляд, снизу — опустив (кто обучен).
+            brain.parry_pitch = if skill.read >= 0.9 {
+                match swing.class() {
+                    combat::SwingClass::Overhead | combat::SwingClass::Diagonal => 0.3,
+                    combat::SwingClass::Rising => -0.25,
+                    _ => 0.0,
+                }
+            } else {
+                0.0
+            };
         }
+        // Цель бросила замах (финт): обученный замечает и не парирует в пустоту.
+        if brain.target_was_winding_up && !winding && !matches!(t.action, Action::Strike { .. }) && (brain.parry_at.is_some() || brain.chamber_at.is_some()) {
+            if rng.chance(skill.read_feint) {
+                brain.parry_at = None;
+                brain.chamber_at = None;
+            }
+        }
+        brain.seen_swing = if winding { t_swing } else { None };
         brain.target_was_winding_up = winding;
-        if let Some(left) = brain.guard_react.as_mut() {
+        if let Some(left) = brain.parry_at.as_mut() {
             *left -= dt;
             if *left <= 0.0 {
-                brain.guard_react = None;
+                brain.parry_at = None;
                 brain.want_guard = true;
+                brain.guard_linger = 0.3;
+                // Стойка висит глухим блоком — отпустить и нажать заново: окно снова открыто.
+                if fighter.guard_held && !fighter.in_parry_window() {
+                    let restart = matches!(fighter.action, Action::Guard { .. });
+                    fighter.set_guard(false);
+                    if restart {
+                        fighter.set_guard(true);
+                    }
+                }
+            }
+        }
+        if let Some((left, swing)) = brain.chamber_at.as_mut() {
+            *left -= dt;
+            if *left <= 0.0 {
+                let swing = *swing;
+                brain.chamber_at = None;
+                if can_act && fighter.try_attack(Some(swing)) {
+                    brain.last_swing = swing;
+                    brain.attack_cooldown = rng.range(prof.cooldown.0, prof.cooldown.1) * skill.cooldown_mult;
+                }
             }
         }
         let threat = matches!(t.action, Action::Windup { .. } | Action::Strike { .. });
@@ -639,10 +780,12 @@ pub fn think(
         }
         if brain.want_guard {
             if threat {
-                brain.guard_linger = 0.35;
-                if can_act && !fighter.guard_held && matches!(fighter.action, Action::Idle | Action::Windup { .. }) {
+                brain.guard_linger = brain.guard_linger.max(0.2);
+                if can_act && !fighter.guard_held && matches!(fighter.action, Action::Idle | Action::Windup { .. } | Action::Recoil { .. }) {
                     fighter.set_guard(true);
                 }
+            } else if fighter.guard_held && !fighter.guard_used && fighter.in_parry_window() {
+                // Окно парирования ещё открыто — дожидаемся (отпускать сразу незачем).
             } else {
                 brain.guard_linger -= dt;
                 if brain.guard_linger <= 0.0 {
@@ -650,8 +793,30 @@ pub fn think(
                 }
             }
         }
+        // Стойка висит глухим блоком, а следующий удар цели ещё только замахивается — опускаем
+        // и поднимаем заново к удару (кто без щита: оружием глухой блок дорог).
+        if !fighter.has_shield
+            && fighter.guard_held
+            && brain.parry_at.is_none()
+            && matches!(fighter.action, Action::Guard { .. } | Action::GuardStagger { .. })
+            && !fighter.in_parry_window()
+            && let (Some(rel), Some(swing)) = (t.action.time_to_release(), t_swing)
+        {
+            let eta = rel + t.weapon.timing(swing).release * 0.35;
+            let lead = fighter.guard_raise() + combat::PARRY_ACTIVE * 0.45;
+            if eta > lead + 0.06 {
+                brain.want_guard = false;
+                fighter.set_guard(false);
+                brain.parry_at = Some((eta - lead + rng.range(-skill.timing_err, skill.timing_err)).max(0.0));
+            }
+        }
         if !brain.want_guard && fighter.guard_held {
             fighter.set_guard(false);
+        }
+        // Наклон головы: на удар сверху — выше, на удар снизу — ниже.
+        if !ranged {
+            let want_pitch = if brain.want_guard || brain.parry_at.is_some() { brain.parry_pitch } else { 0.0 };
+            pose.pitch += (want_pitch - pose.pitch).clamp(-3.0 * dt, 3.0 * dt);
         }
 
         // --- Атака ---
@@ -659,17 +824,40 @@ pub fn think(
         if fighter.can_riposte() {
             let wait = *brain.riposte_wait.get_or_insert_with(|| if rng.chance(skill.miss_riposte) { f32::INFINITY } else { react(rng) * 0.8 });
             brain.riposte_wait = Some(wait - dt);
-            if wait - dt <= 0.0 && fighter.try_attack() {
+            let swing = choose_swing(rng, fighter.weapon, brain.last_swing);
+            if wait - dt <= 0.0 && fighter.try_attack(Some(swing)) {
+                brain.last_swing = swing;
                 brain.want_guard = false;
-                brain.guard_react = None;
+                brain.parry_at = None;
                 fighter.guard_held = false;
                 brain.riposte_wait = None;
             }
         } else {
             brain.riposte_wait = None;
         }
+        // Свой замах: финт или морф по плану, если задумал.
+        if let Action::Windup { t: wt, dur, riposte: false, .. } = fighter.action {
+            let frac = wt / dur.max(0.01);
+            if brain.plan_feint.is_some_and(|at| frac >= at) {
+                brain.plan_feint = None;
+                if fighter.feint() {
+                    brain.attack_cooldown = rng.range(0.08, 0.3);
+                }
+            }
+            if let Some((at, swing)) = brain.plan_morph
+                && frac >= at
+            {
+                brain.plan_morph = None;
+                if fighter.try_attack(Some(swing)) {
+                    brain.last_swing = swing;
+                }
+            }
+        } else {
+            brain.plan_feint = None;
+            brain.plan_morph = None;
+        }
         // Оглушённую цель бьём, но тоже не мгновенно: сначала надо это заметить.
-        let staggered = matches!(t.action, Action::Stagger { .. });
+        let staggered = matches!(t.action, Action::Stagger { .. } | Action::Recoil { .. } | Action::ParryRecovery { .. });
         if staggered && !brain.target_was_staggered {
             brain.punish_wait = Some(react(rng));
         } else if !staggered {
@@ -691,16 +879,34 @@ pub fn think(
         let reserve = if punish { 0.0 } else { skill.reserve * fighter.max_stamina };
         let rested = fighter.stamina >= stats.stamina_cost + reserve && !brain.winded;
         // Опытный боец не начинает замах под уже летящий в него удар; новобранец лезет.
-        let busy_defending = brain.want_guard || brain.guard_react.is_some() || brain.evade_timer > 0.0 || (skill.knows_limits && brain.noticed);
+        let busy_defending = brain.want_guard || brain.parry_at.is_some() || brain.chamber_at.is_some() || brain.evade_timer > 0.0 || (skill.knows_limits && brain.noticed);
+        // По стойке опытный бьёт с финтом: выманить парирование и ударить в заминку.
+        let baiting = !ranged && target_guarding && rng.chance(skill.feint * 2.5);
+        let blocked_by_guard = blocked_by_guard && !baiting;
         if can_act && in_reach && aligned && ready && rested && !busy_defending && !blocked_by_guard && (brain.attack_cooldown <= 0.0 || punish) {
-            if fighter.try_attack() {
+            let swing = if ranged { Swing::Thrust } else { choose_swing(rng, fighter.weapon, brain.last_swing) };
+            if fighter.try_attack(Some(swing)) {
+                brain.last_swing = swing;
                 brain.attack_cooldown = rng.range(prof.cooldown.0, prof.cooldown.1) * skill.cooldown_mult;
                 brain.patience = 0.0;
+                if !ranged && !punish {
+                    // Задумать финт (бросить замах на полпути) или морф (сменить удар).
+                    let feint = skill.feint * if target_guarding || baiting { 2.5 } else { 1.0 };
+                    if rng.chance(feint) {
+                        brain.plan_feint = Some(rng.range(0.35, 0.7));
+                    } else if rng.chance(skill.morph) {
+                        let other = choose_swing(rng, fighter.weapon, swing);
+                        if other != swing {
+                            brain.plan_morph = Some((rng.range(0.2, 0.5), other));
+                        }
+                    }
+                }
             }
         }
     } else {
         brain.want_guard = false;
-        brain.guard_react = None;
+        brain.parry_at = None;
+        brain.chamber_at = None;
         brain.riposte_wait = None;
         brain.punish_wait = None;
         pose.pitch *= 1.0 - (3.0 * dt).min(1.0);
@@ -759,6 +965,29 @@ mod tests {
     const PI_: f32 = std::f32::consts::PI;
     use crate::combat::{Contact, HitOutcome, blade_segment, resolve_contact, trace_blade};
 
+    /// Игрок, который умеет парировать: жмёт ПКМ так, чтобы удар пришёлся в окно парирования,
+    /// отпускает после, а после удачного парирования отвечает рипостом.
+    fn skilled_guard(player: &mut Fighter, npc: &Fighter) {
+        if player.can_riposte() {
+            player.try_attack(None);
+            return;
+        }
+        let eta = match npc.action {
+            Action::Windup { t, dur, swing, .. } => Some(dur - t + npc.timing(swing).release * 0.35),
+            Action::Strike { t, swing, .. } => Some((npc.timing(swing).release * 0.6 - t).max(0.0)),
+            _ => None,
+        };
+        match eta {
+            Some(e) if e <= player.guard_raise() + combat::PARRY_ACTIVE * 0.5 => {
+                if !player.guard_held {
+                    player.set_guard(true);
+                }
+            }
+            None if player.guard_held => player.set_guard(false),
+            _ => {}
+        }
+    }
+
     /// Прогоняет поединок игрока со стратегией `player_brain` против врага. Возвращает статистику.
     fn fight(kind: ActorKind, player_guard: bool, seconds: f32) -> (Fighter, Fighter, [u32; 3]) {
         let (npc, player, stats, _) = fight_with(kind, None, player_guard, seconds, 7);
@@ -790,14 +1019,10 @@ mod tests {
                 player_pose.feet = feet;
             }
             if player_guard {
-                // Держим защиту, а после парирования бьём в ответ.
-                if player.can_riposte() {
-                    player.try_attack();
-                } else {
-                    player.set_guard(true);
-                }
+                // Парируем вовремя, а после парирования бьём в ответ.
+                skilled_guard(&mut player, &npc);
             } else {
-                player.try_attack();
+                player.try_attack(None);
             }
             let seen = [Seen { id: 1, kind: ActorKind::Player, pose: player_pose, action: player.action, weapon: player.weapon, shield: false, alive: true, targetable: true }];
             think(&mut brain, kind, &mut npc_pose, &mut npc, &seen, &level, &mut rng, dt);
@@ -1020,7 +1245,7 @@ mod tests {
                 let mut rng = Rng::new(seed);
                 brain.attack_cooldown = 100.0;
                 let dt = 1.0 / 60.0;
-                player.try_attack();
+                player.try_attack(None);
                 // Быстрее ~150 мс не реагирует никто.
                 for frame in 0..9 {
                     let seen = [Seen { id: 1, kind: ActorKind::Player, pose: player_pose, action: player.action, weapon: player.weapon, shield: false, alive: true, targetable: true }];
@@ -1079,7 +1304,7 @@ mod tests {
             let mut attacker = Fighter::new(WeaponKind::Axe, 150.0, false);
             // Атакующий каждые 0,9 с начинает новый замах (как будто их несколько).
             let phase = (i % 54) as f32 * dt;
-            attacker.action = if phase < 0.5 { Action::Windup { t: phase, swing: combat::Swing::Overhead, riposte: false } } else { Action::Strike { t: 0.0, swing: combat::Swing::Overhead, riposte: false } };
+            attacker.action = if phase < 0.5 { Action::Windup { t: phase, dur: 0.5, swing: combat::Swing::Overhead, riposte: false, morphed: false } } else { Action::Strike { t: 0.0, swing: combat::Swing::Overhead, riposte: false } };
             let ap = Pose { feet: player_feet, yaw: yaw_towards(player_feet, pose.feet), pitch: 0.0, crouching: false };
             let seen = [Seen { id: 1, kind: ActorKind::Player, pose: ap, action: attacker.action, weapon: WeaponKind::Axe, shield: false, alive: true, targetable: true }];
             think(&mut brain, ActorKind::Stratiotes, &mut pose, &mut npc, &seen, &level, &mut rng, dt);
@@ -1095,6 +1320,102 @@ mod tests {
         assert!(brain.fatigue > 0.05, "усталость не копится");
         assert!(npc.max_stamina < 90.0, "усталость не снижает запас сил");
         assert!(broken || min_stamina < 15.0, "выносливость у врага не кончается");
+    }
+
+    /// Ветеран парирует вовремя (с рипостом), а не просто держит блок; новобранец чаще
+    /// поднимает защиту не вовремя.
+    #[test]
+    fn veteran_parries_on_time() {
+        let share = |training: Training| {
+            let (mut timed, mut held, mut hurt) = (0u32, 0u32, 0u32);
+            for seed in [3u64, 11, 19, 27, 35, 43, 51, 59] {
+                let level = crate::level::level_colliders();
+                let spawn = NpcSpawn::brigand(ActorKind::Bucellarius, Vec3::new(10.0, 0.0, 0.0), 0.0);
+                let mut brain = Brain::new(&spawn);
+                brain.training = training;
+                brain.attack_cooldown = 1000.0;
+                let npc_feet = find_free_spot(&level, spawn.pos);
+                let player_feet = npc_feet + Vec3::new(0.0, 0.0, 1.2);
+                let mut pose = Pose { feet: npc_feet, yaw: yaw_towards(npc_feet, player_feet), pitch: 0.0, crouching: false };
+                let player_pose = Pose { feet: player_feet, yaw: yaw_towards(player_feet, npc_feet), pitch: 0.0, crouching: false };
+                let mut npc = Fighter::new(WeaponKind::Spatha, 500.0, false);
+                let mut player = fighter_for(ActorKind::Player);
+                let mut rng = Rng::new(seed);
+                let dt = 1.0 / 60.0;
+                for _ in 0..(60 * 20) {
+                    brain.attack_cooldown = 1000.0;
+                    player.stamina = 100.0;
+                    player.try_attack(None);
+                    let seen = [Seen { id: 1, kind: ActorKind::Player, pose: player_pose, action: player.action, weapon: player.weapon, shield: false, alive: true, targetable: true }];
+                    think(&mut brain, ActorKind::Bucellarius, &mut pose, &mut npc, &seen, &level, &mut rng, dt);
+                    npc.tick(dt);
+                    player.tick(dt);
+                    if let Some((swing, p)) = player.strike_progress()
+                        && !player.hit_this_swing.contains(&2)
+                    {
+                        let (h, t) = blade_segment(&player_pose, player.weapon, swing, p);
+                        if let Some(c) = trace_blade(h, t, &player_pose, &npc, &pose) {
+                            player.hit_this_swing.push(2);
+                            match resolve_contact(&mut player, &mut npc, c, 1.0) {
+                                HitOutcome::Parried => timed += 1,
+                                HitOutcome::Blocked { .. } => held += 1,
+                                HitOutcome::Damage { .. } => hurt += 1,
+                                _ => {}
+                            }
+                        }
+                    }
+                    npc.hp = 500.0;
+                }
+            }
+            (timed, held, hurt)
+        };
+        let (rt, rh, rd) = share(Training::Recruit);
+        let (vt, vh, vd) = share(Training::Veteran);
+        eprintln!("новобранец: вовремя {rt}, глухо {rh}, пропустил {rd}; ветеран: вовремя {vt}, глухо {vh}, пропустил {vd}");
+        let hurt_share = |t: u32, h: u32, d: u32| d as f32 / (t + h + d).max(1) as f32;
+        assert!(hurt_share(vt, vh, vd) < hurt_share(rt, rh, rd), "ветеран пропускает не реже новобранца");
+        assert!(vt as f32 / (vt + vh).max(1) as f32 > 0.55, "ветеран в основном держит глухой блок");
+    }
+
+    /// Ветеран против игрока, который стоит в стойке: финтит и морфит, а не бьёт в лоб по таймеру.
+    #[test]
+    fn veteran_feints_against_turtle() {
+        let level = crate::level::level_colliders();
+        let spawn = NpcSpawn::brigand(ActorKind::Stratiotes, Vec3::new(10.0, 0.0, 0.0), 0.0);
+        let mut brain = Brain::new(&spawn);
+        brain.training = Training::Veteran;
+        let npc_feet = find_free_spot(&level, spawn.pos);
+        let player_feet = npc_feet + Vec3::new(0.0, 0.0, 1.3);
+        let mut pose = Pose { feet: npc_feet, yaw: yaw_towards(npc_feet, player_feet), pitch: 0.0, crouching: false };
+        let player_pose = Pose { feet: player_feet, yaw: yaw_towards(player_feet, npc_feet), pitch: 0.0, crouching: false };
+        let mut npc = fighter_for(ActorKind::Stratiotes);
+        let mut player = fighter_for(ActorKind::Player);
+        let mut rng = Rng::new(17);
+        let dt = 1.0 / 60.0;
+        let (mut feints, mut morphs, mut swings) = (0, 0, std::collections::HashSet::new());
+        for _ in 0..(60 * 90) {
+            player.set_guard(true);
+            player.stamina = 100.0;
+            npc.stamina = npc.max_stamina;
+            let seen = [Seen { id: 1, kind: ActorKind::Player, pose: player_pose, action: player.action, weapon: player.weapon, shield: false, alive: true, targetable: true }];
+            let before = npc.action;
+            think(&mut brain, ActorKind::Stratiotes, &mut pose, &mut npc, &seen, &level, &mut rng, dt);
+            if matches!(before, Action::Windup { .. }) && matches!(npc.action, Action::Idle | Action::Guard { .. }) {
+                feints += 1;
+            }
+            if matches!(npc.action, Action::Windup { morphed: true, .. }) && !matches!(before, Action::Windup { morphed: true, .. }) {
+                morphs += 1;
+            }
+            if let Action::Windup { swing, .. } = npc.action {
+                swings.insert(swing);
+            }
+            npc.tick(dt);
+            player.tick(dt);
+        }
+        eprintln!("финтов {feints}, морфов {morphs}, разных ударов {}", swings.len());
+        assert!(feints >= 2, "ветеран не финтит");
+        assert!(swings.len() >= 4, "бьёт однообразно: {swings:?}");
+        let _ = morphs;
     }
 
     /// Выучка раздаётся по типам: букелларии — ветераны или обученные, у готов бывают новобранцы.

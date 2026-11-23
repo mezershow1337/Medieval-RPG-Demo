@@ -1,12 +1,12 @@
 //! Общий сетевой протокол: сообщения между клиентом и сервером.
 
-use crate::combat::{Action, HitOutcome, WeaponKind};
+use crate::combat::{Action, HitOutcome, Swing, WeaponKind};
 use bevy::math::Vec3;
 use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendType};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_0013;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_0014;
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -91,8 +91,11 @@ impl From<NetPos> for Vec3 {
 pub enum ClientMessage {
     /// Состояние своего персонажа (ненадёжный канал). Сервер проверяет, что скорость правдоподобная.
     PlayerState { pos: NetPos, yaw: f32, pitch: f32, crouching: bool, sprinting: bool },
-    /// Начать удар (надёжный канал).
-    Attack { yaw: f32, pitch: f32 },
+    /// Начать удар (надёжный канал). `swing` — направление, выбранное мышью
+    /// (`None` — по серии). Во время замаха — морф, после парирования — рипост.
+    Attack { yaw: f32, pitch: f32, swing: Option<Swing> },
+    /// Финт: бросить свой замах.
+    Feint,
     /// Зажать / отпустить защиту (надёжный канал).
     Guard { on: bool, yaw: f32, pitch: f32 },
     /// Убрать оружие и драться кулаками / снова взять оружие (хотбар).

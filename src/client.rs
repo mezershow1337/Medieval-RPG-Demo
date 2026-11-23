@@ -43,6 +43,8 @@ pub struct RemoteActor {
     /// Видимые доспехи и щит (у игроков) и то, во что модель одета сейчас.
     gear: Gear,
     shown_gear: Gear,
+    /// Сглаженное положение оружия (рукоять, направление) — без рывков между фазами удара.
+    weapon_smooth: Option<(Vec3, Vec3)>,
 }
 
 /// Скелет с телом (дочерняя сущность бойца или тела на земле).
@@ -158,7 +160,7 @@ pub fn run(server_addr: SocketAddr) {
         .add_plugins(crate::trade_client::TradeClientPlugin)
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))
         .add_plugins(crate::smithing_client::SmithingClientPlugin)
-        .add_systems(Update, hide_ui_for_shots.run_if(|| std::env::var("MRPG_CAM").is_ok()))
+        .add_systems(Update, hide_ui_for_shots.run_if(|| std::env::var("MRPG_CAM").is_ok() || std::env::var("MRPG_DUEL_SHOWCASE").is_ok()))
         .insert_resource(RenetClient::new(connection_config()))
         .insert_resource(transport)
         .insert_resource(NetState { server_addr: Some(server_addr), ..default() })
@@ -178,6 +180,11 @@ pub fn run(server_addr: SocketAddr) {
         .add_systems(Update, animate_corpses.in_set(rig::PoseSet))
         .add_systems(Update, (fly_arrows, refresh_remote_weapons, refresh_remote_gear))
         .add_systems(Update, gear_showcase.run_if(|| std::env::var("MRPG_GEAR_SHOWCASE").is_ok()))
+        .add_systems(Update, duel_showcase.run_if(|| std::env::var("MRPG_DUEL_SHOWCASE").is_ok()))
+        .add_systems(
+            Update,
+            (freeze_showcase, animate_remote).chain().in_set(rig::PoseSet).run_if(|| std::env::var("MRPG_DUEL_SHOWCASE").is_ok()).run_if(not(client_connected)),
+        )
         .run();
 }
 
@@ -286,6 +293,7 @@ fn spawn_remote(commands: &mut Commands, index: &mut RemoteIndex, snap: &ActorSn
                 finish: snap.finish,
                 gear: snap.gear,
                 shown_gear: snap.gear,
+                weapon_smooth: None,
             },
             Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(snap.yaw)),
             Visibility::default(),
@@ -629,6 +637,97 @@ fn gear_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<Wa
     }
 }
 
+/// Застывшее действие фигуры на витрине боя.
+#[derive(Component)]
+struct Frozen(Action);
+
+fn freeze_showcase(mut q: Query<(&mut RemoteActor, &Frozen)>) {
+    for (mut r, f) in &mut q {
+        r.fighter.action = f.0;
+    }
+}
+
+/// `MRPG_DUEL_SHOWCASE=row|pairs` (место — `MRPG_DUEL_AT=x,y,z`, иначе у агоры): для снимков
+/// застывшие бойцы в фазах боя. `row` — шестеро лицом к камере (замах сверху справа, удар
+/// сверху, укол, окно парирования, отбит, рипост); `pairs` — три пары лицом друг к другу
+/// (удар в парирование, отбитый под рипостом, укол в щит).
+fn duel_showcase(mut commands: Commands, mut index: ResMut<RemoteIndex>, mut cams: Query<&mut Transform, With<WaitingCamera>>, mut done: Local<bool>) {
+    use std::f32::consts::FRAC_PI_2;
+    if *done {
+        return;
+    }
+    let Ok(mut cam) = cams.single_mut() else { return };
+    *done = true;
+    let v: Vec<f32> = std::env::var("MRPG_DUEL_AT").unwrap_or_default().split(',').filter_map(|s| s.trim().parse().ok()).collect();
+    let o = if v.len() == 3 { Vec3::new(v[0], v[1], v[2]) } else { crate::level::place_pos("agora").unwrap_or_default() + Vec3::new(4.0, 0.0, 4.0) };
+    let mail = |n: &str| crate::items::ItemBaseId::find(n).map(|b| b.0);
+    let gear = |shield: bool| Gear {
+        head: mail("Спангенхельм"),
+        chest: mail("Кольчуга"),
+        hands: mail("Кожаные перчатки"),
+        feet: mail("Кожаные сапоги"),
+        off_hand: if shield { mail("Овальный щит") } else { None },
+        ..default()
+    };
+    let mut spawn = |id: u64, kind: ActorKind, pos: Vec3, yaw: f32, weapon: WeaponKind, shield: bool, spec: &str| {
+        let action = combat::showcase_action(spec, weapon).unwrap_or_default();
+        let snap = ActorSnapshot {
+            id,
+            kind,
+            pos: pos.into(),
+            yaw,
+            pitch: 0.0,
+            crouching: false,
+            weapon,
+            action,
+            hp: 100.0,
+            max_hp: 100.0,
+            shield,
+            stamina: 100.0,
+            max_stamina: 100.0,
+            action_speed: 1.0,
+            move_mult: 1.0,
+            finish: 230,
+            gear: if kind == ActorKind::Player { gear(shield) } else { Gear::default() },
+        };
+        spawn_remote(&mut commands, &mut index, &snap);
+        if let Some(e) = index.0.get(&id) {
+            commands.entity(*e).insert(Frozen(action));
+        }
+    };
+    let layout = std::env::var("MRPG_DUEL_SHOWCASE").unwrap_or_default();
+    if layout == "pairs" {
+        let pairs: [(&str, ActorKind, WeaponKind, bool, &str, ActorKind, WeaponKind, bool); 3] = [
+            ("strike:ur:0.4", ActorKind::Player, WeaponKind::Spatha, false, "guard:o:0.2", ActorKind::Player, WeaponKind::Spatha, false),
+            ("recoil:r:0.15", ActorKind::GothWarrior, WeaponKind::Axe, false, "riposte:l:0.8", ActorKind::Player, WeaponKind::Spatha, false),
+            ("strike:t:0.55", ActorKind::AlanLancer, WeaponKind::Spear, false, "guard:o:0.8", ActorKind::Stratiotes, WeaponKind::Spatha, true),
+        ];
+        for (i, (sa, ka, wa, sha, sb, kb, wb, shb)) in pairs.into_iter().enumerate() {
+            let a = o + Vec3::X * (i as f32 * 3.6);
+            let gap = if wa == WeaponKind::Spear { 2.0 } else { 1.25 };
+            spawn(9000 + i as u64 * 2, ka, a, -FRAC_PI_2, wa, sha, sa);
+            spawn(9001 + i as u64 * 2, kb, a + Vec3::X * gap, FRAC_PI_2, wb, shb, sb);
+        }
+        if std::env::var("MRPG_CAM").is_err() {
+            let f: f32 = std::env::var("MRPG_DUEL_FOCUS").ok().and_then(|s| s.parse().ok()).unwrap_or(-1.0);
+            *cam = if f >= 0.0 {
+                let c = o + Vec3::new(f * 3.6 + 0.7, 1.15, 0.0);
+                Transform::from_translation(c + Vec3::new(-0.6, 0.35, 2.6)).looking_at(c, Vec3::Y)
+            } else {
+                Transform::from_translation(o + Vec3::new(4.3, 1.9, 6.8)).looking_at(o + Vec3::new(4.3, 1.0, 0.0), Vec3::Y)
+            };
+        }
+    } else {
+        let row = ["windup:ur:0.95", "strike:o:0.4", "strike:t:0.6", "guard:o:0.2", "recoil:r:0.12", "riposte:l:0.85"];
+        for (i, spec) in row.iter().enumerate() {
+            spawn(9100 + i as u64, ActorKind::Player, o + Vec3::X * (i as f32 * 1.3), std::f32::consts::PI, WeaponKind::Spatha, false, spec);
+        }
+        if std::env::var("MRPG_CAM").is_err() {
+            *cam = Transform::from_translation(o + Vec3::new(3.25, 1.5, 5.2)).looking_at(o + Vec3::new(3.25, 1.05, 0.0), Vec3::Y);
+        }
+    }
+}
+
 /// Другой игрок надел или снял доспех, щит — переодеваем модель.
 fn refresh_remote_gear(
     mut commands: Commands,
@@ -716,14 +815,32 @@ fn animate_remote(
 
         let eye = 1.65 - 0.6 * r.crouch;
         let aim = Quat::from_rotation_x(r.pitch * 0.6);
-        let (hilt, dir) = combat::weapon_pose(&r.fighter.action, r.fighter.weapon, now);
+        let (want_hilt, want_dir) = combat::weapon_pose(&r.fighter.action, r.fighter.weapon, now);
+        // Сглаживаем смену фаз (комбо, отбитый удар, снимок сервера пришёл с опозданием).
+        let k = 1.0 - (-30.0 * dt).exp();
+        let (hilt, dir) = match r.weapon_smooth {
+            Some((h, d)) if h.distance(want_hilt) < 0.8 => (h.lerp(want_hilt, k), d.lerp(want_dir, k).normalize_or(want_dir)),
+            _ => (want_hilt, want_dir),
+        };
+        r.weapon_smooth = Some((hilt, dir));
         // Ответный удар после парирования подсвечиваем.
         let riposte = matches!(r.fighter.action, Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. });
+        // Корпус работает вместе с клинком: на замахе торс закручен в сторону удара, в ударе
+        // раскручивается, сверху — наклон вперёд, укол — выпад, отбитый — откинут назад.
+        let d = aim * dir;
         let (twist, lean) = match r.fighter.action {
             Action::Windup { swing, .. } | Action::Strike { swing, .. } | Action::Recovery { swing, .. } => {
-                let lean = if swing == combat::Swing::Overhead { -0.25 * (aim * dir).z.abs().min(1.0) } else { -0.05 };
-                (-(aim * dir).x * 0.55, lean)
+                let striking = matches!(r.fighter.action, Action::Strike { .. });
+                let lean = match swing.class() {
+                    combat::SwingClass::Overhead | combat::SwingClass::Diagonal => -0.25 * d.z.abs().min(1.0),
+                    combat::SwingClass::Thrust if striking => -0.22,
+                    combat::SwingClass::Rising => 0.04,
+                    _ => -0.06,
+                };
+                (-d.x * 0.6, lean)
             }
+            Action::Recoil { t, dur } => (0.12, 0.3 * (1.0 - t / dur).max(0.0) + (now * 25.0).sin() * 0.03 * (1.0 - t / dur).max(0.0)),
+            Action::ParryRecovery { .. } => (0.08, 0.1),
             Action::Stagger { t, .. } => (0.0, 0.32 + (now * 25.0).sin() * 0.05 * (1.0 - t).max(0.0)),
             Action::GuardStagger { .. } => (0.15, 0.12),
             Action::Flinch { .. } => (0.1, 0.15),
