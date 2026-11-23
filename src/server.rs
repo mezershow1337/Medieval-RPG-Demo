@@ -595,7 +595,8 @@ fn combat_tick(
         if let HitOutcome::Damage { amount, head, .. } = outcome
             && player
         {
-            world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon: combat::WeaponKind::Bow, amount, head });
+            let part = world.actors.get(&tid).map_or(crate::medicine::BodyPart::Chest, |t| crate::medicine::BodyPart::from_hit(&t.pose, point, head));
+            world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon: combat::WeaponKind::Bow, amount, head, part });
         }
         server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: arrow.owner, target: tid, outcome, at: point.into() }));
         let killed = matches!(outcome, HitOutcome::Damage { killed: true, .. });
@@ -637,7 +638,8 @@ fn combat_tick(
                     && world.actors.get(&tid).is_some_and(|t| t.kind == ActorKind::Player)
                 {
                     let weapon = world.actors.get(&aid).map_or(combat::WeaponKind::Spatha, |a| a.fighter.weapon);
-                    world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon, amount, head });
+                    let part = world.actors.get(&tid).map_or(crate::medicine::BodyPart::Chest, |t| crate::medicine::BodyPart::from_hit(&t.pose, point, head));
+                    world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon, amount, head, part });
                 }
                 server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: aid, target: tid, outcome, at: point.into() }));
                 let killed = matches!(outcome, HitOutcome::Damage { killed: true, .. });
