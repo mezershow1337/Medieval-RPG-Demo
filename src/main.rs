@@ -82,6 +82,7 @@ mod trade_net;
 mod trade_server;
 mod trade_ui;
 mod ui_theme;
+mod vegetation;
 mod weight;
 mod work;
 mod work_client;
@@ -89,6 +90,7 @@ mod worn;
 mod world_clock;
 mod daily_life;
 mod life_client;
+mod night_lights;
 
 use protocol::DEFAULT_PORT;
 use std::net::SocketAddr;

@@ -9,7 +9,7 @@ use super::kit::{self, Op, Rect, Rng};
 use super::*;
 use super::interior::extras;
 use crate::items::LootTableId as L;
-use crate::level::Role;
+use crate::level::{PlantKind, Role};
 use crate::collision::Aabb;
 use crate::level::places::{self, ALAN_CAMP, GOTH_VILLAGE, KLEROS_FARM, NECROPOLIS, STEPPE_CAMP};
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
@@ -60,6 +60,12 @@ pub fn roads() -> Vec<Vec<Vec2>> {
 fn seg_distance(p: Vec2, a: Vec2, c: Vec2) -> f32 {
     let t = ((p - a).dot(c - a) / (c - a).length_squared()).clamp(0.0, 1.0);
     p.distance(a + (c - a) * t)
+}
+
+/// Расстояние до ближайшей дороги (дороги считаются один раз).
+pub fn road_distance_at(p: Vec2) -> f32 {
+    static ROADS: std::sync::OnceLock<Vec<Vec<Vec2>>> = std::sync::OnceLock::new();
+    road_distance(ROADS.get_or_init(roads), p)
 }
 
 fn road_distance(roads: &[Vec<Vec2>], p: Vec2) -> f32 {
@@ -874,7 +880,7 @@ fn herb_plant(b: &mut Builder, p: Vec3, herb: &str, rng: &mut Rng) {
         }
         "rosa" => {
             let h = 1.3 * s;
-            mound(b, p, 0.8 * s, h, Mat::Leaves);
+            kit::shrub(b, p, h);
             for _ in 0..10 {
                 let a = rng.range(0.0, TAU);
                 let y = rng.range(0.3, 0.9) * h;
@@ -904,7 +910,7 @@ fn herb_plant(b: &mut Builder, p: Vec3, herb: &str, rng: &mut Rng) {
             if rng.chance(0.5) {
                 kit::oak(b, p, rng.range(6.0, 9.0), rng);
             } else {
-                mound(b, p, 0.7, 1.4, Mat::Leaves);
+                kit::shrub(b, p, 1.6);
             }
         }
         "symphytum" => {
@@ -968,39 +974,41 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
             let q = g(p.x, p.y) - Vec3::Y * 0.1;
             let up = ((p.y - 300.0) / 400.0).clamp(0.0, 1.0);
             let roll = rng.f();
+            // На самом плато сосна редка (крымская сосна — дерево гор), больше можжевельника,
+            // дуба пушистого и диких груш (их изображает тот же лиственный вид).
             if roll < 0.55 - up * 0.3 {
                 kit::juniper(b, q, rng.range(2.0, 4.5), &mut rng);
-            } else if roll < 0.75 - up * 0.2 {
+            } else if roll < 0.64 - up * 0.1 {
                 kit::pine(b, q, rng.range(7.0, 12.0), &mut rng);
             } else {
                 kit::oak(b, q, rng.range(6.0, 10.0), &mut rng);
             }
-            // Подлесок.
-            for _ in 0..rng.int(3) {
+            // Подлесок: кусты шибляка вокруг деревьев.
+            for _ in 0..1 + rng.int(4) {
                 let a = rng.range(0.0, TAU);
-                let d = rng.range(1.5, 3.5);
+                let d = rng.range(1.8, 5.0);
                 let s = g(p.x + a.cos() * d, p.y + a.sin() * d);
-                mound(b, s - Vec3::Y * 0.1, rng.range(0.4, 0.9), rng.range(0.5, 1.0), if rng.chance(0.5) { Mat::Leaves } else { Mat::Conifer });
+                kit::shrub(b, s - Vec3::Y * 0.05, rng.range(0.9, 2.0));
             }
         }
         z += step;
     }
 }
 
-/// Известняковый выход: несколько повёрнутых глыб, наполовину в земле.
+/// Известняковый выход: фотоскан глыбы, наполовину в земле, иногда с камнями поменьше.
 fn rock(b: &mut Builder, p: Vec2, size: f32, rng: &mut Rng) {
     let y = ground_y(p.x, p.y);
     b.at(p.x, p.y);
     let n = 1 + rng.int(3);
     for k in 0..n {
-        let off = if k == 0 { Vec2::ZERO } else { Vec2::new(rng.range(-1.0, 1.0), rng.range(-1.0, 1.0)) * size };
-        let s = size * if k == 0 { 1.0 } else { rng.range(0.4, 0.7) };
-        let half = Vec3::new(s * rng.range(0.6, 1.0), s * rng.range(0.3, 0.55), s * rng.range(0.5, 0.9));
-        let c = Vec3::new(p.x + off.x, y + half.y * 0.4, p.y + off.y);
-        b.mesh(Mat::Limestone).obox(c, half, rng.range(0.0, PI));
+        let off = if k == 0 { Vec2::ZERO } else { Vec2::new(rng.range(-1.0, 1.0), rng.range(-1.0, 1.0)) * size * 1.2 };
+        let s = size * if k == 0 { 1.0 } else { rng.range(0.3, 0.6) };
+        let q = Vec2::new(p.x + off.x, p.y + off.y);
+        let c = Vec3::new(q.x, ground_y(q.x, q.y) - s * 0.25, q.y);
+        b.plant(PlantKind::Rock, c, s, rng.range(0.0, TAU), rng.int(64) as u32);
         if s > 0.7 {
-            let r = half.x.min(half.z) * 0.7;
-            b.invisible.push(Aabb::new(Vec3::new(c.x - r, y - 0.3, c.z - r), Vec3::new(c.x + r, c.y + half.y * 0.8, c.z + r)));
+            let r = s * 0.45;
+            b.invisible.push(Aabb::new(Vec3::new(c.x - r, y - 0.3, c.z - r), Vec3::new(c.x + r, c.y + s * 0.6, c.z + r)));
         }
     }
 }
