@@ -624,7 +624,7 @@ mod tests {
     fn every_item_has_a_body() {
         for i in 0..crate::items::ITEM_BASES.len() {
             let b = PropBody::for_item(ItemBaseId(i as u16), 1, Vec3::ZERO, Quat::IDENTITY);
-            assert!(b.mass > 0.0 && b.half.min_element() >= MIN_HALF && b.half.max_element() < 1.5);
+            assert!(b.mass > 0.0 && b.half.min_element() >= MIN_HALF && b.half.max_element() < 2.0, "{}", crate::items::ITEM_BASES[i].name);
         }
     }
 }

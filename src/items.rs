@@ -519,6 +519,96 @@ pub const ITEM_BASES: &[ItemBase] = &[
     base!("Отвар ревеня", "Ревень", None, (1, 1), None, 5, &[], Sh::Flask, true),
     base!("Вяжущая мазь", "Вяж.мазь", None, (1, 1), None, 5, &[], Sh::Flask, true),
     base!("Мазь от ожогов", "Ож.мазь", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    // <arsenal> — создано tools/gen_arsenal.py
+    base!("Семиспата", "Семиспата", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 26.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Солдатская спата", "Спата солд.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 29.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Меч букеллария", "Меч букел.", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 36.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Спата с бронзовой гардой", "Спата бронз.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Парадная спата", "Спата парад.", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 33.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Старый гладиус", "Гладиус", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 24.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Готская спата с кольцом", "Спата гот.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 31.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Готская узорчатая спата", "Спата узор.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 32.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Гепидская спата", "Спата гепид.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Франкская спата", "Спата франк.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Вандальская спата", "Спата ванд.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 29.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Лангобардская спата", "Спата ланг.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 31.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Аланский длинный меч", "Меч алан.", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 35.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Меч с кольцевым навершием", "Меч кольц.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Гуннский длинный меч", "Меч гунн.", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 36.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Степной изогнутый меч", "Изогн. меч", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 33.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Сасанидский меч", "Меч перс.", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 34.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Короткий конный меч", "Меч конн.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 28.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Герульская спата", "Спата герул.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 31.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Боспорский меч", "Меч босп.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Лазский меч", "Меч лазск.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 31.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Скрамасакс", "Скрамасакс", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 22.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Длинный сакс", "Длинный сакс", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 26.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Узкий сакс", "Узкий сакс", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 20.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Боевой нож", "Боевой нож", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 19.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Пугион", "Пугион", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 20.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Гуннский кинжал", "Кинжал гунн.", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 21.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Персидский кинжал", "Кинжал перс.", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 21.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Засапожный нож", "Засап. нож", Some(S::MainHand), (1, 1), Some((Stat::WeaponDamage, 15.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Охотничий нож", "Охот. нож", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 17.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Сика", "Сика", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 21.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Тесак", "Тесак", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 23.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Франциска", "Франциска", Some(S::MainHand), (2, 2), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Бородовидная секира", "Секира бород.", Some(S::MainHand), (2, 3), Some((Stat::WeaponDamage, 37.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Широкая секира", "Широк. секира", Some(S::MainHand), (2, 4), Some((Stat::WeaponDamage, 45.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Узколезвийный топор", "Топор узк.", Some(S::MainHand), (2, 3), Some((Stat::WeaponDamage, 34.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Долабра", "Долабра", Some(S::MainHand), (2, 3), Some((Stat::WeaponDamage, 33.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Плотничий топор", "Топор плотн.", Some(S::MainHand), (2, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Аланский топорик", "Топорик алан.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 31.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Славянский топорик", "Топорик слав.", Some(S::MainHand), (2, 2), Some((Stat::WeaponDamage, 29.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Метательный топорик", "Топорик метат.", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 26.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Гуннский боевой топор", "Топор гунн.", Some(S::MainHand), (2, 3), Some((Stat::WeaponDamage, 35.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Армянский топор", "Топор арм.", Some(S::MainHand), (2, 3), Some((Stat::WeaponDamage, 36.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Гранёная булава", "Булава гран.", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 35.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Шипастая булава", "Булава шип.", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 37.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Сасанидская булава", "Булава перс.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 38.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Кистень", "Кистень", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 33.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Гирька на ремне", "Гирька", Some(S::MainHand), (1, 1), Some((Stat::WeaponDamage, 27.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Боевой молот", "Молот", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 38.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Клевец", "Клевец", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 34.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Окованная палица", "Палица", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Шаровая булава", "Булава шар.", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 34.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Контос", "Контос", Some(S::MainHand), (1, 6), Some((Stat::WeaponDamage, 56.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Аланское копьё", "Копьё алан.", Some(S::MainHand), (1, 6), Some((Stat::WeaponDamage, 54.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Ланкия", "Ланкия", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 40.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Менавлон", "Менавлон", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 52.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Ангон", "Ангон", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 44.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Плюмбата", "Плюмбата", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 24.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Пилум", "Пилум", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 46.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Спикулум", "Спикулум", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 42.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Верут", "Верут", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 32.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Дротик", "Дротик", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 34.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Крылатое копьё", "Копьё крыл.", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 50.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Гуннское копьё", "Копьё гунн.", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 48.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Рогатина", "Рогатина", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 52.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Рыбацкая острога", "Острога", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 36.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Копьё с ромбическим пером", "Копьё ромб.", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 50.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Пехотная пика", "Пика", Some(S::MainHand), (1, 6), Some((Stat::WeaponDamage, 54.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Копьё с бандоном", "Копьё флаж.", Some(S::MainHand), (1, 6), Some((Stat::WeaponDamage, 52.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Выпрямленная коса", "Коса", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 44.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Франкское копьё", "Копьё франк.", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 48.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Персидское копьё", "Копьё перс.", Some(S::MainHand), (1, 6), Some((Stat::WeaponDamage, 55.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Копьё-жало", "Копьё-жало", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 46.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Исаврийский дротик", "Дротик исавр.", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 35.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Бронебойные наконечники", "Бронебойные", None, (1, 1), None, 30, &[], Sh::Small, true),
+    base!("Трёхлопастные наконечники", "Трёхлопаст.", None, (1, 1), None, 30, &[], Sh::Small, true),
+    base!("Срезни", "Срезни", None, (1, 1), None, 30, &[], Sh::Small, true),
+    // </arsenal>
+    // Луки и стрелы (archery.rs).
+    base!("Простой лук", "Лук", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 26.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Гуннский составной лук", "Составной лук", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 36.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Стрелы", "Стрелы", None, (1, 2), None, 30, &[], Sh::Polearm, true),
+    base!("Бронебойные стрелы", "Бронеб.", None, (1, 2), None, 30, &[], Sh::Polearm, true),
+    base!("Трёхлопастные стрелы", "Трёхлоп.", None, (1, 2), None, 30, &[], Sh::Polearm, true),
+    base!("Стрелы-срезни", "Срезни", None, (1, 2), None, 30, &[], Sh::Polearm, true),
+    base!("Древки стрел", "Древки", None, (1, 2), None, 30, &[], Sh::Polearm, false),
+    base!("Маховые перья", "Перья", None, (1, 1), None, 90, &[], Sh::Small, false),
+    base!("Рыбий клей", "Клей", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Сухожилия", "Жилы", None, (1, 1), None, 10, &[], Sh::Small, false),
 ];
 
 /// Старое название → новое (предметы переименованы под VI век).
@@ -752,6 +842,18 @@ impl Item {
         }
         for (s, v) in &self.affixes {
             totals.add(*s, *v);
+        }
+        // Врождённое: лёгкий нож быстрее тяжёлой секиры при том же мастерстве.
+        if let Some(a) = crate::arsenal::of_base(self.base)
+            && a.fam != crate::arsenal::Fam::Head
+            && a.speed != 0.0
+        {
+            totals.add(Stat::ActionSpeed, a.speed);
+        }
+        if let Some((_, _, speed)) = crate::archery::BOWS.iter().find(|(n, ..)| *n == self.info().name)
+            && *speed != 0.0
+        {
+            totals.add(Stat::ActionSpeed, *speed);
         }
         totals
     }

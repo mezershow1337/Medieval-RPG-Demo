@@ -133,6 +133,8 @@ pub enum Pattern {
     Greaves,
     OvalShield,
     RoundShield,
+    /// Вид из [`crate::arsenal::ARMS`] (мечи, ножи, топоры, булавы, копья, наконечники).
+    Arms(u16),
 }
 
 /// Чем вещь будет после ковки.
@@ -175,8 +177,48 @@ impl Pattern {
         [Bloom, ScrapWeld, Knife, Spatha, CavalrySpatha, Axe, Spear, Mace, Arrowheads, Spangenhelm, RidgeHelmet, Mail, Lamellar, Vambraces, Greaves, OvalShield, RoundShield]
     };
 
+    /// Всё, что можно сковать: заготовки, старые образцы, доспехи и весь арсенал.
+    pub fn all() -> Vec<Pattern> {
+        let mut v = Self::ALL.to_vec();
+        v.extend((0..crate::arsenal::ARMS.len() as u16).map(Pattern::Arms));
+        v
+    }
+
+    /// Семейство для списка в кузне.
+    pub fn fam(self) -> Option<crate::arsenal::Fam> {
+        use crate::arsenal::Fam;
+        match self {
+            Pattern::Arms(i) => crate::arsenal::ARMS.get(i as usize).map(|a| a.fam),
+            Pattern::Knife => Some(Fam::Seax),
+            Pattern::Spatha | Pattern::CavalrySpatha => Some(Fam::Sword),
+            Pattern::Axe => Some(Fam::Axe),
+            Pattern::Mace => Some(Fam::Mace),
+            Pattern::Spear => Some(Fam::Spear),
+            Pattern::Arrowheads => Some(Fam::Head),
+            _ => None,
+        }
+    }
+
     pub fn info(self) -> PatternInfo {
         use Pattern::*;
+        if let Arms(i) = self {
+            let a = &crate::arsenal::ARMS[(i as usize).min(crate::arsenal::ARMS.len() - 1)];
+            let head = a.fam == crate::arsenal::Fam::Head;
+            return PatternInfo {
+                product: a.name,
+                count: if head { 12 } else { 1 },
+                metal: a.metal,
+                parts: a.parts,
+                segments: a.fam.segments(),
+                weld: a.weld,
+                harden: a.temper > 0.0,
+                cold: false,
+                needs: a.needs,
+                mass: a.mass,
+                temper_best: a.temper,
+                kind: PieceKind::Weapon,
+            };
+        }
         use Technique as T;
         let p = |product, count, metal, parts, segments, weld, harden, needs, mass, temper_best, kind| PatternInfo {
             product,
@@ -214,6 +256,7 @@ impl Pattern {
             Greaves => p("Железные поножи", 1, 2, &[(HIDE, 1)], &["левая", "правая", "наколенники"], false, false, Some(T::Armoury), 1.1, 0.0, PieceKind::Armour),
             OvalShield => p("Овальный щит", 1, 1, &[(ASH, 2), (HIDE, 1)], &["умбон", "рукоять", "оковка"], false, false, None, 1.0, 0.0, PieceKind::Armour),
             RoundShield => p("Круглый щит", 1, 1, &[(ASH, 1), (HIDE, 1)], &["умбон", "рукоять"], false, false, None, 1.0, 0.0, PieceKind::Armour),
+            Arms(_) => unreachable!("разобрано выше"),
         }
     }
 

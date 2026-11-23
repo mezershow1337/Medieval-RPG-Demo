@@ -40,6 +40,8 @@ pub enum Tab {
     Forge,
     Cast,
     Other,
+    /// Верстак: древки и стрелы.
+    Fletch,
 }
 
 #[derive(Resource)]
@@ -61,6 +63,8 @@ pub struct SmithState {
     ore: u8,
     charcoal: u8,
     rev: u64,
+    /// Раздел списка ковки.
+    fam: Option<crate::arsenal::Fam>,
     built: Option<(u64, u64, u64, bool)>,
     /// Искры, пар, звон — разбирает `smithing_fx`.
     pub(crate) fx_queue: Vec<(u32, u64, Fx)>,
@@ -88,6 +92,7 @@ impl Default for SmithState {
             ore: 6,
             charcoal: 10,
             rev: 1,
+            fam: Some(crate::arsenal::Fam::Sword),
             built: None,
             fx_queue: Vec::new(),
             others: Vec::new(),
@@ -245,6 +250,8 @@ fn smith_input(
 enum Act {
     Close,
     Tab(Tab),
+    /// Раздел списка ковки: None — заготовки и доспехи.
+    Fam(Option<crate::arsenal::Fam>),
     Steel,
     Begin(Plan),
     Fuel,
@@ -337,6 +344,10 @@ fn smith_buttons(
                 loot.rev += 1;
             }
             Act::Tab(t) => state.tab = t,
+            Act::Fam(f) => {
+                state.fam = f;
+                state.rev += 1;
+            }
             Act::Steel => state.steel = !state.steel,
             Act::Begin(plan) => send(client, &SmithClientMessage::Begin { station, plan }),
             Act::Fuel => send(client, &SmithClientMessage::AddFuel { station }),
@@ -610,6 +621,7 @@ fn begin_menu(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
         button(r, fonts, "Ковка", Act::Tab(Tab::Forge), st.tab == Tab::Forge);
         button(r, fonts, "Литьё", Act::Tab(Tab::Cast), st.tab == Tab::Cast);
         button(r, fonts, "Цементация и ремонт", Act::Tab(Tab::Other), st.tab == Tab::Other);
+        button(r, fonts, "Стрелы", Act::Tab(Tab::Fletch), st.tab == Tab::Fletch);
     });
     match st.tab {
         Tab::Forge => {
@@ -617,7 +629,14 @@ fn begin_menu(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
                 r.spawn(label(fonts, format!("Железных полос: {}, стальных: {}, лома: {}, криц: {}", have(loot, IRON), have(loot, STEEL), have(loot, SCRAP), have(loot, BLOOM)), 13.0, DIM, false));
                 button(r, fonts, if st.steel { "Наварить сталь на лезвие: да" } else { "Наварить сталь: нет" }, Act::Steel, st.steel);
             });
-            for pat in Pattern::ALL {
+            // Разделы: заготовки и доспехи, затем семейства оружия.
+            row(p).with_children(|r| {
+                button(r, fonts, "Заготовки и доспехи", Act::Fam(None), st.fam.is_none());
+                for f in crate::arsenal::Fam::ALL {
+                    button(r, fonts, f.name(), Act::Fam(Some(f)), st.fam == Some(f));
+                }
+            });
+            for pat in Pattern::all().into_iter().filter(|p| p.fam() == st.fam) {
                 let info = pat.info();
                 let known = info.needs.is_none_or(|t| k.knows(Lore::Technique(t)));
                 let metal = match pat {
@@ -679,6 +698,43 @@ fn begin_menu(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
             if k.knows(Lore::Technique(Technique::Casting)) {
                 p.spawn(label(fonts, "Вы знаете: бронза — девять частей меди на одну олова; лить жёлтым жаром в прогретую форму, ровно и без перерыва.", 13.0, DIM, false));
             }
+        }
+        Tab::Fletch => {
+            use crate::archery::{FEATHERS, Fletch, GLUE, SHAFTS, SINEW};
+            p.spawn(label(
+                fonts,
+                format!(
+                    "Верстак у кузни. Древков: {} · перьев: {} · рыбьего клея: {} · сухожилий: {}",
+                    have(loot, SHAFTS),
+                    have(loot, FEATHERS),
+                    have(loot, GLUE),
+                    have(loot, SINEW)
+                ),
+                13.0,
+                DIM,
+                false,
+            ));
+            for what in Fletch::all() {
+                let inputs = what.inputs();
+                let mut enough = inputs.iter().all(|(n, c)| have(loot, n) >= *c as u32);
+                let mut need: Vec<String> = inputs.iter().map(|(n, c)| format!("{} ×{c}", n.to_lowercase())).collect();
+                if what.needs_glue() {
+                    need.push("клей или жилы".into());
+                    enough &= have(loot, GLUE) + have(loot, SINEW) > 0;
+                }
+                let (product, n) = what.product();
+                row(p).with_children(|r| {
+                    button(r, fonts, &format!("{} ×{n}", product), Act::Begin(Plan::Fletch(what)), enough);
+                    r.spawn(label(fonts, need.join(", "), 12.0, if enough { TEXT } else { DIM }, false));
+                });
+            }
+            p.spawn(label(
+                fonts,
+                "Наконечники куют здесь же (Ковка → Наконечники стрел). Лук тратит стрелы из сумки — ту стопку, что лежит первой.",
+                12.0,
+                DIM,
+                false,
+            ));
         }
         Tab::Other => {
             if let Some(inv) = loot.inventory.as_ref() {
@@ -867,6 +923,22 @@ fn work_panel(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
                 });
             button(p, fonts, "Бросить и забрать вещь", Act::Abandon, false);
         }
+        Job::Fletch { what, .. } => {
+            p.spawn(label(fonts, what.verb(), 15.0, TITLE, true));
+            row(p).with_children(|r| {
+                bar(r, 200.0, Color::srgb(0.75, 0.65, 0.4), Live::Progress);
+            });
+            swing_bar(p, fonts);
+            let hint = match what {
+                crate::archery::Fletch::Shafts => "Колоть, строгать и править древки: щёлкайте в такт",
+                crate::archery::Fletch::Arrows(_) => "Насадить наконечник, вклеить перья, обмотать: щёлкайте в такт",
+            };
+            p.spawn((GrindPad, Interaction::default(), FocusPolicy::Block, Node { padding: UiRect::all(px(8)), border: UiRect::all(px(1)), justify_content: JustifyContent::Center, ..default() }, BackgroundColor(Color::srgb(0.3, 0.26, 0.2)), BorderColor::all(BORDER)))
+                .with_children(|b| {
+                    b.spawn(label(fonts, hint, 14.0, TEXT, true));
+                });
+            button(p, fonts, "Бросить (материал вернётся, клей — нет)", Act::Abandon, false);
+        }
     }
     let _ = st;
 }
@@ -1019,7 +1091,7 @@ fn update_live(state: Res<SmithState>, knowledge: Res<MyKnowledge>, mut nodes: Q
                     let v = match job {
                         Some(Job::Cast(c)) => c.poured,
                         Some(Job::Soak(s)) => s.elapsed / s.total,
-                        Some(Job::Repair { progress, .. }) => *progress,
+                        Some(Job::Repair { progress, .. }) | Some(Job::Fletch { progress, .. }) => *progress,
                         _ => 0.0,
                     };
                     n.width = percent(v.clamp(0.0, 1.0) * 100.0);

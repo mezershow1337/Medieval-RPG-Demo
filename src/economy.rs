@@ -203,6 +203,9 @@ pub fn base_price(base: ItemBaseId) -> u32 {
         return v;
     }
     let info = base.base();
+    if let Some(a) = crate::arsenal::of_base(base) {
+        return a.price;
+    }
     if let Some(p) = PRICE_LIST
         .iter()
         .find(|(n, _)| *n == info.name)
@@ -347,6 +350,17 @@ const PRICE_LIST: &[(&str, u32)] = &[
     ("Бронзовая фибула", 360),
     ("Бронзовое навершие", 440),
     ("Свинцовые грузила", 15),
+    // Луки и стрелы: стрела — наконечник, древко, перья, клей и работа.
+    ("Простой лук", 1800),
+    ("Гуннский составной лук", 6000),
+    ("Стрелы", 70),
+    ("Бронебойные стрелы", 75),
+    ("Трёхлопастные стрелы", 95),
+    ("Стрелы-срезни", 80),
+    ("Древки стрел", 10),
+    ("Маховые перья", 2),
+    ("Рыбий клей", 80),
+    ("Сухожилия", 40),
     ("Плиний. Естественная история", 9600),
     ("Целебное зелье", 600),
     ("Рубин", 14400),
@@ -502,6 +516,7 @@ pub fn unpriced_items() -> Vec<&'static str> {
         .iter()
         .filter(|b| {
             !PRICE_LIST.iter().any(|(n, _)| *n == b.name)
+                && crate::arsenal::find(b.name).is_none()
                 && !DENOMINATIONS.iter().any(|(n, _)| *n == b.name)
         })
         .map(|b| b.name)

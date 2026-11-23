@@ -343,6 +343,8 @@ pub fn ground_message(id: LootId, g: &GroundItem) -> LootServerMessage {
         count: g.item.count,
         asleep: g.body.asleep,
         shelf: g.shelf.as_ref().map(|t| ShelfMark { merchant: t.merchant }),
+        // Вид кованой вещи; у прочего — как в модели.
+        finish: if g.item.make.is_some() { (g.item.look() * 255.0) as u8 } else { 255 },
     }
 }
 

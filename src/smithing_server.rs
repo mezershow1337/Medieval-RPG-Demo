@@ -390,6 +390,37 @@ fn begin(world: &mut SmithWorld, loot: &mut LootWorld, k: &Knowledge, pid: u64, 
             let Some((item, _)) = inv.take(uid) else { return Err("Нет вещи".into()) };
             Job::Repair { item, progress: 0.0 }
         }
+        Plan::Fletch(what) => {
+            use crate::archery::{GLUE, SINEW};
+            if let crate::archery::Fletch::Arrows(i) = what
+                && i as usize >= crate::archery::ARROWS.len()
+            {
+                return Err("Нет такой стрелы".into());
+            }
+            for (name, n) in what.inputs() {
+                if count_named(inv, name) < n as u32 {
+                    return Err(format!("Не хватает: {} (нужно {n})", name.to_lowercase()));
+                }
+            }
+            let glue = count_named(inv, GLUE) > 0;
+            if what.needs_glue() && !glue && count_named(inv, SINEW) == 0 {
+                return Err("Нужен рыбий клей или сухожилия — приклеить перья и примотать наконечник".into());
+            }
+            let mut head = Quality::Common;
+            for (name, n) in what.inputs() {
+                let got = take_named(inv, name, n as u32);
+                if crate::archery::ARROWS.iter().any(|a| a.head == name) {
+                    // Худший наконечник и решает: в десятке стрел ровня по слабой.
+                    head = got.iter().map(|i| i.quality).min_by_key(|q| q.index()).unwrap_or(Quality::Common);
+                }
+                taken.push((name.to_string(), n));
+            }
+            let sinew = what.needs_glue() && !glue;
+            if what.needs_glue() {
+                take_named(inv, if glue { GLUE } else { SINEW }, 1);
+            }
+            Job::Fletch { what, progress: 0.0, acc: 0.0, strokes: 0, head, sinew }
+        }
     };
     let verb = match &job {
         Job::Forge(f) => format!("Работа: {}", f.pattern.name().to_lowercase()),
@@ -399,6 +430,7 @@ fn begin(world: &mut SmithWorld, loot: &mut LootWorld, k: &Knowledge, pid: u64, 
             SoakKind::Carburize => "Горшок с полосой в горне: держите красный жар".into(),
         },
         Job::Repair { item, .. } => format!("Ремонт: {}", item.info().name.to_lowercase()),
+        Job::Fletch { what, .. } => format!("Верстак: {}", what.verb().to_lowercase()),
     };
     world.works.insert(pid, Work { station, job, bellows: false, taken, since_view: 0.0 });
     Ok(verb)
@@ -603,6 +635,12 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                             fxs.push(Fx::Grind);
                             *progress += 0.1 * (0.3 + 0.7 * acc.clamp(0.0, 1.0));
                         }
+                        (Job::Fletch { what, progress, acc: avg, strokes, .. }, SmithClientMessage::Grind { acc }) => {
+                            let acc = acc.clamp(0.0, 1.0);
+                            *avg = (*avg * *strokes as f32 + acc) / (*strokes as f32 + 1.0);
+                            *strokes += 1;
+                            *progress += 0.1 * (0.4 + 0.6 * acc) / what.work();
+                        }
                         (_, _) => {}
                     }
                     let sid = w.station;
@@ -632,6 +670,25 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                             sync_knowledge(&mut server, k, pid);
                         }
                         notice(&mut server, pid, format!("Выправлено и наточено: {}", name.to_lowercase()));
+                        sync_inventory(&mut server, &loot, pid);
+                    }
+                    // Верстак: работа готова.
+                    let fletched = matches!(world.works.get(&pid).map(|w| &w.job), Some(Job::Fletch { progress, .. }) if *progress >= 1.0);
+                    if fletched
+                        && let Some(Work { job: Job::Fletch { what, acc, head, sinew, .. }, .. }) = world.works.remove(&pid)
+                    {
+                        let (name, n) = what.product();
+                        let q = match what {
+                            crate::archery::Fletch::Shafts => crate::smithing::quality_of(0.35 + acc * 0.4 + skill / 100.0 * 0.25),
+                            crate::archery::Fletch::Arrows(_) => crate::archery::assembled_quality(head, skill, acc, sinew),
+                        };
+                        let quality = if crate::items::ItemBaseId::find(name).is_some_and(|b| b.base().has_quality) { q } else { Quality::Common };
+                        give_named(&mut commands, &mut loot, pid, name, quality, n, feet);
+                        if let Some(k) = know.players.get_mut(&pid) {
+                            k.practice(Skill::Smithing, 0.3);
+                            sync_knowledge(&mut server, k, pid);
+                        }
+                        notice(&mut server, pid, format!("Готово: {} ×{n}", name.to_lowercase()));
                         sync_inventory(&mut server, &loot, pid);
                     }
                     send_work(&mut server, world, pid);
@@ -666,6 +723,13 @@ fn abandon(commands: &mut Commands, loot: &mut LootWorld, pid: u64, w: Work, fee
             }
         }
         Job::Soak(_) => {}
+        // Со верстака всё возвращается, кроме клея.
+        Job::Fletch { what, head, .. } => {
+            for (name, n) in what.inputs() {
+                let q = if crate::archery::ARROWS.iter().any(|a| a.head == name) { head } else { Quality::Common };
+                give_named(commands, loot, pid, name, q, n, feet);
+            }
+        }
         Job::Repair { item, .. } => {
             if let Some(inv) = loot.inventories.get_mut(&pid) {
                 give(commands, inv, item, feet);
@@ -850,6 +914,7 @@ fn finish(commands: &mut Commands, world: &mut SmithWorld, loot: &mut LootWorld,
             }
         }
         Job::Repair { .. } => return Err("Доправьте вещь на наковальне или точиле".into()),
+        Job::Fletch { .. } => return Err("Доделайте работу на верстаке".into()),
     }
     Ok(msgs.join(". "))
 }
@@ -886,7 +951,7 @@ fn tick_works(time: Res<Time>, mut server: ResMut<RenetServer>, game: Res<GameWo
             Job::Forge(f) => matches!(f.spot, Spot::Fire | Spot::Temper),
             Job::Cast(c) => c.spot == Spot::Fire,
             Job::Soak(s) => matches!(s.kind, SoakKind::Carburize) && !s.done(),
-            Job::Repair { .. } => false,
+            Job::Repair { .. } | Job::Fletch { .. } => false,
         };
         if hot {
             burning.insert(w.station, true);
@@ -911,7 +976,7 @@ fn tick_works(time: Res<Time>, mut server: ResMut<RenetServer>, game: Res<GameWo
                 s.bellows = w.bellows;
                 s.step(dt, st.fuel > 0.0)
             }
-            Job::Repair { .. } => Vec::new(),
+            Job::Repair { .. } | Job::Fletch { .. } => Vec::new(),
         };
         for e in events {
             if e == SmithEvent::Sparks {
@@ -925,7 +990,7 @@ fn tick_works(time: Res<Time>, mut server: ResMut<RenetServer>, game: Res<GameWo
             Job::Forge(f) => f.temp > 60.0 || f.spot == Spot::Fire,
             Job::Cast(c) => c.temp > 60.0 || c.spot == Spot::Fire || c.pouring,
             Job::Soak(s) => !s.done() || s.temp > 60.0,
-            Job::Repair { .. } => false,
+            Job::Repair { .. } | Job::Fletch { .. } => false,
         };
         if lively && w.since_view > 0.12 {
             w.since_view = 0.0;
@@ -971,6 +1036,10 @@ pub enum Wear {
     Shield(f32),
     /// Доспех, по которому пришёлся удар.
     Armour { head: bool, amount: f32 },
+    /// Выпущена стрела из этой стопки.
+    Ammo(ItemUid),
+    /// Тетива натянута, а стрел в сумке нет.
+    NoAmmo,
 }
 
 fn wear_item(item: &mut Item, amount: f32) -> Option<bool> {
@@ -1001,6 +1070,23 @@ fn apply_wear(mut server: ResMut<RenetServer>, mut game: ResMut<GameWorld>, mut 
     for (pid, w) in wear {
         let Some(inv) = loot.inventories.get_mut(&pid) else { continue };
         let slots: Vec<(EquipSlot, f32)> = match w {
+            Wear::Ammo(uid) => {
+                if let Some(stack) = inv.find_mut(uid) {
+                    stack.count = stack.count.saturating_sub(1);
+                    if stack.count == 0 {
+                        inv.take(uid);
+                        notice(&mut server, pid, "Это была последняя стрела этого вида");
+                    }
+                }
+                if !dirty.contains(&pid) {
+                    dirty.push(pid);
+                }
+                continue;
+            }
+            Wear::NoAmmo => {
+                notice(&mut server, pid, "Нет стрел: соберите их у кузни или купите");
+                continue;
+            }
             Wear::Weapon(a) => vec![(EquipSlot::MainHand, a)],
             Wear::Shield(a) => vec![(EquipSlot::OffHand, a)],
             Wear::Armour { head: true, amount } => vec![(EquipSlot::Head, amount)],
