@@ -262,6 +262,7 @@ fn spawn_waiting_camera(mut commands: Commands) {
         }
         let y = |i: usize, x: f32, z: f32| if t[i].starts_with('g') { crate::level::ground_y(x, z) + v[i] } else { v[i] };
         let (eye, at) = (Vec3::new(v[0], y(1, v[0], v[2]), v[2]), Vec3::new(v[3], y(4, v[3], v[5]), v[5]));
+        info!("камера снимка: {eye} -> {at}");
         Some(Transform::from_translation(eye).looking_at(at, Vec3::Y))
     });
     let tf = cam.unwrap_or_else(|| {
