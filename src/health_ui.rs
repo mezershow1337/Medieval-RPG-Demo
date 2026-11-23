@@ -14,8 +14,6 @@ use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
 use std::hash::{Hash, Hasher};
 
-const PANEL_BG: Color = Color::srgba(0.11, 0.09, 0.07, 0.96);
-const PANEL_BORDER: Color = Color::srgb(0.45, 0.36, 0.22);
 const TITLE: Color = Color::srgb(0.93, 0.83, 0.6);
 const DIM: Color = Color::srgb(0.6, 0.56, 0.5);
 const TEXT: Color = Color::srgb(0.86, 0.8, 0.68);
@@ -138,18 +136,17 @@ pub fn body_panel(root: &mut ChildSpawnerCommands, fonts: &UiFonts, body: &Body,
         FocusPolicy::Pass,
         Node {
             flex_direction: FlexDirection::Column,
-            padding: UiRect::all(px(12)),
+            padding: crate::ui_theme::Skin::Wood.padding(),
             row_gap: px(8),
-            border: UiRect::all(px(2)),
             align_self: AlignSelf::Center,
-            width: px(360),
+            width: px(380),
             ..default()
         },
-        BorderColor::all(PANEL_BORDER),
-        BackgroundColor(PANEL_BG),
+        crate::ui_theme::theme().skin(crate::ui_theme::Skin::Wood),
     ))
     .with_children(|p| {
-        p.spawn(text(fonts, "Тело", 22.0, TITLE, true));
+        p.spawn(crate::ui_theme::theme().title("Тело", 28.0));
+        crate::ui_theme::theme().divider(p);
         p.spawn(Node { flex_direction: FlexDirection::Row, column_gap: px(10), ..default() }).with_children(|row| {
             // Силуэт на листе пергамента.
             row.spawn((

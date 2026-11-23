@@ -22,7 +22,6 @@ impl Plugin for ResidentsPlugin {
 #[derive(Component)]
 pub struct ResidentView {
     pub role: Role,
-    phase: f32,
     pub index: usize,
 }
 
@@ -142,7 +141,7 @@ pub fn spawn_residents(commands: &mut Commands, residents: &[Resident]) {
         let scale = if r.role == Role::Child { 0.72 } else { 1.0 };
         commands
             .spawn((
-                ResidentView { role: r.role, phase: i as f32 * 2.31, index: i },
+                ResidentView { role: r.role, index: i },
                 Transform::from_translation(r.pos).with_rotation(Quat::from_rotation_y(r.yaw)).with_scale(Vec3::splat(scale)),
                 Visibility::default(),
             ))
@@ -234,22 +233,33 @@ fn setup_speech(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
     commands
         .spawn(Node { position_type: PositionType::Absolute, width: percent(100), top: percent(60), justify_content: JustifyContent::Center, ..default() })
         .with_children(|p| {
-            p.spawn((
-                SpeechText,
-                Text::new(""),
-                TextFont { font: fonts.regular.clone().into(), font_size: bevy::text::FontSize::Px(19.0), ..default() },
-                TextColor(Color::srgb(0.95, 0.9, 0.78)),
-                TextLayout::justify(Justify::Center),
-                TextShadow::default(),
-            ));
+            crate::ui_theme::theme().plaque(p).with_children(|p| {
+                p.spawn((
+                    SpeechText,
+                    Text::new(""),
+                    TextFont {
+                        font: fonts.regular.clone().into(),
+                        font_size: bevy::text::FontSize::Px(19.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.95, 0.9, 0.78)),
+                    TextLayout::justify(Justify::Center),
+                    TextShadow::default(),
+                    crate::ui_theme::Plaque,
+                ));
+            });
         });
 }
 
-fn update_speech(time: Res<Time>, aim: Res<ResidentAim>, speech: Res<Speech>, mut text: Single<&mut Text, With<SpeechText>>) {
+fn update_speech(time: Res<Time>, aim: Res<ResidentAim>, speech: Res<Speech>, acts: Res<crate::life_client::LiveActs>, mut text: Single<&mut Text, With<SpeechText>>) {
     let line = if time.elapsed_secs() < speech.until {
         speech.line.clone()
-    } else if let Some((_, role)) = aim.0 {
-        format!("[E] Поговорить: {}", title(role))
+    } else if let Some((i, role)) = aim.0 {
+        // Видно, чем человек занят: «Ремесленник (куёт)».
+        match acts.0.get(i) {
+            Some(a) if *a != crate::daily_life::Act::Idle => format!("[E] Поговорить: {} ({})", title(role), a.name()),
+            _ => format!("[E] Поговорить: {}", title(role)),
+        }
     } else {
         String::new()
     };

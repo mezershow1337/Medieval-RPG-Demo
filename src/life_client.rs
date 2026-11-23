@@ -170,7 +170,7 @@ fn strike(t: f32, period: f32) -> f32 {
     if p < 0.65 { 1.0 - (p / 0.65) } else if p < 0.78 { (p - 0.65) / 0.13 } else { 1.0 }
 }
 
-fn look_for(role: Role, s: &NpcState, t: f32, phase: f32, night: bool, rain: f32) -> Look {
+fn look_for(me: usize, role: Role, s: &NpcState, t: f32, phase: f32, night: bool, rain: f32) -> Look {
     let mut i = PoseInput { time: t + phase, ..default() };
     let mut props = [None, None];
     let tt = t + phase;
@@ -288,7 +288,7 @@ fn look_for(role: Role, s: &NpcState, t: f32, phase: f32, night: bool, rain: f32
             }
         }
         Act::Talk => {
-            let speaking = speaking(s.partner, t);
+            let speaking = speaking(me, s.partner, t);
             let g = if speaking { ((tt * 1.3).sin() * 1.2).clamp(0.0, 1.0) } else { 0.0 };
             i.twist = 0.12 * (tt * 0.6).sin();
             i.pitch = 0.05;
@@ -396,13 +396,13 @@ pub fn merchant_pose(t: f32, phase: f32) -> PoseInput {
         Act::Idle
     };
     let s = NpcState { pos: Vec3::ZERO, yaw: 0.0, act, walking: false, walked: 0.0, carry: false, patrol: false, partner: None, lie: None };
-    look_for(Role::Shopkeeper, &s, t, phase, false, 0.0).input
+    look_for(0, Role::Shopkeeper, &s, t, phase, false, 0.0).input
 }
 
 /// Кто из пары сейчас говорит: собеседники по очереди, по 5 с.
-fn speaking(partner: Option<u16>, t: f32) -> bool {
+fn speaking(me: usize, partner: Option<u16>, t: f32) -> bool {
     let Some(p) = partner else { return false };
-    ((t / 5.0) as u32 + p as u32).is_multiple_of(2)
+    ((t / 5.0) as u32 + (me < p as usize) as u32).is_multiple_of(2)
 }
 
 /// Положение «лёжа на спине» на постели: голова — к изголовью.
@@ -432,7 +432,6 @@ fn drive_residents(
     mut poses: Query<&mut RigPose>,
     mut slots: Query<(&mut Transform, &mut Visibility), (With<PropSlot>, Without<ResidentView>)>,
     mut frame: Local<u32>,
-    mut away: Local<Vec<bool>>,
 ) {
     *frame = frame.wrapping_add(1);
     let t = time.elapsed_secs();
@@ -458,9 +457,6 @@ fn drive_residents(
     if acts.0.len() != n {
         acts.0 = vec![Act::Idle; n];
     }
-    if away.len() != n {
-        *away = vec![false; n];
-    }
     for (r, mut tf, mut vis, children, mut gait, fallen) in &mut people {
         let i = r.index;
         let scale = tf.scale.y;
@@ -478,14 +474,8 @@ fn drive_residents(
             *a = s.act;
         }
         // Тело-коробка в доме мешает, только пока житель там (и жив).
-        if let Some((home, _)) = anchor
-            && i < away.len()
-        {
-            let gone = fallen || s.pos.distance(home) > 0.4 || matches!(s.act, Act::Sleep | Act::Away);
-            if gone != away[i] {
-                away[i] = gone;
-                level.set_body_gone(i, gone);
-            }
+        if let Some((home, _)) = anchor {
+            level.set_body_gone(i, fallen || s.pos.distance(home) > 0.4 || matches!(s.act, Act::Sleep | Act::Away));
         }
         if fallen {
             continue;
@@ -516,7 +506,7 @@ fn drive_residents(
             4
         };
         let pose_now = gait.fresh || (*frame + i as u32).is_multiple_of(every);
-        let look = look_for(r.role, &s, t, r_phase(i), night, rain);
+        let look = look_for(i, r.role, &s, t, r_phase(i), night, rain);
         if look.lying {
             *tf = lying_transform(&s, scale);
         } else {
@@ -617,31 +607,34 @@ const RAIN_GREETINGS: &[&str] = &["Ну и льёт…", "Промок до ни
 #[derive(Component)]
 struct Bubble(usize);
 #[derive(Component)]
+struct BubbleText(usize);
+#[derive(Component)]
 struct ClockText;
+#[derive(Component)]
+struct ClockRoot;
 
 const BUBBLES: usize = 5;
 
-fn setup_chatter(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>) {
+fn setup_chatter(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
+    use crate::ui_theme::Skin;
+    let font = |size: f32| TextFont { font: theme.fonts.regular.clone().into(), font_size: bevy::text::FontSize::Px(size), ..default() };
     for k in 0..BUBBLES {
-        commands.spawn((
-            Bubble(k),
-            Node { position_type: PositionType::Absolute, max_width: Val::Px(320.0), padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)), border_radius: BorderRadius::all(Val::Px(4.0)), ..default() },
-            BackgroundColor(Color::srgba(0.12, 0.09, 0.06, 0.55)),
-            Text::new(""),
-            TextFont { font: fonts.regular.clone().into(), font_size: bevy::text::FontSize::Px(15.0), ..default() },
-            TextColor(Color::srgb(0.96, 0.92, 0.8)),
-            TextLayout::justify(Justify::Center),
-            Visibility::Hidden,
-        ));
+        commands
+            .spawn((
+                Bubble(k),
+                Node { position_type: PositionType::Absolute, max_width: Val::Px(340.0), padding: UiRect::axes(Val::Px(12.0), Val::Px(7.0)), ..default() },
+                theme.skin(Skin::Leather),
+                Visibility::Hidden,
+            ))
+            .with_children(|p| {
+                p.spawn((BubbleText(k), Text::new(""), font(15.0), TextColor(Skin::Leather.text()), TextLayout::justify(Justify::Center)));
+            });
     }
-    commands.spawn((
-        ClockText,
-        Node { position_type: PositionType::Absolute, right: Val::Px(14.0), top: Val::Px(10.0), ..default() },
-        Text::new(""),
-        TextFont { font: fonts.regular.clone().into(), font_size: bevy::text::FontSize::Px(16.0), ..default() },
-        TextColor(Color::srgb(0.95, 0.88, 0.7)),
-        TextShadow::default(),
-    ));
+    commands
+        .spawn((Node { position_type: PositionType::Absolute, right: Val::Px(12.0), top: Val::Px(8.0), padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)), ..default() }, theme.skin(Skin::Leather), ClockRoot, Visibility::Hidden))
+            .with_children(|p| {
+                p.spawn((ClockText, Text::new(""), font(16.0), TextColor(Skin::Leather.title())));
+            });
 }
 
 /// Реплики над головами: беседующие соседи и прохожие, которые здороваются с игроком.
@@ -652,7 +645,8 @@ fn chatter(
     camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     people: Query<(&ResidentView, &Transform, &Visibility), Without<crate::civil_client::Fallen>>,
     acts: Res<LiveActs>,
-    mut bubbles: Query<(&Bubble, &mut Node, &mut Text, &mut Visibility), Without<ResidentView>>,
+    mut bubbles: Query<(&Bubble, &mut Node, &ComputedNode, &mut Visibility), Without<ResidentView>>,
+    mut texts: Query<(&BubbleText, &mut Text)>,
     mut greeted: Local<std::collections::HashMap<usize, f32>>,
 ) {
     let t = time.elapsed_secs();
@@ -674,7 +668,7 @@ fn chatter(
         if act == Act::Talk {
             let partner = plans.as_ref().and_then(|p| p.people.get(r.index)).and_then(|p| p.state(clock.of_day())).and_then(|s| s.partner);
             let Some(p) = partner else { continue };
-            if !speaking(Some(p), t) {
+            if !speaking(r.index, Some(p), t) {
                 continue;
             }
             let pair = (r.index.min(p as usize) as u64) << 16 | r.index.max(p as usize) as u64;
@@ -713,7 +707,7 @@ fn chatter(
         }
     }
     let mut shown = 0;
-    for (b, mut node, mut text, mut vis) in &mut bubbles {
+    for (b, mut node, computed, mut vis) in &mut bubbles {
         let Some((px, line)) = placed.get(b.0) else {
             if *vis != Visibility::Hidden {
                 *vis = Visibility::Hidden;
@@ -721,20 +715,26 @@ fn chatter(
             continue;
         };
         let px = *px;
-        if text.0 != *line {
+        if let Some((_, mut text)) = texts.iter_mut().find(|(t, _)| t.0 == b.0)
+            && text.0 != *line
+        {
             text.0 = line.clone();
         }
-        node.left = Val::Px(px.x - 120.0);
-        node.top = Val::Px(px.y - 18.0);
+        let size = computed.size() * computed.inverse_scale_factor();
+        node.left = Val::Px(px.x - size.x * 0.5);
+        node.top = Val::Px(px.y - size.y);
         *vis = Visibility::Inherited;
         shown += 1;
     }
     let _ = shown;
 }
 
-fn clock_hud(clock: Res<WorldClock>, mut text: Single<&mut Text, With<ClockText>>) {
+fn clock_hud(clock: Res<WorldClock>, mut text: Single<&mut Text, With<ClockText>>, mut root: Single<&mut Visibility, With<ClockRoot>>) {
     if !clock.synced || crate::level::active() != crate::level::LevelKind::Chersonesus {
         return;
+    }
+    if **root == Visibility::Hidden && std::env::var("MRPG_CAM").is_err() {
+        **root = Visibility::Inherited;
     }
     let rain = if clock.rain() > 0.1 { " · дождь" } else { "" };
     let line = format!("{} · {}{}", clock.hhmm(), crate::world_clock::part_of_day(clock.hour()), rain);
@@ -764,7 +764,7 @@ fn setup_rain(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats
     let mut nrm: Vec<[f32; 3]> = Vec::new();
     let mut idx: Vec<u32> = Vec::new();
     // Струи: косые крестики из двух тонких полосок.
-    for k in 0..2600u64 {
+    for k in 0..7000u64 {
         let x = (crate::world_clock::unit(k, 1) * 2.0 - 1.0) * RAIN_R;
         let z = (crate::world_clock::unit(k, 2) * 2.0 - 1.0) * RAIN_R;
         let y = crate::world_clock::unit(k, 3) * RAIN_H;
@@ -806,7 +806,7 @@ fn rain(
     if let Some(look) = look
         && let Some(mut m) = mats.get_mut(&look.0)
     {
-        let a = 0.32 * r;
+        let a = 0.45 * r;
         if (m.base_color.alpha() - a).abs() > 0.01 {
             m.base_color.set_alpha(a);
         }
@@ -857,7 +857,7 @@ mod tests {
         for act in acts {
             for t in [0.0, 0.7, 3.1] {
                 let s = NpcState { pos: Vec3::ZERO, yaw: 0.0, act, walking: false, walked: 0.0, carry: false, patrol: false, partner: Some(1), lie: None };
-                let look = look_for(Role::Soldier, &s, t, 0.3, true, 0.0);
+                let look = look_for(0, Role::Soldier, &s, t, 0.3, true, 0.0);
                 let solved = crate::rig::solve_pose(&look.input);
                 assert!(solved.right_grip.is_finite() && solved.left_grip.is_finite(), "{act:?}");
             }
@@ -870,7 +870,7 @@ mod tests {
         let mut low = f32::MAX;
         let mut high = f32::MIN;
         for k in 0..50 {
-            let look = look_for(Role::Craftsman, &s, k as f32 * 0.05, 0.0, false, 0.0);
+            let look = look_for(0, Role::Craftsman, &s, k as f32 * 0.05, 0.0, false, 0.0);
             let g = crate::rig::solve_pose(&look.input).right_grip;
             low = low.min(g.y);
             high = high.max(g.y);

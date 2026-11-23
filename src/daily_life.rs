@@ -401,10 +401,6 @@ impl Dest {
             _ => 6.0,
         }
     }
-
-    fn outdoors(self) -> bool {
-        matches!(self, Dest::Agora | Dest::Quay | Dest::PortMarket | Dest::MainGate | Dest::PortGate | Dest::SouthGate | Dest::Reservoir)
-    }
 }
 
 /// Место для одного-двух человек: точка, взгляд и точка собеседника (лицом к лицу).
@@ -482,7 +478,7 @@ pub enum Act {
 }
 
 impl Act {
-    /// Занятие за столом/работой, где человек стоит на месте лицом к делу.
+    /// Как сказать, чем человек занят («куёт», «молится»).
     pub fn name(self) -> &'static str {
         match self {
             Act::Sleep => "спит",
@@ -521,6 +517,7 @@ impl Act {
 #[derive(Clone, Debug)]
 pub struct Stay {
     pub t0: f64,
+    #[allow(dead_code)] // конец пребывания: для проверок плана
     pub t1: f64,
     pub pos: Vec3,
     pub yaw: f32,
@@ -601,13 +598,6 @@ impl Plan {
         })
     }
 
-    /// Ровно ли на месте `p` в момент `t` (не ушёл ли с поста).
-    pub fn first_pos(&self) -> Option<Vec3> {
-        self.segs.first().map(|s| match s {
-            Seg::Stay(s) => s.pos,
-            Seg::Walk(w) => w.pts[0],
-        })
-    }
 }
 
 /// Планы всех жителей на один день.
@@ -640,7 +630,6 @@ pub struct Town {
     street: Vec<Spot>,
     /// Ближайшее к дому жителя место на улице.
     street_of: Vec<Option<usize>>,
-    pub dest_cells: HashMap<Dest, usize>,
 }
 
 static TOWN: OnceLock<Town> = OnceLock::new();
@@ -837,7 +826,7 @@ impl Town {
                 near.into_iter().take(3).map(|(_, k)| k).find(|k| nav.local_path(r.pos, street[*k].pos, 10.0).is_some())
             })
             .collect();
-        Town { nav, residents, home_cell, bed, anvil, job, fields, spots, fishing, street, street_of, dest_cells }
+        Town { nav, residents, home_cell, bed, anvil, job, fields, spots, fishing, street, street_of }
     }
 
     /// Путь от точки `from` к месту `d` (через поле), заканчивая в `to` (место у цели).
@@ -994,8 +983,8 @@ impl Town {
         // Сейчас: где стоит и у какого места.
         let first_bed = matches!(wishes.first().map(|w| w.act), Some(Act::Sleep));
         let (mut at_pos, mut at_dest): (Vec3, Option<Dest>) = (if first_bed { self.bed_spot(i).0 } else { home }, None);
-        // Если дом не там, где постель, а дорога не находится — спим «в доме».
-        let mut lie = None;
+        // Лежит ли в постели на этом шаге (середина ложа).
+        let mut lie: Option<Vec3>;
         let mut t = 0.0f64;
         for (k, w) in wishes.iter().enumerate() {
             let want_t = if k == 0 { 0.0 } else { w.at as f64 * 3600.0 };
@@ -1489,7 +1478,6 @@ impl Town {
                     }
                 }
                 v.push(w(12.0, Home, Eat));
-                v.retain(|x| x.at < 12.0 || x.act != Eat || x.at == 12.0);
                 v.sort_by(|a, b| a.at.total_cmp(&b.at));
                 v.push(leisure(7, 18.0, true));
                 v.push(w(19.8, Home, Eat));
@@ -1691,7 +1679,7 @@ impl Plugin for LifeServerPlugin {
     }
 }
 
-fn move_residents_server(clock: Res<crate::world_clock::WorldClock>, mut civil: ResMut<crate::civil_server::CivilWorld>, level: Res<LevelColliders>, mut fright: ResMut<Fright>, mut away: Local<Vec<bool>>) {
+fn move_residents_server(clock: Res<crate::world_clock::WorldClock>, mut civil: ResMut<crate::civil_server::CivilWorld>, level: Res<LevelColliders>, mut fright: ResMut<Fright>) {
     let day = clock.day();
     let now = clock.of_day();
     if clock.hour() > 18.0 {
@@ -1702,9 +1690,6 @@ fn move_residents_server(clock: Res<crate::world_clock::WorldClock>, mut civil: 
         fright.alarm(&plans, at, now);
     }
     fright.settle(day, now);
-    if away.len() != plans.people.len() {
-        *away = vec![false; plans.people.len()];
-    }
     for (i, plan) in plans.people.iter().enumerate() {
         let Some(p) = civil.people.get_mut(i) else { break };
         if p.role.is_none() || !p.alive() {
@@ -1715,11 +1700,8 @@ fn move_residents_server(clock: Res<crate::world_clock::WorldClock>, mut civil: 
         p.pos = s.pos;
         p.yaw = s.yaw;
         // Тело-коробка стоит в доме: пока житель не там (или спит), она не мешает.
-        let gone = s.pos.distance(anchor) > 0.4 || matches!(s.act, Act::Sleep | Act::Away);
-        if gone != away[i] {
-            away[i] = gone;
-            level.set_body_gone(i, gone);
-        }
+        // (Ставим каждый тик: так и вернувшийся на место погибшего сразу получает верное тело.)
+        level.set_body_gone(i, s.pos.distance(anchor) > 0.4 || matches!(s.act, Act::Sleep | Act::Away));
     }
 }
 
@@ -1842,69 +1824,44 @@ mod tests {
     }
 }
 
+
 #[cfg(test)]
-mod debug_tests {
+mod shot_tests {
     use super::*;
 
+    /// Подбирает виды для снимков: житель за делом и камера в 3 м перед ним.
     #[test]
-    fn debug_dump() {
+    #[ignore]
+    fn print_tour() {
         let town = test_town();
-        let mut no_side = 0;
-        let mut no_path = 0;
-        for (i, b) in town.bed.iter().enumerate() {
-            let Some(b) = b else { continue };
-            match town.nav.nearest(b.pos - Vec3::Y * 0.62, 1.4) {
-                None => no_side += 1,
-                Some(c) => {
-                    if town.nav.local_path(town.residents[i].pos, town.nav.point(c), 6.0).is_none() {
-                        no_path += 1;
-                        if no_path < 4 {
-                            eprintln!("bed {} home {} side {}", b.pos, town.residents[i].pos, town.nav.point(c));
-                        }
-                    }
+        let h: f32 = std::env::var("TOUR_HOUR").ok().and_then(|s| s.parse().ok()).unwrap_or(10.0);
+        let day = (h / 24.0) as u32;
+        let plans = town.plan_day(day);
+        let t = (h % 24.0) as f64 * 3600.0;
+        let mut out = Vec::new();
+        let mut used = Vec::new();
+        for act in [Act::Hammer, Act::Talk, Act::Carry, Act::Fish, Act::Sleep, Act::Preach, Act::Pray, Act::Stir, Act::Sweep, Act::Browse, Act::Drink, Act::Guard, Act::Weave, Act::Treat, Act::Lie, Act::Idle] {
+            let mut n = 0;
+            for (i, p) in plans.people.iter().enumerate() {
+                let Some(s) = p.state(t) else { continue };
+                let ok = if act == Act::Carry { s.carry } else { s.act == act && !s.walking };
+                if !ok || used.iter().any(|u: &Vec3| u.distance(s.pos) < 15.0) {
+                    continue;
+                }
+                let base = s.lie.unwrap_or(s.pos);
+                let fwd = forward(s.yaw);
+                let side = Vec3::new(fwd.z, 0.0, -fwd.x);
+                let cands = [fwd * 3.2 + side * 1.2, fwd * 2.5 - side * 1.5, side * 3.0, -side * 3.0, fwd * 4.5];
+                let Some(off) = cands.iter().find(|o| town.nav.nearest(s.pos + **o, 0.3).is_some() && town.nav.straight(s.pos, s.pos + **o)) else { continue };
+                let cam = s.pos + *off + Vec3::Y * 1.75;
+                used.push(s.pos);
+                out.push(format!("{:?}{}_{}:{:.1},{:.1},{:.1},{:.1},{:.1},{:.1}", act, n, i, cam.x, cam.y, cam.z, base.x, base.y + 1.1, base.z));
+                n += 1;
+                if n >= 2 {
+                    break;
                 }
             }
         }
-        eprintln!("beds: no side {no_side}, no path {no_path}");
-        let q = town.dest_cells[&Dest::Quay];
-        let p = town.nav.point(q);
-        for dz in -6..=6 {
-            let mut line = String::new();
-            for dx in 0..=40 {
-                let (x, z) = (p.x + 10.0 + dx as f32 * 0.5, p.z + dz as f32 * 3.0);
-                let c = town.nav.cell_at(x, z).map(|c| town.nav.walkable(c)).unwrap_or(false);
-                let g = crate::level::ground_y(x, z);
-                line.push(if c { '#' } else if g < crate::level::WATER_Y { '~' } else { '.' });
-            }
-            eprintln!("{line}");
-        }
-        eprintln!("quay cell {p}");
-        for dz in [-10.0f32, -4.0, 0.0, 4.0, 10.0] {
-            let mut line = String::new();
-            for k in 0..80 {
-                let x = p.x - 20.0 + k as f32 * 0.5;
-                let c = town.nav.cell_at(x, p.z + dz);
-                let g = crate::level::ground_y(x, p.z + dz);
-                line.push(match c.map(|c| town.nav.walkable(c)) { Some(true) => '#', _ if g < crate::level::WATER_Y => '~', _ => '.' });
-            }
-            eprintln!("row {line}");
-        }
-        for dz in [-6.0f32, 0.0, 6.0] {
-            for dx in [11.0f32, 11.5, 12.0, 12.25, 12.5, 13.0] {
-                let (x, z) = (p.x + dx, p.z + dz);
-                let c = town.nav.cell_at(x, z);
-                eprintln!("dx {dx} dz {dz}: cell {:?} walk {:?} reached {:?} floor {:?} ground {}", c, c.map(|c| town.nav.walkable(c)), c.map(|c| town.fields[&Dest::Quay].reached(c)), c.map(|c| town.nav.floor[c]), crate::level::ground_y(x, z));
-            }
-        }
-        eprintln!("forges: {:?}", crate::level::layout().forges.iter().map(|f| f.anvil).collect::<Vec<_>>());
-    }
-}
-#[cfg(test)]
-mod where_tests {
-    #[test]
-    fn print_places() {
-        for id in ["agora", "smithy", "quay", "horrea", "basilica", "tavern", "tavern_port", "port_market", "thermae", "garrison", "main_gate"] {
-            eprintln!("{id}: {:?}", crate::level::place_pos(id));
-        }
+        println!("TOUR={}", out.join(";"));
     }
 }

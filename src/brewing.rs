@@ -946,6 +946,8 @@ pub struct Workplace {
     pub clay: bool,
     /// Как вёлся огонь (None — ровно, как задано).
     pub fire: Option<FireLog>,
+    /// Как работали руками 0..1: растирали, мешали, качали мехи (None — не считали).
+    pub work: Option<f32>,
 }
 
 /// Как на самом деле горел огонь за работу: доли времени, когда жар был заметно выше и
@@ -1306,6 +1308,21 @@ pub fn brew(spec: &BrewSpec, vessel: Vessel, k: &Knowledge, flasks: u16, roll: f
             score *= 0.6;
         }
     }
+    // Руки: растёртое комками и неразмешанное выходит хуже.
+    if let Some(w) = wp.work {
+        let w = w.clamp(0.0, 1.0);
+        if vessel == Vessel::Mortar {
+            if w < 0.45 {
+                notes.push("растёрто комками");
+            }
+            score = (score * (0.6 + 0.45 * w)).min(1.0);
+        } else {
+            if w < 0.4 {
+                notes.push(if vessel.still() || vessel == Vessel::Crucible { "мехи качали рывками" } else { "мешали кое-как" });
+            }
+            score = (score * (0.82 + 0.22 * w)).min(1.0);
+        }
+    }
     // Жидкое с травой процеживают через лён.
     if recipe.bottled() && recipe.water.0 > 0.0 {
         if wp.cloth {
@@ -1473,7 +1490,7 @@ mod tests {
     use crate::lore::Skill;
 
     fn wp(table: bool) -> Workplace {
-        Workplace { table, cloth: true, outer_pot: true, clay: true, fire: None }
+        Workplace { table, cloth: true, outer_pot: true, clay: true, fire: None, work: None }
     }
 
     fn spec(items: &[(&str, u16)], water: u8, heat: Heat, hours: f32) -> BrewSpec {
@@ -1552,6 +1569,20 @@ mod tests {
         let k = Knowledge::default();
         let r = brew(&spec(&[("Тысячелистник", 1), ("Подорожник", 1)], 0, Heat::None, 0.25), Vessel::Mortar, &k, 0, 0.9, &wp(false));
         assert_eq!(r.product.map(|p| p.0), Some("Кровоостанавливающая припарка"), "{}", r.text);
+    }
+
+    #[test]
+    fn careless_grinding_gives_worse_poultice() {
+        let mut k = Knowledge::default();
+        for _ in 0..200 {
+            k.practice(Skill::Herbalism, 1.0);
+        }
+        let s = spec(&[("Тысячелистник", 1), ("Подорожник", 1)], 0, Heat::None, 0.25);
+        let good = brew(&s, Vessel::Mortar, &k, 0, 0.9, &Workplace { work: Some(1.0), ..wp(false) });
+        let bad = brew(&s, Vessel::Mortar, &k, 0, 0.9, &Workplace { work: Some(0.1), ..wp(false) });
+        let (g, b) = (good.product.expect("вышло").2, bad.product.expect("вышло").2);
+        assert!(g > b, "ровно {g}, комками {b}");
+        assert!(bad.text.contains("комками"), "{}", bad.text);
     }
 
     #[test]

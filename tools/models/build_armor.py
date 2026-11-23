@@ -224,23 +224,7 @@ def build():
         return bld.shell(part, off, iters)
 
     def skirt(hem, off, narrow=0.78):
-        # Как в build_humans.build(): юбка MakeHuman, суженная к подолу и перевешенная на бёдра.
-        part = bld.extract("helper-skirt", lambda c: c[1] > hem, uv_box=True)
-        part = bld.shell(part, off, 1)
-        pos = part.pos.copy()
-        y = pos[:, 1]
-        k = 1 - (1 - narrow) * smooth(1.0, hem, y)
-        pos[:, 0] *= k
-        pos[:, 2] = (pos[:, 2] + 0.015) * (0.92 + 0.08 * k) - 0.015
-        part.pos = pos
-        W = np.zeros((len(pos), len(BONES)))
-        a = 0.75 * smooth(0.98, hem + 0.05, y)
-        side = 1 / (1 + np.exp(-pos[:, 0] / 0.03))
-        W[:, B["pelvis"]] = 1 - a
-        W[:, B["thigh_r"]] = a * side
-        W[:, B["thigh_l"]] = a * (1 - side)
-        part.W = W
-        return part
+        return bh.make_skirt(bld, hem, off, narrow)
 
     def collar(c, r):
         return c[1] > 1.5 or (c[1] > 1.43 and abs(c[0]) < r and c[2] > -0.11 and c[2] < 0.06)

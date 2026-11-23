@@ -209,12 +209,3 @@ mod tests {
         assert_eq!(rain_at(d as f64 * DAY + (a as f64 - 0.5) * 3600.0), 0.0);
     }
 }
-#[cfg(test)]
-mod print_rain {
-    #[test]
-    fn print_rain_days() {
-        for d in 0..12 {
-            eprintln!("day {d}: {:?}", super::rain_window(d));
-        }
-    }
-}
