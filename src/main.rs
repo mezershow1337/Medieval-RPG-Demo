@@ -23,6 +23,7 @@ mod inventory;
 mod inventory_ui;
 mod items;
 mod knowledge;
+mod launcher;
 mod level;
 mod loot_client;
 mod loot_net;
@@ -61,15 +62,20 @@ mod trade_ui;
 mod weight;
 
 use protocol::DEFAULT_PORT;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::SocketAddr;
 
 fn parse_addr(s: &str) -> SocketAddr {
-    let with_port = if s.contains(':') { s.to_string() } else { format!("{s}:{DEFAULT_PORT}") };
-    with_port
-        .to_socket_addrs()
-        .ok()
-        .and_then(|mut a| a.next())
-        .unwrap_or_else(|| panic!("не понимаю адрес сервера: {s}"))
+    launcher::resolve(s).unwrap_or_else(|e| panic!("не понимаю адрес сервера: {e}"))
+}
+
+/// Хост: сервер в отдельном потоке и окно игры, подключённое к нему же.
+fn host(port: u16) {
+    let socket = match server::bind_socket(port) {
+        Ok(s) => s,
+        Err(e) => panic!("порт {port} занят ({e}): возможно, игра или сервер уже запущены"),
+    };
+    std::thread::spawn(move || server::run(socket, false));
+    client::run(SocketAddr::from(([127, 0, 0, 1], port)));
 }
 
 fn main() {
@@ -80,6 +86,15 @@ fn main() {
         unsafe { std::env::set_var("RUST_MIN_STACK", (16 * 1024 * 1024).to_string()) };
     }
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Готовая сборка, запущенная двойным щелчком: меню «Создать игру / Подключиться».
+    if args.is_empty() && launcher::wanted() {
+        launcher::keep_console_on_panic();
+        match launcher::run_menu() {
+            launcher::Choice::Host => host(DEFAULT_PORT),
+            launcher::Choice::Join(addr) => client::run(addr),
+        }
+        return;
+    }
     match args.first().map(String::as_str) {
         Some("server") => {
             let port = args.get(1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
@@ -91,10 +106,7 @@ fn main() {
             client::run(addr);
         }
         None | Some("host") => {
-            let port = args.get(1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
-            let socket = server::bind_socket(port).expect("порт занят: возможно, сервер уже запущен");
-            std::thread::spawn(move || server::run(socket, false));
-            client::run(SocketAddr::from(([127, 0, 0, 1], port)));
+            host(args.get(1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT));
         }
         Some(other) => {
             eprintln!("Неизвестная команда «{other}». Используйте: host | join <адрес> | server");
