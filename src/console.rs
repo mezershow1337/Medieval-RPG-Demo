@@ -89,6 +89,11 @@ impl Default for Console {
 }
 
 impl Console {
+    /// Выполнить команду, как если бы её набрали (для обходов со снимками).
+    pub fn push(&mut self, line: impl Into<String>) {
+        self.queue.push(line.into());
+    }
+
     fn print(&mut self, text: impl AsRef<str>, color: Color) {
         for l in text.as_ref().lines() {
             self.lines.push_back((l.to_string(), color));

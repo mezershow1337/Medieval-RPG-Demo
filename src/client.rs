@@ -141,7 +141,8 @@ pub fn run(server_addr: SocketAddr) {
         client_id,
         CONNECTION_TIMEOUT_SECS,
         vec![server_addr],
-        None,
+        // Постоянный профиль (ключ и имя): по нему сервер узнаёт хозяина дома после перезапуска.
+        Some(&crate::estates::pack_profile(&crate::estates::local_profile())),
         &[0; NETCODE_KEY_BYTES],
     )
     .expect("не удалось создать билет подключения");
@@ -165,6 +166,7 @@ pub fn run(server_addr: SocketAddr) {
         .add_plugins(crate::trade_client::TradeClientPlugin)
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))
         .add_plugins(crate::smithing_client::SmithingClientPlugin)
+        .add_plugins(crate::towns_client::TownClientPlugin)
         .add_plugins(crate::ui_theme::UiThemePlugin)
         .add_plugins((crate::skill_book::SkillBookPlugin, crate::hints::HintsPlugin))
         .add_plugins(crate::work_client::WorkClientPlugin)
