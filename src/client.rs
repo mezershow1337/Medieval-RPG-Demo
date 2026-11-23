@@ -24,7 +24,6 @@ pub struct NetState {
 /// Другой боец (игрок или враг), которого мы видим по данным сервера.
 #[derive(Component)]
 pub struct RemoteActor {
-    #[allow(dead_code)] // понадобится для обыска и прицеливания
     pub id: u64,
     pub kind: ActorKind,
     pub fighter: Fighter,
@@ -129,6 +128,7 @@ pub fn run(server_addr: SocketAddr) {
         .add_plugins(rig::RigPlugin)
         .add_plugins(crate::loot_client::LootClientPlugin)
         .add_plugins(crate::doors::DoorClientPlugin)
+        .add_plugins(crate::map::MapClientPlugin)
         .add_plugins(crate::residents::ResidentsPlugin)
         .add_plugins(crate::trade_client::TradeClientPlugin)
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))

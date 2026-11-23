@@ -83,9 +83,10 @@ pub fn grab_cursor(
     keys: Res<ButtonInput<KeyCode>>,
     loot: Option<Res<crate::loot_client::LootState>>,
     trade: Option<Res<crate::trade_client::TradeState>>,
+    map: Option<Res<crate::map::MapView>>,
 ) {
-    // Пока открыт инвентарь или окно торговли, клики принадлежат окну, а не бою.
-    if loot.is_some_and(|l| l.ui_open) || trade.is_some_and(|t| t.window_open()) {
+    // Пока открыт инвентарь, окно торговли или карта, клики принадлежат окну, а не бою.
+    if loot.is_some_and(|l| l.ui_open) || trade.is_some_and(|t| t.window_open()) || map.is_some_and(|m| m.open) {
         return;
     }
     if mouse.just_pressed(MouseButton::Left) {

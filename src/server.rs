@@ -130,6 +130,7 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .add_observer(on_server_event)
         .add_plugins(crate::loot_server::LootServerPlugin)
         .add_plugins(crate::doors::DoorServerPlugin)
+        .add_plugins(crate::map::MapServerPlugin)
         .add_plugins(crate::trade_server::TradeServerPlugin)
         .add_plugins(crate::knowledge::KnowledgeServerPlugin)
         .add_plugins(crate::smithing_server::SmithingServerPlugin)

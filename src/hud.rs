@@ -54,9 +54,9 @@ fn setup_hud(mut commands: Commands) {
         .with_children(|p| {
             p.spawn((BannerText, text("", 34.0, Color::WHITE)));
         });
-    // Цель (враг перед вами).
+    // Цель (враг перед вами) — под компасом (см. map.rs).
     commands
-        .spawn(Node { width: percent(100), position_type: PositionType::Absolute, top: px(14), justify_content: JustifyContent::Center, ..default() })
+        .spawn(Node { width: percent(100), position_type: PositionType::Absolute, top: px(50), justify_content: JustifyContent::Center, ..default() })
         .with_children(|p| {
             p.spawn((TargetText, text("", 18.0, Color::srgb(1.0, 0.9, 0.8))));
         });
