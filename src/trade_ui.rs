@@ -64,6 +64,7 @@ enum Act {
     Lesson(u8),
     PayFine,
     Donate(u32),
+    Repair(ItemUid),
     Close,
     P2pAdd(ItemUid),
     P2pRemove(ItemUid),
@@ -557,6 +558,26 @@ fn merchant_window(
                 button(r, fonts, "Уплатить", Act::PayFine, state.fine > 0);
             });
         }
+        if !view.repairs.is_empty() {
+            section(p, fonts, "Правка и заточка");
+            for o in &view.repairs {
+                p.spawn(Node {
+                    column_gap: px(6),
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_children(|r| {
+                    r.spawn((
+                        text(fonts, format!("{} — {:.0}%", o.name, o.condition * 100.0), 15.0, TEXT, false),
+                        Node {
+                            flex_grow: 1.0,
+                            ..default()
+                        },
+                    ));
+                    button(r, fonts, &format_money_short(o.price), Act::Repair(o.uid), !refused);
+                });
+            }
+        }
         if view.donations {
             section(p, fonts, "Милостыня на храм и ксенон");
             p.spawn(Node {
@@ -1030,6 +1051,7 @@ fn click_buttons(
             Act::Lesson(i) => send(client, &TradeClientMessage::StartLesson { index: i }),
             Act::PayFine => send(client, &TradeClientMessage::PayFine),
             Act::Donate(n) => send(client, &TradeClientMessage::Donate { nummi: n }),
+            Act::Repair(uid) => send(client, &TradeClientMessage::Repair { uid }),
             Act::Close => {
                 if state.view.take().is_some() {
                     send(client, &TradeClientMessage::Close);

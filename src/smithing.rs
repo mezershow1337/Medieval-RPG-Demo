@@ -605,6 +605,14 @@ pub fn quality_of(score: f32) -> Quality {
 }
 
 impl Forging {
+    /// Насколько вытянута поковка: 0 — пруток, 1 — готовая форма.
+    pub fn drawn(&self) -> f32 {
+        if self.shape.is_empty() {
+            return 0.0;
+        }
+        (self.shape.iter().map(|s| s.min(1.0)).sum::<f32>() / self.shape.len() as f32).clamp(0.0, 1.0)
+    }
+
     /// Оценить работу. `fitting` — бронзовое навершие (лучше развесовка, красивее).
     pub fn outcome(&self, smith: &str, fitting: bool) -> Outcome {
         let info = self.pattern.info();

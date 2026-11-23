@@ -575,9 +575,28 @@ fn build_view(
         lessons,
         fines: def.has(Service::Fines),
         donations: def.has(Service::Donations),
+        repairs: repair_offers(def, loot, player),
         refuse: tw.refusal(player, id, now),
     }
 }
+
+/// Сбитые вещи игрока, за которые возьмётся кузнец.
+fn repair_offers(def: &MerchantDef, loot: &LootWorld, player: u64) -> Vec<RepairOffer> {
+    if !def.has(Service::Repair) {
+        return Vec::new();
+    }
+    let Some(inv) = loot.inventories.get(&player) else { return Vec::new() };
+    inv.all_items()
+        .filter_map(|i| {
+            let m = i.make.as_ref()?;
+            let c = m.condition();
+            (m.dur_max > 0.0 && c < 0.98).then(|| RepairOffer { uid: i.uid, name: i.info().name.to_string(), condition: c, price: crate::smithing::repair_price(m, i.value()) })
+        })
+        .collect()
+}
+
+/// Мастер у своего горна правит лучше, чем самоучка.
+const MASTER_REPAIR_SKILL: f32 = 85.0;
 
 fn refresh_view(
     server: &mut RenetServer,
@@ -1410,6 +1429,29 @@ fn receive_trade_messages(
                             }
                             Err(e) => format!("{}: штраф {}", e.message(), format_money(fine)),
                         }
+                    };
+                    send(&mut server, pid, &TradeServerMessage::Say(reply));
+                    send_inventory(&mut server, &loot, pid);
+                    refresh_view(&mut server, tw, &loot, pid, now);
+                }
+                TradeClientMessage::Repair { uid } => {
+                    let Some(id) = open else { continue };
+                    if !id.def().has(Service::Repair) {
+                        continue;
+                    }
+                    let Some(offer) = repair_offers(id.def(), &loot, pid).into_iter().find(|o| o.uid == uid) else { continue };
+                    let mut uids = loot.uids.clone();
+                    let inv = loot.inventories.get_mut(&pid).unwrap();
+                    let reply = match take_money(inv, offer.price, &mut uids) {
+                        Ok(()) => {
+                            // Вещь могла уйти в обмен за деньги (сдача) — ищем заново.
+                            if let Some(m) = inv.find_mut(uid).and_then(|i| i.make.as_mut()) {
+                                crate::smithing::repair(m, MASTER_REPAIR_SKILL);
+                            }
+                            loot.uids = uids;
+                            format!("«Готово: выправил и навёл кромку». {} — {}", offer.name, format_money(offer.price))
+                        }
+                        Err(e) => format!("{}: правка стоит {}", e.message(), format_money(offer.price)),
                     };
                     send(&mut server, pid, &TradeServerMessage::Say(reply));
                     send_inventory(&mut server, &loot, pid);

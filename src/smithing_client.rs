@@ -26,9 +26,14 @@ impl Plugin for SmithingClientPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(SmithState::default())
             .add_systems(Startup, setup_smith_ui.after(crate::inventory_ui::setup_fonts))
-            .add_systems(Update, (receive_smith, smith_input, smith_buttons, predict, rebuild_panel, update_live, update_prompt, workpiece_glow).chain());
+            .add_plugins(crate::smithing_fx::SmithFxPlugin)
+            .add_systems(Update, (receive_smith, smith_input, smith_buttons, predict, rebuild_panel, update_live, update_prompt).chain().in_set(SmithSet));
     }
 }
+
+/// Окно и предсказание кузницы (эффекты рисуются после).
+#[derive(SystemSet, Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub struct SmithSet;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Tab {
@@ -57,6 +62,12 @@ pub struct SmithState {
     charcoal: u8,
     rev: u64,
     built: Option<(u64, u64, u64, bool)>,
+    /// Искры, пар, звон — разбирает `smithing_fx`.
+    pub(crate) fx_queue: Vec<(u32, u64, Fx)>,
+    /// Чужие раскалённые поковки и тигли.
+    others: Vec<PieceView>,
+    /// Свой номер клиента.
+    pub(crate) me: u64,
 }
 
 impl Default for SmithState {
@@ -78,6 +89,9 @@ impl Default for SmithState {
             charcoal: 10,
             rev: 1,
             built: None,
+            fx_queue: Vec::new(),
+            others: Vec::new(),
+            me: 0,
         }
     }
 }
@@ -86,8 +100,35 @@ impl SmithState {
     pub fn window_open(&self) -> bool {
         self.open
     }
-    fn station(&self, id: u32) -> Option<&StationView> {
+    pub(crate) fn station(&self, id: u32) -> Option<&StationView> {
         self.stations.iter().find(|s| s.id == id)
+    }
+    /// Показ для снимков: чужая поковка и огонь без сервера.
+    pub(crate) fn demo(&mut self, station: u32, piece: Option<PieceView>, blast: f32) {
+        if self.stations.is_empty() {
+            // Без сервера: горны с карты, номера как у сервера.
+            self.stations = crate::level::forges()
+                .iter()
+                .enumerate()
+                .map(|(i, f)| StationView { id: i as u32 + 1, name: f.name.to_string(), kind: f.kind, fire: f.fire.into(), anvil: f.anvil.into(), trough: f.trough.into(), grind: f.grind.into() })
+                .collect();
+        }
+        self.fires.insert(station, (300.0, blast));
+        self.others = piece.into_iter().collect();
+    }
+    /// Огонь горна: (секунды угля, дутьё).
+    pub(crate) fn fire(&self, id: u32) -> Option<(f32, f32)> {
+        self.fires.get(&id).copied()
+    }
+    /// Все поковки у горнов: своя — из предсказания (плавнее), чужие — с сервера.
+    pub(crate) fn all_pieces(&self) -> Vec<PieceView> {
+        let mut v: Vec<PieceView> = self.others.iter().filter(|p| p.player != self.me).cloned().collect();
+        if let (Some(w), Some(job)) = (self.work.as_ref(), self.pred.as_ref())
+            && let Some(p) = PieceView::of(self.me, w.station, job)
+        {
+            v.push(p);
+        }
+        v
     }
 }
 
@@ -95,7 +136,16 @@ fn send(client: &mut RenetClient, msg: &SmithClientMessage) {
     client.send_message(CH_SMITH, encode(msg));
 }
 
-fn receive_smith(mut client: Option<ResMut<RenetClient>>, mut state: ResMut<SmithState>, mut loot: ResMut<LootState>, time: Res<Time>) {
+fn receive_smith(
+    mut client: Option<ResMut<RenetClient>>,
+    transport: Option<Res<bevy_renet::netcode::NetcodeClientTransport>>,
+    mut state: ResMut<SmithState>,
+    mut loot: ResMut<LootState>,
+    time: Res<Time>,
+) {
+    if let Some(t) = transport {
+        state.me = t.client_id();
+    }
     let Some(client) = client.as_mut() else { return };
     while let Some(bytes) = client.receive_message(CH_SMITH) {
         let Some(msg) = decode::<SmithServerMessage>(&bytes) else { continue };
@@ -119,6 +169,8 @@ fn receive_smith(mut client: Option<ResMut<RenetClient>>, mut state: ResMut<Smit
                 let now = time.elapsed_secs();
                 loot.notify(text, now);
             }
+            SmithServerMessage::Fx { station, player, fx } => state.fx_queue.push((station, player, fx)),
+            SmithServerMessage::Pieces(v) => state.others = v,
         }
     }
 }
@@ -993,53 +1045,6 @@ fn update_prompt(state: Res<SmithState>, mut text: Single<&mut Text, With<SmithP
 // ---------------------------------------------------------------------------
 // Поковка в мире: светится в горне или на наковальне
 // ---------------------------------------------------------------------------
-
-#[derive(Component)]
-struct Workpiece;
-
-fn workpiece_glow(
-    mut commands: Commands,
-    state: Res<SmithState>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut piece: Query<(Entity, &mut Transform, &MeshMaterial3d<StandardMaterial>), With<Workpiece>>,
-) {
-    let target = (|| {
-        let w = state.work.as_ref()?;
-        let st = state.station(w.station)?;
-        let (temp, spot) = match state.pred.as_ref()? {
-            Job::Forge(f) => (f.temp, f.spot),
-            Job::Cast(c) => (c.temp, c.spot),
-            _ => return None,
-        };
-        let pos = match spot {
-            Spot::Fire | Spot::Temper => Vec3::from(st.fire) + Vec3::Y * 0.05,
-            _ => Vec3::from(st.anvil) + Vec3::Y * 0.85,
-        };
-        Some((pos, temp))
-    })();
-    match (target, piece.single_mut()) {
-        (Some((pos, temp)), Ok((_, mut tf, mat))) => {
-            tf.translation = pos;
-            if let Some(mut m) = materials.get_mut(&mat.0) {
-                let (c, _) = heat_color(temp);
-                let glow = ((temp - 480.0) / 800.0).clamp(0.0, 1.0);
-                m.base_color = Color::srgb(0.2 + c[0] * 0.3, 0.19 + c[1] * 0.2, 0.18);
-                m.emissive = LinearRgba::rgb(c[0], c[1], c[2]) * (glow * glow * 12.0);
-            }
-        }
-        (Some((pos, _)), Err(_)) => {
-            commands.spawn((
-                Workpiece,
-                Mesh3d(meshes.add(Cuboid::new(0.55, 0.03, 0.06))),
-                MeshMaterial3d(materials.add(StandardMaterial { base_color: Color::srgb(0.25, 0.24, 0.23), metallic: 0.6, perceptual_roughness: 0.6, ..default() })),
-                Transform::from_translation(pos),
-            ));
-        }
-        (None, Ok((e, _, _))) => commands.entity(e).despawn(),
-        (None, Err(_)) => {}
-    }
-}
 
 /// Цвет каления для подписи в подсказках других окон.
 #[allow(dead_code)]

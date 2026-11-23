@@ -27,6 +27,46 @@ pub struct StationView {
     pub kind: StationKind,
     pub fire: NetPos,
     pub anvil: NetPos,
+    /// Поверхность воды в корыте.
+    pub trough: NetPos,
+    /// Точильный круг.
+    pub grind: NetPos,
+}
+
+/// Зрелищное событие у горна: его видят и слышат все рядом.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub enum Fx {
+    /// Удар молота; `temp` — жар поковки (окалина летит с горячего).
+    Strike { heavy: bool, temp: f32 },
+    /// Клинок опустили в корыто (или в масло).
+    Quench { medium: Quench, temp: f32, cracked: bool },
+    /// Касание точила.
+    Grind,
+    /// Металл горит в горне: сноп искр.
+    Burn,
+    Crack,
+    /// Струя металла из тигля пошла / прервалась.
+    Pour(bool),
+    /// Сняли шлак с расплава.
+    Skim,
+    /// Разбили форму.
+    OpenMould,
+    /// Вещь готова.
+    Done,
+}
+
+/// Что лежит в горне или на наковальне у любого кузнеца — чтобы и другие видели раскалённое железо.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct PieceView {
+    pub player: u64,
+    pub station: u32,
+    pub spot: Spot,
+    pub temp: f32,
+    /// Что куют (None — тигель с металлом).
+    pub pattern: Option<Pattern>,
+    /// Насколько уже вытянуто 0..1.
+    pub drawn: f32,
+    pub pouring: bool,
 }
 
 /// Что игрок начинает делать.
@@ -87,6 +127,9 @@ pub enum SmithServerMessage {
     /// Своя работа (None — нет).
     Work(Option<WorkView>),
     Notice(String),
+    Fx { station: u32, player: u64, fx: Fx },
+    /// Все раскалённые поковки и тигли (несколько раз в секунду, пока что-то есть).
+    Pieces(Vec<PieceView>),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -94,4 +137,15 @@ pub struct WorkView {
     pub station: u32,
     pub job: Job,
     pub bellows: bool,
+}
+
+impl PieceView {
+    /// Что видно у горна от этой работы (ремонт и плавка — без поковки в клещах).
+    pub fn of(player: u64, station: u32, job: &Job) -> Option<Self> {
+        match job {
+            Job::Forge(f) => Some(Self { player, station, spot: f.spot, temp: f.temp, pattern: Some(f.pattern), drawn: f.drawn(), pouring: false }),
+            Job::Cast(c) if !c.opened => Some(Self { player, station, spot: c.spot, temp: c.temp, pattern: None, drawn: c.poured, pouring: c.pouring }),
+            _ => None,
+        }
+    }
 }

@@ -36,6 +36,8 @@ pub struct Station {
     pub kind: StationKind,
     pub fire: Vec3,
     pub anvil: Vec3,
+    pub trough: Vec3,
+    pub grind: Vec3,
     /// Секунды горения угля.
     pub fuel: f32,
     pub blast: f32,
@@ -56,17 +58,20 @@ pub struct SmithWorld {
     pub stations: HashMap<u32, Station>,
     pub works: HashMap<u64, Work>,
     rng: Rng,
+    /// С последней рассылки раскалённых поковок (с); было ли что слать.
+    pieces_t: f32,
+    pieces_any: bool,
 }
 
 impl Default for SmithWorld {
     fn default() -> Self {
-        Self { stations: HashMap::new(), works: HashMap::new(), rng: Rng::from_time() }
+        Self { stations: HashMap::new(), works: HashMap::new(), rng: Rng::from_time(), pieces_t: 0.0, pieces_any: false }
     }
 }
 
 impl SmithWorld {
     fn views(&self) -> Vec<StationView> {
-        let mut v: Vec<StationView> = self.stations.iter().map(|(id, s)| StationView { id: *id, name: s.name.clone(), kind: s.kind, fire: s.fire.into(), anvil: s.anvil.into() }).collect();
+        let mut v: Vec<StationView> = self.stations.iter().map(|(id, s)| StationView { id: *id, name: s.name.clone(), kind: s.kind, fire: s.fire.into(), anvil: s.anvil.into(), trough: s.trough.into(), grind: s.grind.into() }).collect();
         v.sort_by_key(|s| s.id);
         v
     }
@@ -74,6 +79,15 @@ impl SmithWorld {
 
 fn send(server: &mut RenetServer, player: u64, msg: &SmithServerMessage) {
     server.send_message(player, CH_SMITH, encode(msg));
+}
+
+/// Всем: искры, пар, звон. Клиент сам отсекает далёкие.
+fn fx(server: &mut RenetServer, station: u32, player: u64, fx: Fx) {
+    server.broadcast_message(CH_SMITH, encode(&SmithServerMessage::Fx { station, player, fx }));
+}
+
+fn piece_view(player: u64, w: &Work) -> Option<PieceView> {
+    PieceView::of(player, w.station, &w.job)
 }
 
 fn notice(server: &mut RenetServer, player: u64, text: impl Into<String>) {
@@ -102,7 +116,7 @@ fn send_work(server: &mut RenetServer, world: &SmithWorld, player: u64) {
 fn setup_stations(mut world: ResMut<SmithWorld>) {
     for (i, f) in crate::level::forges().iter().enumerate() {
         let fuel = if f.kind == StationKind::Forge { FUEL_MAX * 0.5 } else { 0.0 };
-        world.stations.insert(i as u32 + 1, Station { name: f.name.to_string(), kind: f.kind, fire: f.fire, anvil: f.anvil, fuel, blast: 0.0, sent: (-1.0, -1.0) });
+        world.stations.insert(i as u32 + 1, Station { name: f.name.to_string(), kind: f.kind, fire: f.fire, anvil: f.anvil, trough: f.trough, grind: f.grind, fuel, blast: 0.0, sent: (-1.0, -1.0) });
     }
 }
 
@@ -111,6 +125,9 @@ fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, m
         ServerEvent::ClientConnected { client_id } => {
             let views = world.views();
             send(&mut server, *client_id, &SmithServerMessage::Stations(views));
+            for (id, st) in &world.stations {
+                send(&mut server, *client_id, &SmithServerMessage::Fire { station: *id, fuel: st.fuel, blast: st.blast });
+            }
         }
         ServerEvent::ClientDisconnected { client_id, .. } => {
             // Незаконченная вещь при ремонте возвращается владельцу... если он ещё здесь.
@@ -217,7 +234,7 @@ fn begin(world: &mut SmithWorld, loot: &mut LootWorld, k: &Knowledge, pid: u64, 
                     return Err(format!("Нужно {need} шт. железного лома"));
                 }
                 bars = take_named(inv, SCRAP, need);
-                need = 0;
+                let _ = need;
             } else {
                 let mut picked: Vec<ItemUid> = metal.into_iter().collect();
                 picked.dedup();
@@ -468,9 +485,11 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                         notice(&mut server, pid, "Подойдите к горну");
                         continue;
                     }
+                    let sid = w.station;
                     let k = know.players.entry(pid).or_default();
                     match finish(&mut commands, world, &mut loot, k, pid, fitting, feet) {
                         Ok(text) => {
+                            fx(&mut server, sid, pid, Fx::Done);
                             notice(&mut server, pid, text);
                             sync_knowledge(&mut server, k, pid);
                         }
@@ -487,6 +506,7 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                         continue;
                     }
                     let mut events: Vec<SmithEvent> = Vec::new();
+                    let mut fxs: Vec<Fx> = Vec::new();
                     match (&mut w.job, other) {
                         (Job::Forge(f), SmithClientMessage::Move(spot)) => {
                             if spot == Spot::Ashes && f.temp < 650.0 {
@@ -497,6 +517,7 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                         }
                         (Job::Forge(f), SmithClientMessage::Strike { zone, heavy, acc }) => {
                             if f.since_strike >= STRIKE_GAP[heavy as usize] * 0.85 && f.spot == Spot::Anvil {
+                                fxs.push(Fx::Strike { heavy, temp: f.temp });
                                 events.extend(f.strike(zone as usize, heavy, acc, skill, rng));
                             }
                         }
@@ -509,7 +530,11 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                             } else if q == Quench::Brine && count_named(loot.inventories.get(&pid).unwrap_or(&Inventory::new((1, 1))), "Мешок соли") == 0 {
                                 events.push(SmithEvent::Note("Для рассола нужен мешок соли".into()));
                             } else {
-                                events.push(f.quench(q, skill, rng));
+                                let temp = f.temp;
+                                let e = f.quench(q, skill, rng);
+                                let cracked = matches!(e, SmithEvent::Quenched { cracked: true, .. });
+                                fxs.push(Fx::Quench { medium: q, temp, cracked });
+                                events.push(e);
                             }
                         }
                         (Job::Forge(f), SmithClientMessage::Grind { acc }) => {
@@ -518,6 +543,7 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                                     events.push(SmithEvent::Note("Горячее на точило не кладут".into()));
                                 } else {
                                     f.grind(acc);
+                                    fxs.push(Fx::Grind);
                                 }
                             }
                         }
@@ -527,18 +553,23 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                             }
                             c.spot = if spot == Spot::Fire { Spot::Fire } else { Spot::Anvil };
                         }
-                        (Job::Cast(c), SmithClientMessage::Skim) => c.skim(),
+                        (Job::Cast(c), SmithClientMessage::Skim) => {
+                            c.skim();
+                            fxs.push(Fx::Skim);
+                        }
                         (Job::Cast(c), SmithClientMessage::WarmMould(on)) => c.mould_warm = on,
                         (Job::Cast(c), SmithClientMessage::Pour(on)) => {
                             if on {
                                 if c.spot == Spot::Fire {
                                     c.spot = Spot::Anvil;
                                 }
-                                if let Err(e) = c.start_pour() {
-                                    events.push(SmithEvent::Note(e));
+                                match c.start_pour() {
+                                    Err(e) => events.push(SmithEvent::Note(e)),
+                                    Ok(()) => fxs.push(Fx::Pour(true)),
                                 }
-                            } else {
+                            } else if c.pouring {
                                 c.pouring = false;
+                                fxs.push(Fx::Pour(false));
                             }
                         }
                         (Job::Cast(c), SmithClientMessage::OpenMould) => {
@@ -549,28 +580,40 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                             } else {
                                 c.opened = true;
                                 c.pouring = false;
+                                fxs.push(Fx::OpenMould);
                             }
                         }
                         (Job::Cast(c), SmithClientMessage::Strike { acc, heavy, .. }) => {
                             if c.opened {
                                 c.chase(acc, heavy);
+                                fxs.push(Fx::Strike { heavy, temp: c.temp });
                             }
                         }
                         (Job::Cast(c), SmithClientMessage::Grind { acc }) => {
                             if c.opened {
                                 c.chase(acc * 0.9, false);
+                                fxs.push(Fx::Grind);
                             }
                         }
                         (Job::Repair { progress, .. }, SmithClientMessage::Strike { acc, heavy, .. }) => {
+                            fxs.push(Fx::Strike { heavy, temp: 20.0 });
                             *progress += 0.1 * (0.3 + 0.7 * acc.clamp(0.0, 1.0)) * if heavy { 0.6 } else { 1.0 };
                         }
                         (Job::Repair { progress, .. }, SmithClientMessage::Grind { acc }) => {
+                            fxs.push(Fx::Grind);
                             *progress += 0.1 * (0.3 + 0.7 * acc.clamp(0.0, 1.0));
                         }
                         (_, _) => {}
                     }
+                    let sid = w.station;
                     for e in events {
+                        if e == SmithEvent::Crack {
+                            fxs.push(Fx::Crack);
+                        }
                         notice(&mut server, pid, e.text());
+                    }
+                    for f in fxs {
+                        fx(&mut server, sid, pid, f);
                     }
                     // Ремонт закончен сам собой.
                     if let Job::Repair { progress, .. } = &w.job
@@ -857,6 +900,7 @@ fn tick_works(time: Res<Time>, mut server: ResMut<RenetServer>, game: Res<GameWo
         }
     }
     let mut notes: Vec<(u64, String)> = Vec::new();
+    let mut burns: Vec<(u32, u64)> = Vec::new();
     for (pid, w) in world.works.iter_mut() {
         let Some(st) = world.stations.get(&w.station) else { continue };
         let fire = fire_temp(st.fuel, st.blast);
@@ -870,6 +914,9 @@ fn tick_works(time: Res<Time>, mut server: ResMut<RenetServer>, game: Res<GameWo
             Job::Repair { .. } => Vec::new(),
         };
         for e in events {
+            if e == SmithEvent::Sparks {
+                burns.push((w.station, *pid));
+            }
             notes.push((*pid, e.text()));
         }
         // Пока что-то греется или остывает — снимки чаще.
@@ -889,17 +936,24 @@ fn tick_works(time: Res<Time>, mut server: ResMut<RenetServer>, game: Res<GameWo
     for (pid, text) in notes {
         notice(&mut server, pid, text);
     }
-    // Жар горна — тем, кто у него работает (и раз в секунду при заметной перемене).
-    let watchers: Vec<(u64, u32)> = world.works.iter().map(|(p, w)| (*p, w.station)).collect();
+    for (sid, pid) in burns {
+        fx(&mut server, sid, pid, Fx::Burn);
+    }
+    // Жар горна — всем (огонь и дым видно издали), при заметной перемене.
     for (id, st) in world.stations.iter_mut() {
-        if (st.fuel - st.sent.0).abs() > 2.0 || (st.blast - st.sent.1).abs() > 0.03 {
+        if (st.fuel - st.sent.0).abs() > 2.0 || (st.blast - st.sent.1).abs() > 0.03 || (st.fuel <= 0.0) != (st.sent.0 <= 0.0) {
             st.sent = (st.fuel, st.blast);
-            let msg = encode(&SmithServerMessage::Fire { station: *id, fuel: st.fuel, blast: st.blast });
-            for (pid, sid) in &watchers {
-                if sid == id {
-                    server.send_message(*pid, CH_SMITH, msg.clone());
-                }
-            }
+            server.broadcast_message(CH_SMITH, encode(&SmithServerMessage::Fire { station: *id, fuel: st.fuel, blast: st.blast }));
+        }
+    }
+    // Раскалённое железо у всех горнов — 5 раз в секунду, пока оно есть.
+    world.pieces_t += dt;
+    if world.pieces_t >= 0.2 {
+        world.pieces_t = 0.0;
+        let v: Vec<PieceView> = world.works.iter().filter_map(|(p, w)| piece_view(*p, w)).collect();
+        if !v.is_empty() || world.pieces_any {
+            world.pieces_any = !v.is_empty();
+            server.broadcast_message(CH_SMITH, encode(&SmithServerMessage::Pieces(v)));
         }
     }
 }

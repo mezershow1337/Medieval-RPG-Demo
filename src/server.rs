@@ -41,6 +41,8 @@ pub struct Actor {
     sweep: Option<(Swing, f32, f32)>,
     /// Множитель скорости ходьбы от экипировки (для своего клиента).
     move_mult: f32,
+    /// Вид оружия в руке для снимков (`Item::look` × 255).
+    finish: u8,
     /// В этом кадре выпущена стрела.
     shoot: bool,
     /// Как раны, боль и яды меняют бойца (ведёт medicine_server.rs).
@@ -155,6 +157,7 @@ fn spawn_npc(world: &mut GameWorld, level: &LevelColliders, spawn: NpcSpawn, now
             spawn: Some(spawn),
             sweep: None,
             move_mult: 1.0,
+            finish: 200,
             shoot: false,
             body_mods: Default::default(),
         },
@@ -188,6 +191,7 @@ fn on_server_event(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>,
                     spawn: None,
                     sweep: None,
                     move_mult: 1.0,
+                    finish: 200,
                     shoot: false,
                     body_mods: Default::default(),
                 },
@@ -332,6 +336,7 @@ fn sync_equipment(world: &mut GameWorld, loot: Option<&LootWorld>) {
         actor.fighter.riposte_bonus = stats.get(Stat::ParryWindow) / 1000.0;
         actor.fighter.has_shield = inv.and_then(|inv| inv.equipped(EquipSlot::OffHand)).is_some_and(|item| item.info().shape == ItemShape::Shield);
         // Оружие в руке определяет темп, длину и силу ударов. Менять можно только вне удара.
+        actor.finish = inv.and_then(|inv| inv.equipped(EquipSlot::MainHand)).map_or(200, |item| (item.look() * 255.0) as u8);
         let weapon = inv
             .and_then(|inv| inv.equipped(EquipSlot::MainHand))
             .map(|item| combat::WeaponKind::from_item_name(item.info().name))
@@ -731,6 +736,7 @@ fn send_snapshots(mut server: ResMut<RenetServer>, world: Res<GameWorld>, mut ti
                 max_stamina: a.fighter.max_stamina,
                 action_speed: a.fighter.action_speed,
                 move_mult: a.move_mult,
+                finish: a.finish,
             })
             .collect(),
         arrows: world.arrows.iter().map(|a| ArrowSnapshot { id: a.id, pos: a.pos.into(), vel: a.vel.into() }).collect(),

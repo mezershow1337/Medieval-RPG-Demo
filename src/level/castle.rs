@@ -211,7 +211,7 @@ fn courtyard(b: &mut Builder) {
     b.lamp(Vec3::new(37.7, 1.8, 33.0), Color::srgb(1.0, 0.45, 0.15), 160_000.0, 14.0);
     b.solid([33.0, 0.0, 32.6], [33.6, 0.6, 33.4], Mat::Wood); // колода
     b.solid([32.8, 0.6, 32.7], [33.8, 0.9, 33.3], Mat::Iron); // наковальня
-    b.forges.push(super::ForgeSpec { name: "Кузница замка", kind: crate::smithing_net::StationKind::Forge, fire: Vec3::new(37.7, 1.15, 33.0), anvil: Vec3::new(33.3, 0.0, 34.0) });
+    b.forges.push(super::ForgeSpec { name: "Кузница замка", kind: crate::smithing_net::StationKind::Forge, fire: Vec3::new(37.7, 1.15, 33.0), anvil: Vec3::new(33.3, 0.0, 34.0), trough: Vec3::new(31.0, 1.05, 36.5), grind: Vec3::new(32.0, 0.75, 31.5) });
     b.barrel_at(31.0, 36.5);
     b.barrel_at(31.0, 30.5);
 

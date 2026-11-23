@@ -787,7 +787,7 @@ pub fn forge_set(b: &mut Builder, name: &'static str, o: Vec3, out: Vec3, field:
     let t = l.trough;
     let half = along.abs() * 0.35 + side.abs() * 0.7 + Vec3::Y * 0.5;
     b.solid((t - half.with_y(0.0)).to_array(), (t + half).to_array(), Mat::Wood);
-    b.decor((t - half.with_y(0.0) + Vec3::new(0.06, 0.4, 0.06)).to_array(), (t + half.with_y(0.45) - Vec3::new(0.06, 0.0, 0.06)).to_array(), Mat::Water);
+    b.decor((t - half.with_y(0.0) + Vec3::new(0.06, 0.5, 0.06)).to_array(), (t + half.with_y(0.51) - Vec3::new(0.06, 0.0, 0.06)).to_array(), Mat::Water);
     // Точило: круг на станке.
     let g = l.grind;
     for s in [-1.0f32, 1.0] {
@@ -803,7 +803,7 @@ pub fn forge_set(b: &mut Builder, name: &'static str, o: Vec3, out: Vec3, field:
     b.mesh(Mat::Wood).beam(c - side * 0.35, c + side * 0.45, 0.025, 0.025, Vec3::Y);
     hidden(b, g - Vec3::new(0.45, 0.0, 0.45), g + Vec3::new(0.45, 1.1, 0.45));
     b.lamp(o + Vec3::Y * (h + 0.8), Color::srgb(1.0, 0.45, 0.15), 16_000.0, 7.0);
-    b.forges.push(crate::level::ForgeSpec { name, kind: crate::smithing_net::StationKind::Forge, fire: o + Vec3::Y * (h + 0.08), anvil: a });
+    b.forges.push(crate::level::ForgeSpec { name, kind: crate::smithing_net::StationKind::Forge, fire: o + Vec3::Y * (h + 0.08), anvil: a, trough: l.trough + Vec3::Y * 0.51, grind: l.grind + Vec3::Y * 0.75 });
 }
 
 /// Сыродутный горн: глиняная шахта в рост человека, мехи у фурмы, куча шлака и руды.
@@ -822,5 +822,5 @@ pub fn bloomery(b: &mut Builder, name: &'static str, p: Vec3, out: Vec3) {
     b.mesh(Mat::Rubble).lathe(p + side * 1.6 - out * 0.3, &[(0.55, 0.0), (0.0, 0.4)], 8);
     b.mesh(Mat::Coals).lathe(p + side * 1.5 + out * 1.3, &[(0.5, 0.0), (0.0, 0.3)], 8);
     b.lamp(p + Vec3::Y * 2.0, Color::srgb(1.0, 0.5, 0.2), 8_000.0, 6.0);
-    b.forges.push(crate::level::ForgeSpec { name, kind: crate::smithing_net::StationKind::Bloomery, fire: p + Vec3::Y * 1.6, anvil: p + out * 1.9 });
+    b.forges.push(crate::level::ForgeSpec { name, kind: crate::smithing_net::StationKind::Bloomery, fire: p + Vec3::Y * 1.6, anvil: p + out * 1.9, trough: p + out * 1.9, grind: p + out * 1.9 });
 }

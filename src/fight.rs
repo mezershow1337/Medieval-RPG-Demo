@@ -20,11 +20,13 @@ pub struct LocalFighter {
     pub fighter: Fighter,
     /// Множитель скорости ходьбы от экипировки (присылает сервер).
     pub move_mult: f32,
+    /// Вид своего клинка (присылает сервер).
+    pub finish: u8,
 }
 
 impl LocalFighter {
     pub fn new(fighter: Fighter) -> Self {
-        Self { fighter, move_mult: 1.0 }
+        Self { fighter, move_mult: 1.0, finish: 200 }
     }
 }
 
@@ -183,6 +185,7 @@ pub fn reconcile(local: &mut LocalFighter, snap: &ActorSnapshot) {
     local.fighter.max_stamina = snap.max_stamina;
     local.fighter.action_speed = snap.action_speed;
     local.move_mult = snap.move_mult;
+    local.finish = snap.finish;
     // Оружие меняем только вне удара, чтобы не сбить анимацию.
     if snap.weapon != local.fighter.weapon && matches!(local.fighter.action, Action::Idle | Action::Guard { .. }) {
         local.fighter.weapon = snap.weapon;
@@ -205,6 +208,8 @@ fn animate_view_sword(
     mut camera: Query<&mut Transform, (With<PlayerCamera>, Without<ViewSword>)>,
     mut sword: Query<(&mut Transform, &mut Visibility, &Children), (With<ViewSword>, Without<PlayerCamera>)>,
     mut blades: Query<(&Blade, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut tints: ResMut<crate::rig::BladeTints>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     mut arm: Query<(&crate::rig::ViewArm, &mut Visibility), (With<ViewArmRoot>, Without<ViewSword>)>,
     mut joints: Query<&mut Transform, (Without<ViewSword>, Without<PlayerCamera>, Without<ViewArmRoot>)>,
 ) {
@@ -226,7 +231,7 @@ fn animate_view_sword(
     let _ = (&assets, &models);
     for c in children.iter() {
         if let Ok((b, mut m)) = blades.get_mut(c) {
-            m.0 = b.0.clone();
+            m.0 = tints.get(&mut materials, &b.0, f.finish);
         }
     }
     // Рука держит рукоять.

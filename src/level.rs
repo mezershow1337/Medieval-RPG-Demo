@@ -234,6 +234,10 @@ pub struct ForgeSpec {
     pub fire: Vec3,
     /// Наковальня (у сыродутного горна — место у мехов), отсюда работают.
     pub anvil: Vec3,
+    /// Поверхность воды в корыте для закалки.
+    pub trough: Vec3,
+    /// Ось точильного круга.
+    pub grind: Vec3,
 }
 
 /// Участок карты 64×64 м: меши режутся по участкам, чтобы невидимое не рисовалось.
@@ -349,7 +353,7 @@ impl Builder {
         self.torches.extend(t.torches.into_iter().map(|x| Torch { pos: x.pos + offset, ..x }));
         self.lamps.extend(t.lamps.into_iter().map(|x| Lamp { pos: x.pos + offset, ..x }));
         self.hearths.extend(t.hearths.into_iter().map(|p| p + offset));
-        self.forges.extend(t.forges.into_iter().map(|f| ForgeSpec { fire: f.fire + offset, anvil: f.anvil + offset, ..f }));
+        self.forges.extend(t.forges.into_iter().map(|f| ForgeSpec { fire: f.fire + offset, anvil: f.anvil + offset, trough: f.trough + offset, grind: f.grind + offset, ..f }));
         self.doors.extend(t.doors.into_iter().map(|d| DoorSpec { center: d.center + offset, ..d }));
         self.containers.extend(t.containers.into_iter().map(|c| ContainerSpec { pos: c.pos + offset, ..c }));
         self.residents.extend(t.residents.into_iter().map(|r| Resident { pos: r.pos + offset, ..r }));

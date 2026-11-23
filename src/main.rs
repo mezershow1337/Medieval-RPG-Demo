@@ -40,6 +40,7 @@ mod rig;
 mod server;
 mod smithing;
 mod smithing_client;
+mod smithing_fx;
 mod smithing_net;
 mod smithing_server;
 mod trade;
