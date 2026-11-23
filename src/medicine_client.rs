@@ -30,11 +30,14 @@ fn setup_body_panel(mut commands: Commands) {
             position_type: PositionType::Absolute,
             left: px(12),
             bottom: px(118),
-            max_width: px(520),
+            max_width: px(540),
             flex_direction: FlexDirection::Column,
             row_gap: px(2),
+            padding: crate::ui_theme::Skin::Leather.padding(),
+            display: Display::None,
             ..default()
         },
+        crate::ui_theme::theme().skin(crate::ui_theme::Skin::Leather),
     ));
 }
 
@@ -51,7 +54,7 @@ fn update_body_panel(
     body: Res<MyBody>,
     knowledge: Res<MyKnowledge>,
     fonts: Res<UiFonts>,
-    panel: Query<Entity, With<BodyPanel>>,
+    mut panel: Query<(Entity, &mut Node), With<BodyPanel>>,
     mut shown: Local<Vec<(String, Alarm)>>,
 ) {
     if !body.is_changed() && !knowledge.is_changed() {
@@ -61,7 +64,15 @@ fn update_body_panel(
     if *shown == lines {
         return;
     }
-    let Ok(panel) = panel.single() else { return };
+    let Ok((panel, mut node)) = panel.single_mut() else {
+        return;
+    };
+    // Пустая кожаная плашка не нужна: показываем, только когда есть что сказать.
+    node.display = if lines.is_empty() {
+        Display::None
+    } else {
+        Display::Flex
+    };
     commands.entity(panel).despawn_children();
     commands.entity(panel).with_children(|p| {
         for (line, alarm) in &lines {

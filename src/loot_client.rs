@@ -446,9 +446,13 @@ fn setup_use_bar(mut commands: Commands, fonts: Res<UiFonts>) {
                 TextShadow::default(),
             ));
             p.spawn((
-                Node { width: px(260), height: px(10), border: UiRect::all(px(1)), ..default() },
-                BorderColor::all(Color::srgb(0.45, 0.36, 0.22)),
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+                Node {
+                    width: px(260),
+                    height: px(16),
+                    padding: UiRect::axes(px(5), px(4)),
+                    ..default()
+                },
+                crate::ui_theme::theme().bar_frame(),
             ))
             .with_children(|b| {
                 b.spawn((UseBarFill, Node { width: percent(0), height: percent(100), ..default() }, BackgroundColor(Color::srgb(0.45, 0.8, 0.4))));
@@ -494,13 +498,20 @@ fn setup_prompt(mut commands: Commands, fonts: Res<UiFonts>) {
             ..default()
         })
         .with_children(|p| {
-            p.spawn((
-                PromptText,
-                Text::new(""),
-                TextFont { font: fonts.bold.clone().into(), font_size: bevy::text::FontSize::Px(20.0), ..default() },
-                TextColor(Color::WHITE),
-                TextShadow::default(),
-            ));
+            crate::ui_theme::theme().plaque(p).with_children(|p| {
+                p.spawn((
+                    PromptText,
+                    Text::new(""),
+                    TextFont {
+                        font: fonts.bold.clone().into(),
+                        font_size: bevy::text::FontSize::Px(20.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    TextShadow::default(),
+                    crate::ui_theme::Plaque,
+                ));
+            });
         });
     commands
         .spawn(Node {
@@ -511,14 +522,21 @@ fn setup_prompt(mut commands: Commands, fonts: Res<UiFonts>) {
             ..default()
         })
         .with_children(|p| {
-            p.spawn((
-                NoticeText,
-                Text::new(""),
-                TextFont { font: fonts.regular.clone().into(), font_size: bevy::text::FontSize::Px(20.0), ..default() },
-                TextColor(Color::srgb(1.0, 0.85, 0.6)),
-                TextLayout::justify(Justify::Center),
-                TextShadow::default(),
-            ));
+            crate::ui_theme::theme().plaque(p).with_children(|p| {
+                p.spawn((
+                    NoticeText,
+                    Text::new(""),
+                    TextFont {
+                        font: fonts.regular.clone().into(),
+                        font_size: bevy::text::FontSize::Px(20.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(1.0, 0.85, 0.6)),
+                    TextLayout::justify(Justify::Center),
+                    TextShadow::default(),
+                    crate::ui_theme::Plaque,
+                ));
+            });
         });
 }
 

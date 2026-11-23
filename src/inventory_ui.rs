@@ -12,6 +12,7 @@ use crate::inventory::{Inventory, Loc, Target};
 use crate::items::{EquipSlot, Item, ItemUid, Quality, Stat};
 use crate::loot_client::{LootState, send};
 use crate::loot_net::{LootClientMessage, Owner};
+use crate::ui_theme::{Appear, Skin, UiTheme, ink};
 use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
@@ -22,26 +23,9 @@ const CELL: f32 = 44.0;
 const SLOT: f32 = 76.0;
 const SMALL_SLOT: f32 = 50.0;
 
-const PANEL_BG: Color = Color::srgba(0.11, 0.09, 0.07, 0.96);
-const PANEL_BORDER: Color = Color::srgb(0.45, 0.36, 0.22);
-const CELL_BG: Color = Color::srgba(0.0, 0.0, 0.0, 0.35);
-const CELL_BORDER: Color = Color::srgba(0.4, 0.34, 0.25, 0.35);
-const TITLE: Color = Color::srgb(0.93, 0.83, 0.6);
-const DIM: Color = Color::srgb(0.6, 0.56, 0.5);
+const DIM: Color = ink::DIM;
 
-/// Шрифты с кириллицей (Lora, лицензия OFL — assets/fonts/Lora-OFL.txt).
-#[derive(Resource, Clone)]
-pub struct UiFonts {
-    pub regular: Handle<Font>,
-    pub bold: Handle<Font>,
-}
-
-pub fn setup_fonts(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
-    // Встраиваем в exe, чтобы игра не зависела от папки запуска.
-    let regular = fonts.add(Font::from_bytes(include_bytes!("../assets/fonts/Lora-Regular.ttf").to_vec()));
-    let bold = fonts.add(Font::from_bytes(include_bytes!("../assets/fonts/Lora-Bold.ttf").to_vec()));
-    commands.insert_resource(UiFonts { regular, bold });
-}
+pub use crate::ui_theme::{UiFonts, setup_fonts};
 
 pub struct InventoryUiPlugin;
 
@@ -78,6 +62,9 @@ struct Built {
     rev: u64,
     open: bool,
     held: Option<ItemUid>,
+    /// Ширина пристыкованного слева окна (кузня, перегонка) и ширина экрана — от них раскладка.
+    dock: u32,
+    screen: u32,
 }
 
 #[derive(Resource, Default)]
@@ -184,23 +171,53 @@ fn rebuild_ui(
     state: Res<LootState>,
     held: Res<Held>,
     fonts: Res<UiFonts>,
+    theme: Res<UiTheme>,
     icons: Res<crate::icons::ItemIcons>,
     mut built: ResMut<Built>,
     roots: Query<Entity, With<InventoryRoot>>,
     mut tooltip_for: ResMut<TooltipFor>,
+    dock: Res<crate::ui_theme::SideDock>,
+    window: Single<&Window, With<PrimaryWindow>>,
 ) {
-    let want = Built { rev: state.rev, open: state.ui_open, held: held.0.as_ref().map(|h| h.item.uid) };
+    let dock_w = dock.width();
+    let screen_w = window.width();
+    let want = Built {
+        rev: state.rev,
+        open: state.ui_open,
+        held: held.0.as_ref().map(|h| h.item.uid),
+        dock: dock_w as u32,
+        screen: screen_w as u32,
+    };
     if *built == want && (roots.is_empty() != state.ui_open) {
         return;
     }
+    let opening = !built.open && want.open;
     *built = want;
     for e in &roots {
         commands.entity(e).despawn();
     }
     tooltip_for.0 = None;
-    let Some(inv) = state.inventory.as_ref().filter(|_| state.ui_open) else { return };
+    let Some(inv) = state.inventory.as_ref().filter(|_| state.ui_open) else {
+        return;
+    };
+    // Окна не должны лезть друг на друга: слева может стоять кузня или перегонка, сумка — правее.
+    // Если места не хватает, сначала прячем экипировку (она видна и без окна), потом сжимаем зазоры.
+    let panel_w = |cols: u8| cols as f32 * CELL + 64.0;
+    let bag_w = panel_w(inv.grid.w);
+    let equip_w = 3.0 * SLOT + 12.0 + 64.0;
+    let body_w = state
+        .container
+        .as_ref()
+        .map_or(0.0, |c| panel_w(c.inv.grid.w) + 14.0);
+    let free = screen_w - dock_w - 24.0;
+    let show_equip =
+        body_w + equip_w + 14.0 + bag_w <= free || (dock_w == 0.0 && state.container.is_none());
     let held_uid = held.0.as_ref().map(|h| h.item.uid);
-    let res = UiRes { fonts: fonts.clone(), icons: icons.0.clone() };
+    let res = UiRes {
+        fonts: fonts.clone(),
+        icons: icons.0.clone(),
+        theme: theme.clone(),
+    };
 
     commands
         .spawn((
@@ -215,15 +232,17 @@ fn rebuild_ui(
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 column_gap: px(14),
+                padding: UiRect::left(px(dock_w)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.45)),
+            theme.backdrop(),
             GlobalZIndex(10),
         ))
         .with_children(|root| {
             if let Some(c) = &state.container {
-                panel(root).with_children(|p| {
-                    p.spawn(text(&fonts, c.title.clone(), 22.0, TITLE, true));
+                panel(root, &theme, opening).with_children(|p| {
+                    p.spawn(theme.title(c.title.clone(), 28.0));
+                theme.divider(p);
                     p.spawn(text(&fonts, "Снаряжение", 14.0, DIM, false));
                     p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: px(4), row_gap: px(4), max_width: px(c.inv.grid.w as f32 * CELL), ..default() })
                         .with_children(|row| {
@@ -234,16 +253,13 @@ fn rebuild_ui(
                     p.spawn(text(&fonts, "Сумка", 14.0, DIM, false));
                     grid(p, &res, Owner::Container(c.id), &c.inv, held_uid);
                     if !c.inv.is_empty() {
-                        p.spawn((
-                            Hit::TakeAll,
-                            Interaction::default(),
-                            FocusPolicy::Pass,
-                            Node { padding: UiRect::axes(px(14), px(6)), border: UiRect::all(px(1)), align_self: AlignSelf::FlexStart, ..default() },
-                            BorderColor::all(PANEL_BORDER),
-                            BackgroundColor(Color::srgba(0.3, 0.22, 0.12, 0.9)),
-                        ))
-                        .with_children(|b| {
-                            b.spawn(text(&fonts, "Забрать всё", 16.0, TITLE, true));
+                        theme.button(p, "Забрать всё", (Hit::TakeAll, FocusPolicy::Pass), true).insert(Node {
+                            padding: UiRect::axes(px(18), px(7)),
+                            min_height: px(34),
+                            align_self: AlignSelf::FlexStart,
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
                         });
                     } else {
                         p.spawn(text(&fonts, "Ничего не осталось", 15.0, DIM, false));
@@ -252,8 +268,9 @@ fn rebuild_ui(
             }
 
             // Экипировка и характеристики.
-            panel(root).with_children(|p| {
-                p.spawn(text(&fonts, "Экипировка", 22.0, TITLE, true));
+            if show_equip { panel(root, &theme, opening).with_children(|p| {
+                p.spawn(theme.title("Экипировка", 28.0));
+                theme.divider(p);
                 p.spawn(Node {
                     display: Display::Grid,
                     grid_template_columns: RepeatedGridTrack::px(3, SLOT),
@@ -267,7 +284,8 @@ fn rebuild_ui(
                         equip_slot(g, &res, Owner::Me, slot, inv.equipped(slot), SLOT, held_uid);
                     }
                 });
-                p.spawn(text(&fonts, "Характеристики", 16.0, DIM, false));
+                theme.divider(p);
+                p.spawn(theme.title_colored("Характеристики", 19.0, DIM));
                 let stats = inv.equipped_stats();
                 let order = [
                     Stat::WeaponDamage,
@@ -288,12 +306,13 @@ fn rebuild_ui(
                     .filter(|s| stats.get(**s) != 0.0 || matches!(s, Stat::WeaponDamage | Stat::Armor))
                     .map(|s| format!("{}: {}", s.name(), s.format(stats.get(*s))))
                     .collect();
-                p.spawn(text(&fonts, lines.join("\n"), 15.0, Color::srgb(0.85, 0.82, 0.76), false));
-            });
+                p.spawn(text(&fonts, lines.join("\n"), 15.0, ink::TEXT, false));
+            }); }
 
             // Сумка.
-            panel(root).with_children(|p| {
-                p.spawn(text(&fonts, "Сумка", 22.0, TITLE, true));
+            panel(root, &theme, opening).with_children(|p| {
+                p.spawn(theme.title("Сумка", 28.0));
+                theme.divider(p);
                 grid(p, &res, Owner::Me, inv, held_uid);
                 let purse = crate::economy::purse(inv);
                 let value: u32 = inv.all_items().filter(|i| crate::economy::coin_value(i.base).is_none()).map(Item::value).sum();
@@ -313,7 +332,7 @@ fn rebuild_ui(
                         )
                     },
                     15.0,
-                    Color::srgb(0.9, 0.75, 0.35),
+                    ink::GOLD,
                     false,
                 ));
                 p.spawn(text(
@@ -344,27 +363,34 @@ fn rebuild_ui(
         });
 }
 
-fn panel<'a>(root: &'a mut ChildSpawnerCommands) -> EntityCommands<'a> {
-    root.spawn((
+fn panel<'a>(
+    root: &'a mut ChildSpawnerCommands,
+    theme: &UiTheme,
+    opening: bool,
+) -> EntityCommands<'a> {
+    let mut e = root.spawn((
         Hit::Panel,
         Interaction::default(),
         FocusPolicy::Pass,
         Node {
             flex_direction: FlexDirection::Column,
-            padding: UiRect::all(px(12)),
+            padding: Skin::Wood.padding(),
             row_gap: px(8),
-            border: UiRect::all(px(2)),
             align_self: AlignSelf::Center,
             ..default()
         },
-        BorderColor::all(PANEL_BORDER),
-        BackgroundColor(PANEL_BG),
-    ))
+        theme.skin(Skin::Wood),
+    ));
+    if opening {
+        e.insert(Appear::default());
+    }
+    e
 }
 
 /// Шрифты и иконки для построения окна.
 struct UiRes {
     fonts: UiFonts,
+    theme: UiTheme,
     icons: Vec<Handle<Image>>,
 }
 
@@ -375,15 +401,16 @@ fn item_body(p: &mut ChildSpawnerCommands, fonts: &UiRes, item: &Item, alpha: f3
         Node {
             width: percent(100),
             height: percent(100),
-            border: UiRect::all(px(2)),
+            border: UiRect::all(px(1)),
+            border_radius: BorderRadius::all(px(3)),
             padding: UiRect::all(px(3)),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             overflow: Overflow::clip(),
             ..default()
         },
-        BorderColor::all(quality_color(q).with_alpha(alpha)),
-        BackgroundColor(item_bg(q).with_alpha(0.95 * alpha)),
+        BorderColor::all(quality_color(q).with_alpha(0.75 * alpha)),
+        BackgroundColor(item_bg(q).with_alpha(0.7 * alpha)),
         FocusPolicy::Pass,
     ))
     .with_children(|b| {
@@ -419,11 +446,9 @@ fn grid(p: &mut ChildSpawnerCommands, fonts: &UiRes, owner: Owner, inv: &Invento
                         top: px(y as f32 * CELL),
                         width: px(CELL),
                         height: px(CELL),
-                        border: UiRect::all(px(1)),
                         ..default()
                     },
-                    BorderColor::all(CELL_BORDER),
-                    BackgroundColor(CELL_BG),
+                    fonts.theme.slot_image(false),
                 ));
             }
         }
@@ -456,13 +481,12 @@ fn equip_slot(p: &mut ChildSpawnerCommands, fonts: &UiRes, owner: Owner, slot: E
         Node {
             width: px(size),
             height: px(size),
-            border: UiRect::all(px(1)),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
+            padding: UiRect::all(px(3)),
             ..default()
         },
-        BorderColor::all(CELL_BORDER),
-        BackgroundColor(CELL_BG),
+        fonts.theme.slot(false),
     ))
     .with_children(|s| match item {
         Some(item) => {
@@ -472,7 +496,16 @@ fn equip_slot(p: &mut ChildSpawnerCommands, fonts: &UiRes, owner: Owner, slot: E
         }
         None => {
             let size = if size < SLOT { 10.0 } else { 12.0 };
-            s.spawn((text(&fonts.fonts, slot.name(), size, Color::srgba(0.6, 0.56, 0.5, 0.6), false), TextLayout::justify(Justify::Center)));
+            s.spawn((
+                text(
+                    &fonts.fonts,
+                    slot.name(),
+                    size,
+                    Color::srgba(0.66, 0.58, 0.46, 0.55),
+                    false,
+                ),
+                TextLayout::justify(Justify::Center),
+            ));
         }
     });
 }
@@ -642,7 +675,7 @@ fn highlight_cells(
     state: Res<LootState>,
     held: Res<Held>,
     hits: Query<(&Interaction, &Hit)>,
-    mut cells: Query<(&Hit, &mut BackgroundColor)>,
+    mut cells: Query<(&Hit, &mut ImageNode)>,
 ) {
     if !state.ui_open {
         return;
@@ -666,15 +699,15 @@ fn highlight_cells(
         let color = match target {
             Some((o, tx, ty, w, h, ok)) if o == owner && x >= tx && x < tx + w && y >= ty && y < ty + h => {
                 if ok {
-                    Color::srgba(0.2, 0.6, 0.2, 0.45)
+                    Color::srgb(0.75, 2.2, 0.7)
                 } else {
-                    Color::srgba(0.7, 0.15, 0.1, 0.45)
+                    Color::srgb(2.4, 0.6, 0.5)
                 }
             }
-            _ => CELL_BG,
+            _ => Color::WHITE,
         };
-        if bg.0 != color {
-            bg.0 = color;
+        if bg.color != color {
+            bg.color = color;
         }
     }
 }
@@ -683,21 +716,20 @@ fn highlight_cells(
 // Подсказка и предмет в руке
 // ---------------------------------------------------------------------------
 
-fn setup_tooltip(mut commands: Commands) {
+fn setup_tooltip(mut commands: Commands, theme: Res<UiTheme>) {
     commands.spawn((
         Tooltip,
         Node {
             position_type: PositionType::Absolute,
             display: Display::None,
             flex_direction: FlexDirection::Column,
-            padding: UiRect::all(px(10)),
+            padding: Skin::Leather.padding(),
             row_gap: px(3),
-            border: UiRect::all(px(2)),
-            width: px(300),
+            width: px(320),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.05, 0.04, 0.03, 0.97)),
-        BorderColor::all(PANEL_BORDER),
+        theme.skin(Skin::Leather),
+        BorderColor::all(Color::NONE),
         GlobalZIndex(100),
         FocusPolicy::Pass,
     ));
