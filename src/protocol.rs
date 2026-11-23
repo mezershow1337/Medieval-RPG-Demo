@@ -97,6 +97,8 @@ pub enum ClientMessage {
     Guard { on: bool, yaw: f32, pitch: f32 },
     /// Убрать оружие и драться кулаками / снова взять оружие (хотбар).
     Holster { on: bool },
+    /// Ответ стражнику, который вас остановил.
+    Law(crate::civilians::LawAnswer),
 }
 
 /// Кто это: игрок или враг какого типа. Люди Херсонеса и его округи около 510 г.
@@ -156,6 +158,14 @@ pub enum ServerMessage {
     /// На земле появилось тело (его можно будет обыскать).
     CorpseSpawned { corpse_id: u64, kind: ActorKind, pos: NetPos, yaw: f32, gear: crate::gear_look::Gear },
     CorpseRemoved { corpse_id: u64 },
+    /// Ранили мирного человека.
+    CivilianHit { civ: crate::civilians::Civ, at: NetPos, amount: f32, head: bool },
+    /// Мирный человек погиб; тело (если ещё лежит): id для обыска, точка и поворот.
+    CivilianDead { civ: crate::civilians::Civ, corpse: Option<(u64, NetPos, f32)> },
+    /// На место погибшего пришёл другой человек (наследник лавки, новый жилец).
+    CivilianBack { civ: crate::civilians::Civ },
+    /// Закон: свидетели, стража, карцер.
+    Law(crate::civilians::LawMessage),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

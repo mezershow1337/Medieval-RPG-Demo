@@ -92,7 +92,7 @@ pub struct MerchantNpc {
     phase: f32,
 }
 
-fn outfit_for(info: &MerchantInfo) -> Outfit {
+pub fn outfit_for(info: &MerchantInfo) -> Outfit {
     use crate::factions::Faction;
     let c = |v: [f32; 3]| Color::srgb(v[0], v[1], v[2]);
     // Облик по народу: ромеи в туниках, готы с длинными волосами, аланы и кочевники в кафтанах.
@@ -430,7 +430,7 @@ fn aim_merchants(
     mut state: ResMut<TradeState>,
     loot: Res<LootState>,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
-    npcs: Query<(&MerchantNpc, &GlobalTransform)>,
+    npcs: Query<(&MerchantNpc, &GlobalTransform), Without<crate::civil_client::Fallen>>,
     players: Query<(&RemoteActor, &GlobalTransform)>,
 ) {
     let aim = (|| {
