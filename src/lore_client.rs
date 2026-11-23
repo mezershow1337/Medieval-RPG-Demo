@@ -576,27 +576,44 @@ fn setup_lore_ui(mut commands: Commands, fonts: Res<UiFonts>) {
     commands
         .spawn(Node { position_type: PositionType::Absolute, width: percent(100), bottom: px(150), justify_content: JustifyContent::Center, ..default() })
         .with_children(|p| {
-            p.spawn((
-                TendingHud,
-                Text::new(""),
-                TextFont { font: fonts.bold.clone().into(), font_size: bevy::text::FontSize::Px(17.0), ..default() },
-                TextColor(Color::WHITE),
-                TextLayout::justify(Justify::Center),
-                TextShadow::default(),
-                Node { display: Display::None, ..default() },
-            ));
+            crate::ui_theme::theme().plaque(p).with_children(|p| {
+                p.spawn((
+                    TendingHud,
+                    Text::new(""),
+                    TextFont {
+                        font: fonts.bold.clone().into(),
+                        font_size: bevy::text::FontSize::Px(17.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    TextLayout::justify(Justify::Center),
+                    TextShadow::default(),
+                    Node {
+                        display: Display::None,
+                        ..default()
+                    },
+                    crate::ui_theme::Plaque,
+                ));
+            });
         });
     commands
         .spawn(Node { position_type: PositionType::Absolute, width: percent(100), top: percent(56), justify_content: JustifyContent::Center, ..default() })
         .with_children(|p| {
-            p.spawn((
-                LorePrompt,
-                Text::new(""),
-                TextFont { font: fonts.bold.clone().into(), font_size: bevy::text::FontSize::Px(20.0), ..default() },
-                TextColor(Color::WHITE),
-                TextLayout::justify(Justify::Center),
-                TextShadow::default(),
-            ));
+            crate::ui_theme::theme().plaque(p).with_children(|p| {
+                p.spawn((
+                    LorePrompt,
+                    Text::new(""),
+                    TextFont {
+                        font: fonts.bold.clone().into(),
+                        font_size: bevy::text::FontSize::Px(20.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    TextLayout::justify(Justify::Center),
+                    TextShadow::default(),
+                    crate::ui_theme::Plaque,
+                ));
+            });
         });
     commands.spawn((
         KnowledgeWindow,
@@ -607,14 +624,12 @@ fn setup_lore_ui(mut commands: Commands, fonts: Res<UiFonts>) {
             top: percent(6),
             width: percent(84),
             max_height: percent(88),
-            padding: UiRect::all(px(16)),
+            padding: crate::ui_theme::Skin::Parchment.padding(),
             column_gap: px(28),
-            border: UiRect::all(px(2)),
             overflow: Overflow::clip(),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.09, 0.075, 0.06, 0.96)),
-        BorderColor::all(Color::srgb(0.45, 0.36, 0.22)),
+        crate::ui_theme::theme().skin(crate::ui_theme::Skin::Parchment),
         GlobalZIndex(20),
     ));
 }
@@ -672,17 +687,33 @@ fn update_patch_looks(view: Res<LoreView>, mut patches: Query<(&PatchModel, &Chi
 }
 
 fn column(p: &mut ChildSpawnerCommands, fonts: &UiFonts, title: &str, lines: &[String]) {
-    p.spawn(Node { flex_direction: FlexDirection::Column, row_gap: px(3), flex_basis: percent(33), flex_grow: 1.0, ..default() }).with_children(|c| {
+    p.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        row_gap: px(3),
+        flex_basis: percent(33),
+        flex_grow: 1.0,
+        ..default()
+    })
+    .with_children(|c| {
+        // Как в рукописи: заголовок киноварью, текст чернилами.
         c.spawn((
             Text::new(title),
-            TextFont { font: fonts.bold.clone().into(), font_size: bevy::text::FontSize::Px(19.0), ..default() },
-            TextColor(Color::srgb(0.93, 0.83, 0.6)),
+            TextFont {
+                font: fonts.title.clone().into(),
+                font_size: bevy::text::FontSize::Px(24.0),
+                ..default()
+            },
+            TextColor(crate::ui_theme::ink::RUBRIC),
         ));
         let body = if lines.is_empty() { "—".to_string() } else { lines.join("\n") };
         c.spawn((
             Text::new(body),
-            TextFont { font: fonts.regular.clone().into(), font_size: bevy::text::FontSize::Px(14.0), ..default() },
-            TextColor(Color::srgb(0.86, 0.82, 0.75)),
+            TextFont {
+                font: fonts.regular.clone().into(),
+                font_size: bevy::text::FontSize::Px(15.0),
+                ..default()
+            },
+            TextColor(crate::ui_theme::ink::INK),
         ));
     });
 }
@@ -759,7 +790,16 @@ fn update_knowledge_window(
     }
     view.built_rev = view.rev;
     let (entity, ref mut node) = *window;
-    node.display = if view.window_open { Display::Flex } else { Display::None };
+    if view.window_open && node.display == Display::None {
+        commands
+            .entity(entity)
+            .insert(crate::ui_theme::Appear::default());
+    }
+    node.display = if view.window_open {
+        Display::Flex
+    } else {
+        Display::None
+    };
     if !view.window_open {
         return;
     }
@@ -797,6 +837,7 @@ mod tests {
 
 /// `MRPG_SHOT=файл.png` — через `MRPG_SHOT_DELAY` секунд (по умолчанию 8) сохранить
 /// снимок экрана и выйти. `MRPG_SHOT_UI=knowledge` — перед снимком открыть окно знаний,
+/// `MRPG_SHOT_UI=inventory` — открыть сумку,
 /// `MRPG_SHOT_UI=brew` — открыть сумку и окно варки у горшка (нужен `MRPG_DEBUG_KIT=1`),
 /// `MRPG_SHOT_UI=fx` — сосуды на огне и вспышки перед камерой, `MRPG_SHOT_PITCH=градусы` — наклон,
 /// `MRPG_SHOT_UI=brazier|table` — поставить жаровню (и собрать стол), `MRPG_SHOT_YAW=градусы` —
@@ -833,7 +874,8 @@ fn dev_shot(
     if let Some(n) = std::env::var("MRPG_SHOT_FRAMES").ok().and_then(|s| s.parse::<u32>().ok()) {
         *frames += 1;
         info!("снимок: кадр {} из {n}", *frames);
-        t = if *frames >= n + 12 { delay + 3.0 } else if *frames >= n { delay + 1.0 } else { 0.0 };
+        // Сначала открыть окна (кадр n), снимок — через 4 кадра, когда интерфейс уже построен.
+        t = if *frames >= n + 12 { delay + 3.0 } else if *frames >= n + 4 { delay + 1.0 } else if *frames >= n { delay - 0.5 } else { 0.0 };
     }
     let ui = std::env::var("MRPG_SHOT_UI").unwrap_or_default();
     // `MRPG_SHOT_UI=fx` — выставить перед камерой сосуды на огне и показать вспышку и осколки.
@@ -926,6 +968,10 @@ fn dev_shot(
             if let Some(uid) = pot {
                 brew.open_vessel(uid, crate::brewing::Vessel::ClayPot);
             }
+        }
+        if std::env::var("MRPG_SHOT_UI").as_deref() == Ok("inventory") {
+            loot.ui_open = true;
+            loot.rev += 1;
         }
         if std::env::var("MRPG_SHOT_UI").as_deref() == Ok("knowledge") {
             view.window_open = true;

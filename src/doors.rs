@@ -277,13 +277,20 @@ fn setup_door_prompt(mut commands: Commands, fonts: Res<crate::inventory_ui::UiF
     commands
         .spawn(Node { position_type: PositionType::Absolute, width: percent(100), top: percent(56), justify_content: JustifyContent::Center, ..default() })
         .with_children(|p| {
-            p.spawn((
-                DoorPrompt,
-                Text::new(""),
-                TextFont { font: fonts.bold.clone().into(), font_size: bevy::text::FontSize::Px(20.0), ..default() },
-                TextColor(Color::WHITE),
-                TextShadow::default(),
-            ));
+            crate::ui_theme::theme().plaque(p).with_children(|p| {
+                p.spawn((
+                    DoorPrompt,
+                    Text::new(""),
+                    TextFont {
+                        font: fonts.bold.clone().into(),
+                        font_size: bevy::text::FontSize::Px(20.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    TextShadow::default(),
+                    crate::ui_theme::Plaque,
+                ));
+            });
         });
 }
 

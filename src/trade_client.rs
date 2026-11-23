@@ -525,18 +525,21 @@ fn setup_trade_hud(mut commands: Commands, fonts: Res<UiFonts>) {
             ..default()
         })
         .with_children(|p| {
-            p.spawn((
-                TradePrompt,
-                Text::new(""),
-                TextFont {
-                    font: fonts.bold.clone().into(),
-                    font_size: bevy::text::FontSize::Px(19.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(0.95, 0.88, 0.7)),
-                TextLayout::justify(Justify::Center),
-                TextShadow::default(),
-            ));
+            crate::ui_theme::theme().plaque(p).with_children(|p| {
+                p.spawn((
+                    TradePrompt,
+                    Text::new(""),
+                    TextFont {
+                        font: fonts.bold.clone().into(),
+                        font_size: bevy::text::FontSize::Px(19.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.95, 0.88, 0.7)),
+                    TextLayout::justify(Justify::Center),
+                    TextShadow::default(),
+                    crate::ui_theme::Plaque,
+                ));
+            });
         });
     commands
         .spawn((
@@ -567,12 +570,11 @@ fn setup_trade_hud(mut commands: Commands, fonts: Res<UiFonts>) {
             p.spawn((
                 Node {
                     width: px(320),
-                    height: px(10),
-                    border: UiRect::all(px(1)),
+                    height: px(16),
+                    padding: UiRect::axes(px(5), px(4)),
                     ..default()
                 },
-                BorderColor::all(Color::srgb(0.45, 0.36, 0.22)),
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+                crate::ui_theme::theme().bar_frame(),
             ))
             .with_children(|b| {
                 b.spawn((
