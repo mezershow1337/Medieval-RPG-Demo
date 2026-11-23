@@ -37,6 +37,8 @@ pub struct RemoteActor {
     walk: f32,
     crouch: f32,
     last_pos: Vec3,
+    /// Вид клинка (см. `ActorSnapshot::finish`).
+    finish: u8,
 }
 
 /// Скелет с телом (дочерняя сущность бойца или тела на земле).
@@ -130,6 +132,7 @@ pub fn run(server_addr: SocketAddr) {
         .add_plugins(crate::residents::ResidentsPlugin)
         .add_plugins(crate::trade_client::TradeClientPlugin)
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))
+        .add_plugins(crate::smithing_client::SmithingClientPlugin)
         .add_systems(Update, hide_ui_for_shots.run_if(|| std::env::var("MRPG_CAM").is_ok()))
         .insert_resource(RenetClient::new(connection_config()))
         .insert_resource(transport)
@@ -230,6 +233,7 @@ fn spawn_remote(commands: &mut Commands, index: &mut RemoteIndex, snap: &ActorSn
                 walk: 0.0,
                 crouch: if snap.crouching { 1.0 } else { 0.0 },
                 last_pos: pos,
+                finish: snap.finish,
             },
             Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(snap.yaw)),
             Visibility::default(),
@@ -418,6 +422,7 @@ fn receive_snapshots(
                 r.fighter.stamina = a.stamina;
                 r.fighter.max_stamina = a.max_stamina;
                 r.fighter.action_speed = a.action_speed;
+                r.finish = a.finish;
             }
             None if !index.0.contains_key(&a.id) => spawn_remote(&mut commands, &mut index, a),
             None => {}
@@ -504,6 +509,8 @@ fn animate_remote(
     mut shields: Query<&mut Transform, (With<RemoteShield>, Without<RemoteActor>, Without<RemoteSword>)>,
     mut rigs: Query<&mut RigPose, With<BodyRig>>,
     mut blades: Query<(&Blade, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut tints: ResMut<rig::BladeTints>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let dt = time.delta_secs();
     let now = time.elapsed_secs();
@@ -622,7 +629,7 @@ fn animate_remote(
             *sword = sword_tf;
             for bc in blade_children.iter() {
                 if let Ok((b, mut m)) = blades.get_mut(bc) {
-                    m.0 = if riposte { assets.blade_red.clone() } else { b.0.clone() };
+                    m.0 = if riposte { assets.blade_red.clone() } else { tints.get(&mut materials, &b.0, r.finish) };
                 }
             }
         }

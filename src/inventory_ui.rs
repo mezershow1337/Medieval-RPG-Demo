@@ -390,7 +390,7 @@ fn item_body(p: &mut ChildSpawnerCommands, fonts: &UiRes, item: &Item, alpha: f3
         // Иконка вписывается в рамку с сохранением пропорций.
         let (w, h) = item.size();
         b.spawn((
-            ImageNode::new(fonts.icons[item.base.0 as usize].clone()).with_color(Color::WHITE.with_alpha(alpha)),
+            ImageNode::new(fonts.icons[item.base.0 as usize].clone()).with_color(icon_tint(&item).with_alpha(alpha)),
             Node { height: percent(100), aspect_ratio: Some(w as f32 / h as f32), max_width: percent(100), ..default() },
             FocusPolicy::Pass,
         ));
@@ -748,7 +748,7 @@ fn update_tooltip(
     commands.entity(entity).despawn_children().with_children(|t| {
         let (w, h) = item.size();
         let scale = 40.0 / (w.max(h) as f32 / 2.0).max(1.0);
-        t.spawn((ImageNode::new(icons.get(item.base)), Node { width: px(w as f32 * scale), height: px(h as f32 * scale), align_self: AlignSelf::Center, ..default() }));
+        t.spawn((ImageNode::new(icons.get(item.base)).with_color(icon_tint(&item)), Node { width: px(w as f32 * scale), height: px(h as f32 * scale), align_self: AlignSelf::Center, ..default() }));
         let name = knowledge.as_ref().map(|k| k.item_name(&item)).unwrap_or_else(|| item.display_name());
         t.spawn(text(&fonts, name, 18.0, quality_color(item.quality), true));
         if let Some(k) = knowledge.as_ref() {
@@ -783,6 +783,11 @@ fn update_tooltip(
         for (s, v) in &item.affixes {
             t.spawn(text(&fonts, format!("{} {}", s.format(*v), s.name()), 14.0, Color::srgb(0.55, 0.75, 1.0), false));
         }
+        if let Some(m) = item.make.as_ref() {
+            for (line, color) in make_lines(&item, m) {
+                t.spawn(text(&fonts, line, 13.0, color, false));
+            }
+        }
         t.spawn(text(&fonts, format!("Размер {}×{}   Вес {}   Цена ≈ {}", info.size.0, info.size.1, crate::weight::format_weight(crate::weight::item_weight(&item)), crate::economy::format_money(item.value())), 12.0, DIM, false));
         // Сравнение с надетым.
         if let (Some(slot), Some(me)) = (info.slot, state.inventory.as_ref())
@@ -803,4 +808,65 @@ fn move_ghost(held: Res<Held>, window: Single<&Window, With<PrimaryWindow>>, mut
         node.left = px(pos.x - (h.grab.0 as f32 + 0.5) * CELL);
         node.top = px(pos.y - (h.grab.1 as f32 + 0.5) * CELL);
     }
+}
+
+/// Иконка грубой или сбитой вещи темнее и рыжее (окалина, ржа), полированной — как есть.
+pub fn icon_tint(item: &crate::items::Item) -> Color {
+    let Some(m) = item.make.as_ref() else { return Color::WHITE };
+    if m.dur_max <= 0.0 && m.smith.is_empty() {
+        return Color::WHITE;
+    }
+    let l = item.look();
+    let k = (1.0 - l).clamp(0.0, 1.0) * 0.55;
+    Color::srgb(1.0 - k * 0.35, 1.0 - k * 0.6, 1.0 - k * 0.85)
+}
+
+/// Строки подсказки о работе кузнеца: мастер, прочность, кромка, развесовка, изъяны.
+pub fn make_lines(item: &crate::items::Item, m: &crate::items::Make) -> Vec<(String, Color)> {
+    use crate::items::EquipSlot;
+    let mut v = Vec::new();
+    let dim = Color::srgb(0.7, 0.66, 0.58);
+    if !m.smith.is_empty() {
+        v.push((format!("Работа: {}", m.smith), Color::srgb(0.85, 0.75, 0.55)));
+    }
+    if m.dur_max > 0.0 {
+        let c = m.condition();
+        let color = if m.broken() {
+            Color::srgb(0.95, 0.3, 0.25)
+        } else if c < 0.5 {
+            Color::srgb(0.95, 0.65, 0.3)
+        } else {
+            Color::srgb(0.7, 0.85, 0.65)
+        };
+        let tail = if m.broken() { " — сломано, нужен кузнец" } else if c < 0.5 { " — сбито, слабее в деле" } else { "" };
+        v.push((format!("Прочность {:.0}/{:.0}{tail}", m.dur, m.dur_max), color));
+    }
+    if item.info().slot == Some(EquipSlot::MainHand) && !m.smith.is_empty() {
+        let edge = match m.edge {
+            e if e > 0.75 => "кромка твёрдая, держит заточку",
+            e if e > 0.5 => "кромка добрая",
+            e if e > 0.3 => "кромка мягковата",
+            _ => "кромка мягкая, быстро тупится",
+        };
+        let bal = match m.balance {
+            b if b.abs() < 0.08 => "развесовка ровная",
+            b if b > 0.0 => "тяжела к острию",
+            _ => "тяжела к рукояти",
+        };
+        v.push((format!("{edge}; {bal}"), dim));
+    }
+    let surface = match m.finish {
+        f if f > 0.8 => "поверхность чистая, полированная",
+        f if f > 0.55 => "поверхность ровная",
+        f if f > 0.3 => "поверхность грубая, следы молота",
+        _ => "поверхность в раковинах и окалине",
+    };
+    if !m.smith.is_empty() {
+        v.push((surface.to_string(), dim));
+    }
+    if !m.flaws.is_empty() {
+        let names: Vec<&str> = m.flaws.iter().map(|f| f.name()).collect();
+        v.push((format!("Изъяны: {}", names.join(", ")), Color::srgb(0.9, 0.45, 0.35)));
+    }
+    v
 }

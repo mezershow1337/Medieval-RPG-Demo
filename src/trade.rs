@@ -112,6 +112,7 @@ const IMPORTS: &[&str] = &[
     "Натр",
     "Камедь",
     "Ртуть",
+    "Олово",
 ];
 const MATERIALS: &[&str] = &[
     "Сосновая смола",
@@ -121,7 +122,20 @@ const MATERIALS: &[&str] = &[
     "Медный лом",
     "Древесная зола",
     "Щёлок",
+    // Кузнечное дело.
+    "Железная руда",
     "Древесный уголь",
+    "Крица",
+    "Железная полоса",
+    "Стальная полоса",
+    "Железный лом",
+    "Бронзовый лом",
+    "Серебряный лом",
+    "Чугунная корка",
+    "Ясеневая заготовка",
+    "Гончарная глина",
+    "Каменная литейная форма",
+    "Свинцовые грузила",
 ];
 const VESSELS: &[&str] = &[
     "Ступка с пестиком",
@@ -198,12 +212,19 @@ pub fn category(base: ItemBaseId) -> Category {
     if name == "Рубин" {
         return Category::Gem;
     }
+    if name == "Наконечники стрел" {
+        return Category::Weapon;
+    }
+    if name.starts_with("Бронзов") {
+        return Category::Jewelry;
+    }
     // Книги узнаём по автору или слову в названии: «Гален. О…», «Книга…», «…травник».
     if name.contains(". О")
         || name.contains("Книга")
         || name.contains("травник")
         || name.contains("Синопсис")
         || name.contains("Свиток")
+        || name.contains("история")
     {
         return Category::Book;
     }
@@ -231,6 +252,10 @@ pub enum TeacherKind {
     Alchemist,
     Grammarian,
     SteppeHealer,
+    Smith,
+    Armourer,
+    GothSmith,
+    SteppeSmith,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -303,6 +328,8 @@ pub enum Service {
     Donations,
     /// Скупщик: берёт краденое без вопросов.
     Fence,
+    /// Кузнец: правит и точит сбитое оружие и доспехи.
+    Repair,
 }
 
 /// Внешний вид торговца (рисует клиент).
@@ -451,6 +478,10 @@ pub const MERCHANTS: &[MerchantDef] = &[
             s("Медный купорос", 1, 4, 1.0),
             s("Свинец", 1, 4, 1.0),
             s("Негашёная известь", 2, 6, 1.0),
+            // Бурый железняк с Керченского полуострова и олово из Средиземноморья.
+            s("Железная руда", 4, 12, 1.0),
+            s("Олово", 2, 6, 1.0),
+            s("Серебряный лом", 0, 3, 1.0),
         ],
         buys: &[
             (Category::Material, 0.9),
@@ -710,6 +741,7 @@ pub const MERCHANTS: &[MerchantDef] = &[
             s("Глиняный горшок", 4, 12, 0.9),
             s("Тигель", 1, 4, 0.9),
             s("Ступка с пестиком", 1, 2, 0.9),
+            s("Гончарная глина", 4, 12, 0.9),
         ],
         buys: &[(Category::Material, 0.7)],
         money: MoneyPolicy::Coins,
@@ -753,7 +785,7 @@ pub const MERCHANTS: &[MerchantDef] = &[
         title: "кузнец и медник",
         faction: Faction::Citizens,
         place: "smithy",
-        greeting: "Котлы, весы, ножи. Медный лом и свинец беру. Перегонную снасть из меди — на заказ.",
+        greeting: "Котлы, весы, ножи, клинки. Железо — полосами, уголь — мерами. Горн свободен: работай, если умеешь, а нет — научу за плату или бери в подмастерья.",
         stock: &[
             s("Медный котелок", 1, 2, 1.0),
             s("Жаровня", 1, 2, 1.0),
@@ -762,6 +794,15 @@ pub const MERCHANTS: &[MerchantDef] = &[
             s("Кинжал", 1, 3, 1.0),
             s("Спата", 0, 1, 1.1),
             s("Кожаные перчатки", 0, 2, 1.0),
+            s("Железная полоса", 2, 6, 1.0),
+            s("Стальная полоса", 0, 2, 1.1),
+            s("Железный лом", 2, 6, 1.0),
+            s("Ясеневая заготовка", 1, 3, 1.0),
+            s("Каменная литейная форма", 0, 1, 1.0),
+            s("Бронзовый лом", 1, 4, 1.0),
+            s("Олово", 1, 4, 1.15),
+            s("Бронзовое навершие", 0, 2, 1.0),
+            s("Наконечники стрел", 10, 30, 1.0),
         ],
         buys: &[
             (Category::Material, 0.9),
@@ -794,6 +835,27 @@ pub const MERCHANTS: &[MerchantDef] = &[
                 min: Standing::Neutral,
             },
             OrderDef {
+                item: "Спата",
+                count: 1,
+                price: 6000,
+                secs: 540.0,
+                min: Standing::Neutral,
+            },
+            OrderDef {
+                item: "Пехотное копьё",
+                count: 1,
+                price: 4200,
+                secs: 360.0,
+                min: Standing::Neutral,
+            },
+            OrderDef {
+                item: "Боевой топор",
+                count: 1,
+                price: 2400,
+                secs: 300.0,
+                min: Standing::Neutral,
+            },
+            OrderDef {
                 item: "Алхимический стол",
                 count: 1,
                 price: 7200 * 2 + 2400,
@@ -801,8 +863,27 @@ pub const MERCHANTS: &[MerchantDef] = &[
                 min: Standing::Neutral,
             },
         ],
-        lessons: &[],
-        services: &[],
+        lessons: &[
+            LessonDef {
+                title: "Урок у горна: ковка, сварка, закалка",
+                teacher: TeacherKind::Smith,
+                mode: LessonMode::Paid,
+                hours: 1.5,
+                secs: 90.0,
+                money: 40 * 30,
+                min: Standing::Neutral,
+            },
+            LessonDef {
+                title: "Подмастерье: качать меха, бить кувалдой",
+                teacher: TeacherKind::Smith,
+                mode: LessonMode::Apprentice,
+                hours: 4.0,
+                secs: 120.0,
+                money: 40 * 2,
+                min: Standing::Neutral,
+            },
+        ],
+        services: &[Service::Repair],
         look: Look {
             tunic: [0.3, 0.27, 0.24],
             trousers: [0.2, 0.18, 0.16],
@@ -1077,7 +1158,234 @@ pub const MERCHANTS: &[MerchantDef] = &[
             helmet: false,
         },
     },
+    MerchantDef {
+        key: "vitalianos",
+        name: "Виталиан",
+        title: "мастер-оружейник гарнизонной фабрики",
+        faction: Faction::Garrison,
+        place: "armoury",
+        greeting: "Здесь куют для стратиотов: клинки, кольчуги, шлемы. Чужому продам, если не враг империи. Кольчуге учат годами.",
+        stock: &[
+            s("Кольчуга", 0, 1, 1.15),
+            s("Спангенхельм", 0, 1, 1.1),
+            s("Ламеллярные наручи", 0, 2, 1.05),
+            s("Железные поножи", 0, 1, 1.05),
+            s("Овальный щит", 1, 2, 1.0),
+            s("Кавалерийская спата", 0, 1, 1.15),
+            s("Наконечники стрел", 20, 60, 0.95),
+            s("Стальная полоса", 1, 3, 1.05),
+            s("Железная полоса", 2, 5, 1.0),
+            s("Сырая шкура", 1, 3, 1.1),
+        ],
+        buys: &[
+            (Category::Weapon, 0.55),
+            (Category::Armor, 0.6),
+            (Category::Material, 0.8),
+        ],
+        money: MoneyPolicy::Coins,
+        vigilance: 0.85,
+        cash: 7200 * 3,
+        orders: &[
+            OrderDef {
+                item: "Кольчуга",
+                count: 1,
+                price: 18000,
+                secs: 900.0,
+                min: Standing::Friendly,
+            },
+            OrderDef {
+                item: "Ламеллярный панцирь",
+                count: 1,
+                price: 26000,
+                secs: 900.0,
+                min: Standing::Friendly,
+            },
+            OrderDef {
+                item: "Спангенхельм",
+                count: 1,
+                price: 6000,
+                secs: 480.0,
+                min: Standing::Neutral,
+            },
+            OrderDef {
+                item: "Кавалерийская спата",
+                count: 1,
+                price: 9000,
+                secs: 600.0,
+                min: Standing::Friendly,
+            },
+        ],
+        lessons: &[
+            LessonDef {
+                title: "Урок оружейника: доспехи, закалка клинка",
+                teacher: TeacherKind::Armourer,
+                mode: LessonMode::Paid,
+                hours: 1.5,
+                secs: 90.0,
+                money: 40 * 60,
+                min: Standing::Friendly,
+            },
+            LessonDef {
+                title: "Подмастерье в фабрике: тянуть проволоку, клепать кольца",
+                teacher: TeacherKind::Armourer,
+                mode: LessonMode::Apprentice,
+                hours: 4.0,
+                secs: 120.0,
+                money: 40 * 3,
+                min: Standing::Neutral,
+            },
+        ],
+        services: &[Service::Repair],
+        look: Look {
+            tunic: [0.42, 0.18, 0.15],
+            trousers: [0.22, 0.2, 0.18],
+            helmet: false,
+        },
+    },
     // ---------------- За стенами ----------------
+    MerchantDef {
+        key: "ansila",
+        name: "Ансила",
+        title: "готский кузнец",
+        faction: Faction::Goths,
+        place: "goth_smithy",
+        greeting: "Руду возим из-за пролива, уголь жжём в горах. Сам плавлю, сам кую. Клинок из пакета — дольше, зато не сломается.",
+        stock: &[
+            s("Древесный уголь", 8, 24, 0.75),
+            s("Железная руда", 2, 8, 0.9),
+            s("Крица", 0, 2, 0.85),
+            s("Железная полоса", 1, 4, 0.9),
+            s("Боевой топор", 0, 2, 0.9),
+            s("Кинжал", 1, 2, 0.9),
+            s("Круглый щит", 0, 1, 0.9),
+            s("Ясеневая заготовка", 2, 4, 0.75),
+        ],
+        buys: &[
+            (Category::WineOil, 1.4),
+            (Category::Textile, 1.3),
+            (Category::Material, 1.0),
+            (Category::Weapon, 1.1),
+        ],
+        money: MoneyPolicy::Barter {
+            bronze: 0.8,
+            gold: 1.0,
+        },
+        vigilance: 0.55,
+        cash: 0,
+        orders: &[],
+        lessons: &[
+            LessonDef {
+                title: "Ансила учит плавить руду и варить пакет",
+                teacher: TeacherKind::GothSmith,
+                mode: LessonMode::Paid,
+                hours: 1.5,
+                secs: 90.0,
+                money: 40 * 24,
+                min: Standing::Neutral,
+            },
+            LessonDef {
+                title: "Подмастерье: жечь уголь, дуть мехами у горна",
+                teacher: TeacherKind::GothSmith,
+                mode: LessonMode::Apprentice,
+                hours: 4.0,
+                secs: 120.0,
+                money: 40,
+                min: Standing::Neutral,
+            },
+        ],
+        services: &[Service::Repair],
+        look: Look {
+            tunic: [0.36, 0.3, 0.24],
+            trousers: [0.24, 0.2, 0.17],
+            helmet: false,
+        },
+    },
+    MerchantDef {
+        key: "irnik",
+        name: "Ирник",
+        title: "кочевой кузнец",
+        faction: Faction::Nomads,
+        place: "steppe_forge",
+        greeting: "Наконечники — сотнями, бляшки для поясов — литые. Горн мой лёгкий: снялись — и в путь.",
+        stock: &[
+            s("Наконечники стрел", 30, 90, 0.8),
+            s("Бронзовый лом", 2, 6, 0.85),
+            s("Олово", 1, 3, 1.0),
+            s("Бронзовая пряжка", 1, 3, 0.85),
+            s("Кинжал", 0, 2, 0.9),
+            s("Древесный уголь", 4, 10, 0.9),
+        ],
+        buys: &[
+            (Category::WineOil, 1.6),
+            (Category::Material, 1.1),
+            (Category::Weapon, 1.4),
+            (Category::Jewelry, 1.3),
+        ],
+        money: MoneyPolicy::Barter {
+            bronze: 0.0,
+            gold: 1.15,
+        },
+        vigilance: 0.7,
+        cash: 0,
+        orders: &[],
+        lessons: &[LessonDef {
+            title: "Ирник показывает литьё бляшек и наконечники",
+            teacher: TeacherKind::SteppeSmith,
+            mode: LessonMode::Paid,
+            hours: 1.5,
+            secs: 90.0,
+            money: 2000,
+            min: Standing::Neutral,
+        }],
+        services: &[Service::Repair],
+        look: Look {
+            tunic: [0.45, 0.38, 0.28],
+            trousers: [0.3, 0.26, 0.2],
+            helmet: true,
+        },
+    },
+    MerchantDef {
+        key: "kandak",
+        name: "Кандак",
+        title: "аланский кузнец-бронник",
+        faction: Faction::Alans,
+        place: "alan_forge",
+        greeting: "Аланский всадник одет в железо с головы до коня. Чешую и поножи делаю сам. Учить чужака? Сначала стань другом.",
+        stock: &[
+            s("Железная полоса", 1, 3, 0.95),
+            s("Наконечники стрел", 10, 40, 0.85),
+            s("Ламеллярные наручи", 0, 1, 0.95),
+            s("Железные поножи", 0, 1, 0.95),
+            s("Спангенхельм", 0, 1, 1.0),
+        ],
+        buys: &[
+            (Category::WineOil, 1.5),
+            (Category::Material, 1.1),
+            (Category::Armor, 1.3),
+        ],
+        money: MoneyPolicy::Barter {
+            bronze: 0.0,
+            gold: 1.1,
+        },
+        vigilance: 0.75,
+        cash: 0,
+        orders: &[],
+        lessons: &[LessonDef {
+            title: "Кандак учит доспешному делу",
+            teacher: TeacherKind::Armourer,
+            mode: LessonMode::Paid,
+            hours: 1.5,
+            secs: 90.0,
+            money: 3000,
+            min: Standing::Friendly,
+        }],
+        services: &[Service::Repair],
+        look: Look {
+            tunic: [0.32, 0.3, 0.26],
+            trousers: [0.3, 0.26, 0.2],
+            helmet: true,
+        },
+    },
     MerchantDef {
         key: "guntharis",
         name: "Гунтарис из Дори",

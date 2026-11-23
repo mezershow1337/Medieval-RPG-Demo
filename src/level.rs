@@ -221,6 +221,23 @@ pub struct Layout {
     /// Очаги (для варки отваров).
     #[allow(dead_code)] // читает `places::hearths` для алхимии
     pub hearths: Vec<Vec3>,
+    /// Кузнечные и сыродутные горны (для кузнечного дела).
+    pub forges: Vec<ForgeSpec>,
+}
+
+/// Рабочее место кузнеца: где огонь и где стоять у наковальни.
+#[derive(Clone, Copy, Debug)]
+pub struct ForgeSpec {
+    pub name: &'static str,
+    pub kind: crate::smithing_net::StationKind,
+    /// Середина углей (свет и жар).
+    pub fire: Vec3,
+    /// Наковальня (у сыродутного горна — место у мехов), отсюда работают.
+    pub anvil: Vec3,
+    /// Поверхность воды в корыте для закалки.
+    pub trough: Vec3,
+    /// Ось точильного круга.
+    pub grind: Vec3,
 }
 
 /// Участок карты 64×64 м: меши режутся по участкам, чтобы невидимое не рисовалось.
@@ -271,6 +288,7 @@ struct Builder {
     ground: Option<HeightField>,
     water_y: Option<f32>,
     hearths: Vec<Vec3>,
+    forges: Vec<ForgeSpec>,
     /// Где земля карты высот вырезана (свои полы из коробок).
     holes: Vec<(Vec2, Vec2)>,
     /// Участок, куда сейчас складываются декоративные меши (см. [`Builder::at`]).
@@ -294,6 +312,7 @@ impl Builder {
             ground: None,
             water_y: None,
             hearths: Vec::new(),
+            forges: Vec::new(),
             holes: Vec::new(),
             chunk: (0, 0),
         }
@@ -313,6 +332,7 @@ impl Builder {
             ground: self.ground,
             water_y: self.water_y,
             hearths: self.hearths,
+            forges: self.forges,
         }
     }
 
@@ -333,6 +353,7 @@ impl Builder {
         self.torches.extend(t.torches.into_iter().map(|x| Torch { pos: x.pos + offset, ..x }));
         self.lamps.extend(t.lamps.into_iter().map(|x| Lamp { pos: x.pos + offset, ..x }));
         self.hearths.extend(t.hearths.into_iter().map(|p| p + offset));
+        self.forges.extend(t.forges.into_iter().map(|f| ForgeSpec { fire: f.fire + offset, anvil: f.anvil + offset, trough: f.trough + offset, grind: f.grind + offset, ..f }));
         self.doors.extend(t.doors.into_iter().map(|d| DoorSpec { center: d.center + offset, ..d }));
         self.containers.extend(t.containers.into_iter().map(|c| ContainerSpec { pos: c.pos + offset, ..c }));
         self.residents.extend(t.residents.into_iter().map(|r| Resident { pos: r.pos + offset, ..r }));

@@ -735,3 +735,92 @@ pub fn vine_row(b: &mut Builder, a: Vec3, c: Vec3, h: f32) {
         leaves.lathe(p, &[(0.0, -0.35), (0.45, -0.1), (0.4, 0.25), (0.0, 0.35)], 6);
     }
 }
+
+// ---------------- кузнечный горн ----------------
+
+/// Где стоят части кузницы относительно горна (`o` — пол у горна, `out` — к наковальне).
+pub struct ForgeLayout {
+    pub fire: Vec3,
+    pub anvil: Vec3,
+    pub trough: Vec3,
+    pub grind: Vec3,
+}
+
+pub fn forge_layout(o: Vec3, out: Vec3) -> ForgeLayout {
+    let side = Vec3::new(-out.z, 0.0, out.x);
+    ForgeLayout { fire: o, anvil: o + out * 2.7, trough: o + out * 1.4 + side * 1.6, grind: o + out * 2.9 - side * 1.9 }
+}
+
+/// Полный набор кузнеца: горн (кирпичный под колпаком или полевой из камня и глины),
+/// мехи, наковальня на колоде, корыто с водой, точило. Регистрирует рабочее место.
+pub fn forge_set(b: &mut Builder, name: &'static str, o: Vec3, out: Vec3, field: bool) {
+    let l = forge_layout(o, out);
+    let side = Vec3::new(-out.z, 0.0, out.x);
+    let h = if field { 0.55 } else { 0.9 };
+    // Горн.
+    let (mat, hw) = if field { (Mat::Rubble, 0.65) } else { (Mat::Brick, 0.85) };
+    b.solid((o - Vec3::new(hw, 0.0, hw)).to_array(), (o + Vec3::new(hw, h, hw)).to_array(), mat);
+    b.mesh(Mat::Coals).cuboid(o + Vec3::new(-hw + 0.25, h, -hw + 0.25), o + Vec3::new(hw - 0.25, h + 0.08, hw - 0.25));
+    if !field {
+        b.mesh(Mat::Brick).spire(o + Vec3::Y * 2.3, 1.0, 1.4, 4);
+        b.mesh(Mat::Brick).prism(o + Vec3::Y * 3.4, 0.3, 1.4, 4);
+    } else {
+        // Глиняная обмазка с соплом для мехов.
+        b.mesh(Mat::Earth).lathe(o + Vec3::Y * h, &[(hw, 0.0), (hw * 0.8, 0.18), (hw * 0.6, 0.2)], 10);
+    }
+    // Мехи (кожаные, с доской) сбоку, сопло — в угли.
+    let m = o - side * (hw + 0.7) + Vec3::Y * (h * 0.6);
+    b.mesh(if field { Mat::Felt } else { Mat::Canvas }).lathe(m - Vec3::Y * 0.2, &[(0.0, 0.0), (0.38, 0.08), (0.42, 0.25), (0.0, 0.42)], 8);
+    b.mesh(Mat::Wood).beam(m + Vec3::Y * 0.1, o - side * (hw - 0.1) + Vec3::Y * (h * 0.8), 0.04, 0.04, Vec3::Y);
+    hidden(b, m - Vec3::new(0.45, 0.6, 0.45), m + Vec3::new(0.45, 0.4, 0.45));
+    // Наковальня на колоде.
+    let a = l.anvil;
+    b.mesh(Mat::Wood).lathe(a, &[(0.32, 0.0), (0.3, 0.55), (0.0, 0.55)], 10);
+    let along = out;
+    b.mesh(Mat::Iron).cuboid(a + Vec3::Y * 0.55 - along.abs() * 0.12 - side.abs() * 0.3, a + Vec3::Y * 0.8 + along.abs() * 0.12 + side.abs() * 0.3);
+    b.mesh(Mat::Iron).spire(a + side * 0.3 + Vec3::Y * 0.7, 0.1, 0.25, 4);
+    hidden(b, a - Vec3::new(0.38, 0.0, 0.38), a + Vec3::new(0.38, 0.8, 0.38));
+    // Молоты и клещи на колоде.
+    b.mesh(Mat::Wood).beam(a + Vec3::Y * 0.82 - side * 0.1, a + Vec3::Y * 0.82 - side * 0.1 + along * 0.35, 0.015, 0.015, Vec3::Y);
+    b.mesh(Mat::Iron).cuboid(a + Vec3::Y * 0.8 - side * 0.16 - along * 0.05, a + Vec3::Y * 0.88 - side * 0.04 + along * 0.05);
+    // Корыто для закалки.
+    let t = l.trough;
+    let half = along.abs() * 0.35 + side.abs() * 0.7 + Vec3::Y * 0.5;
+    b.solid((t - half.with_y(0.0)).to_array(), (t + half).to_array(), Mat::Wood);
+    b.decor((t - half.with_y(0.0) + Vec3::new(0.06, 0.5, 0.06)).to_array(), (t + half.with_y(0.51) - Vec3::new(0.06, 0.0, 0.06)).to_array(), Mat::Water);
+    // Точило: круг на станке.
+    let g = l.grind;
+    for s in [-1.0f32, 1.0] {
+        b.mesh(Mat::Wood).cuboid(g + side * (0.3 * s) - Vec3::new(0.05, 0.0, 0.05), g + side * (0.3 * s) + Vec3::new(0.05, 0.75, 0.05));
+    }
+    let c = g + Vec3::Y * 0.75;
+    let mm = b.mesh(Mat::Stone);
+    for k in 0..10 {
+        let ang = k as f32 / 10.0 * TAU;
+        let r = (out * ang.cos() + Vec3::Y * ang.sin()) * 0.38;
+        mm.beam(c, c + r, 0.13, 0.06, side);
+    }
+    b.mesh(Mat::Wood).beam(c - side * 0.35, c + side * 0.45, 0.025, 0.025, Vec3::Y);
+    hidden(b, g - Vec3::new(0.45, 0.0, 0.45), g + Vec3::new(0.45, 1.1, 0.45));
+    b.lamp(o + Vec3::Y * (h + 0.8), Color::srgb(1.0, 0.45, 0.15), 16_000.0, 7.0);
+    b.forges.push(crate::level::ForgeSpec { name, kind: crate::smithing_net::StationKind::Forge, fire: o + Vec3::Y * (h + 0.08), anvil: a, trough: l.trough + Vec3::Y * 0.51, grind: l.grind + Vec3::Y * 0.75 });
+}
+
+/// Сыродутный горн: глиняная шахта в рост человека, мехи у фурмы, куча шлака и руды.
+/// `stand` — где стоит дующий мехами.
+pub fn bloomery(b: &mut Builder, name: &'static str, p: Vec3, out: Vec3) {
+    let side = Vec3::new(-out.z, 0.0, out.x);
+    b.mesh(Mat::Earth).lathe(p, &[(0.75, 0.0), (0.72, 0.4), (0.55, 1.2), (0.36, 1.75), (0.26, 1.78), (0.24, 1.6)], 12);
+    b.mesh(Mat::Coals).disc(p + Vec3::Y * 1.62, 0.25, 10, true);
+    hidden(b, p - Vec3::new(0.7, 0.0, 0.7), p + Vec3::new(0.7, 1.8, 0.7));
+    // Мехи у фурмы.
+    let m = p + out * 1.25 + Vec3::Y * 0.3;
+    b.mesh(Mat::Felt).lathe(m - Vec3::Y * 0.25, &[(0.0, 0.0), (0.36, 0.08), (0.4, 0.25), (0.0, 0.4)], 8);
+    b.mesh(Mat::Earth).beam(m, p + out * 0.6 + Vec3::Y * 0.25, 0.06, 0.06, Vec3::Y);
+    // Шлак и руда.
+    b.mesh(Mat::DarkStone).lathe(p - side * 1.6 - out * 0.4, &[(0.7, 0.0), (0.0, 0.35)], 8);
+    b.mesh(Mat::Rubble).lathe(p + side * 1.6 - out * 0.3, &[(0.55, 0.0), (0.0, 0.4)], 8);
+    b.mesh(Mat::Coals).lathe(p + side * 1.5 + out * 1.3, &[(0.5, 0.0), (0.0, 0.3)], 8);
+    b.lamp(p + Vec3::Y * 2.0, Color::srgb(1.0, 0.5, 0.2), 8_000.0, 6.0);
+    b.forges.push(crate::level::ForgeSpec { name, kind: crate::smithing_net::StationKind::Bloomery, fire: p + Vec3::Y * 1.6, anvil: p + out * 1.9, trough: p + out * 1.9, grind: p + out * 1.9 });
+}
