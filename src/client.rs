@@ -173,12 +173,14 @@ pub fn run(start: crate::menu::Start) {
         }))
         .add_plugins((RenetClientPlugin, NetcodeClientPlugin, PlayerPlugin, fight::FightPlugin, hud::HudPlugin, graphics::GraphicsPlugin, crate::textures::TexturesPlugin))
         .add_plugins(rig::RigPlugin)
+        .add_plugins(crate::vegetation::VegetationPlugin)
         .add_plugins(crate::loot_client::LootClientPlugin)
         .add_plugins(crate::doors::DoorClientPlugin)
         .add_plugins(crate::map::MapClientPlugin)
         .add_plugins(crate::residents::ResidentsPlugin)
         .add_plugins(crate::world_clock::ClockClientPlugin)
         .add_plugins(crate::life_client::LifeClientPlugin)
+        .add_plugins(crate::night_lights::NightLightsPlugin)
         .add_plugins(crate::civil_client::CivilClientPlugin)
         .add_plugins(crate::trade_client::TradeClientPlugin)
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))
@@ -282,9 +284,17 @@ fn shot_tour(mut commands: Commands, mut cams: Query<&mut Transform, With<Waitin
 
 fn spawn_waiting_camera(mut commands: Commands) {
     // Для снимков уровня: MRPG_CAM="x,y,z,tx,ty,tz" — откуда и куда смотрит камера ожидания.
+    // Высота с префиксом «g» отсчитывается от земли: "g1.7" — на уровне глаз.
     let cam = std::env::var("MRPG_CAM").ok().and_then(|s| {
-        let v: Vec<f32> = s.split(',').filter_map(|t| t.trim().parse().ok()).collect();
-        (v.len() == 6).then(|| Transform::from_xyz(v[0], v[1], v[2]).looking_at(Vec3::new(v[3], v[4], v[5]), Vec3::Y))
+        let t: Vec<&str> = s.split(',').map(str::trim).collect();
+        let v: Vec<f32> = t.iter().filter_map(|t| t.trim_start_matches('g').parse().ok()).collect();
+        if v.len() != 6 {
+            return None;
+        }
+        let y = |i: usize, x: f32, z: f32| if t[i].starts_with('g') { crate::level::ground_y(x, z) + v[i] } else { v[i] };
+        let (eye, at) = (Vec3::new(v[0], y(1, v[0], v[2]), v[2]), Vec3::new(v[3], y(4, v[3], v[5]), v[5]));
+        info!("камера снимка: {eye} -> {at}");
+        Some(Transform::from_translation(eye).looking_at(at, Vec3::Y))
     });
     let tf = cam.unwrap_or_else(|| {
         let p = crate::level::spawn_point(0);

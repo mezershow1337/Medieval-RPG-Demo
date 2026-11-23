@@ -258,6 +258,8 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, m
     // ---- Фасадное крыло ----
     let mut front_ops = Vec::new();
     let mut inner_ops = Vec::new();
+    // Окна фасада (u, ширина, подоконник, верх) — для ставней и подоконных плит.
+    let mut windows: Vec<(f32, f32, f32, f32)> = Vec::new();
     for (k, &(u0, u1)) in rooms.iter().enumerate() {
         let uc = (u0 + u1) / 2.0;
         let is_shop = shops && k != vestibule && (special == Shop::None || k == SHOP_ROOM || rng.chance(0.6));
@@ -273,11 +275,13 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, m
             shop_rooms.push((u0, u1, if k == SHOP_ROOM { special } else { Shop::None }));
         } else {
             front_ops.push(Op::Window { s: uc, w: 0.7, sill: 1.9, top: 2.5 });
+            windows.push((uc, 0.7, 1.9, 2.5));
             inner_ops.push(Op::Door { s: uc, w: 1.1, h: 2.2 });
             plan.push(f.rect(u0, u1, OUTER_T, FRONT_D - INNER_T / 2.0));
         }
         if two_storey {
             front_ops.push(Op::Window { s: uc, w: 0.8, sill: H1 + 1.0, top: H1 + 2.0 });
+            windows.push((uc, 0.8, H1 + 1.0, H1 + 2.0));
         }
     }
     f.wall_u(b, OUTER_T / 2.0, 0.0, w, OUTER_T, h_front, &front_ops, mat);
@@ -345,6 +349,10 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, m
             }
         }
     }
+
+    // Своё зерно, чтобы мелочи фасада не сдвигали остальную планировку усадьбы.
+    let mut frng = Rng::new((f.r.x0 * 7.0 + f.r.z0 * 131.0) as i32 as u32 ^ 0x5eed);
+    facade_details(b, &f, &windows, rooms[vestibule], shops, two_storey, &mut frng);
 
     // ---- Боковое крыло вдоль боковой улицы (u = 0) ----
     let side_v0 = FRONT_D;
@@ -465,6 +473,51 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, m
     let _ = stair_rect;
     interior::yard_extras(b, yard, stair_rect, &mut people, rng);
     HouseInfo { rooms: Vec::new(), entrance, two_storey, top, court, back_wing: has_back_wing }
+}
+
+/// Мелочи фасада, без которых стена выглядит макетом: распахнутые ставни, подоконные плиты,
+/// карниз между этажами, у входа — каменная скамья и пара амфор.
+fn facade_details(b: &mut Builder, f: &Frame, windows: &[(f32, f32, f32, f32)], (vu0, vu1): (f32, f32), shops: bool, two_storey: bool, rng: &mut Rng) {
+    let dec = |b: &mut Builder, r: Rect, y0: f32, y1: f32, mat: Mat| b.decor([r.x0, y0, r.z0], [r.x1, y1, r.z1], mat);
+    for &(u, w, sill, top) in windows {
+        // Подоконная плита из известняка чуть выступает из стены.
+        dec(b, f.rect(u - w / 2.0 - 0.1, u + w / 2.0 + 0.1, -0.09, 0.02), sill - 0.09, sill, Mat::Limestone);
+        // Перемычка над окном — деревянный брус.
+        dec(b, f.rect(u - w / 2.0 - 0.18, u + w / 2.0 + 0.18, -0.05, 0.02), top, top + 0.16, Mat::Wood);
+        // Ставни: чаще распахнуты к стене, иногда одной створкой.
+        if rng.chance(0.8) {
+            let leaf = w / 2.0 + 0.04;
+            for side in [-1.0f32, 1.0] {
+                if side > 0.0 && rng.chance(0.15) {
+                    continue;
+                }
+                let inner = u + side * (w / 2.0 + 0.05);
+                let outer = inner + side * leaf;
+                dec(b, f.rect(inner.min(outer), inner.max(outer), -0.07, -0.02), sill + 0.02, top - 0.02, Mat::Wood);
+                // Две поперечные планки.
+                for y in [sill + 0.12, top - 0.14] {
+                    dec(b, f.rect(inner.min(outer) + 0.03, inner.max(outer) - 0.03, -0.095, -0.07), y, y + 0.07, Mat::Wood);
+                }
+            }
+        }
+    }
+    // Тяга между этажами.
+    if two_storey {
+        dec(b, f.rect(0.05, f.w() - 0.05, -0.07, 0.02), H1 - 0.06, H1 + 0.1, Mat::Limestone);
+    }
+    // Скамья у входа и амфоры (у лавок — свои прилавки).
+    if !shops {
+        let door = (vu0 + vu1) / 2.0;
+        if rng.chance(0.55) && door + 2.3 < f.w() - 0.3 {
+            let r = f.rect(door + 1.0, door + 2.3, -0.42, -0.02);
+            b.solid([r.x0, 0.0, r.z0], [r.x1, 0.42, r.z1], Mat::Limestone);
+        }
+        if rng.chance(0.45) && door - 1.6 > 0.4 {
+            for k in 0..(1 + rng.int(2)) {
+                kit::amphora(b, f.p(door - 1.1 - k as f32 * 0.42, 0.0, -0.28), 1.0, rng.int(3) as u32);
+            }
+        }
+    }
 }
 
 fn shop_fittings(b: &mut Builder, f: &Frame, u0: f32, u1: f32, kind: Shop, rng: &mut Rng) {
