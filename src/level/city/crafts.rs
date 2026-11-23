@@ -277,9 +277,10 @@ pub fn smithy(b: &mut Builder) {
     b.mesh(Mat::Iron).cuboid(a + Vec3::new(-0.3, 0.55, -0.12), a + Vec3::new(0.3, 0.8, 0.12));
     b.mesh(Mat::Iron).spire(a + Vec3::new(0.3, 0.7, 0.0), 0.1, 0.25, 4);
     kit::hidden(b, a - Vec3::new(0.35, 0.0, 0.35), a + Vec3::new(0.35, 0.8, 0.35));
+    b.forges.push(crate::level::ForgeSpec { name: "Кузница Филиппа", kind: crate::smithing_net::StationKind::Forge, fire: f + Vec3::Y * 1.08, anvil: a, trough: Vec3::new(f.x + 3.0, 0.61, w.z0 + 1.35), grind: a + Vec3::new(-1.2, 0.75, 1.2) });
     let q = Rect::new(f.x + 2.0, w.z0 + 1.0, f.x + 4.0, w.z0 + 1.7);
     b.solid([q.x0, 0.0, q.z0], [q.x1, 0.6, q.z1], Mat::Wood);
-    b.decor([q.x0 + 0.08, 0.5, q.z0 + 0.08], [q.x1 - 0.08, 0.55, q.z1 - 0.08], Mat::Water);
+    b.decor([q.x0 + 0.08, 0.6, q.z0 + 0.08], [q.x1 - 0.08, 0.61, q.z1 - 0.08], Mat::Water);
     // Инструмент на стене и уголь.
     for k in 0..6 {
         let x = w.x0 + 4.0 + k as f32 * 0.35;

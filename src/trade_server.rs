@@ -35,6 +35,9 @@ const GRUDGE_SECS: f64 = 600.0;
 /// Сколько живёт приглашение к обмену.
 const INVITE_SECS: f64 = 30.0;
 
+#[path = "trade_shelves.rs"]
+mod shelves;
+
 pub struct TradeServerPlugin;
 
 impl Plugin for TradeServerPlugin {
@@ -53,7 +56,8 @@ impl Plugin for TradeServerPlugin {
                     send_standing,
                 )
                     .chain(),
-            );
+            )
+            .add_systems(Update, shelves::tick_shelves.after(crate::props_server::tick_props).after(receive_trade_messages));
     }
 }
 
@@ -109,6 +113,8 @@ pub struct MerchantState {
     grudges: HashMap<u64, f64>,
     /// Когда у него крали.
     thefts: Vec<f64>,
+    /// Прилавок (в системе торговца): на нём лежит товар.
+    pub stall: Vec<StallBox>,
 }
 
 struct Order {
@@ -294,6 +300,14 @@ fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
             *slot += 1;
             let pos = crate::npc::find_free_spot(&level, anchor + side);
             let yaw = open_yaw(&level, pos);
+            // Боковой столик — только если справа от торговца свободно.
+            let side = {
+                let rot = Quat::from_rotation_y(yaw);
+                [Vec3::new(1.3, 0.1, -0.25), Vec3::new(2.05, 0.1, -0.25), Vec3::new(1.3, 0.1, -0.95), Vec3::new(2.05, 0.1, -0.95)]
+                    .iter()
+                    .all(|p| level.body_is_free(&crate::collision::Body { half_width: 0.12, height: 0.8 }, pos + rot * *p))
+            };
+            let stall = stall_layout(def.faction.outside_walls(), side);
             let mut m = MerchantState {
                 id: MerchantId(i as u16),
                 pos,
@@ -305,11 +319,30 @@ fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
                 next_restock: RESTOCK_SECS,
                 grudges: HashMap::new(),
                 thefts: Vec::new(),
+                stall,
             };
             restock(&mut m, &mut rng, &mut uids, true);
             m
         })
-        .collect();
+        .collect::<Vec<MerchantState>>();
+    // Торговцы на одном месте стоят тесно: боковой столик не должен залезать на соседний прилавок.
+    let mut merchants = merchants;
+    for i in 0..merchants.len() {
+        if merchants[i].stall.len() < 2 {
+            continue;
+        }
+        let side = stall_obbs(merchants[i].pos, merchants[i].yaw, &merchants[i].stall[1..])[0].aabb();
+        let crowded = merchants.iter().enumerate().any(|(j, o)| {
+            j != i
+                && (side.overlaps(&crate::collision::Body::STANDING.aabb_at(o.pos))
+                    || stall_obbs(o.pos, o.yaw, &o.stall).iter().any(|t| t.aabb().overlaps(&side)))
+        });
+        if crowded {
+            merchants[i].stall.truncate(1);
+        }
+    }
+    let statics = merchants.iter().flat_map(|m| stall_obbs(m.pos, m.yaw, &m.stall)).collect();
+    commands.insert_resource(crate::props_server::PropStatics(statics));
     commands.insert_resource(TradeWorld {
         merchants,
         reps: HashMap::new(),
@@ -575,9 +608,28 @@ fn build_view(
         lessons,
         fines: def.has(Service::Fines),
         donations: def.has(Service::Donations),
+        repairs: repair_offers(def, loot, player),
         refuse: tw.refusal(player, id, now),
     }
 }
+
+/// Сбитые вещи игрока, за которые возьмётся кузнец.
+fn repair_offers(def: &MerchantDef, loot: &LootWorld, player: u64) -> Vec<RepairOffer> {
+    if !def.has(Service::Repair) {
+        return Vec::new();
+    }
+    let Some(inv) = loot.inventories.get(&player) else { return Vec::new() };
+    inv.all_items()
+        .filter_map(|i| {
+            let m = i.make.as_ref()?;
+            let c = m.condition();
+            (m.dur_max > 0.0 && c < 0.98).then(|| RepairOffer { uid: i.uid, name: i.info().name.to_string(), condition: c, price: crate::smithing::repair_price(m, i.value()) })
+        })
+        .collect()
+}
+
+/// Мастер у своего горна правит лучше, чем самоучка.
+const MASTER_REPAIR_SKILL: f32 = 85.0;
 
 fn refresh_view(
     server: &mut RenetServer,
@@ -933,37 +985,7 @@ fn steal(
     let chance = theft_detection(&attempt);
     m.thefts.push(now);
     if tw.rng.f32() < chance {
-        // Попался с поличным.
-        let m = tw.merchant(id);
-        m.grudges.insert(player, now + GRUDGE_SECS);
-        m.attention = Attention::Watching;
-        m.attention_until = now + 30.0;
-        let name = item.info().name;
-        if def.faction.outside_walls() {
-            tw.change_rep(player, def.faction, -25.0);
-            return Ok(format!(
-                "{} схватил вас за руку! За стенами суда нет: он запомнит, и его люди тоже.",
-                def.name
-            ));
-        }
-        let fine = item.value() * Crime::TheftCaught.fine_multiplier();
-        tw.add_fine(player, fine);
-        tw.change_rep(player, def.faction, -12.0);
-        if def.faction != Faction::Garrison {
-            tw.change_rep(player, Faction::Garrison, -4.0);
-        }
-        crimes.push(CrimeCommitted {
-            player,
-            crime: Crime::TheftCaught,
-            victim: def.faction,
-            at: actor.pose.feet,
-            fine,
-        });
-        return Ok(format!(
-            "«Держи вора!» {} поймал вас с «{name}». По закону — штраф в четверную цену: {}",
-            def.name,
-            format_money(fine)
-        ));
+        return Ok(caught_stealing(tw, player, id, &item, actor.pose.feet, now, crimes));
     }
     let mut uids = loot.uids.clone();
     let part = split_from(&mut tw.merchant(id).shelf, uid, 1, &mut uids).unwrap();
@@ -980,6 +1002,43 @@ fn steal(
         "Вы незаметно спрятали «{name}». Не продавайте это {} — узнает.",
         def.name
     ))
+}
+
+/// Вора поймали за руку: торговец запомнит, штраф (в городе) или вражда (за стенами).
+#[allow(clippy::too_many_arguments)]
+fn caught_stealing(tw: &mut TradeWorld, player: u64, id: MerchantId, item: &Item, at: Vec3, now: f64, crimes: &mut Vec<CrimeCommitted>) -> String {
+    let def = id.def();
+    // Попался с поличным.
+    let m = tw.merchant(id);
+    m.grudges.insert(player, now + GRUDGE_SECS);
+    m.attention = Attention::Watching;
+    m.attention_until = now + 30.0;
+    let name = item.info().name;
+    if def.faction.outside_walls() {
+        tw.change_rep(player, def.faction, -25.0);
+        return format!(
+            "{} схватил вас за руку! За стенами суда нет: он запомнит, и его люди тоже.",
+            def.name
+        );
+    }
+    let fine = item.value() * Crime::TheftCaught.fine_multiplier();
+    tw.add_fine(player, fine);
+    tw.change_rep(player, def.faction, -12.0);
+    if def.faction != Faction::Garrison {
+        tw.change_rep(player, Faction::Garrison, -4.0);
+    }
+    crimes.push(CrimeCommitted {
+        player,
+        crime: Crime::TheftCaught,
+        victim: def.faction,
+        at,
+        fine,
+    });
+    format!(
+        "«Держи вора!» {} поймал вас с «{name}». По закону — штраф в четверную цену: {}",
+        def.name,
+        format_money(fine)
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1088,6 +1147,7 @@ fn merchant_list(tw: &TradeWorld) -> Vec<MerchantInfo> {
                 pos: m.pos.into(),
                 yaw: m.yaw,
                 look: def.look,
+                stall: m.stall.clone(),
             }
         })
         .collect()
@@ -1410,6 +1470,29 @@ fn receive_trade_messages(
                             }
                             Err(e) => format!("{}: штраф {}", e.message(), format_money(fine)),
                         }
+                    };
+                    send(&mut server, pid, &TradeServerMessage::Say(reply));
+                    send_inventory(&mut server, &loot, pid);
+                    refresh_view(&mut server, tw, &loot, pid, now);
+                }
+                TradeClientMessage::Repair { uid } => {
+                    let Some(id) = open else { continue };
+                    if !id.def().has(Service::Repair) {
+                        continue;
+                    }
+                    let Some(offer) = repair_offers(id.def(), &loot, pid).into_iter().find(|o| o.uid == uid) else { continue };
+                    let mut uids = loot.uids.clone();
+                    let inv = loot.inventories.get_mut(&pid).unwrap();
+                    let reply = match take_money(inv, offer.price, &mut uids) {
+                        Ok(()) => {
+                            // Вещь могла уйти в обмен за деньги (сдача) — ищем заново.
+                            if let Some(m) = inv.find_mut(uid).and_then(|i| i.make.as_mut()) {
+                                crate::smithing::repair(m, MASTER_REPAIR_SKILL);
+                            }
+                            loot.uids = uids;
+                            format!("«Готово: выправил и навёл кромку». {} — {}", offer.name, format_money(offer.price))
+                        }
+                        Err(e) => format!("{}: правка стоит {}", e.message(), format_money(offer.price)),
                     };
                     send(&mut server, pid, &TradeServerMessage::Say(reply));
                     send_inventory(&mut server, &loot, pid);
@@ -1808,6 +1891,7 @@ mod tests {
                     next_restock: 0.0,
                     grudges: HashMap::new(),
                     thefts: vec![],
+                    stall: stall_layout(false, true),
                 };
                 restock(&mut m, &mut rng, &mut uids, true);
                 m
@@ -1909,6 +1993,7 @@ mod tests {
             quality: Quality::Common,
             affixes: vec![],
             count: 50,
+            make: None,
         };
         inv.place(folles, Target::Auto).unwrap();
         let out = deal(
@@ -1930,6 +2015,7 @@ mod tests {
             quality: Quality::Common,
             affixes: vec![],
             count: 1,
+            make: None,
         };
         loot.inventories
             .get_mut(&1)
@@ -1993,6 +2079,7 @@ mod tests {
             quality: Quality::Common,
             affixes: vec![],
             count: 1,
+            make: None,
         };
         loot.inventories
             .get_mut(&1)
@@ -2048,6 +2135,7 @@ mod tests {
             quality: Quality::Common,
             affixes: vec![],
             count: 1,
+            make: None,
         };
         inv2.place(sword, Target::Auto).unwrap();
         loot.inventories.insert(2, inv2);

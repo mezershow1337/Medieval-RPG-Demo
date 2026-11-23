@@ -942,6 +942,8 @@ pub struct Workplace {
     pub cloth: bool,
     /// Есть второй горшок или котёл под водяную баню.
     pub outer_pot: bool,
+    /// Есть гончарная глина — обмазать стыки перегонного прибора (лют).
+    pub clay: bool,
     /// Как вёлся огонь (None — ровно, как задано).
     pub fire: Option<FireLog>,
 }
@@ -985,6 +987,8 @@ pub struct BrewResult {
     pub ignited: bool,
     /// Порезался осколками (тяжесть 0..1).
     pub cut: f32,
+    /// Стыки обмазаны лютом (ушёл кусок глины).
+    pub luted: bool,
     /// Сосуд ушёл в изделие.
     pub vessel_used: bool,
 }
@@ -1161,7 +1165,7 @@ fn quality_index(score: f32, skill: f32) -> Option<usize> {
 /// ровный жар жаровни и подставки для приборов (стекло лопается вдвое реже, точнее выходит).
 pub fn brew(spec: &BrewSpec, vessel: Vessel, k: &Knowledge, flasks: u16, roll: f32, wp: &Workplace) -> BrewResult {
     let bench = wp.table;
-    let mut result = BrewResult { product: None, flasks_used: 0, vessel_broken: false, burn: 0.0, text: String::new(), technique: None, poison: None, vessel_used: false, ignited: false, cut: 0.0 };
+    let mut result = BrewResult { product: None, flasks_used: 0, vessel_broken: false, burn: 0.0, text: String::new(), technique: None, poison: None, vessel_used: false, ignited: false, cut: 0.0, luted: false };
     let bath = spec.bath;
     if bath {
         let err = if !matches!(vessel, Vessel::ClayPot | Vessel::CopperKettle) {
@@ -1191,7 +1195,8 @@ pub fn brew(spec: &BrewSpec, vessel: Vessel, k: &Knowledge, flasks: u16, roll: f
         return result;
     }
     // Лют (глиняная обмазка стыков) у знающего держит давление дольше и паров меньше.
-    let luted = vessel.still() && k.knows(Lore::Technique(Technique::Distillation));
+    let luted = vessel.still() && wp.clay && k.knows(Lore::Technique(Technique::Distillation));
+    result.luted = luted;
     let dome_limit = if luted { 1.35 } else { 1.0 };
     if vessel.glass()
         && let Some(f) = wp.fire
@@ -1433,7 +1438,7 @@ fn free_salve(spec: &BrewSpec, vessel: Vessel, heat: Heat, k: &Knowledge, flasks
     };
     let fat_ok = closeness(fat / total, 0.8, 0.2);
     let score = (0.55 + 0.45 * top / sum) * (0.6 + 0.4 * fat_ok);
-    let mut result = BrewResult { product: None, flasks_used: 0, vessel_broken: false, burn: 0.0, text: String::new(), technique: Some(Technique::Salve), poison: None, vessel_used: false, ignited: false, cut: 0.0 };
+    let mut result = BrewResult { product: None, flasks_used: 0, vessel_broken: false, burn: 0.0, text: String::new(), technique: Some(Technique::Salve), poison: None, vessel_used: false, ignited: false, cut: 0.0, luted: false };
     let Some(q) = quality_index(score, k.skill(Technique::Salve.skill())) else {
         result.product = Some((SPOILED, 1, 0));
         result.text = "Жирная каша: свойства трав спорят друг с другом".into();
@@ -1468,7 +1473,7 @@ mod tests {
     use crate::lore::Skill;
 
     fn wp(table: bool) -> Workplace {
-        Workplace { table, cloth: true, outer_pot: true, fire: None }
+        Workplace { table, cloth: true, outer_pot: true, clay: true, fire: None }
     }
 
     fn spec(items: &[(&str, u16)], water: u8, heat: Heat, hours: f32) -> BrewSpec {

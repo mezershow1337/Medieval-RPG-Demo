@@ -41,6 +41,8 @@ pub struct Actor {
     sweep: Option<(Swing, f32, f32)>,
     /// Множитель скорости ходьбы от экипировки (для своего клиента).
     move_mult: f32,
+    /// Вид оружия в руке для снимков (`Item::look` × 255).
+    finish: u8,
     /// В этом кадре выпущена стрела.
     shoot: bool,
     /// Как раны, боль и яды меняют бойца (ведёт medicine_server.rs).
@@ -71,6 +73,8 @@ pub struct GameWorld {
     next_arrow_id: u64,
     /// Попадания по игрокам за кадр: из них medicine_server.rs делает раны.
     pub hits_taken: Vec<crate::medicine::HitTaken>,
+    /// Износ вещей игроков от ударов (применяет smithing_server.rs).
+    pub gear_wear: Vec<(u64, crate::smithing_server::Wear)>,
 }
 
 #[derive(Resource)]
@@ -112,6 +116,7 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         arrows: Vec::new(),
         next_arrow_id: 1,
         hits_taken: Vec::new(),
+        gear_wear: Vec::new(),
     };
     for spawn in npc::npc_spawns() {
         spawn_npc(&mut world, &level, spawn, 0.0);
@@ -127,6 +132,7 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .add_plugins(crate::doors::DoorServerPlugin)
         .add_plugins(crate::trade_server::TradeServerPlugin)
         .add_plugins(crate::knowledge::KnowledgeServerPlugin)
+        .add_plugins(crate::smithing_server::SmithingServerPlugin)
         .add_systems(Update, (receive_client_messages, run_npcs, combat_tick, respawns, send_snapshots).chain());
     info!("Сервер слушает {addr}");
     app.run();
@@ -151,6 +157,7 @@ fn spawn_npc(world: &mut GameWorld, level: &LevelColliders, spawn: NpcSpawn, now
             spawn: Some(spawn),
             sweep: None,
             move_mult: 1.0,
+            finish: 200,
             shoot: false,
             body_mods: Default::default(),
         },
@@ -184,6 +191,7 @@ fn on_server_event(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>,
                     spawn: None,
                     sweep: None,
                     move_mult: 1.0,
+                    finish: 200,
                     shoot: false,
                     body_mods: Default::default(),
                 },
@@ -328,6 +336,7 @@ fn sync_equipment(world: &mut GameWorld, loot: Option<&LootWorld>) {
         actor.fighter.riposte_bonus = stats.get(Stat::ParryWindow) / 1000.0;
         actor.fighter.has_shield = inv.and_then(|inv| inv.equipped(EquipSlot::OffHand)).is_some_and(|item| item.info().shape == ItemShape::Shield);
         // Оружие в руке определяет темп, длину и силу ударов. Менять можно только вне удара.
+        actor.finish = inv.and_then(|inv| inv.equipped(EquipSlot::MainHand)).map_or(200, |item| (item.look() * 255.0) as u8);
         let weapon = inv
             .and_then(|inv| inv.equipped(EquipSlot::MainHand))
             .map(|item| combat::WeaponKind::from_item_name(item.info().name))
@@ -345,7 +354,10 @@ fn sync_equipment(world: &mut GameWorld, loot: Option<&LootWorld>) {
         actor.fighter.stamina_regen_mult = e.stamina_regen * m.stamina_regen;
         actor.fighter.max_stamina = e.max_stamina * m.max_stamina;
         actor.fighter.stamina = actor.fighter.stamina.min(actor.fighter.max_stamina);
-        actor.move_mult = e.move_mult * m.move_mult;
+        // Ноша: сверх грузоподъёмности идёшь медленнее (вес — `weight.rs`).
+        let load = inv.map(crate::weight::inventory_weight).unwrap_or(0.0);
+        let burden = crate::weight::encumbrance(load, crate::weight::carry_capacity(stats.get(Stat::Strength)));
+        actor.move_mult = e.move_mult * m.move_mult * burden;
     }
 }
 
@@ -552,8 +564,17 @@ fn combat_tick(
             continue;
         }
         let outcome = combat::resolve_arrow(&mut t.fighter, shield_facing, head, damage);
+        let player = t.kind == ActorKind::Player;
+        if player {
+            use crate::smithing_server::Wear;
+            match outcome {
+                HitOutcome::Damage { .. } => world.gear_wear.push((tid, Wear::Armour { head, amount: 1.0 })),
+                HitOutcome::Blocked { .. } => world.gear_wear.push((tid, Wear::Shield(0.7))),
+                _ => {}
+            }
+        }
         if let HitOutcome::Damage { amount, head, .. } = outcome
-            && t.kind == ActorKind::Player
+            && player
         {
             world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon: combat::WeaponKind::Bow, amount, head });
         }
@@ -592,6 +613,7 @@ fn combat_tick(
                 world.actors.insert(aid, attacker);
                 let Some(outcome) = outcome else { continue };
                 debug!("Попадание {aid} -> {tid}: {outcome:?}");
+                record_wear(&mut world, aid, tid, outcome);
                 if let HitOutcome::Damage { amount, head, .. } = outcome
                     && world.actors.get(&tid).is_some_and(|t| t.kind == ActorKind::Player)
                 {
@@ -606,6 +628,41 @@ fn combat_tick(
                 }
             }
         }
+    }
+}
+
+/// Удар изнашивает оружие нападавшего и доспех, щит или клинок защитника (только у игроков).
+fn record_wear(world: &mut GameWorld, attacker: u64, target: u64, outcome: HitOutcome) {
+    use crate::smithing_server::Wear;
+    let is_player = |id: u64| world.actors.get(&id).is_some_and(|a| a.kind == ActorKind::Player);
+    let (a, t) = (is_player(attacker), is_player(target));
+    let mut push = |id: u64, w: Wear| world.gear_wear.push((id, w));
+    match outcome {
+        HitOutcome::Damage { head, .. } => {
+            if a {
+                push(attacker, Wear::Weapon(1.0));
+            }
+            if t {
+                push(target, Wear::Armour { head, amount: 1.0 });
+            }
+        }
+        HitOutcome::Parried => {
+            if a {
+                push(attacker, Wear::Weapon(1.2));
+            }
+            if t {
+                push(target, Wear::Weapon(1.5));
+            }
+        }
+        HitOutcome::Blocked { .. } | HitOutcome::GuardBroken => {
+            if a {
+                push(attacker, Wear::Weapon(0.8));
+            }
+            if t {
+                push(target, Wear::Shield(1.2));
+            }
+        }
+        HitOutcome::Bounced => {}
     }
 }
 
@@ -682,6 +739,7 @@ fn send_snapshots(mut server: ResMut<RenetServer>, world: Res<GameWorld>, mut ti
                 max_stamina: a.fighter.max_stamina,
                 action_speed: a.fighter.action_speed,
                 move_mult: a.move_mult,
+                finish: a.finish,
             })
             .collect(),
         arrows: world.arrows.iter().map(|a| ArrowSnapshot { id: a.id, pos: a.pos.into(), vel: a.vel.into() }).collect(),

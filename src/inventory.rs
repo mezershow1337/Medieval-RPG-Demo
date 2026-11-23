@@ -134,6 +134,13 @@ impl Inventory {
             .find_map(|s| self.equipment[s.index()].as_ref().filter(|i| i.uid == uid).map(|i| (Loc::Equip(*s), i)))
     }
 
+    pub fn find_mut(&mut self, uid: ItemUid) -> Option<&mut Item> {
+        if let Some(p) = self.grid.items.iter_mut().find(|p| p.item.uid == uid) {
+            return Some(&mut p.item);
+        }
+        self.equipment.iter_mut().flatten().find(|i| i.uid == uid)
+    }
+
     /// Все предметы (сетка и экипировка).
     pub fn all_items(&self) -> impl Iterator<Item = &Item> {
         self.grid.items.iter().map(|p| &p.item).chain(self.equipment.iter().flatten())

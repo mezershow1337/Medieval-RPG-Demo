@@ -3,7 +3,7 @@
 use crate::factions::{Faction, Reputation};
 use crate::items::{Item, ItemUid};
 use crate::protocol::NetPos;
-use crate::trade::{Attention, Look, MerchantId, MoneyPolicy};
+use crate::trade::{Attention, Look, MerchantId, MoneyPolicy, StallBox};
 use serde::{Deserialize, Serialize};
 
 /// Канал renet для торговли (надёжный, по порядку). Настроен в `protocol::connection_config`.
@@ -52,6 +52,10 @@ pub enum TradeClientMessage {
     StopLesson,
     /// Уплатить штраф (у казначея гарнизона).
     PayFine,
+    /// Отдать вещь кузнецу в правку.
+    Repair {
+        uid: ItemUid,
+    },
     /// Пожертвовать храму.
     Donate {
         nummi: u32,
@@ -85,6 +89,8 @@ pub struct MerchantInfo {
     pub pos: NetPos,
     pub yaw: f32,
     pub look: Look,
+    /// Прилавок (в системе торговца), на нём лежит товар.
+    pub stall: Vec<StallBox>,
 }
 
 /// Товар на полке.
@@ -139,6 +145,16 @@ pub struct LessonOffer {
     pub locked: Option<String>,
 }
 
+/// Кузнец может выправить и наточить сбитую вещь.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RepairOffer {
+    pub uid: ItemUid,
+    pub name: String,
+    /// Сохранность 0..1.
+    pub condition: f32,
+    pub price: u32,
+}
+
 /// Всё, что видно в окне торговца.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MerchantView {
@@ -159,6 +175,8 @@ pub struct MerchantView {
     pub lessons: Vec<LessonOffer>,
     pub fines: bool,
     pub donations: bool,
+    /// Что из ваших вещей кузнец возьмётся править (пусто — не кузнец или всё цело).
+    pub repairs: Vec<RepairOffer>,
     /// Торговец отказывается торговать: почему.
     pub refuse: Option<String>,
 }

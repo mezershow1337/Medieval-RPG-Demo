@@ -27,16 +27,19 @@ pub enum Skill {
     Medicine,
     Herbalism,
     Alchemy,
+    /// Кузнечное и литейное дело.
+    Smithing,
 }
 
 impl Skill {
-    pub const ALL: [Skill; 3] = [Skill::Medicine, Skill::Herbalism, Skill::Alchemy];
+    pub const ALL: [Skill; 4] = [Skill::Medicine, Skill::Herbalism, Skill::Alchemy, Skill::Smithing];
 
     pub fn name(self) -> &'static str {
         match self {
             Skill::Medicine => "Врачевание",
             Skill::Herbalism => "Травничество",
             Skill::Alchemy => "Алхимия",
+            Skill::Smithing => "Кузнечное дело",
         }
     }
 
@@ -360,14 +363,36 @@ pub enum Technique {
     Pottery,
     /// Цельс, книга VII: вырезать или вытолкнуть наконечник, не порвав жил.
     ArrowExtraction,
+    // --- Кузнечное дело (smithing.rs) ---
+    /// Ковка: по цвету каления знать, когда бить, и как вытягивать металл.
+    Forging,
+    /// Кузнечная сварка на белом жару (пакет, наварка стальных лезвий, проковка крицы).
+    ForgeWelding,
+    /// Закалка: с вишнёвого жара в воду, рассол или масло.
+    Quenching,
+    /// Отпуск по цветам побежалости.
+    Tempering,
+    /// Сыродутная плавка руды в горне.
+    Smelting,
+    /// Цементация: железо в угле в запечатанном горшке становится сталью.
+    Carburizing,
+    /// Литьё бронзы, серебра и свинца в каменные формы.
+    Casting,
+    /// Литьё по восковой модели в глиняную форму.
+    LostWax,
+    /// Кольчужное плетение: проволока, кольца, заклёпки.
+    MailMaking,
+    /// Доспешное дело: пластины, ламеллы, шлемы.
+    Armoury,
 }
 
 impl Technique {
-    pub const ALL: [Technique; 21] = {
+    pub const ALL: [Technique; 31] = {
         use Technique::*;
         [
             Gathering, Poultice, WoundWashing, Decoction, Dosage, Maceration, Salve, Oxymel, Theriac, Fermentation, Distillation, Sublimation, Calcination, Mordanting,
-            VatDyeing, Ink, Soap, Incendiary, Glassblowing, Pottery, ArrowExtraction,
+            VatDyeing, Ink, Soap, Incendiary, Glassblowing, Pottery, ArrowExtraction, Forging, ForgeWelding, Quenching, Tempering, Smelting, Carburizing, Casting, LostWax,
+            MailMaking, Armoury,
         ]
     };
 
@@ -395,6 +420,16 @@ impl Technique {
             Glassblowing => "Выдувание стекла",
             Pottery => "Гончарное дело",
             ArrowExtraction => "Извлечение стрел",
+            Forging => "Ковка",
+            ForgeWelding => "Кузнечная сварка",
+            Quenching => "Закалка",
+            Tempering => "Отпуск",
+            Smelting => "Сыродутная плавка",
+            Carburizing => "Цементация",
+            Casting => "Литьё в формы",
+            LostWax => "Литьё по воску",
+            MailMaking => "Кольчужное плетение",
+            Armoury => "Доспешное дело",
         }
     }
 
@@ -422,6 +457,16 @@ impl Technique {
             Glassblowing => "Выдувать флаконы, реторты и амбики из стекла.",
             Pottery => "Лепить и обжигать горшки и тигли.",
             ArrowExtraction => "Расширить рану, вынуть наконечник по ходу древка или вытолкнуть насквозь, не порвав жил; потом промыть и перевязать.",
+            Forging => "Бить, пока металл светится от вишнёвого до жёлтого. Тяжёлым молотом тянуть, лёгким выглаживать. Остывшее не бить: пойдёт трещинами.",
+            ForgeWelding => "Пакет греть до белого, почти искрящего жара и сразу бить тяжело и часто, пока слои не схватятся. Перегреешь — железо горит.",
+            Quenching => "Сталь греть до вишнёвого (не выше) и разом окунуть. Вода — твёрже, но может треснуть; масло мягче. Плиний: мелкое железо калят в масле.",
+            Tempering => "Закалённое зачистить до блеска и греть с краю углей. Цвета: соломенный — для ножа, пурпурный и синий — для меча, серый — перегрел.",
+            Smelting => "Руду и уголь слоями, примерно поровну по весу, и непрерывно дуть мехами. Жёлто-белый жар держать часами: холоднее — сырая крица, жарче — чугун.",
+            Carburizing => "Железную полосу обложить углём в глиняном горшке, замазать и долго держать в красном жару — поверхность наберёт углерода.",
+            Casting => "Бронза — девять частей меди на одну олова. Расплавить в тигле до жёлтого, снять шлак, прогреть форму и лить ровно, не прерываясь.",
+            LostWax => "Вылепить вещь из воска, облепить глиной, выжечь воск — и лить в пустоту. Форма разбивается, зато вещь тонкая.",
+            MailMaking => "Тянуть проволоку, навить кольца, каждое кольцо продеть в четыре соседних и заклепать холодным, лёгкими точными ударами.",
+            Armoury => "Пластины выковать, пробить отверстия, связать ремнями; шлем собрать из сегментов на каркасе и склепать.",
         }
     }
 
@@ -431,6 +476,7 @@ impl Technique {
             Gathering | Maceration => Skill::Herbalism,
             Poultice | WoundWashing | Dosage | Theriac | ArrowExtraction => Skill::Medicine,
             Decoction | Salve | Oxymel => Skill::Herbalism,
+            Forging | ForgeWelding | Quenching | Tempering | Smelting | Carburizing | Casting | LostWax | MailMaking | Armoury => Skill::Smithing,
             _ => Skill::Alchemy,
         }
     }
@@ -477,6 +523,12 @@ impl Lore {
                 Distillation | Sublimation => 4.0,
                 Theriac | Pottery => 6.0,
                 Glassblowing => 10.0,
+                Forging => 2.0,
+                ForgeWelding | Quenching | Casting => 3.0,
+                Tempering | Carburizing => 2.0,
+                Smelting | LostWax => 4.0,
+                Armoury => 6.0,
+                MailMaking => 8.0,
             },
         }
     }
@@ -491,6 +543,10 @@ impl Lore {
             Lore::Technique(VatDyeing) => vec![Lore::Technique(Mordanting)],
             Lore::Technique(Oxymel) => vec![Lore::Technique(Decoction)],
             Lore::Technique(Dosage) => vec![Lore::Technique(Decoction)],
+            Lore::Technique(ForgeWelding) | Lore::Technique(Quenching) | Lore::Technique(Smelting) | Lore::Technique(MailMaking) | Lore::Technique(Armoury) => vec![Lore::Technique(Forging)],
+            Lore::Technique(Tempering) => vec![Lore::Technique(Quenching)],
+            Lore::Technique(Carburizing) => vec![Lore::Technique(ForgeWelding)],
+            Lore::Technique(LostWax) => vec![Lore::Technique(Casting)],
             _ => vec![],
         }
     }
@@ -523,6 +579,7 @@ pub enum Book {
     Aeneas,
     Theophrastus,
     Celsus,
+    Pliny,
 }
 
 pub struct BookInfo {
@@ -536,9 +593,9 @@ pub struct BookInfo {
 }
 
 impl Book {
-    pub const ALL: [Book; 12] = {
+    pub const ALL: [Book; 13] = {
         use Book::*;
-        [HerbalFragment, Dioscorides, IllustratedHerbal, HippocratesUlcers, GalenSimples, GalenAntidotes, Oribasius, Zosimos, DyerBook, Aeneas, Theophrastus, Celsus]
+        [HerbalFragment, Dioscorides, IllustratedHerbal, HippocratesUlcers, GalenSimples, GalenAntidotes, Oribasius, Zosimos, DyerBook, Aeneas, Theophrastus, Celsus, Pliny]
     };
 
     pub fn info(self) -> BookInfo {
@@ -569,6 +626,13 @@ impl Book {
             Aeneas => t("Эней Тактик. Об обороне городов", Language::Greek, "свиток", 150.0, "Как оборонять осаждённый город, в том числе огнём: смола, сера, пакля, ладан."),
             Theophrastus => t("Феофраст. О камнях", Language::Greek, "свиток", 150.0, "О минералах и красках: киноварь, свинцовые белила, ярь-медянка."),
             Celsus => t("Цельс. О медицине", Language::Latin, "кодекс", 240.0, "Авл Корнелий Цельс по-латыни: раны, кровотечения, мази, дозы."),
+            Pliny => t(
+                "Плиний. Естественная история",
+                Language::Latin,
+                "кодекс (книги XXXIII–XXXIV)",
+                240.0,
+                "Плиний Старший о металлах: как плавят руду, как калят железо в воде и масле, сколько олова класть в бронзу.",
+            ),
         }
     }
 
@@ -645,6 +709,8 @@ impl Book {
                 v.extend(props(&[Yarrow, Plantain, Frankincense, Alum, Myrrh, Comfrey]));
                 v
             }
+            // Только теория: руками это всё равно придётся делать самому.
+            Book::Pliny => vec![Lore::Technique(Smelting), Lore::Technique(Quenching), Lore::Technique(Casting)],
         }
     }
 }
@@ -675,6 +741,14 @@ pub enum Teacher {
     Grammarian,
     /// Лекарь у кочевников за стенами.
     SteppeHealer,
+    /// Городской кузнец (χαλκεύς): ковка, сварка, закалка, литьё.
+    Smith,
+    /// Мастер-оружейник гарнизонной мастерской: клинки, кольчуги, доспехи.
+    Armourer,
+    /// Готский кузнец: сам плавит руду, варит пакетные клинки.
+    GothSmith,
+    /// Кочевой кузнец степняков: наконечники стрел, литьё бронзовых бляшек.
+    SteppeSmith,
 }
 
 /// Как учится игрок.
@@ -706,7 +780,7 @@ impl LessonMode {
 }
 
 impl Teacher {
-    pub const ALL: [Teacher; 11] = [
+    pub const ALL: [Teacher; 15] = [
         Teacher::Iatros,
         Teacher::Rhizotomos,
         Teacher::Wisewoman,
@@ -718,6 +792,10 @@ impl Teacher {
         Teacher::Scribe,
         Teacher::Grammarian,
         Teacher::SteppeHealer,
+        Teacher::Smith,
+        Teacher::Armourer,
+        Teacher::GothSmith,
+        Teacher::SteppeSmith,
     ];
 
     pub fn name(self) -> &'static str {
@@ -733,6 +811,10 @@ impl Teacher {
             Teacher::Scribe => "Церковный писец",
             Teacher::Grammarian => "Грамматик",
             Teacher::SteppeHealer => "Степной лекарь",
+            Teacher::Smith => "Кузнец",
+            Teacher::Armourer => "Оружейник",
+            Teacher::GothSmith => "Готский кузнец",
+            Teacher::SteppeSmith => "Кочевой кузнец",
         }
     }
 
@@ -742,6 +824,7 @@ impl Teacher {
             Teacher::Iatros => Some(Skill::Medicine),
             Teacher::Rhizotomos | Teacher::Wisewoman | Teacher::Apothecary | Teacher::SteppeHealer => Some(Skill::Herbalism),
             Teacher::Alchemist | Teacher::Dyer | Teacher::Glassblower | Teacher::Potter => Some(Skill::Alchemy),
+            Teacher::Smith | Teacher::Armourer | Teacher::GothSmith | Teacher::SteppeSmith => Some(Skill::Smithing),
             Teacher::Scribe | Teacher::Grammarian => None,
         }
     }
@@ -821,6 +904,10 @@ impl Teacher {
                 // Степняки живут луком: стрелу из раны вынимают лучше городских врачей.
                 v.push(t(ArrowExtraction));
             }
+            Teacher::Smith => v.extend([t(Forging), t(ForgeWelding), t(Quenching), t(Tempering), t(Casting), t(Carburizing)]),
+            Teacher::Armourer => v.extend([t(Forging), t(Quenching), t(Tempering), t(Armoury), t(MailMaking)]),
+            Teacher::GothSmith => v.extend([t(Forging), t(Smelting), t(ForgeWelding), t(Quenching)]),
+            Teacher::SteppeSmith => v.extend([t(Forging), t(Casting), t(LostWax), t(Quenching)]),
         }
         v
     }
@@ -852,7 +939,7 @@ impl CannotRead {
 pub struct Knowledge {
     pub known: BTreeSet<Lore>,
     /// Навыки 0–100 по [`Skill::index`].
-    pub skills: [f32; 3],
+    pub skills: [f32; 4],
     /// Незаконченные уроки: доля 0..1.
     pub lessons: BTreeMap<Lore, f32>,
     /// Сколько прочитано: доля 0..1.

@@ -167,6 +167,7 @@ fn robe_color(t: Teacher) -> Color {
         Teacher::Dyer => Color::srgb(0.55, 0.15, 0.2),
         Teacher::Glassblower | Teacher::Potter => Color::srgb(0.5, 0.35, 0.22),
         Teacher::SteppeHealer => Color::srgb(0.5, 0.4, 0.3),
+        Teacher::Smith | Teacher::Armourer | Teacher::GothSmith | Teacher::SteppeSmith => Color::srgb(0.3, 0.26, 0.22),
     }
 }
 

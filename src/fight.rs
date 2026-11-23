@@ -20,11 +20,13 @@ pub struct LocalFighter {
     pub fighter: Fighter,
     /// Множитель скорости ходьбы от экипировки (присылает сервер).
     pub move_mult: f32,
+    /// Вид своего клинка (присылает сервер).
+    pub finish: u8,
 }
 
 impl LocalFighter {
     pub fn new(fighter: Fighter) -> Self {
-        Self { fighter, move_mult: 1.0 }
+        Self { fighter, move_mult: 1.0, finish: 200 }
     }
 }
 
@@ -143,21 +145,24 @@ fn combat_input(
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     client: Option<ResMut<RenetClient>>,
     mut local: Query<(&LocalPlayer, &mut LocalFighter)>,
+    grab: Option<Res<crate::props_client::PropGrab>>,
 ) {
     if !cursor_locked(&cursor) {
         return;
     }
+    // ЛКМ по предмету — захват (props_client), ПКМ с предметом в руках — бросок.
+    let (no_attack, no_guard) = grab.map(|g| (g.blocks_attack(), g.blocks_guard())).unwrap_or((false, false));
     let Some(mut client) = client else { return };
     let Ok((p, mut f)) = local.single_mut() else { return };
     if f.fighter.is_dead() {
         return;
     }
-    if mouse.just_pressed(MouseButton::Left) {
+    if mouse.just_pressed(MouseButton::Left) && !no_attack {
         f.fighter.try_attack();
         client.send_message(CH_RELIABLE, encode(&ClientMessage::Attack { yaw: p.yaw, pitch: p.pitch }));
     }
     // Защита: держим ПКМ. Оружием — парирование, щитом — блок.
-    if mouse.just_pressed(MouseButton::Right) {
+    if mouse.just_pressed(MouseButton::Right) && !no_guard {
         f.fighter.set_guard(true);
         client.send_message(CH_RELIABLE, encode(&ClientMessage::Guard { on: true, yaw: p.yaw, pitch: p.pitch }));
     }
@@ -183,6 +188,7 @@ pub fn reconcile(local: &mut LocalFighter, snap: &ActorSnapshot) {
     local.fighter.max_stamina = snap.max_stamina;
     local.fighter.action_speed = snap.action_speed;
     local.move_mult = snap.move_mult;
+    local.finish = snap.finish;
     // Оружие меняем только вне удара, чтобы не сбить анимацию.
     if snap.weapon != local.fighter.weapon && matches!(local.fighter.action, Action::Idle | Action::Guard { .. }) {
         local.fighter.weapon = snap.weapon;
@@ -205,6 +211,8 @@ fn animate_view_sword(
     mut camera: Query<&mut Transform, (With<PlayerCamera>, Without<ViewSword>)>,
     mut sword: Query<(&mut Transform, &mut Visibility, &Children), (With<ViewSword>, Without<PlayerCamera>)>,
     mut blades: Query<(&Blade, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut tints: ResMut<crate::rig::BladeTints>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     mut arm: Query<(&crate::rig::ViewArm, &mut Visibility), (With<ViewArmRoot>, Without<ViewSword>)>,
     mut joints: Query<&mut Transform, (Without<ViewSword>, Without<PlayerCamera>, Without<ViewArmRoot>)>,
 ) {
@@ -226,7 +234,7 @@ fn animate_view_sword(
     let _ = (&assets, &models);
     for c in children.iter() {
         if let Ok((b, mut m)) = blades.get_mut(c) {
-            m.0 = b.0.clone();
+            m.0 = tints.get(&mut materials, &b.0, f.finish);
         }
     }
     // Рука держит рукоять.

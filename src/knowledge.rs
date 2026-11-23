@@ -510,6 +510,10 @@ pub fn teacher_from_trade(t: crate::trade::TeacherKind) -> Teacher {
         K::Alchemist => Teacher::Alchemist,
         K::Grammarian => Teacher::Grammarian,
         K::SteppeHealer => Teacher::SteppeHealer,
+        K::Smith => Teacher::Smith,
+        K::Armourer => Teacher::Armourer,
+        K::GothSmith => Teacher::GothSmith,
+        K::SteppeSmith => Teacher::SteppeSmith,
     }
 }
 
@@ -841,6 +845,7 @@ fn apprentice_chore(teacher: Teacher) -> &'static str {
         Teacher::Dyer => "Мешаете чан и полощете ткань",
         Teacher::Glassblower | Teacher::Potter => "Носите дрова к печи",
         Teacher::Scribe | Teacher::Grammarian => "Растираете чернила и чините перья",
+        Teacher::Smith | Teacher::Armourer | Teacher::GothSmith | Teacher::SteppeSmith => "Качаете меха, носите уголь, бьёте молотом-кувалдой",
     }
 }
 
@@ -1240,7 +1245,7 @@ fn finish_brewing(
     let flasks = count_named(inv, brewing::FLASK).min(u16::MAX as u32) as u16;
     let roll = bodies.rng.f32();
     let pots = count_named(inv, "Глиняный горшок") + count_named(inv, "Медный котелок");
-    let wp = brewing::Workplace { table: bench, cloth: count_named(inv, brewing::CLOTH) > 0, outer_pot: pots >= 2, fire: fire_log };
+    let wp = brewing::Workplace { table: bench, cloth: count_named(inv, brewing::CLOTH) > 0, outer_pot: pots >= 2, clay: count_named(inv, "Гончарная глина") > 0, fire: fire_log };
     let result = brewing::brew(spec, v, k, flasks, roll, &wp);
     // Ничего не вышло (например, некуда разлить) — всё остаётся в сумке.
     if result.product.is_none() && !result.vessel_broken {
@@ -1254,6 +1259,9 @@ fn finish_brewing(
         take_named(inv, name, *n as u32);
     }
     take_named(inv, brewing::FLASK, result.flasks_used as u32);
+    if result.luted {
+        take_named(inv, "Гончарная глина", 1);
+    }
     if let Fire::Brazier { coal } = fire {
         take_named(inv, COAL, coal);
     }

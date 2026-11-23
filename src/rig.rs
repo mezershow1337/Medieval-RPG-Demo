@@ -294,6 +294,34 @@ pub struct CharacterModels {
     pub blade: Handle<StandardMaterial>,
 }
 
+/// Клинки разной выделки: грубый и сбитый темнее, в окалине и ржавчине; полированный блестит.
+#[derive(Resource, Default)]
+pub struct BladeTints(HashMap<(AssetId<StandardMaterial>, u8), Handle<StandardMaterial>>);
+
+impl BladeTints {
+    /// Материал клинка для вида `finish` (0..255). Хороший клинок — как в модели.
+    pub fn get(&mut self, materials: &mut Assets<StandardMaterial>, base: &Handle<StandardMaterial>, finish: u8) -> Handle<StandardMaterial> {
+        let bucket = finish / 32;
+        if bucket >= 5 {
+            return base.clone();
+        }
+        if let Some(h) = self.0.get(&(base.id(), bucket)) {
+            return h.clone();
+        }
+        let Some(mut m) = materials.get(base).cloned() else { return base.clone() };
+        // 0 — бурая ржа и окалина, 4 — чуть тусклее модели.
+        let k = 1.0 - bucket as f32 / 5.0;
+        let c = m.base_color.to_srgba();
+        let rust = Srgba::new(0.36, 0.25, 0.18, c.alpha);
+        m.base_color = Color::Srgba(Srgba::new(c.red + (rust.red - c.red) * k, c.green + (rust.green - c.green) * k, c.blue + (rust.blue - c.blue) * k, c.alpha));
+        m.metallic *= 1.0 - k * 0.6;
+        m.perceptual_roughness = m.perceptual_roughness + (0.9 - m.perceptual_roughness) * k;
+        let h = materials.add(m);
+        self.0.insert((base.id(), bucket), h.clone());
+        h
+    }
+}
+
 /// Лезвие оружия: хранит свой обычный материал (на время ответного удара его подменяют).
 #[derive(Component, Clone)]
 pub struct Blade(pub Handle<StandardMaterial>);
@@ -797,7 +825,8 @@ pub struct PoseSet;
 
 impl Plugin for RigPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, load_models)
+        app.init_resource::<BladeTints>()
+            .add_systems(Startup, load_models)
             .add_systems(Update, finish_models.run_if(resource_exists::<ModelsHandle>))
             .add_systems(Update, attach_rigs.run_if(resource_exists::<CharacterModels>).before(PoseSet))
             .add_systems(Update, apply_poses.after(PoseSet));
