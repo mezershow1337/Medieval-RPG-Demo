@@ -834,7 +834,8 @@ pub fn trace_blade(hilt: Vec3, tip: Vec3, attacker_pose: &Pose, defender: &Fight
 pub fn blade_hits_wall(level: &LevelColliders, hilt: Vec3, tip: Vec3, feet: Vec3) -> Option<Vec3> {
     for i in 3..=8 {
         let p = hilt.lerp(tip, i as f32 / 8.0);
-        let inside = level.boxes_near(p).any(|c| c.max.y > feet.y + 0.3);
+        // Живые люди — не стена: по ним клинок бьёт, а не отскакивает.
+        let inside = level.point_in_wall(p).is_some_and(|c| c.max.y > feet.y + 0.3);
         if inside {
             return Some(p);
         }
