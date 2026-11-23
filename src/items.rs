@@ -598,6 +598,17 @@ pub const ITEM_BASES: &[ItemBase] = &[
     base!("Трёхлопастные наконечники", "Трёхлопаст.", None, (1, 1), None, 30, &[], Sh::Small, true),
     base!("Срезни", "Срезни", None, (1, 1), None, 30, &[], Sh::Small, true),
     // </arsenal>
+    // Луки и стрелы (archery.rs).
+    base!("Простой лук", "Лук", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 26.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Гуннский составной лук", "Составной лук", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 36.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Стрелы", "Стрелы", None, (1, 2), None, 30, &[], Sh::Polearm, true),
+    base!("Бронебойные стрелы", "Бронеб.", None, (1, 2), None, 30, &[], Sh::Polearm, true),
+    base!("Трёхлопастные стрелы", "Трёхлоп.", None, (1, 2), None, 30, &[], Sh::Polearm, true),
+    base!("Стрелы-срезни", "Срезни", None, (1, 2), None, 30, &[], Sh::Polearm, true),
+    base!("Древки стрел", "Древки", None, (1, 2), None, 30, &[], Sh::Polearm, false),
+    base!("Маховые перья", "Перья", None, (1, 1), None, 90, &[], Sh::Small, false),
+    base!("Рыбий клей", "Клей", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Сухожилия", "Жилы", None, (1, 1), None, 10, &[], Sh::Small, false),
 ];
 
 /// Старое название → новое (предметы переименованы под VI век).
@@ -838,6 +849,11 @@ impl Item {
             && a.speed != 0.0
         {
             totals.add(Stat::ActionSpeed, a.speed);
+        }
+        if let Some((_, _, speed)) = crate::archery::BOWS.iter().find(|(n, ..)| *n == self.info().name)
+            && *speed != 0.0
+        {
+            totals.add(Stat::ActionSpeed, *speed);
         }
         totals
     }

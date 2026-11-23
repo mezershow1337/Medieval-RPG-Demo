@@ -63,10 +63,6 @@ pub fn find(name: &str) -> Option<&'static Arm> {
     ARMS.iter().find(|a| a.name == name)
 }
 
-pub fn index(name: &str) -> Option<u16> {
-    ARMS.iter().position(|a| a.name == name).map(|i| i as u16)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

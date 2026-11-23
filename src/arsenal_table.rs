@@ -15,6 +15,8 @@ pub enum Fam {
 /// Вид кованого оружия.
 #[derive(Debug)]
 pub struct Arm {
+    /// Имя модели и иконки (assets/models/items/<key>.glb).
+    #[allow(dead_code)]
     pub key: &'static str,
     pub name: &'static str,
     pub fam: Fam,

@@ -82,6 +82,8 @@ pub enum Plan {
     Carburize { bar: ItemUid },
     /// Выправить и наточить свою вещь.
     Repair { uid: ItemUid },
+    /// Верстак у кузни: древки или сборка стрел.
+    Fletch(crate::archery::Fletch),
 }
 
 /// Работа у горна.
@@ -92,6 +94,8 @@ pub enum Job {
     Soak(Soak),
     /// Ремонт: вещь лежит у горна, `progress` 0..1.
     Repair { item: Item, progress: f32 },
+    /// Стрельное дело на верстаке. `acc` — средняя аккуратность, `head` — качество наконечников.
+    Fletch { what: crate::archery::Fletch, progress: f32, acc: f32, strokes: u16, head: crate::items::Quality, sinew: bool },
 }
 
 /// Клиент -> сервер.

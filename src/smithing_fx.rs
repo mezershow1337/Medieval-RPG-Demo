@@ -1130,10 +1130,21 @@ pub fn showcase(mut commands: Commands, models: Option<Res<crate::icons::ItemMod
         (vec!["Спангенхельм", "Гребенчатый шлем", "Кольчуга", "Ламеллярный панцирь", "Железные поножи"], 0.85, 0.95)
     } else if mode.starts_with("new") {
         (crate::arsenal::ARMS.iter().filter(|a| a.fam == crate::arsenal::Fam::Sword).map(|a| a.name).take(12).collect(), 0.32, 1.25)
+    } else if let Some(fam) = crate::arsenal::Fam::ALL.into_iter().find(|f| format!("{f:?}").eq_ignore_ascii_case(&mode)) {
+        // Витрина одного семейства: всё в один ряд, хорошее качество.
+        let dx = match fam {
+            crate::arsenal::Fam::Axe | crate::arsenal::Fam::Mace => 0.34,
+            crate::arsenal::Fam::Head => 0.16,
+            _ => 0.26,
+        };
+        (crate::arsenal::ARMS.iter().filter(|a| a.fam == fam).map(|a| a.name).collect(), dx, 1.0)
+    } else if mode == "archery" {
+        (vec!["Простой лук", "Гуннский составной лук", "Стрелы", "Бронебойные стрелы", "Трёхлопастные стрелы", "Стрелы-срезни", "Древки стрел", "Маховые перья", "Рыбий клей", "Сухожилия"], 0.3, 1.0)
     } else {
         (vec!["Спата", "Кавалерийская спата", "Кинжал", "Булава", "Боевой топор"], 0.42, 1.3)
     };
-    let looks = [12u8, 100, 255];
+    let single = !(mode.starts_with("arm") || mode.starts_with("new") || mode.starts_with("weap"));
+    let looks: &[u8] = if single { &[255] } else { &[12, 100, 255] };
     let w = dx * kinds.len() as f32 + 0.4;
     let d = dz * looks.len() as f32 + 0.2;
     commands.spawn((

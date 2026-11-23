@@ -42,6 +42,7 @@ mod protocol;
 mod residents;
 mod rig;
 mod server;
+mod archery;
 mod arsenal;
 mod smithing;
 mod smithing_client;

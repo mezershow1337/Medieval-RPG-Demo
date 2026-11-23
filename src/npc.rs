@@ -660,7 +660,7 @@ mod tests {
                 think(&mut brain, ActorKind::HunArcher, &mut pose, &mut archer, &seen, &level, &mut rng, dt);
                 if archer.tick(dt) == Some(crate::combat::TickEvent::StrikeStarted) && archer.weapon.ranged() {
                     let (p, v) = arrow_launch(&pose);
-                    arrows.push(Arrow { id: shots, owner: 2, pos: p, vel: v, damage: 30.0, life: 4.0 });
+                    arrows.push(Arrow { id: shots, owner: 2, pos: p, vel: v, damage: 30.0, life: 4.0, pierce: 0.0 });
                     shots += 1;
                 }
                 player.tick(dt);

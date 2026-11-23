@@ -793,6 +793,14 @@ fn update_tooltip(
                 t.spawn(text(&fonts, format!("{what}: скорость ударов {:+.0}%", a.speed), 13.0, Color::srgb(0.55, 0.75, 1.0), false));
             }
         }
+        if let Some(at) = crate::archery::arrow_type(info.name) {
+            t.spawn(text(&fonts, at.desc.to_string(), 13.0, Color::srgb(0.78, 0.74, 0.64), false));
+            let shot = crate::archery::Shot::of(&item);
+            t.spawn(text(&fonts, format!("Урон лука ×{:.2}, пробивание доспеха {:+.0}%", shot.damage_mult, shot.pierce * 100.0), 13.0, Color::srgb(0.55, 0.75, 1.0), false));
+        }
+        if crate::archery::is_bow(info.name) {
+            t.spawn(text(&fonts, "Стреляет стрелами из сумки (первой стопкой).".to_string(), 13.0, Color::srgb(0.78, 0.74, 0.64), false));
+        }
         if let Some(m) = item.make.as_ref() {
             for (line, color) in make_lines(&item, m) {
                 t.spawn(text(&fonts, line, 13.0, color, false));

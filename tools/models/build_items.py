@@ -834,6 +834,8 @@ def sack():
 
 
 import items_goods  # noqa: E402,F401  (товары, травы, посуда, книги, снадобья)
+import items_arsenal  # noqa: E402,F401  (кованое оружие арсенала)
+import items_archery  # noqa: E402,F401  (луки, стрелы и их части)
 
 
 def build(key):

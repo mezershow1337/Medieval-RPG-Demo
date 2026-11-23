@@ -916,6 +916,8 @@ pub struct Arrow {
     /// Урон до брони цели.
     pub damage: f32,
     pub life: f32,
+    /// Пробивание доспеха наконечником (см. `archery::Shot`).
+    pub pierce: f32,
 }
 
 pub enum ArrowStep {
@@ -1186,7 +1188,7 @@ mod tests {
         let mut sp = shooter;
         sp.pitch = ballistic_pitch(pos, target.feet + Vec3::Y * 1.2);
         let (pos, vel) = arrow_launch(&sp);
-        let mut arrow = Arrow { id: 1, owner: 1, pos, vel, damage: 30.0, life: 5.0 };
+        let mut arrow = Arrow { id: 1, owner: 1, pos, vel, damage: 30.0, life: 5.0, pierce: 0.0 };
         let targets = [(1, sp), (2, target)];
         let mut hit = None;
         for _ in 0..300 {

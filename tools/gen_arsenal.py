@@ -38,6 +38,8 @@ def arsenal_rs():
     out.append("/// Вид кованого оружия.")
     out.append("#[derive(Debug)]")
     out.append("pub struct Arm {")
+    out.append("    /// Имя модели и иконки (assets/models/items/<key>.glb).")
+    out.append("    #[allow(dead_code)]")
     out.append("    pub key: &'static str,")
     out.append("    pub name: &'static str,")
     out.append("    pub fam: Fam,")
@@ -94,7 +96,7 @@ def main():
     s = open(p).read()
     block = items_block()
     if "// <arsenal>" in s:
-        s = re.sub(r"    // <arsenal>.*?// </arsenal>", lambda _: block, s, flags=re.S)
+        s = re.sub(r"    // <arsenal>.*?// </arsenal>", lambda _: block, s, count=1, flags=re.S)
     else:
         # В конец ITEM_BASES: номера прежних видов не сдвигаются.
         i = s.index("pub const ITEM_BASES: &[ItemBase] = &[")
