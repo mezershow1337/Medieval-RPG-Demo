@@ -621,7 +621,9 @@ fn layout_map(
         let p = (uv - view.center) * full + side / 2.0;
         let rect = Rect::from_center_size(p + Vec2::new(0.0, 6.0 + label.est.y / 2.0), label.est + Vec2::new(8.0, 0.0));
         let free = !placed.iter().any(|r| !r.intersect(rect).is_empty());
-        let show = free && view.zoom >= label.min_zoom && p.x > -40.0 && p.y > -10.0 && p.x < side + 40.0 && p.y < side + 10.0;
+        // Обрезанных краем листа подписей не показываем.
+        let inside = rect.min.x > 2.0 && rect.min.y > 2.0 && rect.max.x < side - 2.0 && rect.max.y < side - 2.0;
+        let show = free && inside && view.zoom >= label.min_zoom;
         if show {
             placed.push(rect);
         }
