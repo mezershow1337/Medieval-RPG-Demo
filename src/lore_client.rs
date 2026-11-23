@@ -4,6 +4,8 @@
 //! - E у куста — собрать; E у мастера — платный урок; R у мастера — поработать подмастерьем.
 //! - F или ПКМ по книге в сумке — читать; по лекарству — на рану или внутрь.
 //!   Шаг в сторону или удар прерывают занятие.
+//! - F по жаровне или столу в сумке — поставить перед собой; E у поставленной — забрать,
+//!   R у жаровни — собрать на ней алхимический стол (нужны весы и ступка).
 //! - K — окно знаний.
 
 use crate::inventory_ui::UiFonts;
@@ -43,12 +45,14 @@ impl MyKnowledge {
 pub enum LoreTarget {
     Patch(u32),
     Master(u32),
+    Station(u32),
 }
 
 #[derive(Resource, Default)]
 pub struct LoreView {
     patches: HashMap<u32, (PatchView, Entity)>,
     masters: HashMap<u32, (MasterView, Entity)>,
+    stations: HashMap<u32, (StationView, Entity)>,
     pub target: Option<LoreTarget>,
     window_open: bool,
     /// Окно знаний перестраивается, когда это число меняется.
@@ -67,6 +71,10 @@ pub fn try_use(client: &mut RenetClient, item: &Item, body: Option<&crate::medic
         return true;
     }
     let name = item.info().name;
+    if StationKind::from_item(name).is_some() {
+        send(client, &LoreClientMessage::PlaceStation { uid: item.uid });
+        return true;
+    }
     if crate::medicine::is_remedy(name) {
         // Бинт, когда перевязывать нечего, — обычный расходник (лечит здоровье).
         let healthy = crate::medicine::Body::default();
@@ -81,7 +89,8 @@ pub fn try_use(client: &mut RenetClient, item: &Item, body: Option<&crate::medic
 
 /// Можно ли «использовать» предмет (для подсказок и ПКМ в сумке).
 pub fn usable(base: ItemBaseId) -> bool {
-    Book::from_item(base).is_some() || crate::medicine::is_remedy(base.base().name) || crate::brewing::Vessel::from_item(base.base().name).is_some()
+    let name = base.base().name;
+    Book::from_item(base).is_some() || crate::medicine::is_remedy(name) || crate::brewing::Vessel::from_item(name).is_some() || StationKind::from_item(name).is_some()
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +108,13 @@ struct LoreAssets {
     head: Handle<Mesh>,
     skin: Handle<StandardMaterial>,
     robes: HashMap<Teacher, Handle<StandardMaterial>>,
+    bronze: Handle<StandardMaterial>,
+    coals: Handle<StandardMaterial>,
+    wood: Handle<StandardMaterial>,
+    iron: Handle<StandardMaterial>,
+    cylinder: Handle<Mesh>,
+    cube: Handle<Mesh>,
+    ball: Handle<Mesh>,
 }
 
 #[derive(Component)]
@@ -163,6 +179,18 @@ fn setup_lore_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
         head: meshes.add(Sphere::new(0.13)),
         skin: materials.add(StandardMaterial { base_color: Color::srgb(0.72, 0.55, 0.42), perceptual_roughness: 0.8, ..default() }),
         robes,
+        bronze: materials.add(StandardMaterial { base_color: Color::srgb(0.55, 0.36, 0.18), metallic: 0.85, perceptual_roughness: 0.42, ..default() }),
+        coals: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.12, 0.06, 0.04),
+            emissive: LinearRgba::rgb(2.6, 0.7, 0.12),
+            perceptual_roughness: 1.0,
+            ..default()
+        }),
+        wood: materials.add(StandardMaterial { base_color: Color::srgb(0.27, 0.18, 0.11), perceptual_roughness: 0.92, ..default() }),
+        iron: materials.add(StandardMaterial { base_color: Color::srgb(0.25, 0.24, 0.23), metallic: 0.7, perceptual_roughness: 0.55, ..default() }),
+        cylinder: meshes.add(Cylinder::new(0.5, 1.0)),
+        cube: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+        ball: meshes.add(Sphere::new(0.5)),
     });
 }
 
@@ -170,8 +198,11 @@ fn setup_lore_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
 fn spawn_patch(commands: &mut Commands, assets: &LoreAssets, p: &PatchView) -> Entity {
     let pos: Vec3 = p.pos.into();
     let mut rng = crate::items::Rng::new(p.id as u64 * 7919 + 13);
+    // Одиночный кустик в поле — поменьше заросли.
+    let scale = if p.id >= WILD_PATCH_BASE { 0.7 } else { 1.0 };
+    let shown = if p.id >= WILD_PATCH_BASE && p.charges == 0 { Visibility::Hidden } else { Visibility::default() };
     commands
-        .spawn((PatchModel { id: p.id }, Transform::from_translation(pos), Visibility::default()))
+        .spawn((PatchModel { id: p.id }, Transform::from_translation(pos).with_scale(Vec3::splat(scale)), shown))
         .with_children(|c| {
             for i in 0..14 {
                 let a = i as f32 * 2.4 + rng.f32();
@@ -193,6 +224,66 @@ fn spawn_patch(commands: &mut Commands, assets: &LoreAssets, p: &PatchView) -> E
                 let h = rng.range_f32(0.32, 0.5);
                 c.spawn((Mesh3d(assets.stem.clone()), MeshMaterial3d(assets.leaf_mat.clone()), Transform::from_xyz(a.cos() * r, h * 0.5, a.sin() * r).with_scale(Vec3::new(1.0, h / 0.4, 1.0))));
                 c.spawn((PatchBloom, Mesh3d(assets.flower.clone()), MeshMaterial3d(mat.clone()), Transform::from_xyz(a.cos() * r, h, a.sin() * r)));
+            }
+        })
+        .id()
+}
+
+/// Жаровня — медная чаша с углями на железной треноге; стол — дощатый, с жаровней, весами,
+/// ступкой и подставкой под алембик. Всё из простых тел, свои модели.
+fn spawn_station(commands: &mut Commands, assets: &LoreAssets, s: &StationView) -> Entity {
+    let pos: Vec3 = s.pos.into();
+    let part = |mesh: &Handle<Mesh>, mat: &Handle<StandardMaterial>, t: Transform| (Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), t);
+    let brazier = |c: &mut ChildSpawnerCommands, base: Vec3, k: f32| {
+        // Ножки треноги, чуть врозь.
+        for i in 0..3 {
+            let a = i as f32 * std::f32::consts::TAU / 3.0;
+            let off = Vec3::new(a.cos(), 0.0, a.sin()) * 0.17 * k;
+            c.spawn(part(
+                &assets.cylinder,
+                &assets.iron,
+                Transform::from_translation(base + off + Vec3::Y * 0.2 * k)
+                    .with_rotation(Quat::from_axis_angle(Vec3::new(-a.sin(), 0.0, a.cos()), 0.22))
+                    .with_scale(Vec3::new(0.03 * k, 0.42 * k, 0.03 * k)),
+            ));
+        }
+        c.spawn(part(&assets.cylinder, &assets.bronze, Transform::from_translation(base + Vec3::Y * 0.44 * k).with_scale(Vec3::new(0.46 * k, 0.1 * k, 0.46 * k))));
+        c.spawn(part(&assets.cylinder, &assets.bronze, Transform::from_translation(base + Vec3::Y * 0.38 * k).with_scale(Vec3::new(0.3 * k, 0.06 * k, 0.3 * k))));
+        // Угли горкой.
+        for (x, z, r) in [(0.0, 0.0, 0.13), (0.08, 0.05, 0.09), (-0.07, 0.06, 0.1), (0.02, -0.08, 0.09), (-0.06, -0.05, 0.08)] {
+            c.spawn(part(&assets.ball, &assets.coals, Transform::from_translation(base + Vec3::new(x, 0.48, z) * k).with_scale(Vec3::new(r, r * 0.55, r) * k)));
+        }
+        c.spawn((PointLight { color: Color::srgb(1.0, 0.55, 0.25), intensity: 9000.0, range: 4.0, shadow_maps_enabled: false, ..default() }, Transform::from_translation(base + Vec3::Y * 0.7 * k)));
+    };
+    commands
+        .spawn((Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(s.yaw)), Visibility::default()))
+        .with_children(|c| match s.kind {
+            StationKind::Brazier => brazier(c, Vec3::ZERO, 1.0),
+            StationKind::Table => {
+                let top = 0.82;
+                c.spawn(part(&assets.cube, &assets.wood, Transform::from_xyz(0.0, top, 0.0).with_scale(Vec3::new(1.5, 0.06, 0.72))));
+                for (x, z) in [(-0.68, -0.3), (0.68, -0.3), (-0.68, 0.3), (0.68, 0.3)] {
+                    c.spawn(part(&assets.cube, &assets.wood, Transform::from_xyz(x, top * 0.5, z).with_scale(Vec3::new(0.07, top, 0.07))));
+                }
+                // Нижняя полка с кувшинами.
+                c.spawn(part(&assets.cube, &assets.wood, Transform::from_xyz(0.0, 0.18, 0.0).with_scale(Vec3::new(1.36, 0.04, 0.6))));
+                c.spawn(part(&assets.cylinder, &assets.bronze, Transform::from_xyz(-0.4, 0.3, 0.05).with_scale(Vec3::new(0.18, 0.22, 0.18))));
+                // Жаровня на краю стола, меньше напольной.
+                brazier(c, Vec3::new(0.45, top + 0.03, 0.0), 0.55);
+                // Подставка под алембик над жаровней: железное кольцо на двух стойках.
+                for z in [-0.17, 0.17] {
+                    c.spawn(part(&assets.cylinder, &assets.iron, Transform::from_xyz(0.45, top + 0.3, z).with_scale(Vec3::new(0.02, 0.55, 0.02))));
+                }
+                c.spawn(part(&assets.cube, &assets.iron, Transform::from_xyz(0.45, top + 0.56, 0.0).with_scale(Vec3::new(0.02, 0.02, 0.36))));
+                // Весы: стойка, коромысло, две чашки.
+                c.spawn(part(&assets.cylinder, &assets.bronze, Transform::from_xyz(-0.25, top + 0.17, -0.12).with_scale(Vec3::new(0.02, 0.32, 0.02))));
+                c.spawn(part(&assets.cube, &assets.bronze, Transform::from_xyz(-0.25, top + 0.32, -0.12).with_scale(Vec3::new(0.34, 0.012, 0.012))));
+                for x in [-0.41, -0.09] {
+                    c.spawn(part(&assets.cylinder, &assets.bronze, Transform::from_xyz(x, top + 0.14, -0.12).with_scale(Vec3::new(0.1, 0.012, 0.1))));
+                }
+                // Ступка с пестиком.
+                c.spawn(part(&assets.cylinder, &assets.iron, Transform::from_xyz(-0.55, top + 0.07, 0.15).with_scale(Vec3::new(0.12, 0.1, 0.12))));
+                c.spawn(part(&assets.cylinder, &assets.wood, Transform::from_xyz(-0.53, top + 0.15, 0.15).with_rotation(Quat::from_rotation_z(0.4)).with_scale(Vec3::new(0.022, 0.2, 0.022))));
             }
         })
         .id()
@@ -241,6 +332,22 @@ fn receive_lore(
                 for p in list {
                     let e = if p.draw { spawn_patch(&mut commands, &assets, &p) } else { commands.spawn(Transform::from_translation(p.pos.into())).id() };
                     view.patches.insert(p.id, (p, e));
+                }
+            }
+            LoreServerMessage::PatchMoved { id, pos, charges } => {
+                if let Some((p, e)) = view.patches.get_mut(&id) {
+                    p.pos = pos;
+                    p.charges = charges;
+                    commands.entity(*e).insert(Transform::from_translation(pos.into()).with_scale(Vec3::splat(0.7)));
+                }
+            }
+            LoreServerMessage::Stations(list) => {
+                for (_, (_, e)) in view.stations.drain() {
+                    commands.entity(e).despawn();
+                }
+                for s in list {
+                    let e = spawn_station(&mut commands, &assets, &s);
+                    view.stations.insert(s.id, (s, e));
                 }
             }
             LoreServerMessage::PatchCharges { id, charges } => {
@@ -301,9 +408,13 @@ fn aim_lore_target(mut view: ResMut<LoreView>, loot: Res<LootState>, camera: Que
                 if flat <= p.radius + 0.5 && d.y.abs() < 3.5 && zone.is_none_or(|(s, _)| flat < s) {
                     zone = Some((flat, LoreTarget::Patch(*id)));
                 }
-            } else {
+            } else if p.charges > 0 || *id < WILD_PATCH_BASE {
                 test(Vec3::from(p.pos) + Vec3::Y * 0.25, 0.5, LoreTarget::Patch(*id));
             }
+        }
+        for (id, (s, _)) in &view.stations {
+            let (h, r) = if s.kind == StationKind::Table { (0.85, 0.8) } else { (0.45, 0.45) };
+            test(Vec3::from(s.pos) + Vec3::Y * h, r, LoreTarget::Station(*id));
         }
         for (id, (m, _)) in &view.masters {
             test(Vec3::from(m.pos) + Vec3::Y * 1.1, 0.6, LoreTarget::Master(*id));
@@ -335,6 +446,8 @@ fn lore_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, 
         Some(LoreTarget::Patch(patch)) if keys.just_pressed(KeyCode::KeyE) => send(&mut client, &LoreClientMessage::Gather { patch }),
         Some(LoreTarget::Master(master)) if keys.just_pressed(KeyCode::KeyE) => send(&mut client, &LoreClientMessage::PaidLesson { master }),
         Some(LoreTarget::Master(master)) if keys.just_pressed(KeyCode::KeyR) => send(&mut client, &LoreClientMessage::Apprentice { master }),
+        Some(LoreTarget::Station(id)) if keys.just_pressed(KeyCode::KeyE) => send(&mut client, &LoreClientMessage::TakeStation { id }),
+        Some(LoreTarget::Station(id)) if keys.just_pressed(KeyCode::KeyR) => send(&mut client, &LoreClientMessage::UpgradeStation { id }),
         _ => {}
     }
 }
@@ -401,6 +514,10 @@ fn update_lore_prompt(view: Res<LoreView>, knowledge: Res<MyKnowledge>, mut text
                 None => format!("{}: больше нечему учить", m.teacher.name()),
             }
         }),
+        Some(LoreTarget::Station(id)) => view.stations.get(&id).map(|(s, _)| match s.kind {
+            StationKind::Brazier => "Жаровня: варите рядом (нужен древесный уголь)\n[E] Забрать\n[R] Собрать алхимический стол (весы и ступка)".to_string(),
+            StationKind::Table => "Алхимический стол: варите рядом (уголь для жаровни)\n[E] Забрать".to_string(),
+        }),
         None => None,
     }
     .unwrap_or_default();
@@ -410,12 +527,19 @@ fn update_lore_prompt(view: Res<LoreView>, knowledge: Res<MyKnowledge>, mut text
 }
 
 /// Пустые кусты «вянут»: цветы прячутся.
-fn update_patch_looks(view: Res<LoreView>, patches: Query<(&PatchModel, &Children)>, mut blooms: Query<&mut Visibility, With<PatchBloom>>) {
+fn update_patch_looks(view: Res<LoreView>, mut patches: Query<(&PatchModel, &Children, &mut Visibility), Without<PatchBloom>>, mut blooms: Query<&mut Visibility, With<PatchBloom>>) {
     if !view.is_changed() {
         return;
     }
-    for (pm, children) in &patches {
+    for (pm, children, mut shown) in &mut patches {
         let full = view.patches.get(&pm.id).is_some_and(|(p, _)| p.charges > 0);
+        // Сорванный кустик в поле исчезает совсем (вырастет в другом месте).
+        if pm.id >= WILD_PATCH_BASE {
+            let want = if full { Visibility::Inherited } else { Visibility::Hidden };
+            if *shown != want {
+                *shown = want;
+            }
+        }
         for c in children.iter() {
             if let Ok(mut v) = blooms.get_mut(c) {
                 *v = if full { Visibility::Inherited } else { Visibility::Hidden };
@@ -551,7 +675,8 @@ mod tests {
 /// `MRPG_SHOT=файл.png` — через `MRPG_SHOT_DELAY` секунд (по умолчанию 8) сохранить
 /// снимок экрана и выйти. `MRPG_SHOT_UI=knowledge` — перед снимком открыть окно знаний,
 /// `MRPG_SHOT_UI=brew` — открыть сумку и окно варки у горшка (нужен `MRPG_DEBUG_KIT=1`),
-/// `MRPG_SHOT_YAW=градусы` — повернуть камеру.
+/// `MRPG_SHOT_UI=brazier|table` — поставить жаровню (и собрать стол), `MRPG_SHOT_YAW=градусы` —
+/// повернуть камеру.
 pub struct DevShotPlugin;
 
 impl Plugin for DevShotPlugin {
@@ -570,10 +695,31 @@ fn dev_shot(
     mut loot: ResMut<LootState>,
     mut brew: ResMut<crate::brewing_client::BrewState>,
     mut done: Local<u8>,
+    mut placed: Local<u8>,
+    mut client: Option<ResMut<RenetClient>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let delay: f32 = std::env::var("MRPG_SHOT_DELAY").ok().and_then(|s| s.parse().ok()).unwrap_or(8.0);
     let t = time.elapsed_secs();
+    // `MRPG_SHOT_UI=brazier|table` — поставить жаровню из набора (и собрать на ней стол).
+    let ui = std::env::var("MRPG_SHOT_UI").unwrap_or_default();
+    if (ui == "brazier" || ui == "table")
+        && let Some(client) = client.as_mut()
+    {
+        if *placed == 0 && t > delay - 6.0 {
+            let item = loot.inventory.as_ref().and_then(|inv| inv.all_items().find(|i| i.info().name == "Жаровня").cloned());
+            if let Some(item) = item {
+                send(client, &LoreClientMessage::PlaceStation { uid: item.uid });
+                *placed = 1;
+            }
+        }
+        if *placed == 1 && ui == "table" && t > delay - 3.5 {
+            if let Some(id) = view.stations.keys().next().copied() {
+                send(client, &LoreClientMessage::UpgradeStation { id });
+            }
+            *placed = 2;
+        }
+    }
     if *done == 0 && t > delay - 1.0 {
         if std::env::var("MRPG_SHOT_UI").as_deref() == Ok("brew") {
             loot.ui_open = true;

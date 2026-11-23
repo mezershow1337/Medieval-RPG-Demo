@@ -29,6 +29,7 @@ const HEAL_RATE: f32 = 0.0022;
 const ANTISEPTIC_HALF_LIFE: f32 = 300.0;
 const ANTIPYRETIC_HALF_LIFE: f32 = 150.0;
 const ANTIDOTE_HALF_LIFE: f32 = 120.0;
+const VIGOR_HALF_LIFE: f32 = 240.0;
 
 // ---------------------------------------------------------------------------
 // Раны
@@ -267,6 +268,9 @@ pub struct Body {
     pub antipyretic: f32,
     /// Действует противоядие (териак) 0..1.
     pub antidote: f32,
+    /// Бодрость от укрепляющего отвара (шиповник) 0..1: быстрее отдыхаешь.
+    #[serde(default)]
+    pub vigor: f32,
     next_id: u32,
 }
 
@@ -287,7 +291,7 @@ impl Default for BodyMods {
 
 impl Body {
     pub fn is_healthy(&self) -> bool {
-        self.wounds.is_empty() && self.toxins.is_empty()
+        self.wounds.is_empty() && self.toxins.is_empty() && self.vigor < 0.02
     }
 
     /// Попадание оружием. `damage` — потерянное здоровье, `max_hp` — для оценки тяжести.
@@ -402,14 +406,20 @@ impl Body {
         let antidote = self.antidote;
         for (t, amount) in self.toxins.iter_mut() {
             let (safe, harm, half) = t.params();
-            let harm = harm * if antidote > 0.05 { 0.6 } else { 1.0 };
+            // Противоядие (териак, полынь) ослабляет вред и ускоряет выведение — по силе.
+            let a = antidote.min(1.0);
+            let harm = harm * (1.0 - 0.4 * a);
             loss += (*amount - safe).max(0.0) * harm * dt;
-            let half = if antidote > 0.05 { half / 2.0 } else { half };
+            let half = half / (1.0 + a);
             *amount *= half_life(dt, half);
         }
         self.toxins.retain(|_, a| *a > 0.02);
         self.antipyretic *= half_life(dt, ANTIPYRETIC_HALF_LIFE);
         self.antidote *= half_life(dt, ANTIDOTE_HALF_LIFE);
+        self.vigor *= half_life(dt, VIGOR_HALF_LIFE);
+        if self.vigor < 0.02 {
+            self.vigor = 0.0;
+        }
         if self.antidote < 0.02 {
             self.antidote = 0.0;
         }
@@ -423,7 +433,7 @@ impl Body {
         let mad = (self.toxin(Toxin::Henbane) / 1.5).min(1.0);
         BodyMods {
             action_speed: ((1.0 - 0.22 * pain) * (1.0 - 0.3 * sleepy) * (1.0 - 0.25 * mad)).max(0.45),
-            stamina_regen: ((1.0 - 0.3 * pain) * (1.0 - 0.5 * fever)).max(0.3),
+            stamina_regen: ((1.0 - 0.3 * pain) * (1.0 - 0.5 * fever) * (1.0 + 0.25 * self.vigor)).max(0.3),
             max_stamina: (1.0 - 0.3 * fever).max(0.5),
             move_mult: ((1.0 - 0.25 * sleepy) * (1.0 - 0.15 * mad) * if pain > 0.8 { 0.88 } else { 1.0 }).max(0.5),
         }
@@ -479,11 +489,13 @@ pub struct Intake {
     pub toxins: &'static [(Toxin, f32)],
     pub antipyretic: f32,
     pub antidote: f32,
+    /// Укрепляет (бодрость).
+    pub vigor: f32,
     /// Без знания дозы человек берёт на глаз: от ½ до почти двойной.
     pub needs_dosage: bool,
 }
 
-const INTAKE: Intake = Intake { verb: "Пьёте", secs: 2.0, toxins: &[], antipyretic: 0.0, antidote: 0.0, needs_dosage: false };
+const INTAKE: Intake = Intake { verb: "Пьёте", secs: 2.0, toxins: &[], antipyretic: 0.0, antidote: 0.0, vigor: 0.0, needs_dosage: false };
 
 /// Средство по имени предмета: (на рану, внутрь). Значения взяты из Диоскорида, Цельса и Галена
 /// и сжаты под игру; там, где древние ошибались (териак от всех ядов), действие скромнее.
@@ -516,6 +528,11 @@ pub fn remedy(item: &str) -> (Option<WoundCare>, Option<Intake>) {
         "Отвар шалфея" => (None, i(Intake { verb: "Пьёте отвар шалфея", antipyretic: 0.3, ..INTAKE })),
         "Отвар чабреца" => (None, i(Intake { verb: "Пьёте отвар чабреца", antipyretic: 0.25, ..INTAKE })),
         "Оксимель" => (None, i(Intake { verb: "Пьёте оксимель", antipyretic: 0.55, ..INTAKE })),
+        // Диоскорид: полынь — против ядов и глистов, мята унимает тошноту, девясил — от кашля и жара.
+        "Отвар полыни" => (None, i(Intake { verb: "Пьёте горький отвар полыни", antidote: 0.35, ..INTAKE })),
+        "Мятный отвар" => (None, i(Intake { verb: "Пьёте мятный отвар", antidote: 0.15, antipyretic: 0.1, ..INTAKE })),
+        "Отвар девясила" => (None, i(Intake { verb: "Пьёте отвар девясила", antipyretic: 0.4, ..INTAKE })),
+        "Отвар шиповника" => (None, i(Intake { verb: "Пьёте отвар шиповника", vigor: 1.0, ..INTAKE })),
         "Маковый отвар" => (None, i(Intake { verb: "Пьёте маковый отвар", toxins: &[(Toxin::Opium, 0.9)], needs_dosage: true, ..INTAKE })),
         "Маковые коробочки" => (None, i(Intake { verb: "Жуёте маковые коробочки", secs: 3.0, toxins: &[(Toxin::Opium, 0.35)], ..INTAKE })),
         "Опий" => (None, i(Intake { verb: "Глотаете кусочек опия", secs: 1.5, toxins: &[(Toxin::Opium, 1.4)], needs_dosage: true, ..INTAKE })),
@@ -691,6 +708,9 @@ fn drink(body: &mut Body, k: &Knowledge, i: Intake, quality_index: usize, roll: 
     if i.antidote > 0.0 {
         body.antidote = body.antidote.max((i.antidote * p).min(1.0));
     }
+    if i.vigor > 0.0 {
+        body.vigor = body.vigor.max((i.vigor * p).min(1.0));
+    }
     let text = if dose > 1.35 { format!("{} — кажется, слишком много", i.verb) } else { i.verb.to_string() };
     Treated::Drunk { text }
 }
@@ -774,6 +794,9 @@ pub fn symptoms(body: &Body, k: &Knowledge) -> Vec<(String, Alarm)> {
     }
     if body.antidote > 0.05 {
         out.push(("Действует противоядие".into(), Alarm::Mild));
+    }
+    if body.vigor > 0.05 {
+        out.push(("Бодрость: быстрее переводите дух".into(), Alarm::Mild));
     }
     let pain = body.pain();
     if pain > 0.15 {
