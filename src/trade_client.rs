@@ -595,6 +595,7 @@ fn update_trade_hud(
     time: Res<Time>,
     state: Res<TradeState>,
     loot: Res<LootState>,
+    party: Option<Res<crate::map::Party>>,
     mut prompt: Single<&mut Text, (With<TradePrompt>, Without<LessonText>)>,
     mut bar: Single<&mut Node, (With<LessonBar>, Without<LessonFill>)>,
     mut fill: Single<&mut Node, (With<LessonFill>, Without<LessonBar>)>,
@@ -616,7 +617,7 @@ fn update_trade_hud(
                     lines.push(format!("{} · {}", m.faction.name(), standing));
                 }
             }
-            Some(Aim::Player(id)) => lines.push(format!("[T] Предложить обмен: {}", crate::protocol::player_name(id))),
+            Some(Aim::Player(id)) => lines.push(format!("[T] Предложить обмен: {}", crate::trade_ui::partner_name(party.as_deref(), id))),
             None => {}
         }
     }
@@ -625,7 +626,7 @@ fn update_trade_hud(
     {
         lines.push(format!(
             "{} предлагает обмен: [Y] согласиться, [N] отказать",
-            crate::protocol::player_name(from)
+            crate::trade_ui::partner_name(party.as_deref(), from)
         ));
     }
     if state.fine > 0 && !state.window_open() {
