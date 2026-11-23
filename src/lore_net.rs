@@ -93,6 +93,10 @@ pub enum BurstFx {
     Fumes,
     /// Траву сорвали: листья и пыль.
     Gathered,
+    /// Раздули мехами: сноп искр.
+    Bellows,
+    /// Мокрая тряпица на горячем куполе: шипение и пар.
+    Hiss,
 }
 
 /// Временный мастер, пока в городе нет настоящих NPC.
@@ -129,8 +133,32 @@ pub enum LoreClientMessage {
     TakeStation { id: u32 },
     /// Собрать на жаровне алхимический стол (нужны весы и ступка).
     UpgradeStation { id: u32 },
+    /// Следить за огнём во время варки: мехи, заслонка, мокрая тряпица на купол.
+    Tend(TendAction),
     /// Прервать текущее занятие.
     Stop,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TendAction {
+    /// Раздуть угли мехами.
+    Bellows,
+    /// Прикрыть заслонку, сбить жар.
+    Damper,
+    /// Положить мокрую тряпицу на купол алембика.
+    CoolDome,
+}
+
+/// Как идёт огонь (только самому работающему, несколько раз в секунду).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct TendView {
+    /// Жар: 0 — угасло, 1 — слабый, 2 — средний, 3 — сильный.
+    pub fire: f32,
+    /// Какой жар задан.
+    pub target: f32,
+    /// Нагрев купола перегонного прибора (1 — давление рвёт стекло).
+    pub dome: Option<f32>,
+    pub bath: bool,
 }
 
 /// Сервер -> клиент.
@@ -149,6 +177,8 @@ pub enum LoreServerMessage {
     Work { player: u64, work: Option<WorkView> },
     /// Разовый эффект в точке.
     Burst { pos: NetPos, fx: BurstFx },
+    /// Огонь под своим сосудом.
+    Tending(TendView),
     /// Началось занятие: подпись, сколько уже прошло и сколько всего (секунды).
     Activity { verb: String, done: f32, total: f32 },
     ActivityEnded,

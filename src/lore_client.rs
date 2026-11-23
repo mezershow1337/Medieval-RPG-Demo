@@ -24,10 +24,11 @@ pub struct LoreClientPlugin;
 impl Plugin for LoreClientPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(MyKnowledge::default())
+            .insert_resource(MyTending::default())
             .insert_resource(LoreView::default())
             .add_systems(Startup, (setup_lore_assets, setup_lore_ui).after(crate::inventory_ui::setup_fonts))
             .add_systems(Update, (receive_lore, lore_input).chain().run_if(client_connected))
-            .add_systems(Update, (aim_lore_target, update_lore_prompt, update_patch_looks, update_knowledge_window).chain());
+            .add_systems(Update, (aim_lore_target, update_lore_prompt, update_patch_looks, update_knowledge_window, update_tending_hud).chain());
     }
 }
 
@@ -40,6 +41,10 @@ impl MyKnowledge {
         self.0.display_name(item)
     }
 }
+
+/// Огонь под своим сосудом (пока варим).
+#[derive(Resource, Default)]
+pub struct MyTending(pub Option<TendView>);
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum LoreTarget {
@@ -318,6 +323,7 @@ fn receive_lore(
     mut loot: ResMut<LootState>,
     mut body: ResMut<crate::medicine_client::MyBody>,
     mut fx: ResMut<crate::alchemy_fx::FxQueue>,
+    mut tending: ResMut<MyTending>,
     assets: Res<LoreAssets>,
     time: Res<Time>,
 ) {
@@ -373,7 +379,11 @@ fn receive_lore(
                 }
             }
             LoreServerMessage::Activity { verb, done, total } => loot.using = Some((verb, now - done, total)),
-            LoreServerMessage::ActivityEnded => loot.using = None,
+            LoreServerMessage::ActivityEnded => {
+                loot.using = None;
+                tending.0 = None;
+            }
+            LoreServerMessage::Tending(t) => tending.0 = Some(t),
             LoreServerMessage::Notice(text) => loot.notify(text, now),
             LoreServerMessage::Body(b) => {
                 if body.0 != b {
@@ -434,7 +444,15 @@ fn aim_lore_target(mut view: ResMut<LoreView>, loot: Res<LootState>, camera: Que
     }
 }
 
-fn lore_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, mut view: ResMut<LoreView>, loot: Res<LootState>) {
+fn lore_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, mut view: ResMut<LoreView>, loot: Res<LootState>, tending: Res<MyTending>) {
+    // Огонь под сосудом: 1 — мехи, 2 — заслонка, 3 — мокрая тряпица на купол.
+    if loot.using.is_some() && tending.0.is_some() {
+        for (key, action) in [(KeyCode::Digit1, TendAction::Bellows), (KeyCode::Digit2, TendAction::Damper), (KeyCode::Digit3, TendAction::CoolDome)] {
+            if keys.just_pressed(key) {
+                send(&mut client, &LoreClientMessage::Tend(action));
+            }
+        }
+    }
     if keys.just_pressed(KeyCode::KeyK) && !loot.ui_open {
         view.window_open = !view.window_open;
         view.rev += 1;
@@ -470,7 +488,90 @@ struct LorePrompt;
 #[derive(Component)]
 struct KnowledgeWindow;
 
+/// Строка про огонь под сосудом.
+#[derive(Component)]
+struct TendingHud;
+
+/// Знающий видит жар и нагрев купола; новичок — только слышит кипение и видит дым.
+fn tending_lines(t: &TendView, k: &Knowledge) -> (String, bool) {
+    let mut out = Vec::new();
+    let reads_fire = k.knows(Lore::Technique(Technique::Decoction)) || k.knows(Lore::Technique(Technique::Distillation)) || k.skill(Skill::Alchemy) >= 25.0;
+    let diff = t.fire - t.target;
+    let mut danger = false;
+    if reads_fire {
+        let bar: String = (0..12).map(|i| if (i as f32 + 0.5) * FIRE_SCALE / 12.0 <= t.fire { '▮' } else { '▯' }).collect();
+        let want = ["угли", "слабый", "средний", "сильный"][(t.target.round() as usize).min(3)];
+        out.push(format!("Жар {bar}  (нужен {want})"));
+    }
+    let cue = if t.bath {
+        if diff < -0.75 { "Вода в котле перестала кипеть" } else { "Вода в котле кипит ровно — баня держит жар" }
+    } else if diff < -0.75 {
+        "Угли едва тлеют, варево затихло"
+    } else if diff > 0.75 {
+        danger = true;
+        "Клокочет, тянет горелым, дым чернеет!"
+    } else if t.target >= 2.5 {
+        "Гудит сильный огонь, дым светлый"
+    } else {
+        "Ровно побулькивает, дымок светлый"
+    };
+    out.push(cue.to_string());
+    if let Some(d) = t.dome {
+        if k.knows(Lore::Technique(Technique::Distillation)) {
+            let bar: String = (0..10).map(|i| if (i as f32 + 0.5) / 10.0 <= d { '▮' } else { '▯' }).collect();
+            out.push(format!("Купол {bar}"));
+        }
+        let cue = match d {
+            d if d < 0.4 => "Купол тёплый, капает ровно",
+            d if d < 0.75 => "Купол горячий, стекло звенит",
+            _ => {
+                danger = true;
+                "Купол раскалён, стекло потрескивает!"
+            }
+        };
+        out.push(cue.to_string());
+    }
+    let mut keys = "[1] мехи   [2] заслонка".to_string();
+    if t.dome.is_some() {
+        keys.push_str("   [3] мокрая тряпица на купол");
+    }
+    out.push(keys);
+    (out.join("\n"), danger)
+}
+
+/// Предел шкалы жара (раскалено сверх сильного).
+const FIRE_SCALE: f32 = 3.6;
+
+fn update_tending_hud(tending: Res<MyTending>, knowledge: Res<MyKnowledge>, loot: Res<LootState>, mut hud: Single<(&mut Text, &mut TextColor, &mut Node), With<TendingHud>>) {
+    if !tending.is_changed() && !knowledge.is_changed() && !loot.is_changed() {
+        return;
+    }
+    let (text, color, node) = &mut *hud;
+    match tending.0.as_ref().filter(|_| loot.using.is_some()) {
+        Some(t) => {
+            let (line, danger) = tending_lines(t, &knowledge.0);
+            text.0 = line;
+            color.0 = if danger { Color::srgb(1.0, 0.45, 0.3) } else { Color::srgb(0.95, 0.88, 0.7) };
+            node.display = Display::Flex;
+        }
+        None => node.display = Display::None,
+    }
+}
+
 fn setup_lore_ui(mut commands: Commands, fonts: Res<UiFonts>) {
+    commands
+        .spawn(Node { position_type: PositionType::Absolute, width: percent(100), bottom: px(150), justify_content: JustifyContent::Center, ..default() })
+        .with_children(|p| {
+            p.spawn((
+                TendingHud,
+                Text::new(""),
+                TextFont { font: fonts.bold.clone().into(), font_size: bevy::text::FontSize::Px(17.0), ..default() },
+                TextColor(Color::WHITE),
+                TextLayout::justify(Justify::Center),
+                TextShadow::default(),
+                Node { display: Display::None, ..default() },
+            ));
+        });
     commands
         .spawn(Node { position_type: PositionType::Absolute, width: percent(100), top: percent(56), justify_content: JustifyContent::Center, ..default() })
         .with_children(|p| {
@@ -734,6 +835,29 @@ fn dev_shot(
         }
         if *placed == 2 && t > delay - 0.3 {
             fx.bursts.push((at(-1.6, 2.8), BurstFx::Shatter { glass: true }));
+            *placed = 3;
+        }
+    }
+    // `MRPG_SHOT_UI=tend` — поставить жаровню, сварить на ней тысячелистник и раздуть мехами.
+    if ui == "tend"
+        && let Some(client) = client.as_mut()
+    {
+        let find = |name: &str| loot.inventory.as_ref().and_then(|inv| inv.all_items().find(|i| i.info().name == name).map(|i| i.uid));
+        if *placed == 0 && t > delay - 9.0 {
+            if let Some(uid) = find("Жаровня") {
+                send(client, &LoreClientMessage::PlaceStation { uid });
+                *placed = 1;
+            }
+        }
+        if *placed == 1 && t > delay - 6.0 {
+            if let Some(vessel) = find("Глиняный горшок") {
+                let spec = crate::brewing::BrewSpec { items: vec![("Тысячелистник".into(), 2)], water: 8, heat: crate::brewing::Heat::Low, hours: 15.0, bath: false };
+                send(client, &LoreClientMessage::Brew { vessel, spec });
+            }
+            *placed = 2;
+        }
+        if *placed == 2 && t > delay - 1.5 {
+            send(client, &LoreClientMessage::Tend(TendAction::Bellows));
             *placed = 3;
         }
     }

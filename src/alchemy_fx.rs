@@ -610,6 +610,25 @@ fn spawn_rig(commands: &mut Commands, a: &FxAssets, w: &WorkView) -> Entity {
                         }
                     }
                 }
+                Vessel::DryingTray => {
+                    // Плетёная решётка на двух брусках, на ней разложены листья.
+                    c.spawn(part(&a.cube, &a.wood, Transform::from_xyz(0.0, y0 + 0.08, 0.0).with_scale(Vec3::new(0.62, 0.025, 0.42))));
+                    for x in [-0.25, 0.25] {
+                        c.spawn(part(&a.cube, &a.wood, Transform::from_xyz(x, y0 + 0.035, 0.0).with_scale(Vec3::new(0.05, 0.07, 0.44))));
+                    }
+                    let mut r = Rng::new(pos.x.to_bits() as u64 ^ 0x5eed);
+                    for _ in 0..22 {
+                        let (x, z) = (r.range_f32(-0.27, 0.27), r.range_f32(-0.18, 0.18));
+                        c.spawn(part(
+                            &a.chip,
+                            &a.bits[&Bit::Leaf],
+                            Transform::from_xyz(x, y0 + 0.1, z).with_rotation(Quat::from_rotation_y(r.f32() * 6.3)).with_scale(Vec3::new(0.07, 0.02, 0.04)),
+                        ));
+                    }
+                    if fire {
+                        c.spawn((Transform::from_xyz(0.0, y0 + 0.12, 0.0), Visibility::default(), emitter(Emit::Wisp, 1.2)));
+                    }
+                }
                 Vessel::Crucible => {
                     let mat = if fire { &a.hot_crucible } else { &a.clay };
                     c.spawn(part(&a.cylinder, mat, Transform::from_xyz(0.0, y0 + 0.06, 0.0).with_scale(Vec3::new(0.12, 0.12, 0.12))));
@@ -766,6 +785,23 @@ fn burst(commands: &mut Commands, a: &FxAssets, r: &mut Rng, pos: Vec3, fx: Burs
                     delay: r.range_f32(0.0, 1.5),
                 };
                 spawn_cloud(commands, a, Cloud::Toxic, p);
+            }
+        }
+        BurstFx::Bellows => {
+            for _ in 0..16 {
+                let p = P { pos: pos + Vec3::Y * 0.05, vel: ball(r, (0.1, 0.5), 1.8), life: r.range_f32(0.5, 1.1), size: (0.016, 0.004), drag: 0.5, lift: 0.2, delay: 0.0 };
+                spawn_bit(commands, a, Bit::Spark, p, Vec3::ZERO);
+            }
+            for _ in 0..4 {
+                let p = P { pos: pos + Vec3::Y * 0.1, vel: ball(r, (0.05, 0.2), 0.8), life: r.range_f32(0.25, 0.45), size: (0.08, 0.3), drag: 2.0, lift: 1.0, delay: 0.0 };
+                spawn_cloud(commands, a, Cloud::Fire, p);
+            }
+            flash(commands, pos + Vec3::Y * 0.3, Color::srgb(1.0, 0.6, 0.25), 12_000.0, 4.0, 0.35);
+        }
+        BurstFx::Hiss => {
+            for _ in 0..12 {
+                let p = P { pos, vel: ball(r, (0.3, 0.8), 0.6), life: r.range_f32(0.6, 1.1), size: (0.06, 0.32), drag: 2.5, lift: 0.4, delay: 0.0 };
+                spawn_cloud(commands, a, Cloud::Steam, p);
             }
         }
         BurstFx::Gathered => {
