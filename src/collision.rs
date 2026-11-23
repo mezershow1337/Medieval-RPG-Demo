@@ -122,6 +122,16 @@ pub struct LevelColliders(pub Vec<Aabb>, Accel);
 struct Accel {
     grid: Grid,
     ground: Option<std::sync::Arc<HeightField>>,
+    /// Двери: их коробки лежат в конце `.0` (с индекса `first`), открытая дверь не мешает.
+    /// Флаги общие для всех копий ресурса и меняются без `&mut` (сервер и клиент держат
+    /// по своему `LevelColliders`, состояние приходит по сети).
+    doors: std::sync::Arc<DoorFlags>,
+}
+
+#[derive(Default)]
+struct DoorFlags {
+    first: usize,
+    open: Vec<std::sync::atomic::AtomicBool>,
 }
 
 /// Размеры тела персонажа. Позиция персонажа = точка у ног (центр по X/Z, низ по Y).
@@ -155,9 +165,46 @@ pub struct MoveResult {
 pub const STEP_HEIGHT: f32 = 0.5;
 
 impl LevelColliders {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(boxes: Vec<Aabb>, ground: Option<HeightField>) -> Self {
+        Self::with_doors(boxes, ground, Vec::new())
+    }
+
+    /// Коробки уровня плюс двери (коробка закрытой створки и открыта ли она сначала).
+    /// Номер двери — её индекс в `doors`.
+    pub fn with_doors(mut boxes: Vec<Aabb>, ground: Option<HeightField>, doors: Vec<(Aabb, bool)>) -> Self {
+        let first = boxes.len();
+        let open = doors.iter().map(|(_, o)| std::sync::atomic::AtomicBool::new(*o)).collect();
+        boxes.extend(doors.iter().map(|(a, _)| *a));
         let grid = Grid::build(&boxes);
-        LevelColliders(boxes, Accel { grid, ground: ground.map(std::sync::Arc::new) })
+        LevelColliders(boxes, Accel { grid, ground: ground.map(std::sync::Arc::new), doors: std::sync::Arc::new(DoorFlags { first, open }) })
+    }
+
+    pub fn door_count(&self) -> usize {
+        self.1.doors.open.len()
+    }
+
+    pub fn door_open(&self, id: usize) -> bool {
+        self.1.doors.open.get(id).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
+    pub fn set_door_open(&self, id: usize, open: bool) {
+        if let Some(f) = self.1.doors.open.get(id) {
+            f.store(open, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// Коробка закрытой двери.
+    pub fn door_box(&self, id: usize) -> Option<Aabb> {
+        (id < self.door_count()).then(|| self.0[self.1.doors.first + id])
+    }
+
+    /// Открывает или закрывает все двери сразу (для проверок проходимости).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn set_all_doors(&self, open: bool) {
+        for id in 0..self.door_count() {
+            self.set_door_open(id, open);
+        }
     }
 
     /// Высота земли под точкой (минус бесконечность, если карты высот нет).
@@ -170,7 +217,15 @@ impl LevelColliders {
         let g = &self.1.grid;
         let (x0, z0, x1, z1) = if g.cells.is_empty() { (0, 0, -1, -1) } else { g.range(&a) };
         let cells = (z0..=z1).flat_map(move |z| (x0..=x1).map(move |x| (z * g.nx + x) as usize));
-        g.big.iter().chain(cells.flat_map(move |c| g.cells[c].iter())).map(move |&i| &self.0[i as usize])
+        let doors = &self.1.doors;
+        g.big
+            .iter()
+            .chain(cells.flat_map(move |c| g.cells[c].iter()))
+            .filter(move |&&i| {
+                let i = i as usize;
+                i < doors.first || !doors.open.get(i - doors.first).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+            })
+            .map(move |&i| &self.0[i as usize])
     }
 
     /// Коробки, в которые может попасть точка (быстрее, чем перебор всего `.0`).
@@ -319,6 +374,26 @@ mod tests {
         let mut boxes = vec![Aabb::new(Vec3::new(-50.0, -1.0, -50.0), Vec3::new(50.0, 0.0, 50.0))];
         boxes.extend(extra);
         LevelColliders::new(boxes, None)
+    }
+
+    #[test]
+    fn doors_block_only_when_closed() {
+        let mut boxes = vec![Aabb::new(Vec3::new(-50.0, -1.0, -50.0), Vec3::new(50.0, 0.0, 50.0))];
+        boxes.push(Aabb::new(Vec3::new(2.0, 0.0, -5.0), Vec3::new(2.2, 3.0, -0.6)));
+        boxes.push(Aabb::new(Vec3::new(2.0, 0.0, 0.6), Vec3::new(2.2, 3.0, 5.0)));
+        let level = LevelColliders::with_doors(boxes, None, vec![(Aabb::new(Vec3::new(2.05, 0.0, -0.6), Vec3::new(2.15, 2.2, 0.6)), false)]);
+        let copy = level.clone();
+        let walk = |level: &LevelColliders| {
+            let mut feet = Vec3::ZERO;
+            for _ in 0..100 {
+                level.move_body(&Body::STANDING, &mut feet, Vec3::new(0.1, -0.01, 0.0), true);
+            }
+            feet.x
+        };
+        assert!(walk(&level) < 2.0);
+        copy.set_door_open(0, true);
+        assert!(level.door_open(0), "флаги общие у копий");
+        assert!(walk(&level) > 5.0);
     }
 
     #[test]

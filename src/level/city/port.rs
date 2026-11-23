@@ -6,6 +6,9 @@
 use super::kit::{self, Op, Rect, Rng, Side};
 use super::public::{column, peristyle, stall};
 use super::*;
+use super::interior::{self, extras};
+use crate::items::LootTableId as L;
+use crate::level::Role;
 use crate::collision::Aabb;
 use std::f32::consts::FRAC_PI_2;
 
@@ -298,6 +301,21 @@ fn market(b: &mut Builder) {
             }
         }
     }
+    // Лавочники в лавках, моряки в корчме.
+    for (k, (side, room)) in peri.rooms.iter().enumerate() {
+        let c = room.center(0.0);
+        let court = peri.court.center(0.0);
+        if *side == Side::S {
+            extras(b, *room, L::Storehouse, &["Ларь корчмаря"], &[(Role::Sailor, c + Vec3::X * 1.6, c), (Role::Sailor, c - Vec3::X * 1.8, c)], &mut rng);
+        } else {
+            let mut rr = interior::Room::new(b, room.inset(0.05));
+            if let Some((f, _)) = rr.take(1.2, 0.6, &[Side::N, Side::S, Side::W, Side::E], &mut rng) {
+                interior::sacks(b, f, &mut rng);
+            }
+            let keeper: Vec<(Role, Vec3, Vec3)> = if k % 2 == 0 { vec![(Role::Shopkeeper, c, court)] } else { vec![] };
+            extras(b, *room, L::Storehouse, &["Корзина с товаром", "Ларь"], &keeper, &mut rng);
+        }
+    }
 }
 
 pub fn tavern_port_point() -> Vec3 {
@@ -325,14 +343,17 @@ fn customs(b: &mut Builder) {
     let r = customs_rect();
     b.at(r.cx(), r.cz());
     let mut rng = Rng::new(1919);
-    let peri = peristyle(b, r, 6.5, 4.6, Mat::OpusMixtum, &[(Side::E, r.z0 + 10.0), (Side::N, r.cx())], [2, 2, 2, 2], false);
+    let peri = peristyle(b, r, 6.5, 4.6, Mat::OpusMixtum, &[(Side::E, r.z0 + 10.0), (Side::N, r.cx())], [1, 2, 2, 2], false);
     b.decor([peri.court.x0, 0.0, peri.court.z0], [peri.court.x1, 0.03, peri.court.z1], Mat::Paving);
     let court = peri.court;
     if let Some((_, room)) = peri.rooms.iter().find(|(s, r)| *s == Side::N && r.cx() > court.x0 && r.cx() < court.x1) {
         let c = room.center(0.0);
         kit::table(b, Rect::new(c.x - 1.2, c.z - 0.5, c.x + 1.2, c.z + 0.5), 0.85);
+        b.loot(L::Storehouse);
         kit::chest(b, Vec3::new(c.x + 2.0, 0.0, room.z0 + 0.5), true);
         b.lamp(c + Vec3::Y * 2.6, Color::srgb(1.0, 0.72, 0.45), 6_000.0, 7.0);
+        interior::desk_codex(b, Rect::new(c.x - 2.6, room.z0 + 0.3, c.x - 1.6, room.z0 + 1.0));
+        extras(b, *room, L::Wealthy, &["Ларь с пошлиной"], &[(Role::Officer, c + Vec3::Z * 1.0, c)], &mut rng);
     }
     // Безмен на треноге посреди двора.
     let s = peri.court.center(0.0);
@@ -382,5 +403,7 @@ fn horrea(b: &mut Builder) {
             }
         }
         b.lamp(r.center(3.5), Color::srgb(1.0, 0.72, 0.45), 4_000.0, 8.0);
+        let roles: Vec<(Role, Vec3, Vec3)> = if i == 18 { vec![(Role::Servant, r.center(0.0) + Vec3::new(-1.0, 0.0, 3.0), r.center(0.0))] } else { vec![] };
+        extras(b, r.inset(0.85), L::Storehouse, &["Ларь", "Корзина", "Ларь"], &roles, &mut rng);
     }
 }

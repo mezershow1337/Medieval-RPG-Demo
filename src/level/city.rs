@@ -19,6 +19,7 @@
 
 pub(crate) mod crafts;
 pub(crate) mod houses;
+pub(crate) mod interior;
 pub(crate) mod kit;
 pub(crate) mod outside;
 pub(crate) mod port;
@@ -156,6 +157,13 @@ pub fn edge_distance(x: f32, z: f32) -> f32 {
 
 pub fn city_layout() -> Layout {
     let mut b = Builder::new();
+    // Где стоят торговцы, учителя и стража (несколько торговцев одного места — через 2,4 м).
+    for p in super::places::places() {
+        for dx in [0.0, 2.4, -2.4] {
+            b.keep_clear.push(p.pos + Vec3::X * dx);
+        }
+    }
+    b.keep_clear.extend(super::places::npc_posts().iter().map(|p| p.pos));
 
     walls::fortifications(&mut b);
     streets(&mut b);
@@ -342,6 +350,8 @@ mod tests {
     #[test]
     fn places_inside_walls_are_reachable() {
         let level = level();
+        // Двери открыты: проверяем, что комнаты не замурованы мебелью и жителями.
+        level.set_all_doors(true);
         let cell = 0.4;
         let (x0, z0) = (-305.0f32, -170.0f32);
         let (nx, nz) = ((610.0 / cell) as i32, (345.0 / cell) as i32);
@@ -432,5 +442,40 @@ mod tests {
             }
         }
         assert!(block_fits(10, -3) && block_fits(10, 3));
+    }
+}
+
+#[cfg(test)]
+mod interior_tests {
+    use super::*;
+    use crate::collision::Body;
+
+    /// Город обжит: двери, сундуки и жители есть, и мебель не загораживает двери.
+    #[test]
+    fn interiors_are_lived_in_and_doors_passable() {
+        let layout = city_layout();
+        assert!(layout.doors.len() > 1500, "дверей мало: {}", layout.doors.len());
+        assert!(layout.containers.len() > 1500, "сундуков мало: {}", layout.containers.len());
+        assert!(layout.residents.len() > 600, "жителей мало: {}", layout.residents.len());
+        let doors = layout.doors.clone();
+        let level = super::super::colliders(layout);
+        level.set_all_doors(true);
+        let mut blocked = Vec::new();
+        for d in doors.iter().filter(|d| d.center.y < 0.5 && d.width < 2.5) {
+            let across = if d.along_x { Vec3::Z } else { Vec3::X };
+            // Сквозь проём и по полметра за ним с обеих сторон.
+            for k in [-1.0f32, 0.0, 1.0] {
+                let p = d.center + across * (k * (d.wall_t / 2.0 + 0.45)) + Vec3::Y * 0.1;
+                // Низкую скамью перешагнуть можно.
+                let free = level.body_is_free(&Body::STANDING, p) || level.body_is_free(&Body::STANDING, p + Vec3::Y * 0.5);
+                if level.ground_height(p.x, p.z) < 0.3 && !free {
+                    let a = Body::STANDING.aabb_at(p);
+                    let hits: Vec<String> = level.0.iter().filter(|c| c.overlaps(&a)).map(|c| format!("[{:.2} {:.2} {:.2}]-[{:.2} {:.2} {:.2}]", c.min.x, c.min.y, c.min.z, c.max.x, c.max.y, c.max.z)).collect();
+                    blocked.push(format!("{} ({k}) {hits:?}", d.center));
+                    break;
+                }
+            }
+        }
+        assert!(blocked.len() < 3, "загорожено {} дверей: {:?}", blocked.len(), &blocked[..blocked.len().min(20)]);
     }
 }

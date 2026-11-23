@@ -42,7 +42,8 @@ impl Plugin for LootServerPlugin {
             .add_observer(on_connection)
             .add_observer(on_character_died)
             .add_observer(on_spawn_ground_item)
-            .add_systems(Startup, spawn_demo_loot)
+            .add_systems(Startup, (spawn_demo_loot, spawn_world_containers))
+            .add_systems(Update, refill_world_containers)
             .add_systems(Update, (sync_combat_corpses, receive_loot_messages, close_far_containers).chain());
     }
 }
@@ -114,6 +115,8 @@ pub struct LootWorld {
     linked: HashSet<u64>,
     pub rng: Rng,
     pub uids: UidGen,
+    /// Сундуки уровня: что в них кладётся и с какого времени пусты.
+    fixed: HashMap<LootId, (LootTableId, Option<f32>)>,
 }
 
 impl Default for LootWorld {
@@ -128,6 +131,7 @@ impl Default for LootWorld {
             open: HashMap::new(),
             rng: Rng::from_time(),
             uids: UidGen::default(),
+            fixed: HashMap::new(),
         }
     }
 }
@@ -333,6 +337,54 @@ fn on_spawn_ground_item(event: On<SpawnGroundItem>, mut server: ResMut<RenetServ
     world.spawn_ground(&mut server, &level, ev.pos, ev.vel, ev.item);
 }
 
+/// Через сколько секунд опустевший сундук снова наполняется (хозяева докупают, воры приходят снова).
+const REFILL_AFTER: f32 = 20.0 * 60.0;
+
+fn container_inventory(world: &mut LootWorld, table: LootTableId) -> Inventory {
+    let items = world.roll(table, 0.0);
+    let mut inv = Inventory::new(CORPSE_GRID);
+    inv.fill(items, false);
+    inv
+}
+
+/// Сундуки, шкафы и корзины в домах, лавках и казармах (места задаёт уровень).
+fn spawn_world_containers(mut world: ResMut<LootWorld>) {
+    for (i, c) in crate::level::layout().containers.iter().enumerate() {
+        let id = CONTAINER_ID_BASE + i as LootId;
+        let inv = container_inventory(&mut world, c.table);
+        world.fixed.insert(id, (c.table, None));
+        world.corpses.insert(id, Corpse { pos: c.pos, yaw: 0.0, name: c.name.to_string(), inv, created: 0, own_model: false });
+    }
+}
+
+fn refill_world_containers(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMut<LootWorld>, mut next: Local<f32>) {
+    let now = time.elapsed_secs();
+    if now < *next {
+        return;
+    }
+    *next = now + 10.0;
+    let ids: Vec<LootId> = world.fixed.keys().copied().collect();
+    for id in ids {
+        let empty = world.corpses.get(&id).is_some_and(|c| c.inv.is_empty());
+        let open = world.open.values().any(|o| *o == id);
+        let (table, since) = world.fixed[&id];
+        match (empty, since) {
+            (false, _) => world.fixed.insert(id, (table, None)),
+            (true, None) => world.fixed.insert(id, (table, Some(now))),
+            (true, Some(t)) if now - t > REFILL_AFTER && !open => {
+                let inv = container_inventory(&mut world, table);
+                let now_empty = inv.is_empty();
+                if let Some(c) = world.corpses.get_mut(&id) {
+                    c.inv = inv;
+                }
+                server.broadcast_message(CH_LOOT, encode(&LootServerMessage::CorpseEmpty { id, empty: now_empty }));
+                world.fixed.insert(id, (table, if now_empty { Some(now) } else { None }))
+            }
+            _ => None,
+        };
+    }
+}
+
 /// Одно тело и немного вещей во дворе у точки появления, чтобы сразу было что обыскать.
 fn spawn_demo_loot(mut commands: Commands) {
     commands.trigger(CharacterDied {
@@ -370,6 +422,10 @@ fn receive_loot_messages(
                     if let Some(c) = world.corpses.get(&id) {
                         if !in_reach(feet, c.pos) {
                             notice(&mut server, pid, "Слишком далеко");
+                            continue;
+                        }
+                        if id >= CONTAINER_ID_BASE && !crate::combat::line_of_sight(&level, feet + Vec3::Y * 1.6, c.pos) {
+                            notice(&mut server, pid, "Не дотянуться");
                             continue;
                         }
                         let msg = LootServerMessage::ContainerOpened { id, title: c.name.clone(), inv: c.inv.clone() };

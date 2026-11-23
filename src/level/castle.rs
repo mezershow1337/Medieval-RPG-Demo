@@ -505,6 +505,13 @@ fn cathedral(b: &mut Builder) {
             b.solid([x + dx - 0.2, 0.0, -38.0], [x + dx + 0.2, 0.45, -24.0], Mat::Wood);
         }
     }
+    // Священник у хоров, монах у колонн.
+    {
+        use super::city::interior::extras;
+        let mut rng = super::city::kit::Rng::new(808);
+        let r = super::city::kit::Rect::new(-NAVE_HALF + 1.0, cz1 + 0.5, NAVE_HALF - 1.0, cz1 + 6.0);
+        extras(b, r, crate::items::LootTableId::Church, &["Ризничий ларь"], &[(Role::Priest, Vec3::new(0.0, 0.0, cz1 + 1.5), Vec3::new(0.0, 0.0, 0.0)), (Role::Monk, Vec3::new(4.0, 0.0, cz1 + 4.0), Vec3::new(0.0, 0.0, cz1))], &mut rng);
+    }
     // Люстры над нефом.
     for z in [-30.0, -42.0, -54.0] {
         b.chandelier(Vec3::new(0.0, 6.5, z), 15.6);
@@ -693,6 +700,21 @@ fn barracks(b: &mut Builder) {
     b.solid([37.0, 0.0, -58.0], [40.0, 0.9, -56.5], Mat::Wood);
     b.lamp(Vec3::new(39.0, 3.5, -52.0), Color::srgb(1.0, 0.65, 0.35), 25_000.0, 10.0);
     b.lamp(Vec3::new(39.0, 3.5, -60.0), Color::srgb(1.0, 0.65, 0.35), 20_000.0, 9.0);
+
+    // Обитатели и сундуки: стража в спальнях и арсенале, кашевар в трапезной, кладовщик.
+    use super::city::interior::{self, extras};
+    use crate::items::LootTableId as L;
+    let mut rng = super::city::kit::Rng::new(606);
+    let rect = |xa: f32, za: f32, xb: f32, zb: f32| super::city::kit::Rect::new(xa, za, xb, zb);
+    let p = |x: f32, z: f32| Vec3::new(x, 0.0, z);
+    extras(b, rect(x0 + 1.0, south_split + 0.2, cx0 - 0.4, z1 - 1.0), L::Barracks, &["Сундук стражника", "Сундук стражника"], &[(Role::Soldier, p(26.0, -22.0), p(24.0, -23.0))], &mut rng);
+    extras(b, rect(x0 + 1.0, cz1 + 0.4, cx0 - 0.4, south_split - 0.2), L::Barracks, &["Сундук стражника"], &[(Role::Soldier, p(26.0, -34.0), p(22.0, -34.0))], &mut rng);
+    extras(b, rect(cx1 + 0.4, cz1 + 0.4, x1, z1 - 1.0), L::Storehouse, &["Ларь", "Корзина"], &[(Role::Servant, p(39.0, -27.0), p(43.0, -27.0))], &mut rng);
+    extras(b, rect(x0 + 1.0, z0, cx0 - 0.4, cz0 - 0.4), L::Kitchen, &["Корзина с припасами", "Шкаф с посудой"], &[(Role::Cook, p(28.0, -55.0), p(24.0, -55.0))], &mut rng);
+    extras(b, rect(cx1 + 0.4, z0, x1, cz0 - 0.4), L::Barracks, &["Оружейный сундук"], &[(Role::Officer, p(38.5, -54.0), p(42.0, -54.0))], &mut rng);
+    for (z, light) in [(-24.0, true), (-36.0, false)] {
+        interior::lampstand(b, p(29.0, z), light);
+    }
 }
 
 fn surroundings(b: &mut Builder) {
@@ -759,6 +781,7 @@ mod tests {
     #[test]
     fn spawn_points_are_free() {
         let level = colliders(castle_layout());
+        level.set_all_doors(true);
         for i in 0..16 {
             assert!(free(&level, spawn_point(i)), "точка появления {i} в стене: {}", spawn_point(i));
         }
@@ -778,6 +801,7 @@ mod tests {
     #[test]
     fn key_passages_are_open() {
         let level = colliders(castle_layout());
+        level.set_all_doors(true);
         let checks = [
             ("проезд надвратной башни", Vec3::new(0.0, 0.05, 45.0)),
             ("внутренние ворота", Vec3::new(0.0, 0.05, -6.5)),
@@ -812,6 +836,7 @@ mod tests {
     #[test]
     fn walk_gate_to_choir_and_up_the_stairs() {
         let level = colliders(castle_layout());
+        level.set_all_doors(true);
         let walk = |path: &[Vec3]| {
             let mut feet = path[0];
             for target in &path[1..] {

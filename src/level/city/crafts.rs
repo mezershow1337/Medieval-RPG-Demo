@@ -3,6 +3,9 @@
 use super::kit::{self, Op, Rect, Rng, Side};
 use super::public::{column, floor_around, snap_hole};
 use super::*;
+use super::interior::extras;
+use crate::items::LootTableId as L;
+use crate::level::Role;
 use crate::collision::Aabb;
 
 /// Ванна-цистерна в земле: стенки и дно из цемянки, ступени в углу, вода (рассол).
@@ -54,10 +57,15 @@ pub fn fish_salting(b: &mut Builder, r: Rect, variant: u32) {
     kit::gable_roof(b, sh, 3.6, 1.6, true, 0.3, Mat::Wood);
     // Склад: амфоры штабелями, кучи соли.
     let st = Rect::new(r.x0 + 1.0, g.z1 + 4.0, r.x0 + 12.0, (g.z1 + 13.0).min(r.z1 - 1.0));
-    kit::wall_x(b, st.x0, st.x1, st.z0 + 0.3, 0.6, 3.4, &[Op::Door { s: st.cx(), w: 1.6, h: 2.5 }], Mat::Rubble);
+    // Дверь — к цистернам; если там вплотную городская стена — с востока.
+    let door = [Op::Door { s: st.cx(), w: 1.6, h: 2.5 }];
+    let side_door = [Op::Door { s: st.cz(), w: 1.6, h: 2.5 }];
+    let to_wall = edge_distance(st.cx(), st.z0 - 1.0) < 4.0;
+    let none: [Op; 0] = [];
+    kit::wall_x(b, st.x0, st.x1, st.z0 + 0.3, 0.6, 3.4, if to_wall { &none } else { &door }, Mat::Rubble);
     kit::wall_x(b, st.x0, st.x1, st.z1 - 0.3, 0.6, 3.4, &[], Mat::Rubble);
     kit::wall_z(b, st.z0 + 0.6, st.z1 - 0.6, st.x0 + 0.3, 0.6, 3.4, &[], Mat::Rubble);
-    kit::wall_z(b, st.z0 + 0.6, st.z1 - 0.6, st.x1 - 0.3, 0.6, 3.4, &[], Mat::Rubble);
+    kit::wall_z(b, st.z0 + 0.6, st.z1 - 0.6, st.x1 - 0.3, 0.6, 3.4, if to_wall { &side_door } else { &none }, Mat::Rubble);
     kit::gable_roof(b, st, 3.4, 1.4, true, 0.4, Mat::Rubble);
     for row in 0..3 {
         for k in 0..12 {
@@ -92,6 +100,7 @@ pub fn fish_salting(b: &mut Builder, r: Rect, variant: u32) {
     // Ограда комплекса со стороны улиц.
     kit::wall_x(b, r.x0, r.x1, r.z0 + 0.3, 0.6, 2.6, &[Op::Door { s: r.cx() + 5.0, w: 2.4, h: 2.4 }], Mat::Rubble);
     kit::wall_x(b, r.x0, r.x1, r.z1 - 0.3, 0.6, 2.6, &[Op::Door { s: r.cx(), w: 2.4, h: 2.4 }], Mat::Rubble);
+    extras(b, r.inset(1.0), L::Storehouse, &["Корзина с рыбой"], &[(Role::Craftsman, r.center(0.0) + Vec3::new(-3.0, 0.0, 2.0), r.center(0.0)), (Role::Craftsman, r.center(0.0) + Vec3::new(4.0, 0.0, -2.0), r.center(0.0))], &mut rng);
 }
 
 pub fn fish_salting_point() -> Vec3 {
@@ -159,6 +168,8 @@ pub fn glassworks(b: &mut Builder) {
     for k in 0..3 {
         b.solid([shed.x0 + 3.5 + k as f32 * 0.9, 0.0, shed.z0 + 1.0], [shed.x0 + 4.2 + k as f32 * 0.9, 0.7, shed.z0 + 1.6], Mat::Canvas);
     }
+    // Стеклодув у печи, подмастерье у стола; ящик с бракованным стеклом и инструментом.
+    extras(b, shed.inset(0.6), L::Workshop, &["Ящик стеклодува", "Корзина"], &[(Role::Craftsman, f + Vec3::new(2.4, 0.0, 0.0), f), (Role::Craftsman, t.center(0.0) + Vec3::Z * -1.0, t.center(0.0))], &mut rng);
 }
 
 // ---------------- гончарная мастерская ----------------
@@ -205,6 +216,8 @@ pub fn pottery(b: &mut Builder) {
     }
     kit::woodpile(b, Rect::new(r.x0 + 12.0, r.z0 + 2.0, r.x0 + 15.0, r.z0 + 3.0), 1.2);
     kit::wall_x(b, r.x0, r.x1, r.z1 - 0.3, 0.6, 2.4, &[], Mat::Rubble);
+    extras(b, sh.inset(0.3), L::Workshop, &["Ящик гончара"], &[(Role::Craftsman, w + Vec3::new(0.0, 0.0, 1.2), w)], &mut rng);
+    extras(b, r.inset(1.0), L::Kitchen, &[], &[(Role::Craftsman, cl + Vec3::new(2.0, 0.0, 0.0), cl)], &mut rng);
 }
 
 /// Горновая печь: круглое тело, топочный канал с углями, обжигательная камера под куполом.
@@ -280,6 +293,7 @@ pub fn smithy(b: &mut Builder) {
     for k in 0..4 {
         b.mesh(Mat::Iron).beam(Vec3::new(w.x0 - 3.0 + k as f32 * 0.4, 0.05, w.z1 + 2.0), Vec3::new(w.x0 - 2.0 + k as f32 * 0.4, 0.05, w.z1 + 3.0), 0.04, 0.04, Vec3::Y);
     }
+    extras(b, w.inset(0.5), L::Workshop, &["Ящик кузнеца"], &[(Role::Craftsman, a + Vec3::new(0.0, 0.0, 1.0), a), (Role::Child, f + Vec3::new(0.0, 0.0, -1.6), f)], &mut rng);
 }
 
 // ---------------- винодельня ----------------
@@ -328,4 +342,6 @@ pub fn winery(b: &mut Builder) {
         }
         kit::vine_row(b, Vec3::new(r.x0 + 2.0, 0.0, z), Vec3::new(r.x1 - 2.0, 0.0, z), 1.6);
     }
+    let mut rng = Rng::new(2929);
+    extras(b, hall.inset(0.8), L::Storehouse, &["Ларь винодела", "Корзина"], &[(Role::Craftsman, wt + Vec3::new(1.5, 0.0, 1.2), wt), (Role::Farmer, hall.center(0.0) + Vec3::Z * 3.0, hall.center(0.0))], &mut rng);
 }

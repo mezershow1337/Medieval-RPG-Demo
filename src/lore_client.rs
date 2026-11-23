@@ -40,16 +40,16 @@ impl MyKnowledge {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum LoreTarget {
+pub enum LoreTarget {
     Patch(u32),
     Master(u32),
 }
 
 #[derive(Resource, Default)]
-struct LoreView {
+pub struct LoreView {
     patches: HashMap<u32, (PatchView, Entity)>,
     masters: HashMap<u32, (MasterView, Entity)>,
-    target: Option<LoreTarget>,
+    pub target: Option<LoreTarget>,
     window_open: bool,
     /// Окно знаний перестраивается, когда это число меняется.
     rev: u64,

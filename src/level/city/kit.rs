@@ -2,7 +2,7 @@
 //! утварь (амфоры, пифосы, столы, ложа), деревья.
 
 use super::super::geom::{self, MeshBuilder, WallFrame, arch_height};
-use super::super::{Builder, Mat};
+use super::super::{Builder, DoorSpec, Mat};
 use crate::collision::Aabb;
 use bevy::prelude::*;
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
@@ -85,17 +85,27 @@ pub enum Op {
     Window { s: f32, w: f32, sill: f32, top: f32 },
     /// Полукруглая арка (проход): пята арки на высоте `spring`.
     Arch { s: f32, w: f32, spring: f32 },
+    /// Дверь на верхний этаж: проём от `sill` до `top` (с дверью).
+    Upper { s: f32, w: f32, sill: f32, top: f32 },
 }
 
 impl Op {
+    /// Просвет проёма по высоте (от и до) в стене от `y0` до `y1`.
+    fn gap(&self, y0: f32, y1: f32) -> (f32, f32) {
+        match *self {
+            Op::Door { h, .. } => (y0, (y0 + h).min(y1)),
+            Op::Window { sill, top, .. } | Op::Upper { sill, top, .. } => ((y0 + sill).min(y1), (y0 + top).min(y1)),
+            Op::Arch { w, spring, .. } => (y0, (y0 + spring + w / 2.0).min(y1)),
+        }
+    }
     fn s(&self) -> f32 {
         match *self {
-            Op::Door { s, .. } | Op::Window { s, .. } | Op::Arch { s, .. } => s,
+            Op::Door { s, .. } | Op::Window { s, .. } | Op::Arch { s, .. } | Op::Upper { s, .. } => s,
         }
     }
     fn w(&self) -> f32 {
         match *self {
-            Op::Door { w, .. } | Op::Window { w, .. } | Op::Arch { w, .. } => w,
+            Op::Door { w, .. } | Op::Window { w, .. } | Op::Arch { w, .. } | Op::Upper { w, .. } => w,
         }
     }
 }
@@ -114,68 +124,124 @@ pub fn wall(b: &mut Builder, f: WallFrame, s0: f32, s1: f32, d0: f32, d1: f32, y
     ops.sort_by(|a, b| a.s().total_cmp(&b.s()));
     let mut cursor = s0;
     let dm = (d0 + d1) / 2.0;
-    for o in ops {
-        let (l, r) = (o.s() - o.w() / 2.0, o.s() + o.w() / 2.0);
-        b.solid_v(f.bounds((cursor, l), (y0, y1), (d0, d1)), mat);
-        match o {
-            Op::Door { h, .. } => {
-                let top = (y0 + h).min(y1);
-                b.solid_v(f.bounds((l, r), (top, y1), (d0, d1)), mat);
-                // Деревянная перемычка и каменные откосы.
-                let (a, c) = f.bounds((l - 0.25, r + 0.25), (top - 0.02, top + 0.22), (d0 - 0.03, d1 + 0.03));
-                b.mesh(Mat::Wood).cuboid(a, c);
-                for s in [l, r] {
-                    let (a, c) = f.bounds((s - 0.16, s + 0.16), (y0, top), (d0 - 0.02, d1 + 0.02));
-                    b.mesh(trim).cuboid(a, c);
-                }
-                // Порог.
-                let (a, c) = f.bounds((l, r), (y0, y0 + 0.06), (d0, d1));
-                b.mesh(trim).cuboid(a, c);
+    let mut i = 0;
+    while i < ops.len() {
+        // Проёмы, стоящие друг над другом (дверь внизу, окно второго этажа над ней), — одной группой.
+        let mut group = vec![ops[i]];
+        let (mut gl, mut gr) = (ops[i].s() - ops[i].w() / 2.0, ops[i].s() + ops[i].w() / 2.0);
+        while i + 1 < ops.len() && ops[i + 1].s() - ops[i + 1].w() / 2.0 < gr {
+            i += 1;
+            let o = ops[i];
+            gl = gl.min(o.s() - o.w() / 2.0);
+            gr = gr.max(o.s() + o.w() / 2.0);
+            group.push(o);
+        }
+        i += 1;
+        b.solid_v(f.bounds((cursor, gl), (y0, y1), (d0, d1)), mat);
+        if group.len() == 1 {
+            opening(b, f, group[0], gl, gr, y0, y1, d0, d1, dm, mat, trim);
+        } else {
+            // Сплошная кладка между просветами, обрамления — от каждого проёма.
+            let mut gaps: Vec<(f32, f32)> = group.iter().map(|o| o.gap(y0, y1)).collect();
+            gaps.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let mut y = y0;
+            for (lo, hi) in gaps {
+                b.solid_v(f.bounds((gl, gr), (y, lo), (d0, d1)), mat);
+                y = y.max(hi);
             }
-            Op::Window { sill, top, .. } => {
-                let (sill, top) = ((y0 + sill).min(y1), (y0 + top).min(y1));
-                b.solid_v(f.bounds((l, r), (y0, sill), (d0, d1)), mat);
-                b.solid_v(f.bounds((l, r), (top, y1), (d0, d1)), mat);
-                let (a, c) = f.bounds((l - 0.12, r + 0.12), (sill - 0.08, sill), (d0 - 0.06, d1 + 0.06));
-                b.mesh(trim).cuboid(a, c);
-                let (a, c) = f.bounds((l - 0.15, r + 0.15), (top, top + 0.16), (d0 - 0.03, d1 + 0.03));
-                b.mesh(Mat::Wood).cuboid(a, c);
-                // Деревянная решётка посередине толщины.
-                let m = b.mesh(Mat::Wood);
-                let bars = ((r - l) / 0.18).floor().max(1.0) as usize;
-                for k in 1..=bars {
-                    let s = l + (r - l) * k as f32 / (bars + 1) as f32;
-                    let (a, c) = f.bounds((s - 0.02, s + 0.02), (sill, top), (dm - 0.02, dm + 0.02));
-                    m.cuboid(a, c);
+            b.solid_v(f.bounds((gl, gr), (y, y1), (d0, d1)), mat);
+            for o in group {
+                let (l, r) = (o.s() - o.w() / 2.0, o.s() + o.w() / 2.0);
+                let n = b.blocks.len();
+                opening(b, f, o, l, r, y0, y1, d0, d1, dm, mat, trim);
+                // Кладку вокруг уже положили выше.
+                let mut k = n;
+                while k < b.blocks.len() {
+                    if b.blocks[k].solid {
+                        b.blocks.remove(k);
+                    } else {
+                        k += 1;
+                    }
                 }
-                let (a, c) = f.bounds((l, r), ((sill + top) / 2.0 - 0.02, (sill + top) / 2.0 + 0.02), (dm - 0.02, dm + 0.02));
-                m.cuboid(a, c);
-                b.invisible.push(Aabb::new(f.p(l, sill, dm - 0.05), f.p(r, top, dm + 0.05)));
-            }
-            Op::Arch { w, spring, .. } => {
-                let apex = (y0 + spring + w / 2.0).min(y1);
-                b.solid_v(f.bounds((l, r), (apex, y1), (d0, d1)), mat);
-                let q = w / 4.0;
-                let band = y0 + spring + arch_height(q, w, w / 2.0);
-                b.solid_v(f.bounds((l, l + q * 0.6), (band, apex), (d0, d1)), mat);
-                b.solid_v(f.bounds((r - q * 0.6, r), (band, apex), (d0, d1)), mat);
-                let mut infill = std::mem::take(b.mesh(mat));
-                let mut tr = std::mem::take(b.mesh(trim));
-                geom::arch_infill(&mut infill, &mut tr, f, o.s(), w, y0 + spring, w / 2.0, apex, d0, d1);
-                for s in [l, r] {
-                    let (a, c) = f.bounds((s - 0.14, s + 0.14), (y0, y0 + spring), (d0 - 0.04, d1 + 0.04));
-                    tr.cuboid(a, c);
-                    // Импост.
-                    let (a, c) = f.bounds((s - 0.25, s + 0.25), (y0 + spring - 0.2, y0 + spring), (d0 - 0.1, d1 + 0.1));
-                    tr.cuboid(a, c);
-                }
-                *b.mesh(mat) = infill;
-                *b.mesh(trim) = tr;
             }
         }
-        cursor = r;
+        cursor = gr;
     }
     b.solid_v(f.bounds((cursor, s1), (y0, y1), (d0, d1)), mat);
+}
+
+/// Один проём: кладка над и под ним, обрамление, решётка, дверь.
+fn opening(b: &mut Builder, f: WallFrame, o: Op, l: f32, r: f32, y0: f32, y1: f32, d0: f32, d1: f32, dm: f32, mat: Mat, trim: Mat) {
+    match o {
+        Op::Door { h, w, .. } => {
+            let top = (y0 + h).min(y1);
+            // Створка: двустворчатые ворота и ставни лавок (широкие — открыты днём).
+            b.door(DoorSpec { center: f.p(o.s(), y0, dm), along_x: f.along_x, width: w, height: top - y0, wall_t: d1 - d0, double: w > 1.9, open: w > 2.5 });
+            b.solid_v(f.bounds((l, r), (top, y1), (d0, d1)), mat);
+            // Деревянная перемычка и каменные откосы.
+            let (a, c) = f.bounds((l - 0.25, r + 0.25), (top - 0.02, top + 0.22), (d0 - 0.03, d1 + 0.03));
+            b.mesh(Mat::Wood).cuboid(a, c);
+            for s in [l, r] {
+                let (a, c) = f.bounds((s - 0.16, s + 0.16), (y0, top), (d0 - 0.02, d1 + 0.02));
+                b.mesh(trim).cuboid(a, c);
+            }
+            // Порог.
+            let (a, c) = f.bounds((l, r), (y0, y0 + 0.06), (d0, d1));
+            b.mesh(trim).cuboid(a, c);
+        }
+        Op::Window { sill, top, .. } => {
+            let (sill, top) = ((y0 + sill).min(y1), (y0 + top).min(y1));
+            b.solid_v(f.bounds((l, r), (y0, sill), (d0, d1)), mat);
+            b.solid_v(f.bounds((l, r), (top, y1), (d0, d1)), mat);
+            let (a, c) = f.bounds((l - 0.12, r + 0.12), (sill - 0.08, sill), (d0 - 0.06, d1 + 0.06));
+            b.mesh(trim).cuboid(a, c);
+            let (a, c) = f.bounds((l - 0.15, r + 0.15), (top, top + 0.16), (d0 - 0.03, d1 + 0.03));
+            b.mesh(Mat::Wood).cuboid(a, c);
+            // Деревянная решётка посередине толщины.
+            let m = b.mesh(Mat::Wood);
+            let bars = ((r - l) / 0.18).floor().max(1.0) as usize;
+            for k in 1..=bars {
+                let s = l + (r - l) * k as f32 / (bars + 1) as f32;
+                let (a, c) = f.bounds((s - 0.02, s + 0.02), (sill, top), (dm - 0.02, dm + 0.02));
+                m.cuboid(a, c);
+            }
+            let (a, c) = f.bounds((l, r), ((sill + top) / 2.0 - 0.02, (sill + top) / 2.0 + 0.02), (dm - 0.02, dm + 0.02));
+            m.cuboid(a, c);
+            b.invisible.push(Aabb::new(f.p(l, sill, dm - 0.05), f.p(r, top, dm + 0.05)));
+        }
+        Op::Upper { sill, top, w, .. } => {
+            let (sill, top) = ((y0 + sill).min(y1), (y0 + top).min(y1));
+            b.solid_v(f.bounds((l, r), (y0, sill), (d0, d1)), mat);
+            b.solid_v(f.bounds((l, r), (top, y1), (d0, d1)), mat);
+            let (a, c) = f.bounds((l - 0.25, r + 0.25), (top - 0.02, top + 0.22), (d0 - 0.03, d1 + 0.03));
+            b.mesh(Mat::Wood).cuboid(a, c);
+            for s in [l, r] {
+                let (a, c) = f.bounds((s - 0.16, s + 0.16), (sill, top), (d0 - 0.02, d1 + 0.02));
+                b.mesh(trim).cuboid(a, c);
+            }
+            b.door(DoorSpec { center: f.p(o.s(), sill, dm), along_x: f.along_x, width: w, height: top - sill, wall_t: d1 - d0, double: false, open: false });
+        }
+        Op::Arch { w, spring, .. } => {
+            let apex = (y0 + spring + w / 2.0).min(y1);
+            b.solid_v(f.bounds((l, r), (apex, y1), (d0, d1)), mat);
+            let q = w / 4.0;
+            let band = y0 + spring + arch_height(q, w, w / 2.0);
+            b.solid_v(f.bounds((l, l + q * 0.6), (band, apex), (d0, d1)), mat);
+            b.solid_v(f.bounds((r - q * 0.6, r), (band, apex), (d0, d1)), mat);
+            let mut infill = std::mem::take(b.mesh(mat));
+            let mut tr = std::mem::take(b.mesh(trim));
+            geom::arch_infill(&mut infill, &mut tr, f, o.s(), w, y0 + spring, w / 2.0, apex, d0, d1);
+            for s in [l, r] {
+                let (a, c) = f.bounds((s - 0.14, s + 0.14), (y0, y0 + spring), (d0 - 0.04, d1 + 0.04));
+                tr.cuboid(a, c);
+                // Импост.
+                let (a, c) = f.bounds((s - 0.25, s + 0.25), (y0 + spring - 0.2, y0 + spring), (d0 - 0.1, d1 + 0.1));
+                tr.cuboid(a, c);
+            }
+            *b.mesh(mat) = infill;
+            *b.mesh(trim) = tr;
+        }
+    }
 }
 
 /// Стена вдоль X на линии `z` (толщина `t`, по центру).
@@ -411,7 +477,14 @@ pub fn bed(b: &mut Builder, r: Rect) {
 }
 
 /// Сундук.
+/// Сундук, который можно обыскать (добыча — по текущей таблице сборщика).
 pub fn chest(b: &mut Builder, p: Vec3, along_x: bool) {
+    chest_body(b, p, along_x);
+    b.container(p + Vec3::Y * 0.7, "Сундук");
+}
+
+/// Только сам сундук (без добычи).
+pub fn chest_body(b: &mut Builder, p: Vec3, along_x: bool) {
     let (hx, hz) = if along_x { (0.5, 0.3) } else { (0.3, 0.5) };
     b.solid([p.x - hx, 0.0, p.z - hz], [p.x + hx, 0.55, p.z + hz], Mat::Wood);
     let m = b.mesh(Mat::Iron);

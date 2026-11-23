@@ -4,6 +4,9 @@
 
 use super::kit::{self, Op, Rect, Rng, Side};
 use super::*;
+use super::interior::{self, extras};
+use crate::items::LootTableId as L;
+use crate::level::Role;
 use crate::collision::Aabb;
 use std::f32::consts::{FRAC_PI_2, PI};
 
@@ -439,6 +442,19 @@ pub fn basilica(b: &mut Builder) {
         polycandelon(b, Vec3::new(n.x0 + 5.0 + k as f32 * 6.5, 4.0, n.cz()), nave_h - 0.4);
     }
     b.lamp(alt + Vec3::Y * 2.5, Color::srgb(1.0, 0.75, 0.45), 25_000.0, 10.0);
+    {
+        let mut rng = Rng::new(1919);
+        // У алтаря — священник, в боковых нефах — ризничьи лари, у входа — монах.
+        b.resident(alt - Vec3::X * 1.6, -std::f32::consts::FRAC_PI_2, Role::Priest);
+        b.loot(L::Church);
+        for z in [n.z0 + 1.0, n.z1 - 1.0] {
+            let f = Rect::new(p.apse_x - 6.0, z - 0.3, p.apse_x - 5.0, z + 0.3);
+            interior::chest(b, f, "Ризничий ларь");
+            interior::lampstand(b, Vec3::new(p.apse_x - 7.0, 0.0, z), false);
+        }
+        b.resident(Vec3::new(n.x0 + 2.5, 0.0, n.z0 + 1.2), std::f32::consts::PI, Role::Monk);
+        let _ = &mut rng;
+    }
     // Атрий: портики с трёх сторон и фиал (фонтан для омовения).
     let at = p.atrium;
     kit::wall_x(b, at.x0, nar.x0 + 0.35, at.z0 + 0.35, 0.7, 5.0, &[], Mat::Limestone);
@@ -534,6 +550,29 @@ pub fn episcopium(b: &mut Builder) {
         }
     }
     kit::cistern_mouth(b, Vec3::new(peri.court.cx(), 0.0, c.z1 + 1.0));
+    // Люди и шкафы: монахи-параболаны в палатах, врач в ятрейоне, кухарка, больные у входа.
+    let (mut ward, mut east) = (0, 0);
+    for (side, room) in &peri.rooms {
+        let c = room.center(0.0);
+        match side {
+            Side::N | Side::S if !(room.x0 < r.cx() && room.x1 > r.cx()) => {
+                let role = if ward % 2 == 0 { Role::Monk } else { Role::Patient };
+                extras(b, *room, L::Apothecary, if ward % 3 == 0 { &["Корзина с бинтами"] } else { &[] }, &[(role, c, c + Vec3::Z)], &mut rng);
+                interior::lampstand(b, Vec3::new(room.x0 + 0.4, 0.0, room.cz()), false);
+                ward += 1;
+            }
+            Side::N | Side::S => extras(b, *room, L::Household, &[], &[(Role::Patient, c + Vec3::X, c), (Role::Patient, c - Vec3::X * 1.2, c)], &mut rng),
+            Side::W => extras(b, *room, L::Apothecary, &["Шкаф с лекарствами", "Ларь врача"], &[(Role::Physician, c + Vec3::Z * 1.0, c)], &mut rng),
+            Side::E => {
+                if east == 0 {
+                    extras(b, *room, L::Apothecary, &["Шкаф с лекарствами"], &[(Role::Monk, c, c - Vec3::X)], &mut rng);
+                } else {
+                    extras(b, *room, L::Kitchen, &["Корзина с припасами"], &[(Role::Cook, c + Vec3::X, c - Vec3::X)], &mut rng);
+                }
+                east += 1;
+            }
+        }
+    }
     for side in [Side::N, Side::S] {
         let z = if side == Side::N { peri.court.z0 - 4.0 } else { peri.court.z1 + 4.0 };
         b.lamp(Vec3::new(r.cx() - 6.0, 2.8, z), Color::srgb(1.0, 0.72, 0.45), 6_000.0, 8.0);
@@ -559,7 +598,8 @@ pub fn didaskaleion(b: &mut Builder) {
     let r = didaskaleion_rect();
     b.at(r.cx(), r.cz());
     let mut rng = Rng::new(15);
-    let peri = peristyle(b, r, 7.5, 4.6, Mat::Plaster, &[(Side::S, r.cx())], [1, 2, 2, 2], true);
+    // С улицы — в вестибюль на всю ширину южного корпуса, из него — во двор.
+    let peri = peristyle(b, r, 7.5, 4.6, Mat::Plaster, &[(Side::S, r.cx())], [1, 1, 2, 2], true);
     for (k, (side, room)) in peri.rooms.iter().enumerate() {
         match side {
             Side::N => {
@@ -578,13 +618,19 @@ pub fn didaskaleion(b: &mut Builder) {
                 b.lamp(c + Vec3::Y * 3.0, Color::srgb(1.0, 0.75, 0.45), 8_000.0, 9.0);
             }
             Side::W | Side::E if k % 2 == 0 => {
-                // Книгохранилище: шкафы-армарии со свитками.
-                let sh = Rect::new(room.x0 + 0.1, room.z0 + 0.3, room.x0 + 0.5, room.z1 - 0.3);
+                // Книгохранилище: шкафы-армарии со свитками у наружной стены и у торцов.
+                let sh = if *side == Side::W { Rect::new(room.x0 + 0.1, room.z0 + 0.3, room.x0 + 0.5, room.z1 - 0.3) } else { Rect::new(room.x1 - 0.5, room.z0 + 0.3, room.x1 - 0.1, room.z1 - 0.3) };
                 kit::shelf(b, sh, 4, &mut rng, Mat::Canvas);
-                let sh = Rect::new(room.x1 - 0.5, room.z0 + 0.3, room.x1 - 0.1, room.z1 - 0.3);
-                kit::shelf(b, sh, 4, &mut rng, Mat::Canvas);
+                for z in [room.z0 + 0.1, room.z1 - 0.5] {
+                    kit::shelf(b, Rect::new(room.x0 + 0.7, z, room.x1 - 0.7, z + 0.4), 4, &mut rng, Mat::Canvas);
+                }
                 let c = room.center(0.0);
                 kit::table(b, Rect::new(c.x - 0.5, c.z - 0.8, c.x + 0.5, c.z + 0.8), 0.8);
+            }
+            // Вестибюль — проходной: скамьи для ждущих у стен.
+            Side::S => {
+                kit::bench(b, Rect::new(room.x0 + 0.3, room.z0 + 0.8, room.x0 + 0.7, room.z1 - 0.8));
+                kit::bench(b, Rect::new(room.x1 - 0.7, room.z0 + 0.8, room.x1 - 0.3, room.z1 - 0.8));
             }
             _ => {
                 let c = room.center(0.0);
@@ -593,6 +639,25 @@ pub fn didaskaleion(b: &mut Builder) {
         }
     }
     b.decor([peri.court.x0, 0.0, peri.court.z0], [peri.court.x1, 0.03, peri.court.z1], Mat::Paving);
+    for (k, (side, room)) in peri.rooms.iter().enumerate() {
+        let c = room.center(0.0);
+        match side {
+            Side::N => {
+                let cat = Vec3::new(c.x + 1.0, 0.0, room.z0 + 1.6);
+                let students: Vec<(Role, Vec3, Vec3)> = (0..4).map(|i| (Role::Student, Vec3::new(room.x0 + 2.0 + i as f32 * 2.5, 0.0, room.z0 + 3.0 + (i % 2) as f32 * 1.2), cat)).collect();
+                extras(b, *room, L::Library, &[], &[(Role::Scholar, cat, cat + Vec3::Z)], &mut rng);
+                extras(b, *room, L::Library, &[], &students, &mut rng);
+            }
+            Side::W | Side::E if k % 2 == 0 => extras(b, *room, L::Library, &["Шкаф со свитками", "Ларь с кодексами"], &[(Role::Scholar, c + Vec3::Z * 1.3, c)], &mut rng),
+            _ => {
+                let mut room_l = interior::Room::new(b, room.inset(0.05));
+                if let Some((f, _)) = room_l.take(1.2, 0.7, &[Side::N, Side::S, Side::W, Side::E], &mut rng) {
+                    interior::desk_codex(b, f);
+                }
+                extras(b, *room, L::Library, &["Сундук"], &[(Role::Student, c, c + Vec3::X)], &mut rng);
+            }
+        }
+    }
 }
 
 // ---------------- дом ссыльных ----------------
@@ -606,6 +671,7 @@ pub fn exiles_house(b: &mut Builder) {
     let r = exiles_rect();
     b.at(r.cx(), r.cz());
     let mut rng = Rng::new(1313);
+    b.loot(L::Wealthy);
     // Вход — в правую из двух южных комнат (между ними перегородка по оси дома).
     let peri = peristyle(b, r, 7.0, 5.0, Mat::Plaster, &[(Side::S, r.cx() + (r.w() - 14.0) / 4.0)], [1, 2, 3, 3], true);
     for (side, room) in &peri.rooms {
@@ -625,7 +691,33 @@ pub fn exiles_house(b: &mut Builder) {
                     kit::bed(b, Rect::new(room.x0 + 0.2, room.z0 + 0.2, room.x0 + 1.1, room.z0 + 2.1));
                     kit::chest(b, Vec3::new(room.x1 - 0.5, 0.0, room.z1 - 0.4), true);
                 } else {
-                    kit::shelf(b, Rect::new(room.x0 + 0.1, room.z0 + 0.3, room.x0 + 0.45, room.z1 - 0.3), 3, &mut rng, Mat::Canvas);
+                    let mut rr = interior::Room::new(b, room.inset(0.05));
+                    if let Some((f, _)) = rr.take(2.4, 0.35, &[Side::N, Side::S, Side::W, Side::E], &mut rng) {
+                        kit::shelf(b, f, 3, &mut rng, Mat::Canvas);
+                    }
+                }
+            }
+        }
+    }
+    for (k, (side, room)) in peri.rooms.iter().enumerate() {
+        let c = room.center(0.0);
+        let mut rr = interior::Room::new(b, room.inset(0.05));
+        if let Some((f, _)) = rr.take(0.4, 0.4, &[Side::N, Side::S, Side::W, Side::E], &mut rng) {
+            interior::lampstand(b, f.center(0.0), k == 0);
+        }
+        match side {
+            Side::N => extras(b, *room, L::Wealthy, &["Шкаф с серебром"], &[(Role::Noble, c + Vec3::Z * 0.4, c - Vec3::Z), (Role::Servant, c + Vec3::new(2.0, 0.0, 1.5), c)], &mut rng),
+            _ if k % 3 == 1 => extras(b, *room, L::Wealthy, &["Шкаф"], &[(Role::Servant, c, c + Vec3::X)], &mut rng),
+            _ if k % 3 == 2 => {
+                if let Some((f, _)) = rr.take(1.2, 0.7, &[Side::N, Side::S, Side::W, Side::E], &mut rng) {
+                    interior::desk_codex(b, f);
+                }
+                extras(b, *room, L::Library, &["Ларь со свитками"], &[], &mut rng);
+            }
+            _ => {
+                let r2 = room.inset(0.9);
+                if r2.w() > 0.8 && r2.d() > 0.8 {
+                    interior::rug(b, r2, Mat::Rug);
                 }
             }
         }
@@ -698,6 +790,10 @@ pub fn thermae(b: &mut Builder) {
     kit::woodpile(b, Rect::new(pr.x0 + 0.2, pr.z1 - 1.0, pr.x1 - 0.2, pr.z1 - 0.2), 1.0);
     b.lamp(apo.center(3.0), Color::srgb(1.0, 0.75, 0.45), 6_000.0, 8.0);
     b.lamp(fr.center(3.0), Color::srgb(1.0, 0.75, 0.45), 6_000.0, 8.0);
+    let mut rng = Rng::new(1212);
+    extras(b, apo, L::Household, &["Корзина с полотенцами", "Ларь банщика"], &[(Role::Bather, apo.center(0.0) + Vec3::X * 2.0, apo.center(0.0) - Vec3::X)], &mut rng);
+    extras(b, pr, L::Workshop, &[], &[(Role::Servant, f + Vec3::new(-1.6, 0.0, 1.0), f)], &mut rng);
+    extras(b, fr, L::Household, &[], &[(Role::Bather, fr.center(0.0) + Vec3::Z * 2.0, fr.center(0.0))], &mut rng);
     // Двор-палестра с портиком и колодцем за банями.
     let pal = Rect::new(r.x0 + 1.0, z1 + 1.0, r.x1 - 1.0, r.z1 - 1.0);
     b.decor([pal.x0, 0.0, pal.z0], [pal.x1, 0.03, pal.z1], Mat::Paving);
@@ -892,8 +988,18 @@ pub fn west_church(b: &mut Builder) {
     kit::gable_roof(b, r, 5.5, 2.4, true, 0.5, mat);
     b.solid([r.x1 - 1.6, 0.0, r.cz() - 0.6], [r.x1 - 0.6, 1.1, r.cz() + 0.6], Mat::Limestone);
     b.lamp(Vec3::new(r.x1 - 2.0, 2.4, r.cz()), Color::srgb(1.0, 0.72, 0.45), 5_000.0, 6.0);
-    // Могилы с каменными крестами у церкви.
     let mut rng = Rng::new(11);
+    let inner = r.inset(t + 0.05);
+    for k in 0..3 {
+        kit::bench(b, Rect::new(inner.x0 + 2.0 + k as f32 * 2.2, inner.z0 + 0.4, inner.x0 + 2.4 + k as f32 * 2.2, inner.cz() - 1.2));
+        kit::bench(b, Rect::new(inner.x0 + 2.0 + k as f32 * 2.2, inner.cz() + 1.2, inner.x0 + 2.4 + k as f32 * 2.2, inner.z1 - 0.4));
+    }
+    let altar = Vec3::new(r.x1 - 1.1, 0.0, r.cz());
+    extras(b, inner, L::Church, &["Ризничий ларь"], &[(Role::Priest, altar - Vec3::X * 1.6, altar)], &mut rng);
+    for z in [inner.z0 + 0.4, inner.z1 - 0.4] {
+        interior::lampstand(b, Vec3::new(inner.x1 - 2.5, 0.0, z), false);
+    }
+    // Могилы с каменными крестами у церкви.
     for k in 0..8 {
         let p = Vec3::new(r.x0 + 1.0 + (k % 4) as f32 * 4.0, 0.0, r.z1 + 4.0 + (k / 4) as f32 * 3.5);
         grave(b, p, &mut rng);
@@ -938,6 +1044,7 @@ pub fn citadel(b: &mut Builder) {
     // Претория.
     let pr = Rect::new(c.x0 + 2.0, c.z0 + 2.0, c.x0 + 28.0, c.z0 + 24.0);
     let mut rng = Rng::new(488);
+    b.loot(L::Wealthy);
     let peri = peristyle(b, pr, 6.0, 4.8, Mat::OpusMixtum, &[(Side::E, pr.cz())], [2, 2, 1, 1], true);
     for (side, room) in &peri.rooms {
         if *side == Side::N {
@@ -946,6 +1053,27 @@ pub fn citadel(b: &mut Builder) {
             b.lamp(room.center(2.6), Color::srgb(1.0, 0.72, 0.45), 6_000.0, 7.0);
         } else if rng.chance(0.5) {
             kit::bed(b, Rect::new(room.x0 + 0.2, room.z0 + 0.2, room.x0 + 1.1, room.z0 + 2.1));
+        }
+    }
+    for (k, (side, room)) in peri.rooms.iter().enumerate() {
+        let c = room.center(0.0);
+        let mut rr = interior::Room::new(b, room.inset(0.05));
+        let all = [Side::N, Side::S, Side::W, Side::E];
+        match (side, k % 2) {
+            (Side::N, 0) => extras(b, *room, L::Wealthy, &["Шкаф с бумагами"], &[(Role::Officer, c + Vec3::Z * 1.0, c)], &mut rng),
+            (Side::N, _) => {
+                if let Some((f, _)) = rr.take(1.2, 0.7, &all, &mut rng) {
+                    interior::desk_codex(b, f);
+                }
+                extras(b, *room, L::Library, &["Ларь с донесениями"], &[(Role::Servant, c, c + Vec3::X)], &mut rng);
+            }
+            (Side::S, _) => {
+                if let Some((f, s)) = rr.take(1.6, 0.4, &all, &mut rng) {
+                    interior::weapon_rack(b, f, s);
+                }
+                extras(b, *room, L::Barracks, &["Сундук"], &[(Role::Soldier, c, c + Vec3::Z)], &mut rng);
+            }
+            _ => extras(b, *room, L::Kitchen, &["Корзина с припасами"], &[(Role::Cook, c, c + Vec3::X)], &mut rng),
         }
     }
     // Казармы вдоль южной стены: длинный корпус с комнатами на 8 солдат.
@@ -968,6 +1096,15 @@ pub fn citadel(b: &mut Builder) {
             b.mesh(Mat::Wood).beam(Vec3::new(x, 0.0, room.z0 + 0.35), Vec3::new(x, 2.6, room.z0 + 0.35), 0.015, 0.015, Vec3::X);
             b.mesh(Mat::Iron).spire(Vec3::new(x, 2.6, room.z0 + 0.35), 0.04, 0.25, 4);
         }
+        let c = room.center(0.0);
+        let soldiers: &[(Role, Vec3, Vec3)] = if k % 2 == 0 { &[(Role::Soldier, c, c + Vec3::X)] } else { &[] };
+        let soldiers: Vec<_> = soldiers.to_vec();
+        let mut rr = interior::Room::new(b, room.inset(0.05));
+        if let Some((f, _)) = rr.take(1.4, 0.7, &[Side::N, Side::W, Side::E], &mut rng) {
+            kit::table(b, f, 0.75);
+            interior::table_setting(b, f.inset(0.1), 0.75, &mut rng);
+        }
+        extras(b, room, L::Barracks, &["Сундук стратиота", "Сундук стратиота"], &soldiers, &mut rng);
     }
     kit::lean_roof(b, ba, Side::S, 5.0, 3.85, 0.5);
     // Горреум — зернохранилище на подпорных стенках (пол приподнят от сырости).
@@ -982,6 +1119,7 @@ pub fn citadel(b: &mut Builder) {
         b.solid([p.x - 0.5, 0.0, p.z - 0.4], [p.x + 0.5, 0.8, p.z + 0.4], Mat::Canvas);
         kit::pithos(b, p + Vec3::Z * 2.4, 1.5, 0.0);
     }
+    extras(b, ho.inset(0.85), L::Storehouse, &["Ларь с зерном", "Корзина"], &[(Role::Servant, ho.center(0.0) + Vec3::Z * 2.0, ho.center(0.0))], &mut rng);
     // Бани гарнизона.
     let th = Rect::new(c.x1 - 20.0, c.z0 + 3.0, c.x1 - 2.0, c.z0 + 15.0);
     kit::wall_x(b, th.x0, th.x1, th.z0 + 0.4, 0.8, 4.5, &[], Mat::OpusMixtum);

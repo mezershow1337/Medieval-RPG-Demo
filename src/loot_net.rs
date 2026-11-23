@@ -17,6 +17,9 @@ pub const INTERACT_RANGE: f32 = 3.0;
 /// Номер тела или предмета на земле.
 pub type LootId = u64;
 
+/// Сундуки, шкафы и корзины уровня: номер = база + индекс в `level::Layout::containers`.
+pub const CONTAINER_ID_BASE: LootId = 1 << 50;
+
 /// Чей инвентарь.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Owner {
