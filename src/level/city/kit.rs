@@ -677,15 +677,36 @@ pub fn loom(b: &mut Builder, p: Vec3, along_x: bool) {
 
 /// Навес из небелёного льна на жердях перед лавкой.
 pub fn awning(b: &mut Builder, a: Vec3, c: Vec3, out: Vec3, depth: f32, h: f32) {
+    awning_of(b, a, c, out, depth, h, Mat::Canvas);
+}
+
+/// Навес из полотна `cloth` (некрашеный холст, крашенная мареной или вайдой шерсть).
+pub fn awning_of(b: &mut Builder, a: Vec3, c: Vec3, out: Vec3, depth: f32, h: f32, cloth: Mat) {
     let low = h - 0.5;
     let p = [a + Vec3::Y * h, c + Vec3::Y * h, c + out * depth + Vec3::Y * low, a + out * depth + Vec3::Y * low];
-    let m = b.mesh(Mat::Canvas);
+    let m = b.mesh(cloth);
     m.quad(p, Vec3::Y + out * 0.3);
     m.quad(p, -Vec3::Y - out * 0.3);
+    // Подзор: полотно свисает с переднего края полосой с вырезами-«языками».
+    let drop = Vec3::Y * -0.24;
+    let edge = p[2] - p[3];
+    let n = ((edge.length() / 0.45).round() as usize).max(2);
+    for k in 0..n {
+        let a = p[3] + edge * (k as f32 / n as f32);
+        let c = p[3] + edge * ((k + 1) as f32 / n as f32);
+        let mid = (a + c) * 0.5 + drop * 1.25;
+        let quad = [a, c, c + drop, a + drop];
+        m.quad(quad, out);
+        m.quad([quad[1], quad[0], quad[3], quad[2]], -out);
+        m.tri(a + drop, c + drop, mid, out);
+        m.tri(a + drop, c + drop, mid, -out);
+    }
     let w = b.mesh(Mat::Wood);
     for q in [p[2], p[3]] {
         w.beam(Vec3::new(q.x, 0.0, q.z), q, 0.04, 0.04, Vec3::X);
     }
+    // Жердь по переднему краю, на ней натянуто полотно.
+    w.beam(p[3] + out * 0.02, p[2] + out * 0.02, 0.03, 0.03, Vec3::Y);
 }
 
 // ---------------- растения ----------------
