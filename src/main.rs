@@ -6,6 +6,7 @@
 //!   cargo run -- server           — только сервер, без окна
 
 mod alchemy_fx;
+mod audio;
 mod brewing;
 mod brewing_client;
 mod client;

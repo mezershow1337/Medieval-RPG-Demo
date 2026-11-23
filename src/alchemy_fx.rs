@@ -33,9 +33,13 @@ impl Plugin for AlchemyFxPlugin {
             .insert_resource(Works::default())
             .insert_resource(FxRng(Rng::from_time()))
             .add_systems(Startup, setup_fx_assets)
-            .add_systems(Update, (apply_queue, light_braziers, emit, update_particles, face_camera, animate_rigs, fade_flashes).chain());
+            .add_systems(Update, (apply_queue, light_braziers, emit, update_particles, face_camera, animate_rigs, fade_flashes).chain().in_set(AlchemyFxSet));
     }
 }
+
+/// Системы эффектов алхимии (звук читает очередь до них).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AlchemyFxSet;
 
 /// Сюда сеть складывает начатые/законченные работы и разовые эффекты.
 #[derive(Resource, Default)]
