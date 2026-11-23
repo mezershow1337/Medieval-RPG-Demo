@@ -115,6 +115,8 @@ pub struct MerchantState {
     thefts: Vec<f64>,
     /// Прилавок (в системе торговца): на нём лежит товар.
     pub stall: Vec<StallBox>,
+    /// Торговец убит: лавка закрыта, пока дело не перейдёт к наследнику.
+    pub dead: bool,
 }
 
 struct Order {
@@ -197,11 +199,22 @@ impl TradeWorld {
         self.standing_dirty.insert(player);
     }
 
+    /// Снять пеню (уплачена или отсижена).
+    pub fn clear_fine(&mut self, player: u64) {
+        self.fines.remove(&player);
+        self.standing_dirty.insert(player);
+    }
+
+    /// Убийце лавочник (или его наследник) не продаст ничего ещё долго.
+    pub fn grudge(&mut self, player: u64, id: MerchantId, until: f64) {
+        self.merchant(id).grudges.insert(player, until);
+    }
+
     pub fn fine(&self, player: u64) -> u32 {
         self.fines.get(&player).copied().unwrap_or(0)
     }
 
-    fn add_fine(&mut self, player: u64, nummi: u32) {
+    pub fn add_fine(&mut self, player: u64, nummi: u32) {
         *self.fines.entry(player).or_default() += nummi;
         self.standing_dirty.insert(player);
     }
@@ -214,6 +227,9 @@ impl TradeWorld {
     fn refusal(&self, player: u64, id: MerchantId, now: f64) -> Option<String> {
         let def = id.def();
         let m = &self.merchants[id.0 as usize];
+        if m.dead {
+            return Some("Лавка закрыта: хозяина убили. Говорят, дело перейдёт к родне.".into());
+        }
         if m.grudges.get(&player).is_some_and(|t| *t > now) {
             return Some("«Я тебя запомнил, вор. Проваливай, пока стражу не кликнул».".into());
         }
@@ -320,6 +336,7 @@ fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
                 grudges: HashMap::new(),
                 thefts: Vec::new(),
                 stall,
+                dead: false,
             };
             restock(&mut m, &mut rng, &mut uids, true);
             m
@@ -1892,6 +1909,7 @@ mod tests {
                     grudges: HashMap::new(),
                     thefts: vec![],
                     stall: stall_layout(false, true),
+                    dead: false,
                 };
                 restock(&mut m, &mut rng, &mut uids, true);
                 m

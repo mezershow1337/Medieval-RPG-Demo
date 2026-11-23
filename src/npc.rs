@@ -406,6 +406,8 @@ pub struct Brain {
     noticed: bool,
     /// Решил уйти от удара шагом назад, а не закрываться.
     evade_on_notice: bool,
+    /// Стражник идёт задержать этого игрока (не нападает, пока тот не окажет сопротивление).
+    pub arrest: Option<u64>,
 }
 
 impl Brain {
@@ -713,9 +715,16 @@ pub fn think(
             brain.stroll_to = Some(brain.home + Vec3::new(a.cos() * r, 0.0, a.sin() * r));
             brain.stroll_timer = rng.range(8.0, 16.0);
         }
-        let goal = brain.stroll_to.unwrap_or(brain.home);
+        // Стражник идёт к разыскиваемому и встаёт перед ним.
+        let arrest = brain.arrest.and_then(|id| others.iter().find(|o| o.id == id && o.alive)).map(|o| o.pose.feet);
+        let goal = arrest.unwrap_or(brain.stroll_to.unwrap_or(brain.home));
         let to_goal = goal - pose.feet;
-        if Vec2::new(to_goal.x, to_goal.z).length() > 1.0 {
+        if let Some(at) = arrest {
+            pose.yaw = turn_towards(pose.yaw, yaw_towards(pose.feet, at), 3.0 * dt);
+            if Vec2::new(to_goal.x, to_goal.z).length() > 1.7 {
+                wish = pose.forward_flat() * 0.9;
+            }
+        } else if Vec2::new(to_goal.x, to_goal.z).length() > 1.0 {
             pose.yaw = turn_towards(pose.yaw, yaw_towards(pose.feet, goal), 3.0 * dt);
             wish = pose.forward_flat() * if brain.stroll_to.is_some() { 0.45 } else { 0.6 };
         } else if brain.stroll_to.take().is_none() {

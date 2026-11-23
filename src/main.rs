@@ -8,6 +8,9 @@
 mod alchemy_fx;
 mod brewing;
 mod brewing_client;
+mod civil_client;
+mod civil_server;
+mod civilians;
 mod client;
 mod collision;
 mod combat;
