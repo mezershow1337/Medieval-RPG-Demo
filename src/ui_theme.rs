@@ -248,10 +248,8 @@ fn sliced(image: Handle<Image>, border: f32, tile: bool) -> ImageNode {
 }
 
 fn with_mode(image: Handle<Image>, image_mode: NodeImageMode) -> ImageNode {
-    ImageNode {
-        image_mode,
-        ..ImageNode::new(image)
-    }
+    // Картинка рамки — на весь узел, включая отступы (по умолчанию Bevy рисует только в content box).
+    ImageNode { image_mode, visual_box: VisualBox::BorderBox, ..ImageNode::new(image) }
 }
 
 impl UiTheme {
