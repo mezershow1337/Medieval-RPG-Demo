@@ -171,12 +171,14 @@ pub struct HitTaken {
 }
 
 impl HitTaken {
-    pub fn wound_kind(&self) -> WoundKind {
+    /// Какую рану оставляет удар. Кулак ран не оставляет — синяки проходят вместе со здоровьем.
+    pub fn wound_kind(&self) -> Option<WoundKind> {
         use crate::combat::WeaponKind as W;
         match self.weapon {
-            W::Spatha | W::Axe | W::Seax => WoundKind::Cut,
-            W::Spear => WoundKind::Stab,
-            W::Bow => WoundKind::Arrow,
+            W::Spatha | W::Axe | W::Seax => Some(WoundKind::Cut),
+            W::Spear => Some(WoundKind::Stab),
+            W::Bow => Some(WoundKind::Arrow),
+            W::Fists => None,
         }
     }
 }
