@@ -81,7 +81,7 @@ impl Plugin for GraphicsPlugin {
         .insert_resource(GraphicsSettings { heavy: true })
         .add_observer(setup_camera)
         .add_systems(Startup, setup_environment)
-        .add_systems(Update, (billboard_flames, flicker_lights, follow_sky, toggle_heavy));
+        .add_systems(Update, (billboard_flames, flicker_lights, cull_far_lights, follow_sky, toggle_heavy));
     }
 }
 
@@ -174,6 +174,9 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         Mat::Signinum => (Color::srgb(0.68, 0.45, 0.38), Color::srgb(0.50, 0.33, 0.28), P_PLASTER, 1.6, 0.25, 0.4, 0.8, 0.0, 0.1, 0.6, 0.0),
         Mat::Canvas => (Color::srgb(0.78, 0.72, 0.60), Color::srgb(0.6, 0.55, 0.45), P_PLAIN, 1.0, 0.15, 0.2, 0.95, 0.0, 0.0, 0.0, 0.0),
         Mat::Felt => (Color::srgb(0.62, 0.56, 0.47), Color::srgb(0.4, 0.34, 0.28), P_PLAIN, 1.0, 0.25, 0.4, 1.0, 0.0, 0.0, 0.4, 0.0),
+        // Шерсть, крашенная мареной (ковры, покрывала) и вайдой (покрывала, занавеси).
+        Mat::Rug => (Color::srgb(0.5, 0.17, 0.12), Color::srgb(0.32, 0.1, 0.07), P_PLAIN, 1.0, 0.3, 0.4, 1.0, 0.0, 0.0, 0.3, 0.0),
+        Mat::Cloth => (Color::srgb(0.24, 0.3, 0.46), Color::srgb(0.14, 0.18, 0.3), P_PLAIN, 1.0, 0.25, 0.3, 1.0, 0.0, 0.0, 0.2, 0.0),
         Mat::Thatch => (Color::srgb(0.55, 0.45, 0.28), Color::srgb(0.33, 0.27, 0.16), P_WOOD, 0.5, 0.4, 1.0, 1.0, 0.0, 0.3, 0.0, 0.0),
         Mat::Ceramic => (Color::srgb(0.66, 0.40, 0.26), Color::srgb(0.5, 0.3, 0.2), P_PLAIN, 1.0, 0.2, 0.15, 0.75, 0.0, 0.0, 0.3, 0.0),
         Mat::Bronze => (Color::srgb(0.55, 0.40, 0.22), Color::srgb(0.25, 0.42, 0.33), P_METAL, 1.0, 0.25, 0.3, 0.4, 0.9, 0.0, 0.0, 0.0),
@@ -270,6 +273,24 @@ fn flicker_lights(time: Res<Time>, mut lights: Query<(&mut PointLight, &Flicker)
         let p = f.phase;
         let n = (t * 9.1 + p).sin() * 0.5 + (t * 23.7 + p * 2.3).sin() * 0.3 + (t * 4.3 + p * 0.7).sin() * 0.2;
         light.intensity = f.base * (0.85 + 0.12 * n);
+    }
+}
+
+/// Далёкие факелы и светильники выключаем: в городе их сотни, а освещают они лишь пару комнат.
+fn cull_far_lights(time: Res<Time>, mut next: Local<f32>, cameras: Query<&GlobalTransform, With<Camera3d>>, mut lights: Query<(&GlobalTransform, &PointLight, &mut Visibility), With<Flicker>>) {
+    let now = time.elapsed_secs();
+    if now < *next {
+        return;
+    }
+    *next = now + 0.25;
+    let Some(cam) = cameras.iter().next() else { return };
+    let c = cam.translation();
+    for (t, light, mut vis) in &mut lights {
+        let far = 35.0 + light.range * 2.0;
+        let want = if t.translation().distance_squared(c) < far * far { Visibility::Inherited } else { Visibility::Hidden };
+        if *vis != want {
+            *vis = want;
+        }
     }
 }
 

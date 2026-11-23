@@ -44,6 +44,14 @@ pub fn connection_config() -> ConnectionConfig {
     };
     config.server_channels_config.push(lore.clone());
     config.client_channels_config.push(lore);
+    // Канал 8 — двери (см. doors.rs).
+    let doors = ChannelConfig {
+        channel_id: crate::doors::CH_DOOR,
+        max_memory_usage_bytes: 1024 * 1024,
+        send_type: SendType::ReliableOrdered { resend_time: std::time::Duration::from_millis(300) },
+    };
+    config.server_channels_config.push(doors.clone());
+    config.client_channels_config.push(doors);
     config
 }
 

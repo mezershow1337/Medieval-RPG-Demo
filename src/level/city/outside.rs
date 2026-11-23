@@ -7,6 +7,9 @@
 
 use super::kit::{self, Op, Rect, Rng};
 use super::*;
+use super::interior::extras;
+use crate::items::LootTableId as L;
+use crate::level::Role;
 use crate::collision::Aabb;
 use crate::level::places::{self, ALAN_CAMP, GOTH_VILLAGE, KLEROS_FARM, NECROPOLIS, STEPPE_CAMP};
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
@@ -363,7 +366,11 @@ fn kleros(b: &mut Builder) {
         kit::hearth(t, Vec3::new(10.5, 0.0, 13.6));
         kit::bed(t, Rect::new(12.6, 13.4, 14.5, 14.6));
         kit::loom(t, Vec3::new(18.0, 0.0, 14.4), true);
+        t.loot(L::Household);
         kit::chest(t, Vec3::new(20.4, 0.0, 12.4), false);
+        let mut rr = Rng::new(31);
+        extras(t, Rect::new(8.6, 10.6, 14.75, 15.4), L::Kitchen, &["Корзина с припасами"], &[(Role::Housewife, Vec3::new(11.5, 0.0, 12.6), Vec3::new(10.5, 0.0, 13.6))], &mut rr);
+        extras(t, Rect::new(1.0, 7.5, 7.5, 9.5), L::Household, &[], &[(Role::Farmer, Vec3::new(5.0, 0.0, 8.5), Vec3::new(10.0, 0.0, 3.5))], &mut rr);
         // Давильня, пифосы для сусла, ручная мельница, поленница.
         kit::wine_press(t, Rect::new(9.0, 2.0, 12.0, 5.0));
         for k in 0..4 {
@@ -516,6 +523,10 @@ fn goth_house(b: &mut Builder, p: Vec2, front: kit::Side, k: usize, rng: &mut Rn
         } else {
             kit::hand_mill(t, back * 0.1 + side * 1.9);
         }
+        // Хозяин или хозяйка у очага, сундук с добром.
+        let role = if k.is_multiple_of(2) { Role::Farmer } else { Role::Housewife };
+        let home = front.out() * 0.3;
+        extras(t, r.inset(wt + 0.05), L::Household, &["Сундук"], &[(role, home - side * 1.2, home)], &mut rng);
         // Перед домом — поленница или плетень.
         let out = front.out() * ((if along_x { d } else { w }) / 2.0 + 1.2);
         if rng.chance(0.6) {
@@ -581,6 +592,7 @@ fn yurt(b: &mut Builder, p: Vec2, r: f32, door_yaw: f32, rng: &mut Rng) {
     b.mesh(Mat::Felt).disc(base + Vec3::Y * 0.04, r - 0.1, 14, true);
     kit::hearth(b, base + Vec3::Y * 0.02);
     if rng.chance(0.5) {
+        b.loot(L::Household);
         kit::chest(b, base - dir * (r - 0.7), true);
     }
     // Коллизия стены: кольцо коробок с разрывом у двери.

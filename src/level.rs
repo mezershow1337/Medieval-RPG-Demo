@@ -21,7 +21,8 @@ pub use places::*;
 use crate::collision::{Aabb, HeightField, LevelColliders};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
-use geom::{MeshBuilder, WallFrame, arch_height};
+pub use geom::MeshBuilder;
+use geom::{WallFrame, arch_height};
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -75,6 +76,10 @@ pub enum Mat {
     Canvas,
     /// Войлок кочевых юрт.
     Felt,
+    /// Шерсть, крашенная мареной: ковры, покрывала.
+    Rug,
+    /// Шерсть, крашенная вайдой: покрывала, занавеси.
+    Cloth,
     /// Соломенная/камышовая кровля.
     Thatch,
     /// Обожжённая глина: амфоры, пифосы, горшки.
@@ -130,7 +135,77 @@ pub struct GlassPane {
     pub normal: Vec3,
 }
 
+/// Дверь в проёме стены. Номер двери — её индекс в [`Layout::doors`] (одинаков у сервера и клиентов,
+/// потому что уровень строится одинаково).
+#[derive(Clone, Copy, Debug)]
+pub struct DoorSpec {
+    /// Середина порога (по толщине стены).
+    pub center: Vec3,
+    /// Стена идёт вдоль X (иначе — вдоль Z).
+    pub along_x: bool,
+    pub width: f32,
+    pub height: f32,
+    /// Толщина стены: створка открывается внутрь проёма и прижимается к откосу.
+    pub wall_t: f32,
+    /// Двустворчатая (ворота, ставни лавки).
+    pub double: bool,
+    /// Открыта при запуске сервера.
+    pub open: bool,
+}
+
+impl DoorSpec {
+    /// Коробка закрытой створки (по середине толщины стены).
+    pub fn closed_box(&self) -> Aabb {
+        let (hw, ht) = (self.width / 2.0, 0.07);
+        let (dx, dz) = if self.along_x { (hw, ht) } else { (ht, hw) };
+        Aabb::new(self.center - Vec3::new(dx, 0.0, dz), self.center + Vec3::new(dx, self.height, dz))
+    }
+}
+
+/// Сундук, шкаф или корзина, которые можно обыскать (содержимое бросает сервер).
+#[derive(Clone, Copy, Debug)]
+pub struct ContainerSpec {
+    pub pos: Vec3,
+    pub name: &'static str,
+    pub table: crate::items::LootTableId,
+}
+
+/// Кто живёт или работает в помещении (рисуется клиентом, стоит на месте).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    Householder,
+    Housewife,
+    Servant,
+    Child,
+    Weaver,
+    Cook,
+    Craftsman,
+    Shopkeeper,
+    Priest,
+    Monk,
+    Physician,
+    Patient,
+    Scholar,
+    Student,
+    Soldier,
+    Officer,
+    Bather,
+    Sailor,
+    Noble,
+    Farmer,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Resident {
+    pub pos: Vec3,
+    pub yaw: f32,
+    pub role: Role,
+}
+
 pub struct Layout {
+    pub doors: Vec<DoorSpec>,
+    pub containers: Vec<ContainerSpec>,
+    pub residents: Vec<Resident>,
     pub blocks: Vec<Block>,
     pub torches: Vec<Torch>,
     pub lamps: Vec<Lamp>,
@@ -179,6 +254,13 @@ impl Opening {
 }
 
 struct Builder {
+    doors: Vec<DoorSpec>,
+    containers: Vec<ContainerSpec>,
+    residents: Vec<Resident>,
+    /// Какую добычу кладут в сундуки, которые сейчас ставятся (см. [`Builder::loot`]).
+    loot: (crate::items::LootTableId, &'static str),
+    /// Точки, где стоят торговцы, учителя и стража: обстановка их не занимает.
+    keep_clear: Vec<Vec3>,
     blocks: Vec<Block>,
     torches: Vec<Torch>,
     lamps: Vec<Lamp>,
@@ -197,6 +279,11 @@ struct Builder {
 impl Builder {
     fn new() -> Self {
         Self {
+            doors: Vec::new(),
+            containers: Vec::new(),
+            residents: Vec::new(),
+            loot: (crate::items::LootTableId::Household, "Сундук"),
+            keep_clear: Vec::new(),
             blocks: Vec::new(),
             torches: Vec::new(),
             lamps: Vec::new(),
@@ -213,6 +300,9 @@ impl Builder {
 
     fn finish(self) -> Layout {
         Layout {
+            doors: self.doors,
+            containers: self.containers,
+            residents: self.residents,
             blocks: self.blocks,
             torches: self.torches,
             lamps: self.lamps,
@@ -228,15 +318,23 @@ impl Builder {
     /// Строит `f` в локальных координатах (пол на y = 0) и переносит всё построенное на `offset`:
     /// так постройки за стенами ставятся на террасу на склоне.
     fn placed(&mut self, offset: Vec3, f: impl FnOnce(&mut Builder)) {
+        self.placed_in(offset, chunk_of(offset), f);
+    }
+
+    /// Как [`Builder::placed`], но декор идёт в участок `chunk` (для подъёма на этаж выше).
+    fn placed_in(&mut self, offset: Vec3, chunk: Chunk, f: impl FnOnce(&mut Builder)) {
         let mut t = Builder::new();
+        t.loot = self.loot;
         f(&mut t);
-        let chunk = chunk_of(offset);
         let shift = |a: Aabb| Aabb::new(a.min + offset, a.max + offset);
         self.blocks.extend(t.blocks.into_iter().map(|b| Block { aabb: shift(b.aabb), ..b }));
         self.invisible.extend(t.invisible.into_iter().map(shift));
         self.torches.extend(t.torches.into_iter().map(|x| Torch { pos: x.pos + offset, ..x }));
         self.lamps.extend(t.lamps.into_iter().map(|x| Lamp { pos: x.pos + offset, ..x }));
         self.hearths.extend(t.hearths.into_iter().map(|p| p + offset));
+        self.doors.extend(t.doors.into_iter().map(|d| DoorSpec { center: d.center + offset, ..d }));
+        self.containers.extend(t.containers.into_iter().map(|c| ContainerSpec { pos: c.pos + offset, ..c }));
+        self.residents.extend(t.residents.into_iter().map(|r| Resident { pos: r.pos + offset, ..r }));
         for mut g in t.glass {
             g.pts.iter_mut().for_each(|p| *p += offset);
             self.glass.push(g);
@@ -245,6 +343,26 @@ impl Builder {
             mb.translate(offset);
             self.decor.entry((mat, chunk)).or_default().append(mb);
         }
+    }
+
+    /// Что лежит в сундуках, которые ставятся дальше: таблица добычи и подпись по умолчанию.
+    fn loot(&mut self, table: crate::items::LootTableId) {
+        self.loot.0 = table;
+    }
+
+    fn door(&mut self, d: DoorSpec) {
+        self.doors.push(d);
+    }
+
+    /// Обыскиваемое место (сундук, шкаф, корзина) по текущей таблице добычи.
+    fn container(&mut self, pos: Vec3, name: &'static str) {
+        self.containers.push(ContainerSpec { pos, name, table: self.loot.0 });
+    }
+
+    /// Житель стоит в точке `pos` лицом по `yaw` (тело — невидимая коробка, чтобы сквозь него не ходили).
+    fn resident(&mut self, pos: Vec3, yaw: f32, role: Role) {
+        self.residents.push(Resident { pos, yaw, role });
+        self.invisible.push(Aabb::new(pos - Vec3::new(0.25, 0.0, 0.25), pos + Vec3::new(0.25, 1.75, 0.25)));
     }
 
     /// Дальнейшие декоративные меши относятся к участку карты вокруг точки (x, z).
@@ -355,6 +473,10 @@ impl Builder {
                 }
                 *self.mesh(mat) = infill;
                 *self.mesh(Mat::Trim) = trim;
+            }
+            // Дверь в проёме (широкие порталы и арки нефа остаются открытыми проходами).
+            if !o.glass && o.width <= 3.0 && o.sill < y0 + 0.01 {
+                self.door(DoorSpec { center: f.p(o.s, y0, dm), along_x: f.along_x, width: o.width, height: o.spring - y0, wall_t: d1 - d0, double: o.width > 2.0, open: false });
             }
             if o.glass {
                 let (pts, uvs) = geom::lancet_outline(f, o.s, dm, o.width, sill, o.spring, o.rise);
@@ -564,7 +686,8 @@ pub fn layout() -> Layout {
 pub fn colliders(layout: Layout) -> LevelColliders {
     let mut boxes: Vec<Aabb> = layout.blocks.iter().filter(|b| b.solid).map(|b| b.aabb).collect();
     boxes.extend(layout.invisible);
-    LevelColliders::new(boxes, layout.ground)
+    let doors = layout.doors.iter().map(|d| (d.closed_box(), d.open)).collect();
+    LevelColliders::with_doors(boxes, layout.ground, doors)
 }
 
 pub fn level_colliders() -> LevelColliders {
@@ -627,6 +750,12 @@ pub fn spawn_level(
             e.insert(NotShadowCaster);
         }
     }
+
+    // Двери и жители.
+    let wood = materials.entry(Mat::Wood).or_insert_with(|| surfaces.add(crate::graphics::surface_material(Mat::Wood))).clone();
+    let iron = materials.entry(Mat::Iron).or_insert_with(|| surfaces.add(crate::graphics::surface_material(Mat::Iron))).clone();
+    crate::doors::spawn_door_leaves(&mut commands, &mut meshes, wood, iron, &layout.doors);
+    crate::residents::spawn_residents(&mut commands, &layout.residents);
 
     // Витражи (двусторонние, не отбрасывают тень — свет проходит в окна).
     for kind in [GlassKind::Lancet, GlassKind::Rose] {

@@ -199,6 +199,12 @@ fn receive_loot(
                 state.rev += 1;
             }
             LootServerMessage::CorpseSpawned { id, pos, yaw, name, empty, own_model } => {
+                if id >= CONTAINER_ID_BASE {
+                    // Сундук уровня: его рисует уровень, здесь — только точка для наведения.
+                    let e = commands.spawn((CorpseView { id, name, empty }, Transform::from_translation(pos.into()))).id();
+                    index.0.insert(id, e);
+                    continue;
+                }
                 if !own_model {
                     // Модель рисует боевая система — обыск привяжем к её телу.
                     pending.0.insert(id, CorpseView { id, name, empty });
@@ -298,6 +304,7 @@ fn aim_target(
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
     corpses: Query<(&CorpseView, &Transform)>,
     ground: Query<(&GroundView, &Transform)>,
+    level: Res<LevelColliders>,
 ) {
     state.target = None;
     if state.ui_open {
@@ -326,7 +333,15 @@ fn aim_target(
         test(t.translation + Vec3::Y * 0.08, 0.35, g.id);
     }
     for (c, t) in &corpses {
-        test(t.translation + Vec3::Y * 0.3, 0.9, c.id);
+        if c.id >= CONTAINER_ID_BASE {
+            // Сундук уровня: точка — над крышкой; сквозь стены и закрытые двери не открыть.
+            let close = (t.translation - origin).length_squared() < (INTERACT_RANGE + 1.0).powi(2);
+            if close && crate::combat::line_of_sight(&level, origin, t.translation) {
+                test(t.translation, 0.5, c.id);
+            }
+        } else {
+            test(t.translation + Vec3::Y * 0.3, 0.9, c.id);
+        }
     }
     state.target = best.map(|(_, id)| id);
 }
@@ -483,7 +498,8 @@ fn update_prompt(
         _ if corpse.is_some() => {
             let c = corpse.unwrap();
             let suffix = if c.empty { " (пусто)" } else { "" };
-            (format!("[E] Обыскать: {}{suffix}", c.name), Color::WHITE)
+            let verb = if c.id >= CONTAINER_ID_BASE { "Открыть" } else { "Обыскать" };
+            (format!("[E] {verb}: {}{suffix}", c.name), Color::WHITE)
         }
         Some(e) if ground.get(e).is_ok() => {
             let g = ground.get(e).unwrap();
