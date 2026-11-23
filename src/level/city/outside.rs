@@ -866,7 +866,7 @@ fn herb_plant(b: &mut Builder, p: Vec3, herb: &str, rng: &mut Rng) {
         }
         "rosa" => {
             let h = 1.3 * s;
-            kit::shrub(b, p, h, rng);
+            kit::shrub(b, p, h);
             for _ in 0..10 {
                 let a = rng.range(0.0, TAU);
                 let y = rng.range(0.3, 0.9) * h;
@@ -896,7 +896,7 @@ fn herb_plant(b: &mut Builder, p: Vec3, herb: &str, rng: &mut Rng) {
             if rng.chance(0.5) {
                 kit::oak(b, p, rng.range(6.0, 9.0), rng);
             } else {
-                kit::shrub(b, p, 1.6, rng);
+                kit::shrub(b, p, 1.6);
             }
         }
         "symphytum" => {
@@ -974,7 +974,7 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
                 let a = rng.range(0.0, TAU);
                 let d = rng.range(1.8, 5.0);
                 let s = g(p.x + a.cos() * d, p.y + a.sin() * d);
-                kit::shrub(b, s - Vec3::Y * 0.05, rng.range(0.9, 2.0), &mut rng);
+                kit::shrub(b, s - Vec3::Y * 0.05, rng.range(0.9, 2.0));
             }
         }
         z += step;

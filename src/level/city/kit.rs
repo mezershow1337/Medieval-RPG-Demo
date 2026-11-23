@@ -691,9 +691,20 @@ pub fn awning(b: &mut Builder, a: Vec3, c: Vec3, out: Vec3, depth: f32, h: f32) 
 // ---------------- растения ----------------
 
 
+/// Поворот и вариант модели дерева. Берёт из `rng` ровно `draws` чисел — столько же, сколько
+/// брали прежние деревья из примитивов, чтобы остальная планировка (сады, дворы, жители) не сдвинулась.
+fn look_of(rng: &mut Rng, draws: usize) -> (f32, u32) {
+    let (a, c) = (rng.f(), rng.f());
+    for _ in 2..draws {
+        rng.f();
+    }
+    (a * TAU, (c * 16.0) as u32 % 16)
+}
+
 /// Инжир (смоковница) — обычное дерево херсонесских дворов.
 pub fn fig_tree(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
-    b.plant(PlantKind::Fig, p, h, rng.range(0.0, TAU), rng.int(16) as u32);
+    let (yaw, v) = look_of(rng, 16);
+    b.plant(PlantKind::Fig, p, h, yaw, v);
     b.invisible.push(Aabb::new(p - Vec3::new(0.18, 0.0, 0.18), p + Vec3::new(0.18, h * 0.5, 0.18)));
 }
 
@@ -706,25 +717,32 @@ pub fn cypress(b: &mut Builder, p: Vec3, h: f32) {
 
 /// Можжевельник высокий (Juniperus excelsa) — кустарник или невысокое дерево крымских склонов.
 pub fn juniper(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
-    b.plant(PlantKind::Juniper, p, h, rng.range(0.0, TAU), rng.int(16) as u32);
+    let n = 3 + rng.int(3);
+    let (yaw, v) = look_of(rng, 3 * n);
+    b.plant(PlantKind::Juniper, p, h, yaw, v);
     b.invisible.push(Aabb::new(p - Vec3::new(0.25, 0.0, 0.25), p + Vec3::new(0.25, h * 0.5, 0.25)));
 }
 
 /// Крымская сосна.
 pub fn pine(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
-    b.plant(PlantKind::Pine, p, h, rng.range(0.0, TAU), rng.int(16) as u32);
+    let (yaw, v) = look_of(rng, 3);
+    b.plant(PlantKind::Pine, p, h, yaw, v);
     b.invisible.push(Aabb::new(p - Vec3::new(0.25, 0.0, 0.25), p + Vec3::new(0.25, h * 0.6, 0.25)));
 }
 
 /// Дуб пушистый (предгорья).
 pub fn oak(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
-    b.plant(PlantKind::Oak, p, h, rng.range(0.0, TAU), rng.int(16) as u32);
+    let (yaw, v) = look_of(rng, 17);
+    b.plant(PlantKind::Oak, p, h, yaw, v);
     b.invisible.push(Aabb::new(p - Vec3::new(0.3, 0.0, 0.3), p + Vec3::new(0.3, h * 0.5, 0.3)));
 }
 
 /// Куст шибляка (шиповник, боярышник, держидерево) — без коллизии.
-pub fn shrub(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
-    b.plant(PlantKind::Shrub, p, h, rng.range(0.0, TAU), rng.int(16) as u32);
+/// Поворот и вариант — от положения, `rng` не трогаем (куст встал на место прежних «холмиков»).
+pub fn shrub(b: &mut Builder, p: Vec3, h: f32) {
+    let k = (p.x * 12.9898 + p.z * 78.233).sin() * 43758.547;
+    let f = k - k.floor();
+    b.plant(PlantKind::Shrub, p, h, f * TAU, (f * 997.0) as u32 % 16);
 }
 
 /// Виноградная лоза на шпалере (беседка во дворе или ряд в винограднике).
