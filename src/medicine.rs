@@ -45,6 +45,8 @@ pub enum WoundKind {
     Arrow,
     /// Ожог (огонь, кипящее масло, негашёная известь).
     Burn,
+    /// Закрытый перелом от тяжёлого удара. Не кровит и не гноится, но без лубка не срастается.
+    Fracture,
 }
 
 impl WoundKind {
@@ -54,6 +56,7 @@ impl WoundKind {
             WoundKind::Stab => "Колотая рана",
             WoundKind::Arrow => "Рана от стрелы",
             WoundKind::Burn => "Ожог",
+            WoundKind::Fracture => "Перелом",
         }
     }
 
@@ -62,7 +65,7 @@ impl WoundKind {
             WoundKind::Cut => 1.0,
             WoundKind::Stab => 1.35,
             WoundKind::Arrow => 0.9,
-            WoundKind::Burn => 0.0,
+            WoundKind::Burn | WoundKind::Fracture => 0.0,
         }
     }
 
@@ -72,7 +75,89 @@ impl WoundKind {
             WoundKind::Stab => 1.5,
             WoundKind::Arrow => 1.3,
             WoundKind::Burn => 1.4,
+            WoundKind::Fracture => 0.0,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Части тела
+// ---------------------------------------------------------------------------
+
+/// Куда пришлась рана. Сторона — самого раненого («левая рука» — его левая).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum BodyPart {
+    Head,
+    #[default]
+    Chest,
+    Belly,
+    LeftArm,
+    RightArm,
+    LeftLeg,
+    RightLeg,
+}
+
+impl BodyPart {
+    pub const ALL: [BodyPart; 7] = [BodyPart::Head, BodyPart::Chest, BodyPart::Belly, BodyPart::LeftArm, BodyPart::RightArm, BodyPart::LeftLeg, BodyPart::RightLeg];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            BodyPart::Head => "Голова",
+            BodyPart::Chest => "Грудь",
+            BodyPart::Belly => "Живот",
+            BodyPart::LeftArm => "Левая рука",
+            BodyPart::RightArm => "Правая рука",
+            BodyPart::LeftLeg => "Левая нога",
+            BodyPart::RightLeg => "Правая нога",
+        }
+    }
+
+    /// «на голове», «на левой руке» — для строк состояния.
+    pub fn where_(self) -> &'static str {
+        match self {
+            BodyPart::Head => "на голове",
+            BodyPart::Chest => "на груди",
+            BodyPart::Belly => "на животе",
+            BodyPart::LeftArm => "на левой руке",
+            BodyPart::RightArm => "на правой руке",
+            BodyPart::LeftLeg => "на левой ноге",
+            BodyPart::RightLeg => "на правой ноге",
+        }
+    }
+
+    pub fn is_arm(self) -> bool {
+        matches!(self, BodyPart::LeftArm | BodyPart::RightArm)
+    }
+
+    pub fn is_leg(self) -> bool {
+        matches!(self, BodyPart::LeftLeg | BodyPart::RightLeg)
+    }
+
+    /// Какая часть тела задета: по точке попадания относительно стоящего (или присевшего) бойца.
+    /// `head` — решение боя (голова выше линии плеч), ему доверяем.
+    pub fn from_hit(pose: &crate::combat::Pose, point: bevy::math::Vec3, head: bool) -> BodyPart {
+        if head {
+            return BodyPart::Head;
+        }
+        let rel = point - pose.feet;
+        // В локальных координатах бойца: +X — его правая сторона, -Z — вперёд.
+        let local = bevy::math::Quat::from_rotation_y(-pose.yaw) * rel;
+        let scale = if pose.crouching { 0.9 / 1.42 } else { 1.0 };
+        let y = rel.y / scale;
+        let side = local.x;
+        if y < 0.86 {
+            return if side >= 0.0 { BodyPart::RightLeg } else { BodyPart::LeftLeg };
+        }
+        // Руки висят по бокам туловища (плечи ~0,2 м от оси) и держат оружие перед собой.
+        if side.abs() > 0.19 || (local.z < -0.28 && y < 1.3) {
+            return if side >= 0.0 { BodyPart::RightArm } else { BodyPart::LeftArm };
+        }
+        if y < 1.1 { BodyPart::Belly } else { BodyPart::Chest }
+    }
+
+    /// Можно ли тут сломать кость ударом (голову и живот не считаем: череп — отдельная беда).
+    fn breakable(self) -> bool {
+        self.is_arm() || self.is_leg() || self == BodyPart::Chest
     }
 }
 
@@ -80,7 +165,8 @@ impl WoundKind {
 pub struct Wound {
     pub id: u32,
     pub kind: WoundKind,
-    pub head: bool,
+    #[serde(default)]
+    pub part: BodyPart,
     /// Глубина 0..1. Уменьшается при заживлении.
     pub severity: f32,
     /// Глубина при получении (кровотечение слабеет вместе с заживлением).
@@ -105,12 +191,18 @@ pub struct Wound {
     pub healing: f32,
     /// Ожог смягчён маслом или мальвой 0..1.
     pub soothed: f32,
+    /// Перелом в лубке.
+    #[serde(default)]
+    pub splinted: bool,
+    /// Кость вправили плохо: срастётся криво.
+    #[serde(default)]
+    pub malunion: bool,
 }
 
 impl Wound {
     /// Текущее кровотечение, здоровья в секунду.
     pub fn bleeding(&self) -> f32 {
-        if self.kind == WoundKind::Burn {
+        if matches!(self.kind, WoundKind::Burn | WoundKind::Fracture) {
             return 0.0;
         }
         // Мелкие раны затягиваются сами, глубокие — нет (порванная жила).
@@ -124,6 +216,8 @@ impl Wound {
     pub fn pain(&self) -> f32 {
         let base = match self.kind {
             WoundKind::Burn => self.severity * 0.8 * (1.0 - self.soothed * 0.6),
+            // Сломанная кость без лубка ходит под кожей при каждом шаге.
+            WoundKind::Fracture => self.severity * if self.splinted { 0.25 } else { 0.6 },
             _ => self.severity * 0.45,
         };
         base + self.inflammation * 0.35 + if self.arrowhead { 0.3 } else { 0.0 }
@@ -131,12 +225,22 @@ impl Wound {
 
     /// Нужна ли ещё помощь (для выбора, что лечить).
     fn urgency(&self) -> f32 {
+        if self.kind == WoundKind::Fracture {
+            return if self.splinted { 0.1 } else { 1.5 * self.severity };
+        }
         self.bleeding() * 10.0 + self.inflammation * 2.0 + if self.arrowhead { 3.0 } else { 0.0 } + self.severity * (1.0 - self.antiseptic) * (if self.dressed { 0.2 } else { 1.0 })
     }
 
     fn tick(&mut self, dt: f32) {
         self.age += dt;
         self.antiseptic *= half_life(dt, ANTISEPTIC_HALF_LIFE);
+        if self.kind == WoundKind::Fracture {
+            // Кость срастается только в покое, в лубке, и куда медленнее мяса.
+            if self.splinted {
+                self.severity = (self.severity - HEAL_RATE * 0.4 * self.healing * dt).max(0.0);
+            }
+            return;
+        }
         // Воспаление: после «спокойного» срока, если в ране грязь или железо.
         if self.age > INCUBATION_SECS {
             let dirt = if self.arrowhead { self.dirt.max(0.8) } else { self.dirt };
@@ -168,15 +272,32 @@ pub struct HitTaken {
     pub weapon: crate::combat::WeaponKind,
     pub amount: f32,
     pub head: bool,
+    /// Куда пришёлся удар.
+    pub part: BodyPart,
 }
 
 impl HitTaken {
-    pub fn wound_kind(&self) -> WoundKind {
+    /// Какую рану оставляет удар. Кулак ран не оставляет — синяки проходят вместе со здоровьем.
+    pub fn wound_kind(&self) -> Option<WoundKind> {
         use crate::combat::WeaponKind as W;
         match self.weapon {
-            W::Spatha | W::Axe | W::Seax => WoundKind::Cut,
-            W::Spear => WoundKind::Stab,
-            W::Bow => WoundKind::Arrow,
+            W::Spatha | W::Axe | W::Seax => Some(WoundKind::Cut),
+            W::Spear => Some(WoundKind::Stab),
+            W::Bow => Some(WoundKind::Arrow),
+            W::Fists => None,
+        }
+    }
+
+    /// Насколько оружие ломает кости: тяжёлый топор — часто, тонкий сакс — почти никогда.
+    pub fn bone_chance(&self) -> f32 {
+        use crate::combat::WeaponKind as W;
+        match self.weapon {
+            W::Axe => 0.7,
+            W::Spatha => 0.35,
+            W::Spear => 0.3,
+            W::Bow => 0.15,
+            W::Seax => 0.05,
+            W::Fists => 0.0,
         }
     }
 }
@@ -271,6 +392,9 @@ pub struct Body {
     /// Бодрость от укрепляющего отвара (шиповник) 0..1: быстрее отдыхаешь.
     #[serde(default)]
     pub vigor: f32,
+    /// Кости, сросшиеся криво (вправили неумело): хромота или слабая рука до самой смерти.
+    #[serde(default)]
+    pub crooked: Vec<BodyPart>,
     next_id: u32,
 }
 
@@ -291,21 +415,36 @@ impl Default for BodyMods {
 
 impl Body {
     pub fn is_healthy(&self) -> bool {
-        self.wounds.is_empty() && self.toxins.is_empty() && self.vigor < 0.02
+        self.wounds.is_empty() && self.toxins.is_empty() && self.vigor < 0.02 && self.crooked.is_empty()
     }
 
-    /// Попадание оружием. `damage` — потерянное здоровье, `max_hp` — для оценки тяжести.
+    /// Раны на этой части тела.
+    pub fn wounds_on(&self, part: BodyPart) -> impl Iterator<Item = &Wound> {
+        self.wounds.iter().filter(move |w| w.part == part)
+    }
+
+    /// Попадание оружием (без точки попадания: голова или грудь, кости целы).
+    /// `damage` — потерянное здоровье, `max_hp` — для оценки тяжести.
     /// `roll` 0..1 — случай (наконечник застрял, если меньше 0,7).
     pub fn hit(&mut self, kind: WoundKind, damage: f32, max_hp: f32, head: bool, roll: f32) -> Option<u32> {
+        let part = if head { BodyPart::Head } else { BodyPart::Chest };
+        self.hit_on(kind, damage, max_hp, part, roll, 0.0, 1.0)
+    }
+
+    /// Попадание в определённую часть тела. `bone_chance` — насколько оружие ломает кости
+    /// (топор — сильно, сакс — почти нет), `bone_roll` 0..1 — случай.
+    #[allow(clippy::too_many_arguments)]
+    pub fn hit_on(&mut self, kind: WoundKind, damage: f32, max_hp: f32, part: BodyPart, roll: f32, bone_chance: f32, bone_roll: f32) -> Option<u32> {
         let severity = (damage / (max_hp * 0.3)).clamp(0.0, 1.0);
         if severity < 0.04 {
             return None;
         }
         let arrowhead = kind == WoundKind::Arrow && roll < 0.7;
-        Some(self.add(Wound {
+        let head = part == BodyPart::Head;
+        let id = self.add(Wound {
             id: 0,
             kind,
-            head,
+            part,
             severity,
             initial: severity,
             bleed0: 1.1 * severity * kind.bleed_factor() * if head { 1.2 } else { 1.0 },
@@ -318,16 +457,52 @@ impl Body {
             inflammation: 0.0,
             healing: 1.0,
             soothed: 0.0,
-        }))
+            splinted: false,
+            malunion: false,
+        });
+        // Тяжёлый удар по руке, ноге или рёбрам ломает кость (одной кости хватит).
+        let chance = ((severity - 0.35) / 0.65).clamp(0.0, 1.0) * bone_chance;
+        if part.breakable() && bone_roll < chance && !self.wounds.iter().any(|w| w.kind == WoundKind::Fracture && w.part == part) {
+            self.fracture(part, (severity * 1.1).clamp(0.4, 1.0));
+        }
+        Some(id)
     }
 
-    /// Ожог (огонь, кипяток, известь). `severity` 0..1.
+    /// Перелом (удар, падение).
+    pub fn fracture(&mut self, part: BodyPart, severity: f32) -> u32 {
+        let severity = severity.clamp(0.3, 1.0);
+        self.add(Wound {
+            id: 0,
+            kind: WoundKind::Fracture,
+            part,
+            severity,
+            initial: severity,
+            bleed0: 0.0,
+            age: 0.0,
+            dressed: false,
+            styptic: 1.0,
+            dirt: 0.0,
+            antiseptic: 0.0,
+            arrowhead: false,
+            inflammation: 0.0,
+            healing: 1.0,
+            soothed: 0.0,
+            splinted: false,
+            malunion: false,
+        })
+    }
+
+    /// Ожог (огонь, кипяток, известь). `severity` 0..1. Без места — обжигают руки (у огня работают ими).
     pub fn burn(&mut self, severity: f32) -> u32 {
+        self.burn_on(severity, BodyPart::RightArm)
+    }
+
+    pub fn burn_on(&mut self, severity: f32, part: BodyPart) -> u32 {
         let severity = severity.clamp(0.05, 1.0);
         self.add(Wound {
             id: 0,
             kind: WoundKind::Burn,
-            head: false,
+            part,
             severity,
             initial: severity,
             bleed0: 0.0,
@@ -340,6 +515,8 @@ impl Body {
             inflammation: 0.0,
             healing: 1.0,
             soothed: 0.0,
+            splinted: false,
+            malunion: false,
         })
     }
 
@@ -400,6 +577,11 @@ impl Body {
                 loss += 0.25 * dt;
             }
         }
+        for w in &self.wounds {
+            if w.kind == WoundKind::Fracture && w.severity <= 0.02 && w.malunion && !self.crooked.contains(&w.part) {
+                self.crooked.push(w.part);
+            }
+        }
         self.wounds.retain(|w| w.severity > 0.02 || w.arrowhead || w.inflammation > 0.05);
         loss += self.fever() * 0.08 * dt;
 
@@ -431,11 +613,32 @@ impl Body {
         let fever = self.fever();
         let sleepy = (self.toxin(Toxin::Opium) / 2.5).min(1.0);
         let mad = (self.toxin(Toxin::Henbane) / 1.5).min(1.0);
+        // Переломы: на сломанной ноге не побежишь, сломанной рукой не размахнёшься, со сломанными рёбрами не вздохнёшь.
+        let (mut arm, mut leg, mut ribs) = (1.0f32, 1.0f32, 1.0f32);
+        for w in self.wounds.iter().filter(|w| w.kind == WoundKind::Fracture) {
+            let k = if w.splinted { 0.5 } else { 1.0 };
+            if w.part.is_leg() {
+                leg = leg.min(1.0 - 0.45 * k);
+            } else if w.part.is_arm() {
+                arm = arm.min(1.0 - 0.3 * k);
+            } else {
+                ribs = ribs.min(1.0 - 0.35 * k);
+            }
+        }
+        for p in &self.crooked {
+            if p.is_leg() {
+                leg = leg.min(0.88);
+            } else if p.is_arm() {
+                arm = arm.min(0.92);
+            } else {
+                ribs = ribs.min(0.9);
+            }
+        }
         BodyMods {
-            action_speed: ((1.0 - 0.22 * pain) * (1.0 - 0.3 * sleepy) * (1.0 - 0.25 * mad)).max(0.45),
-            stamina_regen: ((1.0 - 0.3 * pain) * (1.0 - 0.5 * fever) * (1.0 + 0.25 * self.vigor)).max(0.3),
-            max_stamina: (1.0 - 0.3 * fever).max(0.5),
-            move_mult: ((1.0 - 0.25 * sleepy) * (1.0 - 0.15 * mad) * if pain > 0.8 { 0.88 } else { 1.0 }).max(0.5),
+            action_speed: ((1.0 - 0.22 * pain) * (1.0 - 0.3 * sleepy) * (1.0 - 0.25 * mad) * arm).max(0.45),
+            stamina_regen: ((1.0 - 0.3 * pain) * (1.0 - 0.5 * fever) * (1.0 + 0.25 * self.vigor) * ribs).max(0.3),
+            max_stamina: ((1.0 - 0.3 * fever) * (0.5 + 0.5 * ribs)).max(0.5),
+            move_mult: ((1.0 - 0.25 * sleepy) * (1.0 - 0.15 * mad) * if pain > 0.8 { 0.88 } else { 1.0 } * leg).max(0.5),
         }
     }
 }
@@ -465,6 +668,8 @@ pub struct WoundCare {
     pub soothe: f32,
     /// Каким приёмом это делают умело.
     pub technique: Technique,
+    /// Лубок на перелом.
+    pub splint: bool,
 }
 
 const CARE: WoundCare = WoundCare {
@@ -478,6 +683,7 @@ const CARE: WoundCare = WoundCare {
     heal: 1.0,
     soothe: 0.0,
     technique: Technique::Poultice,
+    splint: false,
 };
 
 /// Что вещество делает, если его выпить или съесть.
@@ -505,6 +711,7 @@ pub fn remedy(item: &str) -> (Option<WoundCare>, Option<Intake>) {
     let i = |c: Intake| Some(c);
     match item {
         "Бинт" => (w(WoundCare { verb: "Перевязываете рану", dress: true, technique: Poultice, ..CARE }), None),
+        "Лубок" => (w(WoundCare { verb: "Накладываете лубок", secs: 7.0, splint: true, technique: Bonesetting, ..CARE }), None),
         // Свежие листья под повязку.
         "Подорожник" => (w(WoundCare { verb: "Прикладываете размятый подорожник", poultice: true, styptic: 0.7, antiseptic: 0.15, heal: 1.2, ..CARE }), None),
         "Тысячелистник" => (w(WoundCare { verb: "Прикладываете тысячелистник", poultice: true, styptic: 0.5, antiseptic: 0.1, ..CARE }), None),
@@ -599,43 +806,261 @@ pub fn potency(quality_index: usize) -> f32 {
     [0.6, 0.85, 1.0, 1.15, 1.3, 1.45][quality_index.min(5)]
 }
 
-/// Что сделает применение (для выбора длительности и подписи до начала).
-pub fn plan(body: &Body, item: &str) -> Option<(&'static str, f32)> {
-    let (care, intake) = remedy(item);
-    if let Some(c) = care
-        && let Some(w) = body.worst_wound()
-    {
-        if w.arrowhead && w.kind == WoundKind::Arrow {
-            return Some(("Вынимаете наконечник", 5.0));
-        }
-        if !(c.dress && w.dressed && w.bleeding() < 0.05) {
-            return Some((c.verb, c.secs));
-        }
-    }
-    intake.map(|i| (i.verb, i.secs))
+/// Куда игрок приложил средство (из окна здоровья).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CareTarget {
+    /// На эту рану.
+    Wound(u32),
+    /// На эту часть тела (если ран там несколько — на самую тяжёлую из них).
+    Part(BodyPart),
+    /// В рот: выпить, съесть.
+    Mouth,
 }
 
-/// Применить средство. `has_bandage` — есть ли в сумке бинт, чтобы прибинтовать припарку.
-/// `roll` 0..1 — случай (неудача при извлечении, доза на глаз).
-pub fn apply(body: &mut Body, k: &Knowledge, item: &str, quality_index: usize, has_bandage: bool, roll: f32) -> Treated {
+/// Что выйдет из применения. Одно решение и для подписи до начала, и для самого действия,
+/// чтобы обещанное и сделанное не расходились. Подсказок «так правильно» тут нет:
+/// неверное средство просто тратится или вредит.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Act {
+    /// Вынуть застрявший наконечник.
+    Extract(u32),
+    /// Обработать рану (мясо или ожог).
+    Care(u32, WoundCare),
+    /// Вправить и уложить в лубок.
+    Splint(u32),
+    /// Средство на кожу над переломом: помогает только то, что сращивает кость (окопник).
+    OverFracture(u32, WoundCare),
+    /// Едкое в рану: жжёт и разъедает.
+    Corrode(u32, &'static str),
+    /// Ярь-медянка в рану: древние так чистили раны — чистит, но разъедает.
+    Verdigris(u32),
+    /// Полить рану питьём: почти без пользы.
+    Pour(u32),
+    /// Выпить или съесть.
+    Drink(Intake),
+    /// Съесть то, что прикладывают снаружи.
+    Swallow(&'static str, &'static [(Toxin, f32)]),
+    /// Без пользы, предмет тратится.
+    Waste(&'static str),
+    /// Ничего не делается, предмет цел.
+    Refuse(&'static str),
+}
+
+impl Act {
+    fn label(&self) -> (String, f32) {
+        match *self {
+            Act::Extract(_) => ("Вынимаете наконечник".into(), 5.0),
+            Act::Care(_, c) => (c.verb.into(), c.secs),
+            Act::Splint(_) => ("Вытягиваете кость и накладываете лубок".into(), 7.0),
+            Act::OverFracture(_, c) => (c.verb.into(), c.secs),
+            Act::Corrode(_, v) => (v.into(), 2.0),
+            Act::Verdigris(_) => ("Присыпаете рану зелёным порошком".into(), 2.5),
+            Act::Pour(_) => ("Поливаете рану".into(), 2.0),
+            Act::Drink(i) => (i.verb.into(), i.secs),
+            Act::Swallow(v, _) => (v.into(), 2.0),
+            Act::Waste(v) => (v.into(), 2.0),
+            Act::Refuse(v) => (v.into(), 0.0),
+        }
+    }
+}
+
+/// Едкое, что жжёт открытую рану.
+fn corrosive(item: &str) -> Option<&'static str> {
+    match item {
+        "Щёлок" => Some("Льёте щёлок на рану"),
+        "Серная вода" => Some("Льёте серную воду на рану"),
+        "Негашёная известь" => Some("Сыплете известь в рану"),
+        _ => None,
+    }
+}
+
+/// Цель по умолчанию (быстрое применение из сумки): лубок — на перелом, остальное — на самую
+/// нуждающуюся рану, а если её нет или средство пьют — внутрь.
+fn auto_target(body: &Body, item: &str) -> CareTarget {
     let (care, intake) = remedy(item);
-    let wound = body.worst_wound().map(|w| w.id);
-    if let (Some(c), Some(id)) = (care, wound) {
-        let w = body.wound_mut(id).expect("рана есть");
-        if w.arrowhead && w.kind == WoundKind::Arrow {
-            return extract(w, k, roll);
+    if let Some(c) = care {
+        if c.splint {
+            if let Some(w) = body.wounds.iter().filter(|w| w.kind == WoundKind::Fracture && !w.splinted).max_by(|a, b| a.severity.total_cmp(&b.severity)) {
+                return CareTarget::Wound(w.id);
+            }
+        } else if let Some(w) = body.wounds.iter().filter(|w| w.kind != WoundKind::Fracture).max_by(|a, b| a.urgency().total_cmp(&b.urgency())) {
+            // Перевязанную и не кровящую повторно не бинтуем — бинт пригодится как расходник.
+            if !(c.dress && w.dressed && w.bleeding() < 0.05 && !w.arrowhead) {
+                return CareTarget::Wound(w.id);
+            }
         }
-        if !(c.dress && w.dressed && w.bleeding() < 0.05) {
-            return care_for(w, k, c, quality_index, has_bandage);
+    }
+    if intake.is_some() {
+        return CareTarget::Mouth;
+    }
+    match body.worst_wound() {
+        Some(w) if care.is_some() => CareTarget::Wound(w.id),
+        _ => CareTarget::Mouth,
+    }
+}
+
+fn decide(body: &Body, item: &str, target: CareTarget) -> Act {
+    let (care, intake) = remedy(item);
+    if care.is_none() && intake.is_none() && corrosive(item).is_none() {
+        return Act::Refuse("Это не лекарство");
+    }
+    let wound = match target {
+        CareTarget::Mouth => {
+            if let Some(i) = intake {
+                return Act::Drink(i);
+            }
+            return match item {
+                "Бинт" | "Лубок" => Act::Refuse("Это не едят"),
+                "Квасцы" => Act::Swallow("Глотаете квасцы: вяжет рот, мутит", &[(Toxin::Caustic, 0.25)]),
+                "Негашёная известь" => Act::Swallow("Глотаете известь", &[(Toxin::Caustic, 1.2)]),
+                "Горшок мёда" => Act::Swallow("Едите мёд", &[]),
+                "Кувшин вина" | "Амфора вина" => Act::Swallow("Пьёте вино", &[]),
+                "Винный уксус" | "Чабрецовый уксус" => Act::Swallow("Пьёте уксус: кисло, щиплет горло", &[]),
+                _ => Act::Swallow("Глотаете через силу — гадость", &[]),
+            };
         }
+        CareTarget::Wound(id) => body.wounds.iter().find(|w| w.id == id),
+        CareTarget::Part(part) => body.wounds_on(part).max_by(|a, b| a.urgency().total_cmp(&b.urgency())),
+    };
+    let Some(w) = wound else {
+        // Здоровое место.
+        return match item {
+            "Бинт" => Act::Refuse("Здесь нечего перевязывать"),
+            "Лубок" => Act::Refuse("Кость тут цела"),
+            _ if care.is_some() => Act::Waste("Мажете здоровую кожу"),
+            _ => Act::Waste("Обливаетесь — без толку"),
+        };
+    };
+    if let Some(verb) = corrosive(item) {
+        return Act::Corrode(w.id, verb);
     }
-    if let Some(i) = intake {
-        return drink(body, k, i, quality_index, roll);
+    if matches!(item, "Ярь-медянка" | "Медный купорос") && w.kind != WoundKind::Fracture {
+        return Act::Verdigris(w.id);
     }
-    if care.is_some() {
-        return Treated::Nothing("Нечего лечить".into());
+    let Some(c) = care else {
+        return Act::Pour(w.id);
+    };
+    if w.kind == WoundKind::Fracture {
+        if c.splint {
+            return if w.splinted { Act::Refuse("Лубок уже наложен") } else { Act::Splint(w.id) };
+        }
+        return Act::OverFracture(w.id, c);
     }
-    Treated::Nothing("Это не лекарство".into())
+    if w.arrowhead && w.kind == WoundKind::Arrow {
+        return Act::Extract(w.id);
+    }
+    if c.splint {
+        return Act::Refuse("Кость тут цела");
+    }
+    if c.dress && w.dressed && w.bleeding() < 0.05 {
+        return Act::Refuse("Рана уже перевязана");
+    }
+    Act::Care(w.id, c)
+}
+
+/// Что сделает применение (для выбора длительности и подписи до начала): быстрое применение из сумки.
+pub fn plan(body: &Body, item: &str) -> Option<(&'static str, f32)> {
+    match decide(body, item, auto_target(body, item)) {
+        Act::Refuse(_) | Act::Waste(_) | Act::Swallow(..) | Act::Pour(_) => None,
+        Act::Extract(_) => Some(("Вынимаете наконечник", 5.0)),
+        Act::Splint(_) => Some(("Вытягиваете кость и накладываете лубок", 7.0)),
+        Act::Care(_, c) | Act::OverFracture(_, c) => Some((c.verb, c.secs)),
+        Act::Drink(i) => Some((i.verb, i.secs)),
+        Act::Corrode(_, v) => Some((v, 2.0)),
+        Act::Verdigris(_) => Some(("Присыпаете рану зелёным порошком", 2.5)),
+    }
+}
+
+/// Что сделает применение на выбранное место. `Err` — не начинать (предмет цел), с причиной.
+pub fn plan_to(body: &Body, item: &str, target: CareTarget) -> Result<(String, f32), String> {
+    match decide(body, item, target) {
+        Act::Refuse(why) => Err(why.into()),
+        act => Ok(act.label()),
+    }
+}
+
+/// Применить средство (быстрое применение из сумки). `has_bandage` — есть ли в сумке бинт,
+/// чтобы прибинтовать припарку. `roll` 0..1 — случай (неудача при извлечении, доза на глаз).
+pub fn apply(body: &mut Body, k: &Knowledge, item: &str, quality_index: usize, has_bandage: bool, roll: f32) -> Treated {
+    let target = auto_target(body, item);
+    match decide(body, item, target) {
+        Act::Waste(_) | Act::Swallow(..) | Act::Pour(_) => {
+            if remedy(item).0.is_some() { Treated::Nothing("Нечего лечить".into()) } else { Treated::Nothing("Это не лекарство".into()) }
+        }
+        _ => apply_to(body, k, item, quality_index, has_bandage, roll, target),
+    }
+}
+
+/// Применить средство туда, куда приложил игрок.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_to(body: &mut Body, k: &Knowledge, item: &str, quality_index: usize, has_bandage: bool, roll: f32, target: CareTarget) -> Treated {
+    match decide(body, item, target) {
+        Act::Refuse(why) => Treated::Nothing(why.into()),
+        Act::Extract(id) => extract(body.wound_mut(id).expect("рана есть"), k, roll),
+        Act::Care(id, c) => care_for(body.wound_mut(id).expect("рана есть"), k, c, quality_index, has_bandage),
+        Act::Splint(id) => splint(body.wound_mut(id).expect("рана есть"), k, has_bandage, roll),
+        Act::OverFracture(id, c) => {
+            let w = body.wound_mut(id).expect("рана есть");
+            let where_ = w.part.where_();
+            // Окопник (symphytum, «сращивающий») древние клали на переломы — и он правда помогает.
+            if c.heal >= 1.5 && c.poultice || matches!(item, "Мазь из окопника") {
+                let q = care_skill(k, c.technique) * potency(quality_index);
+                w.healing = w.healing.max(1.0 + (c.heal - 1.0) * 0.6 * q);
+            }
+            let text = if c.dress { format!("Перевязываете {where_} — но кость под повязкой ходит") } else { format!("{} {where_}", c.verb) };
+            Treated::Wound { text, bandage_used: false }
+        }
+        Act::Corrode(id, verb) => {
+            let w = body.wound_mut(id).expect("рана есть");
+            w.severity = (w.severity + 0.15).min(1.0);
+            w.initial = w.initial.max(w.severity);
+            w.healing = (w.healing * 0.7).max(0.5);
+            w.soothed = 0.0;
+            Treated::Wound { text: format!("{verb}: рану жжёт огнём, края побелели"), bandage_used: false }
+        }
+        Act::Verdigris(id) => {
+            let w = body.wound_mut(id).expect("рана есть");
+            // Цельс: aerugo чистит рану, но разъедает живое мясо.
+            w.antiseptic = w.antiseptic.max(0.35);
+            w.severity = (w.severity + 0.05).min(1.0);
+            w.initial = w.initial.max(w.severity);
+            Treated::Wound { text: "Рану щиплет и печёт".into(), bandage_used: false }
+        }
+        Act::Pour(id) => {
+            let w = body.wound_mut(id).expect("рана есть");
+            // Что-то смыли, но не вином и не уксусом.
+            w.dirt = (w.dirt * 0.85).max(0.05);
+            Treated::Wound { text: format!("{}: поливаете — пользы мало", w.kind.name()), bandage_used: false }
+        }
+        Act::Drink(i) => drink(body, k, i, quality_index, roll),
+        Act::Swallow(verb, toxins) => {
+            for (t, d) in toxins {
+                body.poison(*t, *d);
+            }
+            Treated::Drunk { text: verb.into() }
+        }
+        Act::Waste(verb) => Treated::Wound { text: format!("{verb}: ничего не изменилось"), bandage_used: false },
+    }
+}
+
+/// Вправить кость и наложить лубок. Без знания приёма кость часто встаёт криво.
+fn splint(w: &mut Wound, k: &Knowledge, has_bandage: bool, roll: f32) -> Treated {
+    let knows = k.knows(Lore::Technique(Technique::Bonesetting));
+    let mut good = (if knows { 0.75 } else { 0.25 }) + k.skill(Skill::Medicine) / 100.0 * 0.35;
+    let mut notes = Vec::new();
+    if has_bandage {
+        notes.push("прибинтовали");
+    } else {
+        good *= 0.6;
+        notes.push("без бинта лубок болтается");
+    }
+    w.splinted = true;
+    w.malunion = roll >= good.min(0.97);
+    // Знающий чувствует, что обломки не сошлись; неуч узнает, когда кость срастётся.
+    if w.malunion && knows {
+        notes.push("обломки встали неровно");
+    }
+    Treated::Wound { text: format!("{} {}: лубок наложен ({})", WoundKind::Fracture.name(), w.part.where_(), notes.join(", ")), bandage_used: has_bandage }
 }
 
 fn extract(w: &mut Wound, k: &Knowledge, roll: f32) -> Treated {
@@ -741,17 +1166,61 @@ fn knows_wounds(k: &Knowledge) -> bool {
     k.knows(Lore::Technique(Technique::WoundWashing)) || k.skill(Skill::Medicine) >= 15.0
 }
 
-/// Строки состояния для экрана. Без знаний — признаки, со знаниями — диагноз и совет.
-pub fn symptoms(body: &Body, k: &Knowledge) -> Vec<(String, Alarm)> {
-    let mut out = Vec::new();
+/// Рана, как её видит больной (для окна здоровья).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WoundView {
+    pub id: u32,
+    pub part: BodyPart,
+    /// «Рубленая рана», «Перелом» — или, у неуча, просто что видно («Распухло, не слушается»).
+    pub title: String,
+    pub details: Vec<String>,
+    pub alarm: Alarm,
+}
+
+/// Разбирается ли в переломах.
+fn knows_bones(k: &Knowledge) -> bool {
+    k.knows(Lore::Technique(Technique::Bonesetting)) || k.skill(Skill::Medicine) >= 35.0
+}
+
+/// Раны глазами больного. Без знаний — что видно и что чувствуешь, со знаниями — что это и чем грозит.
+pub fn wound_views(body: &Body, k: &Knowledge) -> Vec<WoundView> {
     let expert = knows_wounds(k);
+    let bones = knows_bones(k);
+    let mut out = Vec::new();
     for w in &body.wounds {
-        let place = if w.head { " на голове" } else { "" };
         let b = w.bleeding();
         let mut parts: Vec<String> = Vec::new();
-        let alarm;
+        if w.kind == WoundKind::Fracture {
+            let limb = w.part.is_arm() || w.part.is_leg();
+            let title = if bones {
+                if w.part == BodyPart::Chest { "Перелом рёбер".to_string() } else { "Перелом".to_string() }
+            } else if w.part == BodyPart::Chest {
+                "Больно вдохнуть, в боку хрустит".to_string()
+            } else {
+                "Распухло, не слушается".to_string()
+            };
+            if w.splinted {
+                parts.push("в лубке".into());
+                if w.malunion && bones {
+                    parts.push("обломки стоят неровно — срастётся криво".into());
+                }
+            } else {
+                parts.push(if limb { "под кожей ходит и хрустит".into() } else { "каждый вдох — нож".into() });
+                if w.part.is_leg() {
+                    parts.push("наступить больно".into());
+                }
+                if bones {
+                    parts.push("не вправлена".into());
+                }
+            }
+            let alarm = if w.splinted { Alarm::Mild } else { Alarm::Serious };
+            out.push(WoundView { id: w.id, part: w.part, title, details: parts, alarm });
+            continue;
+        }
         if w.kind == WoundKind::Burn {
             parts.push(if w.severity > 0.5 { "пузыри, кожа слезает".into() } else { "кожа красная, жжёт".into() });
+        } else if expert {
+            parts.push(if w.severity > 0.6 { "глубокая".into() } else if w.severity > 0.3 { "средняя".into() } else { "неглубокая".into() });
         }
         if b > 0.6 {
             parts.push("кровь хлещет".into());
@@ -776,16 +1245,45 @@ pub fn symptoms(body: &Body, k: &Knowledge) -> Vec<(String, Alarm)> {
         if expert && w.dirt > 0.6 && w.inflammation < 0.25 && w.age < INCUBATION_SECS && !w.arrowhead && w.kind != WoundKind::Burn {
             parts.push("не промыта".into());
         }
-        alarm = if b > 0.6 || w.inflammation >= 0.95 {
+        if expert && w.antiseptic > 0.25 {
+            parts.push("смазана".into());
+        }
+        if parts.iter().all(|p| matches!(p.as_str(), "перевязана" | "смазана" | "неглубокая" | "средняя" | "глубокая")) {
+            parts.push("затягивается".into());
+        }
+        let alarm = if b > 0.6 || w.inflammation >= 0.95 {
             Alarm::Deadly
         } else if b > 0.2 || w.inflammation > 0.55 || w.arrowhead {
             Alarm::Serious
         } else {
             Alarm::Mild
         };
-        let head = format!("{}{}", w.kind.name(), place);
-        let line = if parts.is_empty() { format!("{head}: затягивается") } else { format!("{head}: {}", parts.join(", ")) };
-        out.push((line, alarm));
+        out.push(WoundView { id: w.id, part: w.part, title: w.kind.name().to_string(), details: parts, alarm });
+    }
+    out
+}
+
+/// Строки состояния для экрана. Без знаний — признаки, со знаниями — диагноз и совет.
+pub fn symptoms(body: &Body, k: &Knowledge) -> Vec<(String, Alarm)> {
+    let mut out: Vec<(String, Alarm)> = wound_views(body, k)
+        .into_iter()
+        .map(|v| {
+            let line = format!("{} {}: {}", v.title, v.part.where_(), v.details.join(", "));
+            (line, v.alarm)
+        })
+        .collect();
+    out.extend(general_symptoms(body, k));
+    out
+}
+
+/// Всё, что не привязано к одной ране: жар, яды, боль, криво сросшиеся кости.
+pub fn general_symptoms(body: &Body, k: &Knowledge) -> Vec<(String, Alarm)> {
+    let mut out = Vec::new();
+    let expert = knows_wounds(k);
+    for p in &body.crooked {
+        let what = if p.is_leg() { "хромаете" } else if p.is_arm() { "рука слабее и короче" } else { "тяжело дышать" };
+        let bone = if *p == BodyPart::Chest { "Рёбра срослись".to_string() } else { format!("{} срослась", p.name()) };
+        out.push((format!("{bone} криво: {what}"), Alarm::Mild));
     }
     let fever = body.fever();
     if fever > 0.05 {
@@ -1006,5 +1504,151 @@ mod tests {
         b.hit(WoundKind::Arrow, 35.0, 150.0, false, 0.1);
         let loss = run(&mut b, 900.0);
         assert!(loss > 150.0, "{loss}");
+    }
+
+    // --- Части тела, переломы, лечение «куда приложил» ---
+
+    #[test]
+    fn hit_point_picks_body_part() {
+        use crate::combat::Pose;
+        use bevy::math::Vec3;
+        // Боец смотрит вдоль -Z (yaw 0): его правая сторона — +X.
+        let pose = Pose { feet: Vec3::ZERO, yaw: 0.0, pitch: 0.0, crouching: false };
+        assert_eq!(BodyPart::from_hit(&pose, Vec3::new(0.0, 1.6, 0.0), true), BodyPart::Head);
+        assert_eq!(BodyPart::from_hit(&pose, Vec3::new(0.0, 1.3, 0.0), false), BodyPart::Chest);
+        assert_eq!(BodyPart::from_hit(&pose, Vec3::new(0.0, 0.95, 0.0), false), BodyPart::Belly);
+        assert_eq!(BodyPart::from_hit(&pose, Vec3::new(0.3, 1.2, 0.0), false), BodyPart::RightArm);
+        assert_eq!(BodyPart::from_hit(&pose, Vec3::new(-0.3, 1.2, 0.0), false), BodyPart::LeftArm);
+        assert_eq!(BodyPart::from_hit(&pose, Vec3::new(-0.1, 0.4, 0.0), false), BodyPart::LeftLeg);
+        // Развернулся кругом: та же точка мира теперь у него слева.
+        let back = Pose { yaw: std::f32::consts::PI, ..pose };
+        assert_eq!(BodyPart::from_hit(&back, Vec3::new(0.3, 1.2, 0.0), false), BodyPart::LeftArm);
+        // Присел: бедро ниже.
+        let low = Pose { crouching: true, ..pose };
+        assert_eq!(BodyPart::from_hit(&low, Vec3::new(0.05, 0.45, 0.0), false), BodyPart::RightLeg);
+        assert_eq!(BodyPart::from_hit(&low, Vec3::new(0.05, 0.75, 0.0), false), BodyPart::Chest);
+    }
+
+    #[test]
+    fn heavy_axe_breaks_leg_and_it_slows() {
+        let mut b = Body::default();
+        b.hit_on(WoundKind::Cut, 45.0, 150.0, BodyPart::LeftLeg, 0.9, 0.7, 0.1);
+        assert_eq!(b.wounds.len(), 2, "рубленая рана и перелом");
+        let f = b.wounds.iter().find(|w| w.kind == WoundKind::Fracture).unwrap();
+        assert_eq!(f.part, BodyPart::LeftLeg);
+        assert!(b.mods().move_mult < 0.6, "{:?}", b.mods());
+        // Сакс кость не ломает.
+        let mut c = Body::default();
+        c.hit_on(WoundKind::Cut, 45.0, 150.0, BodyPart::LeftLeg, 0.9, 0.05, 0.1);
+        assert_eq!(c.wounds.len(), 1);
+    }
+
+    #[test]
+    fn fracture_heals_only_in_splint() {
+        let mut b = Body::default();
+        b.fracture(BodyPart::RightArm, 0.6);
+        run(&mut b, 600.0);
+        assert!((b.wounds[0].severity - 0.6).abs() < 1e-4, "без лубка кость не срастается");
+        let mut k = Knowledge::default();
+        k.learn(Lore::Technique(Technique::Bonesetting));
+        let id = b.wounds[0].id;
+        let r = apply_to(&mut b, &k, "Лубок", 1, true, 0.1, CareTarget::Wound(id));
+        assert!(matches!(r, Treated::Wound { bandage_used: true, .. }), "{r:?}");
+        assert!(b.wounds[0].splinted && !b.wounds[0].malunion);
+        run(&mut b, 1200.0);
+        assert!(b.wounds.is_empty(), "{:?}", b.wounds);
+        assert!(b.crooked.is_empty());
+        assert_eq!(b.mods(), BodyMods::default());
+    }
+
+    #[test]
+    fn clumsy_splint_leaves_crooked_bone() {
+        let mut b = Body::default();
+        b.fracture(BodyPart::LeftLeg, 0.5);
+        // Неуч, без бинта, и не повезло.
+        apply_to(&mut b, &Knowledge::default(), "Лубок", 1, false, 0.9, CareTarget::Part(BodyPart::LeftLeg));
+        assert!(b.wounds[0].malunion);
+        // Неуч об этом не знает, пока кость не срастётся.
+        assert!(!wound_views(&b, &Knowledge::default())[0].details.iter().any(|d| d.contains("криво")));
+        run(&mut b, 1200.0);
+        assert!(b.wounds.is_empty());
+        assert_eq!(b.crooked, vec![BodyPart::LeftLeg]);
+        assert!(b.mods().move_mult < 0.95);
+        assert!(!b.is_healthy());
+    }
+
+    #[test]
+    fn treatment_goes_where_it_is_put() {
+        let mut b = Body::default();
+        b.hit_on(WoundKind::Stab, 40.0, 150.0, BodyPart::Belly, 0.9, 0.0, 1.0);
+        b.hit_on(WoundKind::Cut, 20.0, 150.0, BodyPart::RightArm, 0.9, 0.0, 1.0);
+        let k = Knowledge::default();
+        let belly = b.wounds[0].id;
+        // Бинт на руку — перевязана рука, живот кровит как кровил.
+        apply_to(&mut b, &k, "Бинт", 1, false, 0.5, CareTarget::Part(BodyPart::RightArm));
+        assert!(b.wounds[1].dressed);
+        assert!(!b.wounds[0].dressed);
+        // Бинт на здоровую ногу — некуда, бинт цел.
+        assert!(!apply_to(&mut b, &k, "Бинт", 1, false, 0.5, CareTarget::Part(BodyPart::LeftLeg)).consumes_item());
+        // Мазь на здоровую ногу — потрачена без толку.
+        let r = apply_to(&mut b, &k, "Ранозаживляющая мазь", 1, false, 0.5, CareTarget::Part(BodyPart::LeftLeg));
+        assert!(r.consumes_item(), "{r:?}");
+        // Отвар на рану — почти без пользы, жар не снимает.
+        apply_to(&mut b, &k, "Отвар шалфея", 1, false, 0.5, CareTarget::Wound(belly));
+        assert_eq!(b.antipyretic, 0.0);
+        // Тот же отвар в рот — действует.
+        apply_to(&mut b, &k, "Отвар шалфея", 1, false, 0.5, CareTarget::Mouth);
+        assert!(b.antipyretic > 0.0);
+        // Бинт не едят.
+        assert!(!apply_to(&mut b, &k, "Бинт", 1, false, 0.5, CareTarget::Mouth).consumes_item());
+    }
+
+    #[test]
+    fn caustic_in_wound_harms() {
+        let mut b = Body::default();
+        b.hit_on(WoundKind::Cut, 20.0, 150.0, BodyPart::LeftArm, 0.9, 0.0, 1.0);
+        let before = b.wounds[0].severity;
+        let r = apply_to(&mut b, &Knowledge::default(), "Щёлок", 1, false, 0.5, CareTarget::Part(BodyPart::LeftArm));
+        assert!(r.consumes_item());
+        assert!(b.wounds[0].severity > before + 0.1);
+    }
+
+    #[test]
+    fn plan_and_apply_agree_on_refusals() {
+        let mut b = Body::default();
+        b.fracture(BodyPart::RightLeg, 0.5);
+        let k = Knowledge::default();
+        for t in [CareTarget::Mouth, CareTarget::Part(BodyPart::Head), CareTarget::Part(BodyPart::RightLeg)] {
+            for item in ["Бинт", "Лубок", "Мирра", "Отвар шалфея", "Щёлок", "Спата"] {
+                let planned = plan_to(&b, item, t).is_ok();
+                let done = apply_to(&mut b.clone(), &k, item, 1, true, 0.5, t);
+                assert_eq!(planned, !matches!(done, Treated::Nothing(_)), "{item} -> {t:?}: {done:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn novice_sees_symptoms_healer_sees_fracture() {
+        let mut b = Body::default();
+        b.fracture(BodyPart::LeftArm, 0.6);
+        let novice = wound_views(&b, &Knowledge::default());
+        assert!(!novice[0].title.contains("Перелом"), "{:?}", novice[0]);
+        let mut k = Knowledge::default();
+        k.learn(Lore::Technique(Technique::Bonesetting));
+        assert_eq!(wound_views(&b, &k)[0].title, "Перелом");
+        assert!(symptoms(&b, &k).iter().any(|(s, _)| s.contains("на левой руке")));
+    }
+
+    #[test]
+    fn quick_use_splints_the_fracture() {
+        let mut b = Body::default();
+        b.hit_on(WoundKind::Cut, 30.0, 150.0, BodyPart::Chest, 0.9, 0.0, 1.0);
+        b.fracture(BodyPart::RightLeg, 0.5);
+        assert!(plan(&b, "Лубок").is_some());
+        apply(&mut b, &Knowledge::default(), "Лубок", 1, true, 0.1);
+        assert!(b.wounds.iter().any(|w| w.kind == WoundKind::Fracture && w.splinted));
+        // Бинт из сумки идёт на рану, а не на перелом.
+        apply(&mut b, &Knowledge::default(), "Бинт", 1, false, 0.5);
+        assert!(b.wounds.iter().any(|w| w.kind == WoundKind::Cut && w.dressed));
     }
 }

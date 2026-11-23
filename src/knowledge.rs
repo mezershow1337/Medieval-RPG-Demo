@@ -127,7 +127,7 @@ enum Task {
     Read { uid: ItemUid, text: Book },
     Gather { patch: u32 },
     Lesson { master: u32, mode: LessonMode },
-    Treat { uid: ItemUid },
+    Treat { uid: ItemUid, target: Option<medicine::CareTarget> },
     Brew { vessel: ItemUid, spec: BrewSpec },
 }
 
@@ -720,9 +720,18 @@ fn receive_lore_messages(
                     let healthy = Body::default();
                     let body = bodies.bodies.get(&pid).unwrap_or(&healthy);
                     match medicine::plan(body, base.base().name) {
-                        Some((verb, secs)) => start(&mut server, &mut world, pid, Task::Treat { uid }, verb.into(), 0.0, secs, feet, hp),
+                        Some((verb, secs)) => start(&mut server, &mut world, pid, Task::Treat { uid, target: None }, verb.into(), 0.0, secs, feet, hp),
                         None if medicine::is_remedy(base.base().name) => notice(&mut server, pid, "Нечего лечить"),
                         None => notice(&mut server, pid, "Это не лекарство"),
+                    }
+                }
+                LoreClientMessage::TreatOn { uid, target } => {
+                    let Some(base) = loot.inventories.get(&pid).and_then(|inv| inv.find(uid)).map(|(_, i)| i.base) else { continue };
+                    let healthy = Body::default();
+                    let body = bodies.bodies.get(&pid).unwrap_or(&healthy);
+                    match medicine::plan_to(body, base.base().name, target) {
+                        Ok((verb, secs)) => start(&mut server, &mut world, pid, Task::Treat { uid, target: Some(target) }, verb, 0.0, secs, feet, hp),
+                        Err(why) => notice(&mut server, pid, why),
                     }
                 }
                 LoreClientMessage::Brew { vessel, spec } => {
@@ -902,7 +911,7 @@ fn tick_activities(
         match a.task {
             Task::Read { uid, text } => finish_reading(&mut server, &mut world, &mut loot, pid, uid, text),
             Task::Gather { patch } => finish_gathering(&mut server, &mut world, &mut loot, pid, patch, a.start),
-            Task::Treat { uid } => finish_treatment(&mut server, &mut world, &mut loot, &mut game, &mut bodies, pid, uid),
+            Task::Treat { uid, target } => finish_treatment(&mut server, &mut world, &mut loot, &mut game, &mut bodies, pid, uid, target),
             Task::Brew { vessel, spec } => {
                 let feet = game.actors.get(&pid).map(|a| a.pose.feet).unwrap_or_default();
                 let at = a.work.map_or(feet, |w| w.pos.into());
@@ -1068,14 +1077,18 @@ fn regrow_patches(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: R
 }
 
 /// Лечение закончено: применить средство, списать предмет (и бинт к припарке).
-fn finish_treatment(server: &mut RenetServer, world: &mut KnowledgeWorld, loot: &mut LootWorld, game: &mut GameWorld, bodies: &mut Bodies, pid: u64, uid: ItemUid) {
+#[allow(clippy::too_many_arguments)]
+fn finish_treatment(server: &mut RenetServer, world: &mut KnowledgeWorld, loot: &mut LootWorld, game: &mut GameWorld, bodies: &mut Bodies, pid: u64, uid: ItemUid, target: Option<medicine::CareTarget>) {
     let Some(item) = loot.inventories.get(&pid).and_then(|inv| inv.find(uid)).map(|(_, i)| i.clone()) else { return };
     let Some(k) = world.players.get_mut(&pid) else { return };
     let name = item.info().name;
     let bandage = ItemBaseId::find("Бинт");
     let has_bandage = name != "Бинт" && loot.inventories.get(&pid).is_some_and(|inv| inv.all_items().any(|i| Some(i.base) == bandage));
     let roll = bodies.rng.f32();
-    let result = medicine::apply(bodies.body(pid), k, name, item.quality.index(), has_bandage, roll);
+    let result = match target {
+        Some(t) => medicine::apply_to(bodies.body(pid), k, name, item.quality.index(), has_bandage, roll, t),
+        None => medicine::apply(bodies.body(pid), k, name, item.quality.index(), has_bandage, roll),
+    };
     bodies.touch(pid);
     let take_one = |loot: &mut LootWorld, uid: ItemUid| {
         if let Some(inv) = loot.inventories.get_mut(&pid)
@@ -1355,6 +1368,8 @@ fn debug_kit(mut server: ResMut<RenetServer>, mut loot: ResMut<LootWorld>, mut g
             ("Весы с гирями", 1),
             ("Отрез льна", 1),
             ("Сушильная решётка", 1),
+            ("Лубок", 1),
+            ("Отвар шалфея", 1),
         ];
         for (name, n) in kit {
             let Some(base) = ItemBaseId::find(name) else { continue };
