@@ -95,6 +95,8 @@ pub enum ClientMessage {
     Attack { yaw: f32, pitch: f32 },
     /// Зажать / отпустить защиту (надёжный канал).
     Guard { on: bool, yaw: f32, pitch: f32 },
+    /// Убрать оружие и драться кулаками / снова взять оружие (хотбар).
+    Holster { on: bool },
 }
 
 /// Кто это: игрок или враг какого типа. Люди Херсонеса и его округи около 510 г.
@@ -152,7 +154,7 @@ pub enum ServerMessage {
     /// Ваш персонаж возрождён в этой точке.
     Respawned { pos: NetPos },
     /// На земле появилось тело (его можно будет обыскать).
-    CorpseSpawned { corpse_id: u64, kind: ActorKind, pos: NetPos, yaw: f32 },
+    CorpseSpawned { corpse_id: u64, kind: ActorKind, pos: NetPos, yaw: f32, gear: crate::gear_look::Gear },
     CorpseRemoved { corpse_id: u64 },
 }
 
@@ -178,6 +180,8 @@ pub struct ActorSnapshot {
     pub move_mult: f32,
     /// Вид клинка в руке: 0 — ржавый и грубый, 255 — полированный (см. `Item::look`).
     pub finish: u8,
+    /// Видимые доспехи и щит (у игроков), чтобы модель была одета как в инвентаре.
+    pub gear: crate::gear_look::Gear,
 }
 
 /// Летящая стрела.

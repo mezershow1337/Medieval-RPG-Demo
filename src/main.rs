@@ -16,6 +16,8 @@ mod doors;
 mod economy;
 mod factions;
 mod fight;
+mod gear_look;
+mod hotbar;
 mod graphics;
 mod hud;
 mod icons;

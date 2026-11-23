@@ -832,7 +832,7 @@ fn dev_shot(
     if let Some(n) = std::env::var("MRPG_SHOT_FRAMES").ok().and_then(|s| s.parse::<u32>().ok()) {
         *frames += 1;
         info!("снимок: кадр {} из {n}", *frames);
-        t = if *frames >= n + 4 { delay + 3.0 } else if *frames >= n { delay + 1.0 } else { 0.0 };
+        t = if *frames >= n + 12 { delay + 3.0 } else if *frames >= n { delay + 1.0 } else { 0.0 };
     }
     let ui = std::env::var("MRPG_SHOT_UI").unwrap_or_default();
     // `MRPG_SHOT_UI=fx` — выставить перед камерой сосуды на огне и показать вспышку и осколки.
