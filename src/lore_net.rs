@@ -27,6 +27,43 @@ pub struct PatchView {
     pub radius: f32,
 }
 
+/// Номера одиночных кустиков в поле начинаются отсюда (меньшие — заросли города).
+pub const WILD_PATCH_BASE: u32 = 1000;
+
+/// Рабочее место, поставленное игроком на землю.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StationKind {
+    /// Медная жаровня на треноге: огонь где угодно (жжёт древесный уголь).
+    Brazier,
+    /// Алхимический стол: жаровня, весы, ступка, подставка под алембик.
+    Table,
+}
+
+impl StationKind {
+    pub fn item(self) -> &'static str {
+        match self {
+            StationKind::Brazier => "Жаровня",
+            StationKind::Table => "Алхимический стол",
+        }
+    }
+
+    pub fn from_item(name: &str) -> Option<Self> {
+        match name {
+            "Жаровня" => Some(StationKind::Brazier),
+            "Алхимический стол" => Some(StationKind::Table),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct StationView {
+    pub id: u32,
+    pub kind: StationKind,
+    pub pos: NetPos,
+    pub yaw: f32,
+}
+
 /// Временный мастер, пока в городе нет настоящих NPC.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MasterView {
@@ -55,6 +92,12 @@ pub enum LoreClientMessage {
     Treat { uid: ItemUid },
     /// Варить в сосуде из своей сумки.
     Brew { vessel: ItemUid, spec: BrewSpec },
+    /// Поставить жаровню или стол из сумки перед собой.
+    PlaceStation { uid: ItemUid },
+    /// Забрать поставленное обратно в сумку.
+    TakeStation { id: u32 },
+    /// Собрать на жаровне алхимический стол (нужны весы и ступка).
+    UpgradeStation { id: u32 },
     /// Прервать текущее занятие.
     Stop,
 }
@@ -66,7 +109,11 @@ pub enum LoreServerMessage {
     Knowledge(Knowledge),
     Patches(Vec<PatchView>),
     PatchCharges { id: u32, charges: u8 },
+    /// Одиночный кустик вырос на новом месте (или его сорвали: charges 0).
+    PatchMoved { id: u32, pos: NetPos, charges: u8 },
     Masters(Vec<MasterView>),
+    /// Все поставленные жаровни и столы (после каждого изменения).
+    Stations(Vec<StationView>),
     /// Началось занятие: подпись, сколько уже прошло и сколько всего (секунды).
     Activity { verb: String, done: f32, total: f32 },
     ActivityEnded,

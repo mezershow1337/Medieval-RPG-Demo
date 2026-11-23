@@ -216,7 +216,7 @@ impl Recipe {
     pub fn bottled(&self) -> bool {
         !matches!(
             self.product,
-            "Кровоостанавливающая припарка" | "Мыло" | "Ярь-медянка" | "Свинцовые белила" | "Сурик" | "Мареновый лак" | "Вайдовая синь" | "Зажигательный горшок"
+            "Кровоостанавливающая припарка" | "Мыло" | "Жаровня" | "Ярь-медянка" | "Свинцовые белила" | "Сурик" | "Мареновый лак" | "Вайдовая синь" | "Зажигательный горшок"
         )
     }
 }
@@ -571,6 +571,86 @@ pub static RECIPES: &[Recipe] = &[
         consumes_vessel: true,
         ignites: Some(Heat::Medium),
     },
+    Recipe {
+        product: "Отвар полыни",
+        technique: Technique::Decoction,
+        vessel: VesselNeed::Pot,
+        parts: &[part(&["Полынь"], 1.0, 0.0)],
+        water: (20.0, 10.0),
+        heat: &[Heat::Low, Heat::Medium],
+        reduce: (0.6, 0.25),
+        hours: HERB_DECOCTION_HOURS,
+        yield_per: Yield::PerKotyle(2.0),
+        acidic: false,
+        hint: "Полынь варят как прочие отвары; горька, но гонит яд и глистов.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
+    },
+    Recipe {
+        product: "Мятный отвар",
+        technique: Technique::Decoction,
+        vessel: VesselNeed::Pot,
+        parts: &[part(&["Мята"], 1.0, 0.0)],
+        water: (20.0, 10.0),
+        heat: &[Heat::Low, Heat::Medium],
+        reduce: (0.6, 0.25),
+        hours: HERB_DECOCTION_HOURS,
+        yield_per: Yield::PerKotyle(2.0),
+        acidic: false,
+        hint: "Мяту томить недолго, на слабом огне: унимает тошноту.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
+    },
+    Recipe {
+        product: "Отвар шиповника",
+        technique: Technique::Decoction,
+        vessel: VesselNeed::Pot,
+        parts: &[part(&["Шиповник"], 1.0, 0.0)],
+        water: (20.0, 10.0),
+        heat: &[Heat::Low, Heat::Medium],
+        reduce: (0.6, 0.25),
+        hours: HERB_DECOCTION_HOURS,
+        yield_per: Yield::PerKotyle(2.0),
+        acidic: false,
+        hint: "Плоды шиповника варить около часа: укрепляет и бодрит.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
+    },
+    Recipe {
+        product: "Отвар девясила",
+        technique: Technique::Decoction,
+        vessel: VesselNeed::Pot,
+        parts: &[part(&["Корень девясила"], 1.0, 0.0)],
+        water: (15.0, 8.0),
+        heat: &[Heat::Low, Heat::Medium],
+        reduce: (0.6, 0.25),
+        hours: HERB_DECOCTION_HOURS,
+        yield_per: Yield::PerKotyle(2.0),
+        acidic: false,
+        hint: "Корень девясила варить дольше травы: от кашля и жара.",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
+    },
+    Recipe {
+        product: "Жаровня",
+        technique: Technique::Calcination,
+        vessel: VesselNeed::Crucible,
+        parts: &[part(&["Медный лом"], 1.0, 0.0)],
+        water: (0.0, 0.0),
+        heat: &[Heat::High],
+        reduce: (0.0, 1.0),
+        hours: (2.0, 3.0, 8.0),
+        yield_per: Yield::PerDrachms(60.0),
+        acidic: false,
+        hint: "Медный лом расплавить в тигле на сильном огне и отлить чашу жаровни (на неё — четыре куска лома).",
+        fumes: None,
+        consumes_vessel: false,
+        ignites: None,
+    },
 ];
 
 /// Что положено в сосуд.
@@ -730,8 +810,9 @@ fn quality_index(score: f32, skill: f32) -> Option<usize> {
 }
 
 /// Сварить. `flasks` — сколько пустых флаконов в сумке.
-/// `roll` 0..1 — случай (лопнет ли стекло).
-pub fn brew(spec: &BrewSpec, vessel: Vessel, k: &Knowledge, flasks: u16, roll: f32) -> BrewResult {
+/// `roll` 0..1 — случай (лопнет ли стекло). `bench` — работа за алхимическим столом:
+/// ровный жар жаровни и подставки для приборов (стекло лопается вдвое реже, точнее выходит).
+pub fn brew(spec: &BrewSpec, vessel: Vessel, k: &Knowledge, flasks: u16, roll: f32, bench: bool) -> BrewResult {
     let mut result = BrewResult { product: None, flasks_used: 0, vessel_broken: false, burn: 0.0, text: String::new(), technique: None, poison: None, vessel_used: false };
     let water = spec.water as f32;
     let left = (water - spec.heat.boil_off() * spec.hours).max(0.0);
@@ -749,7 +830,7 @@ pub fn brew(spec: &BrewSpec, vessel: Vessel, k: &Knowledge, flasks: u16, roll: f
     // Стекло боится сильного огня: знающий разогревает постепенно.
     if vessel.glass() && spec.heat == Heat::High {
         let careful = k.knows(Lore::Technique(Technique::Distillation));
-        let chance = if vessel == Vessel::Retort { 0.6 } else { 0.45 } * if careful { 0.5 } else { 1.0 };
+        let chance = if vessel == Vessel::Retort { 0.6 } else { 0.45 } * if careful { 0.5 } else { 1.0 } * if bench { 0.5 } else { 1.0 };
         if roll < chance {
             result.vessel_broken = true;
             result.burn = 0.25;
@@ -813,6 +894,7 @@ pub fn brew(spec: &BrewSpec, vessel: Vessel, k: &Knowledge, flasks: u16, roll: f
         result.text = "Кислое разъело медь: варево позеленело, пить его — яд".into();
         return result;
     }
+    let score = if bench { (score * 1.1).min(1.0) } else { score };
     let Some(q) = quality_index(score, k.skill(recipe.technique.skill())) else {
         result.product = Some((SPOILED, 1, 0));
         result.text = format!("Похоже на «{}», но не вышло: {}", recipe.product, if notes.is_empty() { "всё не так".into() } else { notes.join(", ") });
@@ -886,7 +968,7 @@ mod tests {
     fn real_recipe_works_without_knowledge() {
         // Гален: воск к маслу 1:4, на слабом огне — и неуч сварит мазь.
         let k = Knowledge::default();
-        let r = brew(&spec(&[("Воск", 1), ("Кувшин оливкового масла", 1), ("Мирра", 1)], 0, Heat::Low, 1.0), Vessel::ClayPot, &k, 5, 0.9);
+        let r = brew(&spec(&[("Воск", 1), ("Кувшин оливкового масла", 1), ("Мирра", 1)], 0, Heat::Low, 1.0), Vessel::ClayPot, &k, 5, 0.9, false);
         let (name, n, q) = r.product.expect("что-то вышло");
         assert_eq!(name, "Ранозаживляющая мазь", "{}", r.text);
         assert!(n >= 2);
@@ -897,38 +979,38 @@ mod tests {
     fn wrong_proportions_fail() {
         let k = Knowledge::default();
         // Воска больше, чем масла.
-        let r = brew(&spec(&[("Воск", 4), ("Кувшин оливкового масла", 1)], 0, Heat::Low, 1.0), Vessel::ClayPot, &k, 5, 0.9);
+        let r = brew(&spec(&[("Воск", 4), ("Кувшин оливкового масла", 1)], 0, Heat::Low, 1.0), Vessel::ClayPot, &k, 5, 0.9, false);
         assert_eq!(r.product.map(|p| p.0), Some(SPOILED), "{}", r.text);
     }
 
     #[test]
     fn decoction_needs_water_and_gentle_fire() {
         let k = Knowledge::default();
-        let good = brew(&spec(&[("Шалфей", 2)], 4, Heat::Low, 1.5), Vessel::ClayPot, &k, 5, 0.9);
+        let good = brew(&spec(&[("Шалфей", 2)], 4, Heat::Low, 1.5), Vessel::ClayPot, &k, 5, 0.9, false);
         assert_eq!(good.product.map(|p| p.0), Some("Отвар шалфея"), "{}", good.text);
         // Без воды на сильном огне глина лопается.
-        let burnt = brew(&spec(&[("Шалфей", 2)], 0, Heat::High, 1.0), Vessel::ClayPot, &k, 5, 0.9);
+        let burnt = brew(&spec(&[("Шалфей", 2)], 0, Heat::High, 1.0), Vessel::ClayPot, &k, 5, 0.9, false);
         assert!(burnt.vessel_broken);
         // Выкипело всё.
-        let dry = brew(&spec(&[("Шалфей", 2)], 2, Heat::High, 2.0), Vessel::ClayPot, &k, 5, 0.9);
+        let dry = brew(&spec(&[("Шалфей", 2)], 2, Heat::High, 2.0), Vessel::ClayPot, &k, 5, 0.9, false);
         assert_eq!(dry.product.map(|p| p.0), Some(SPOILED));
     }
 
     #[test]
     fn vinegar_eats_copper() {
         let k = Knowledge::default();
-        let r = brew(&spec(&[("Горшок мёда", 1), ("Винный уксус", 1)], 1, Heat::Low, 1.0), Vessel::CopperKettle, &k, 5, 0.9);
+        let r = brew(&spec(&[("Горшок мёда", 1), ("Винный уксус", 1)], 1, Heat::Low, 1.0), Vessel::CopperKettle, &k, 5, 0.9, false);
         assert_eq!(r.product.map(|p| p.0), Some(SPOILED), "{}", r.text);
-        let r = brew(&spec(&[("Горшок мёда", 1), ("Винный уксус", 1)], 1, Heat::Low, 1.0), Vessel::ClayPot, &k, 5, 0.9);
+        let r = brew(&spec(&[("Горшок мёда", 1), ("Винный уксус", 1)], 1, Heat::Low, 1.0), Vessel::ClayPot, &k, 5, 0.9, false);
         assert_eq!(r.product.map(|p| p.0), Some("Оксимель"), "{}", r.text);
     }
 
     #[test]
     fn liquids_need_flasks() {
         let k = Knowledge::default();
-        let r = brew(&spec(&[("Шалфей", 2)], 4, Heat::Low, 1.5), Vessel::ClayPot, &k, 0, 0.9);
+        let r = brew(&spec(&[("Шалфей", 2)], 4, Heat::Low, 1.5), Vessel::ClayPot, &k, 0, 0.9, false);
         assert!(r.product.is_none());
-        let r = brew(&spec(&[("Шалфей", 2)], 4, Heat::Low, 1.5), Vessel::ClayPot, &k, 1, 0.9);
+        let r = brew(&spec(&[("Шалфей", 2)], 4, Heat::Low, 1.5), Vessel::ClayPot, &k, 1, 0.9, false);
         assert_eq!(r.product.map(|p| p.1), Some(1));
         assert_eq!(r.flasks_used, 1);
     }
@@ -936,7 +1018,7 @@ mod tests {
     #[test]
     fn poultice_in_mortar() {
         let k = Knowledge::default();
-        let r = brew(&spec(&[("Тысячелистник", 1), ("Подорожник", 1)], 0, Heat::None, 0.25), Vessel::Mortar, &k, 0, 0.9);
+        let r = brew(&spec(&[("Тысячелистник", 1), ("Подорожник", 1)], 0, Heat::None, 0.25), Vessel::Mortar, &k, 0, 0.9, false);
         assert_eq!(r.product.map(|p| p.0), Some("Кровоостанавливающая припарка"), "{}", r.text);
     }
 
@@ -948,8 +1030,8 @@ mod tests {
             master.practice(Skill::Herbalism, 1.0);
         }
         let s = spec(&[("Шалфей", 2)], 4, Heat::Low, 1.5);
-        let a = brew(&s, Vessel::ClayPot, &novice, 5, 0.9).product.unwrap().2;
-        let b = brew(&s, Vessel::ClayPot, &master, 5, 0.9).product.unwrap().2;
+        let a = brew(&s, Vessel::ClayPot, &novice, 5, 0.9, false).product.unwrap().2;
+        let b = brew(&s, Vessel::ClayPot, &master, 5, 0.9, false).product.unwrap().2;
         assert!(b > a, "{a} {b}");
     }
 
@@ -962,9 +1044,10 @@ mod tests {
             &k,
             5,
             0.9,
+            false,
         );
         assert_eq!(t.product.map(|p| p.0), Some("Териак"), "{}", t.text);
-        let v = brew(&spec(&[("Кувшин вина", 1)], 0, Heat::None, 72.0), Vessel::ClayPot, &k, 10, 0.9);
+        let v = brew(&spec(&[("Кувшин вина", 1)], 0, Heat::None, 72.0), Vessel::ClayPot, &k, 10, 0.9, false);
         assert_eq!(v.product.map(|p| p.0), Some("Винный уксус"), "{}", v.text);
     }
 
@@ -972,12 +1055,12 @@ mod tests {
     fn mercury_from_cinnabar_poisons_unless_careful() {
         let k = Knowledge::default();
         let s = spec(&[("Киноварь", 3)], 0, Heat::Medium, 2.0);
-        let r = brew(&s, Vessel::Alembic, &k, 5, 0.9);
+        let r = brew(&s, Vessel::Alembic, &k, 5, 0.9, false);
         assert_eq!(r.product.map(|p| p.0), Some("Ртуть"), "{}", r.text);
         let (_, d) = r.poison.expect("пары");
         let mut sage = Knowledge::default();
         sage.learn(Lore::Technique(Technique::Sublimation));
-        let careful = brew(&s, Vessel::Kerotakis, &sage, 5, 0.9).poison.unwrap().1;
+        let careful = brew(&s, Vessel::Kerotakis, &sage, 5, 0.9, false).poison.unwrap().1;
         assert!(careful < d * 0.2, "{careful} {d}");
     }
 
@@ -985,40 +1068,40 @@ mod tests {
     fn glass_bursts_on_strong_fire() {
         let k = Knowledge::default();
         let s = spec(&[("Сосновая смола", 2)], 0, Heat::High, 1.0);
-        let r = brew(&s, Vessel::Retort, &k, 5, 0.1);
+        let r = brew(&s, Vessel::Retort, &k, 5, 0.1, false);
         assert!(r.vessel_broken && r.burn > 0.0, "{}", r.text);
         // Ровный средний огонь — масло.
-        let ok = brew(&spec(&[("Сосновая смола", 2)], 0, Heat::Medium, 2.0), Vessel::Alembic, &k, 5, 0.1);
+        let ok = brew(&spec(&[("Сосновая смола", 2)], 0, Heat::Medium, 2.0), Vessel::Alembic, &k, 5, 0.1, false);
         assert_eq!(ok.product.map(|p| p.0), Some("Смоляное масло"), "{}", ok.text);
     }
 
     #[test]
     fn pigments_and_dyes() {
         let k = Knowledge::default();
-        let lead = brew(&spec(&[("Свинец", 1), ("Винный уксус", 1)], 0, Heat::None, 72.0), Vessel::ClayPot, &k, 0, 0.9);
+        let lead = brew(&spec(&[("Свинец", 1), ("Винный уксус", 1)], 0, Heat::None, 72.0), Vessel::ClayPot, &k, 0, 0.9, false);
         assert_eq!(lead.product.map(|p| p.0), Some("Свинцовые белила"), "{}", lead.text);
-        let red = brew(&spec(&[("Свинцовые белила", 3)], 0, Heat::High, 3.0), Vessel::Crucible, &k, 0, 0.9);
+        let red = brew(&spec(&[("Свинцовые белила", 3)], 0, Heat::High, 3.0), Vessel::Crucible, &k, 0, 0.9, false);
         assert_eq!(red.product.map(|p| p.0), Some("Сурик"), "{}", red.text);
-        let verd = brew(&spec(&[("Медный лом", 1), ("Винный уксус", 1)], 0, Heat::None, 72.0), Vessel::ClayPot, &k, 0, 0.9);
+        let verd = brew(&spec(&[("Медный лом", 1), ("Винный уксус", 1)], 0, Heat::None, 72.0), Vessel::ClayPot, &k, 0, 0.9, false);
         assert_eq!(verd.product.map(|p| p.0), Some("Ярь-медянка"), "{}", verd.text);
-        let madder = brew(&spec(&[("Корень марены", 3), ("Квасцы", 2), ("Натр", 1)], 2, Heat::Low, 2.0), Vessel::ClayPot, &k, 0, 0.9);
+        let madder = brew(&spec(&[("Корень марены", 3), ("Квасцы", 2), ("Натр", 1)], 2, Heat::Low, 2.0), Vessel::ClayPot, &k, 0, 0.9, false);
         assert_eq!(madder.product.map(|p| p.0), Some("Мареновый лак"), "{}", madder.text);
     }
 
     #[test]
     fn incendiary_pot_ignites_on_strong_fire() {
         let k = Knowledge::default();
-        let good = brew(&spec(&[("Сосновая смола", 2), ("Сера", 1), ("Ладан", 1)], 0, Heat::Low, 0.5), Vessel::ClayPot, &k, 0, 0.9);
+        let good = brew(&spec(&[("Сосновая смола", 2), ("Сера", 1), ("Ладан", 1)], 0, Heat::Low, 0.5), Vessel::ClayPot, &k, 0, 0.9, false);
         assert_eq!(good.product.map(|p| (p.0, p.1)), Some(("Зажигательный горшок", 1)), "{}", good.text);
         assert!(good.vessel_used);
-        let bad = brew(&spec(&[("Сосновая смола", 2), ("Сера", 1)], 0, Heat::Medium, 0.5), Vessel::ClayPot, &k, 0, 0.9);
+        let bad = brew(&spec(&[("Сосновая смола", 2), ("Сера", 1)], 0, Heat::Medium, 0.5), Vessel::ClayPot, &k, 0, 0.9, false);
         assert!(bad.burn > 0.0, "{}", bad.text);
     }
 
     #[test]
     fn sulfur_water_smells() {
         let k = Knowledge::default();
-        let r = brew(&spec(&[("Сера", 1), ("Негашёная известь", 1)], 4, Heat::Medium, 1.0), Vessel::ClayPot, &k, 5, 0.9);
+        let r = brew(&spec(&[("Сера", 1), ("Негашёная известь", 1)], 4, Heat::Medium, 1.0), Vessel::ClayPot, &k, 5, 0.9, false);
         assert_eq!(r.product.map(|p| p.0), Some("Серная вода"), "{}", r.text);
         assert!(r.poison.is_some());
     }
