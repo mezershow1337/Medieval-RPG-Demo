@@ -6,7 +6,7 @@ use crate::smithing::{CastMetal, CastPiece, Casting, Forging, Pattern, Quench, S
 use serde::{Deserialize, Serialize};
 
 /// Номер канала renet (надёжный, по порядку). Настроен в `protocol::connection_config`.
-pub const CH_SMITH: u8 = 9;
+pub const CH_SMITH: u8 = 10;
 
 /// Дальше этого (метры от наковальни) у горна не поработать.
 pub const SMITH_REACH: f32 = 4.0;

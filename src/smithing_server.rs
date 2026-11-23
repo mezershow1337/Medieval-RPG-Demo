@@ -486,11 +486,11 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                         notice(&mut server, pid, "Вы отошли от горна");
                         continue;
                     }
-                    let mut events: Vec<Event> = Vec::new();
+                    let mut events: Vec<SmithEvent> = Vec::new();
                     match (&mut w.job, other) {
                         (Job::Forge(f), SmithClientMessage::Move(spot)) => {
                             if spot == Spot::Ashes && f.temp < 650.0 {
-                                events.push(Event::Note("Отжигают с красного жара: сначала нагрейте".into()));
+                                events.push(SmithEvent::Note("Отжигают с красного жара: сначала нагрейте".into()));
                             } else {
                                 f.spot = spot;
                             }
@@ -505,9 +505,9 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                                 f.spot = Spot::Anvil;
                             }
                             if q == Quench::Oil && count_named(loot.inventories.get(&pid).unwrap_or(&Inventory::new((1, 1))), "Кувшин оливкового масла") == 0 {
-                                events.push(Event::Note("Для закалки в масле нужен кувшин оливкового масла".into()));
+                                events.push(SmithEvent::Note("Для закалки в масле нужен кувшин оливкового масла".into()));
                             } else if q == Quench::Brine && count_named(loot.inventories.get(&pid).unwrap_or(&Inventory::new((1, 1))), "Мешок соли") == 0 {
-                                events.push(Event::Note("Для рассола нужен мешок соли".into()));
+                                events.push(SmithEvent::Note("Для рассола нужен мешок соли".into()));
                             } else {
                                 events.push(f.quench(q, skill, rng));
                             }
@@ -515,7 +515,7 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                         (Job::Forge(f), SmithClientMessage::Grind { acc }) => {
                             if f.spot == Spot::Grindstone {
                                 if f.temp > 250.0 {
-                                    events.push(Event::Note("Горячее на точило не кладут".into()));
+                                    events.push(SmithEvent::Note("Горячее на точило не кладут".into()));
                                 } else {
                                     f.grind(acc);
                                 }
@@ -535,7 +535,7 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                                     c.spot = Spot::Anvil;
                                 }
                                 if let Err(e) = c.start_pour() {
-                                    events.push(Event::Note(e));
+                                    events.push(SmithEvent::Note(e));
                                 }
                             } else {
                                 c.pouring = false;
@@ -543,9 +543,9 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                         }
                         (Job::Cast(c), SmithClientMessage::OpenMould) => {
                             if c.poured <= 0.0 {
-                                events.push(Event::Note("Сначала залейте форму".into()));
+                                events.push(SmithEvent::Note("Сначала залейте форму".into()));
                             } else if c.temp > c.liquidus() - 150.0 && c.temp > 200.0 {
-                                events.push(Event::Note("Металл ещё жидкий: подождите, пока застынет".into()));
+                                events.push(SmithEvent::Note("Металл ещё жидкий: подождите, пока застынет".into()));
                             } else {
                                 c.opened = true;
                                 c.pouring = false;

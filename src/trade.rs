@@ -1272,22 +1272,7 @@ pub const MERCHANTS: &[MerchantDef] = &[
         },
         vigilance: 0.55,
         cash: 0,
-        orders: &[
-            OrderDef {
-                item: "Боевой топор",
-                count: 1,
-                price: 2000,
-                secs: 300.0,
-                min: Standing::Neutral,
-            },
-            OrderDef {
-                item: "Спата",
-                count: 1,
-                price: 5600,
-                secs: 600.0,
-                min: Standing::Friendly,
-            },
-        ],
+        orders: &[],
         lessons: &[
             LessonDef {
                 title: "Ансила учит плавить руду и варить пакет",
@@ -1384,13 +1369,7 @@ pub const MERCHANTS: &[MerchantDef] = &[
         },
         vigilance: 0.75,
         cash: 0,
-        orders: &[OrderDef {
-            item: "Ламеллярный панцирь",
-            count: 1,
-            price: 22000,
-            secs: 900.0,
-            min: Standing::Respected,
-        }],
+        orders: &[],
         lessons: &[LessonDef {
             title: "Кандак учит доспешному делу",
             teacher: TeacherKind::Armourer,

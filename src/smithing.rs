@@ -309,7 +309,7 @@ pub struct Forging {
 
 /// Что случилось после действия (для подсказки игроку).
 #[derive(Debug, Clone, PartialEq)]
-pub enum Event {
+pub enum SmithEvent {
     Crack,
     Sparks,
     Welded,
@@ -321,21 +321,21 @@ pub enum Event {
     Note(String),
 }
 
-impl Event {
+impl SmithEvent {
     pub fn text(&self) -> String {
         match self {
-            Event::Crack => "Металл треснул: били по остывшему".into(),
-            Event::Sparks => "Летят искры — железо горит в горне!".into(),
-            Event::Welded => "Слои схватились: сварка взялась".into(),
-            Event::ColdShut => "Сварка не берётся: жара мало".into(),
-            Event::Missed => "Удар вскользь: забоина".into(),
-            Event::Quenched { hard: true, cracked: false } => "Шипит пар: закалилось".into(),
-            Event::Quenched { hard: true, cracked: true } => "Закалилось, но пошла трещина".into(),
-            Event::Quenched { hard: false, cracked: false } => "Не закалилось: металл был холоден или это мягкое железо".into(),
-            Event::Quenched { hard: false, cracked: true } => "Треснуло и не закалилось".into(),
-            Event::Annealed => "Остыло в золе: напряжение ушло, металл мягкий".into(),
-            Event::TooCold => "Холодное: не поддаётся".into(),
-            Event::Note(s) => s.clone(),
+            SmithEvent::Crack => "Металл треснул: били по остывшему".into(),
+            SmithEvent::Sparks => "Летят искры — железо горит в горне!".into(),
+            SmithEvent::Welded => "Слои схватились: сварка взялась".into(),
+            SmithEvent::ColdShut => "Сварка не берётся: жара мало".into(),
+            SmithEvent::Missed => "Удар вскользь: забоина".into(),
+            SmithEvent::Quenched { hard: true, cracked: false } => "Шипит пар: закалилось".into(),
+            SmithEvent::Quenched { hard: true, cracked: true } => "Закалилось, но пошла трещина".into(),
+            SmithEvent::Quenched { hard: false, cracked: false } => "Не закалилось: металл был холоден или это мягкое железо".into(),
+            SmithEvent::Quenched { hard: false, cracked: true } => "Треснуло и не закалилось".into(),
+            SmithEvent::Annealed => "Остыло в золе: напряжение ушло, металл мягкий".into(),
+            SmithEvent::TooCold => "Холодное: не поддаётся".into(),
+            SmithEvent::Note(s) => s.clone(),
         }
     }
 }
@@ -369,7 +369,7 @@ impl Forging {
     }
 
     /// Шаг времени: жар горна (°C, 0 — горн погас), куда идёт тепло. Возвращает события.
-    pub fn step(&mut self, dt: f32, fire_temp: f32) -> Vec<Event> {
+    pub fn step(&mut self, dt: f32, fire_temp: f32) -> Vec<SmithEvent> {
         let mut ev = Vec::new();
         self.since_strike += dt;
         let mass = self.pattern.info().mass;
@@ -390,7 +390,7 @@ impl Forging {
                     self.hardness = 0.0;
                     self.brittle = 0.0;
                     self.quenched = false;
-                    ev.push(Event::Annealed);
+                    ev.push(SmithEvent::Annealed);
                 }
             }
             Spot::Anvil | Spot::Grindstone => self.temp = cool(self.temp, dt, mass),
@@ -419,14 +419,14 @@ impl Forging {
             let was = self.burn;
             self.burn += dt * (self.temp - 1340.0) / 100.0 * 0.25;
             if was < 0.05 && self.burn >= 0.05 {
-                ev.push(Event::Sparks);
+                ev.push(SmithEvent::Sparks);
             }
         }
         ev
     }
 
     /// Удар молотом по участку `zone`. `acc` — точность 0..1 (с экрана), `skill` — навык 0..100.
-    pub fn strike(&mut self, zone: usize, heavy: bool, acc: f32, skill: f32, rng: &mut Rng) -> Vec<Event> {
+    pub fn strike(&mut self, zone: usize, heavy: bool, acc: f32, skill: f32, rng: &mut Rng) -> Vec<SmithEvent> {
         let mut ev = Vec::new();
         let info = self.pattern.info();
         let n = self.shape.len();
@@ -451,15 +451,15 @@ impl Forging {
             let risk = (cold_limit - self.temp) / 320.0 * force * (0.35 + self.carbon) * (1.0 - 0.5 * s);
             if rng.f32() < risk * 0.35 {
                 self.cracks += 0.12 * force;
-                ev.push(Event::Crack);
+                ev.push(SmithEvent::Crack);
             } else if self.temp < 500.0 {
-                ev.push(Event::TooCold);
+                ev.push(SmithEvent::TooCold);
             }
         }
         if info.cold && heavy {
             // По кольчужным кольцам кувалдой не бьют: кольца рвутся.
             self.dents += 0.05;
-            ev.push(Event::Note("Тяжёлым молотом кольца рвутся".into()));
+            ev.push(SmithEvent::Note("Тяжёлым молотом кольца рвутся".into()));
         }
         // Сварка пакета: только на белом жару, сильными ударами.
         if self.weld < 1.0 {
@@ -467,14 +467,14 @@ impl Forging {
                 let gain = 0.09 * force * (0.4 + 0.6 * acc) * smooth(1230.0, 1320.0, self.temp).max(0.35);
                 self.weld = (self.weld + gain).min(1.0);
                 if self.weld >= 1.0 {
-                    ev.push(Event::Welded);
+                    ev.push(SmithEvent::Welded);
                 }
                 return ev;
             } else if self.temp > 650.0 {
                 // Тянуть несваренный пакет: слои расходятся.
                 self.cold_shut += 0.035 * force;
-                if !ev.contains(&Event::ColdShut) {
-                    ev.push(Event::ColdShut);
+                if !ev.contains(&SmithEvent::ColdShut) {
+                    ev.push(SmithEvent::ColdShut);
                 }
             }
         }
@@ -490,7 +490,7 @@ impl Forging {
         }
         if acc < 0.35 {
             self.dents += 0.05 * (1.0 - acc) * force;
-            ev.push(Event::Missed);
+            ev.push(SmithEvent::Missed);
         } else if heavy {
             self.dents += 0.006;
         } else if (600.0..=980.0).contains(&self.temp) || info.cold {
@@ -501,7 +501,7 @@ impl Forging {
     }
 
     /// Окунуть в закалочную ванну.
-    pub fn quench(&mut self, medium: Quench, skill: f32, rng: &mut Rng) -> Event {
+    pub fn quench(&mut self, medium: Quench, skill: f32, rng: &mut Rng) -> SmithEvent {
         let t = self.temp;
         let sev = medium.severity();
         let s = (skill / 100.0).clamp(0.0, 1.0);
@@ -524,7 +524,7 @@ impl Forging {
             self.brittle = self.hardness * (1.0 + overheat * 0.5);
             self.temper = 0.0;
         }
-        Event::Quenched { hard: hard > 0.15, cracked }
+        SmithEvent::Quenched { hard: hard > 0.15, cracked }
     }
 
     /// Проход на точиле.
@@ -631,7 +631,11 @@ impl Forging {
         } else {
             shape * 0.38 + integrity * 0.3 + surface * 0.15 + self.purity * 0.17
         };
-        let score = (score - over_ground * 0.3 + if fitting { 0.03 } else { 0.0 }).clamp(0.0, 1.0);
+        let mut score = (score - over_ground * 0.3 + if fitting { 0.03 } else { 0.0 }).clamp(0.0, 1.0);
+        // Недокованная вещь — ещё не вещь: выше «плохой» не бывает.
+        if self.shape.iter().any(|s| *s < 0.8) {
+            score = score.min(0.3);
+        }
         let mut flaws = Vec::new();
         let mut add = |cond: bool, f: Flaw| {
             if cond {
@@ -827,7 +831,7 @@ impl Casting {
         (1085.0 - 950.0 * self.tin_frac().min(0.25)).max(830.0)
     }
 
-    pub fn step(&mut self, dt: f32, fire_temp: f32) -> Vec<Event> {
+    pub fn step(&mut self, dt: f32, fire_temp: f32) -> Vec<SmithEvent> {
         let mut ev = Vec::new();
         let liq = self.liquidus();
         match self.spot {
@@ -868,11 +872,11 @@ impl Casting {
             }
             if cap < 1.0 && self.poured >= cap {
                 self.pouring = false;
-                ev.push(Event::Note("Металла не хватило: форма залита не вся".into()));
+                ev.push(SmithEvent::Note("Металла не хватило: форма залита не вся".into()));
                 self.misrun += 0.5;
             } else if self.poured >= 1.0 {
                 self.pouring = false;
-                ev.push(Event::Note("Форма залита".into()));
+                ev.push(SmithEvent::Note("Форма залита".into()));
             }
         }
         ev
@@ -1002,7 +1006,7 @@ impl Soak {
     }
 
     /// `fuel` — есть ли уголь в горне (для цементации; сыродутный горн заправлен заранее).
-    pub fn step(&mut self, dt: f32, fuel: bool) -> Vec<Event> {
+    pub fn step(&mut self, dt: f32, fuel: bool) -> Vec<SmithEvent> {
         let mut ev = Vec::new();
         if self.elapsed >= self.total {
             self.temp = cool(self.temp, dt, 3.0);
@@ -1030,7 +1034,7 @@ impl Soak {
                     let was = self.over;
                     self.over += dt * (self.temp - 1350.0) / 100.0 * 0.06;
                     if was < 0.1 && self.over >= 0.1 {
-                        ev.push(Event::Note("Из горна течёт чугун: слишком жарко".into()));
+                        ev.push(SmithEvent::Note("Из горна течёт чугун: слишком жарко".into()));
                     }
                 }
             }
@@ -1042,7 +1046,7 @@ impl Soak {
                     let was = self.over;
                     self.over += dt * 0.08;
                     if was < 0.3 && self.over >= 0.3 {
-                        ev.push(Event::Note("Горшок лопнул от жара".into()));
+                        ev.push(SmithEvent::Note("Горшок лопнул от жара".into()));
                     }
                 }
             }
@@ -1227,13 +1231,13 @@ mod tests {
         let mut rng = Rng::new(1);
         let mut f = Forging::new(Pattern::Knife, 0.7, 0.7);
         f.temp = 800.0;
-        assert!(matches!(f.quench(Quench::Oil, 50.0, &mut rng), Event::Quenched { hard: true, .. }));
+        assert!(matches!(f.quench(Quench::Oil, 50.0, &mut rng), SmithEvent::Quenched { hard: true, .. }));
         let mut f = Forging::new(Pattern::Knife, 0.7, 0.7);
         f.temp = 650.0;
-        assert!(matches!(f.quench(Quench::Water, 50.0, &mut rng), Event::Quenched { hard: false, .. }));
+        assert!(matches!(f.quench(Quench::Water, 50.0, &mut rng), SmithEvent::Quenched { hard: false, .. }));
         let mut f = Forging::new(Pattern::Knife, 0.7, 0.05);
         f.temp = 820.0;
-        assert!(matches!(f.quench(Quench::Water, 50.0, &mut rng), Event::Quenched { hard: false, .. }));
+        assert!(matches!(f.quench(Quench::Water, 50.0, &mut rng), SmithEvent::Quenched { hard: false, .. }));
     }
 
     #[test]

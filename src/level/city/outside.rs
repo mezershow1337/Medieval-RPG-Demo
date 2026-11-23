@@ -1014,7 +1014,7 @@ pub fn steppe_forge_rect() -> Rect {
 /// Горн аланов внутри кольца повозок.
 pub fn alan_forge_rect() -> Rect {
     let c = ALAN_CAMP;
-    Rect::new(c.x - 2.6, c.z + 4.8, c.x + 2.6, c.z + 8.6)
+    Rect::new(c.x - 2.6, c.z - 10.4, c.x + 2.6, c.z - 6.6)
 }
 
 /// Высота пола площадки кузницы за стенами.
