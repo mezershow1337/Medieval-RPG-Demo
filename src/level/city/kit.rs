@@ -2,10 +2,10 @@
 //! утварь (амфоры, пифосы, столы, ложа), деревья.
 
 use super::super::geom::{self, MeshBuilder, WallFrame, arch_height};
-use super::super::{Builder, DoorSpec, Mat};
+use super::super::{Builder, DoorSpec, Mat, PlantKind};
 use crate::collision::Aabb;
 use bevy::prelude::*;
-use std::f32::consts::{FRAC_PI_2, PI, TAU};
+use std::f32::consts::{FRAC_PI_2, TAU};
 
 /// Простой детерминированный генератор случайных чисел (одинаково на сервере и клиенте).
 #[derive(Clone)]
@@ -138,6 +138,10 @@ pub fn wall(b: &mut Builder, f: WallFrame, s0: f32, s1: f32, d0: f32, d1: f32, y
         }
         i += 1;
         b.solid_v(f.bounds((cursor, gl), (y0, y1), (d0, d1)), mat);
+        socle(b, f, cursor, gl, y0, d0, d1, mat);
+        if group.iter().all(|o| matches!(o, Op::Window { .. })) {
+            socle(b, f, gl, gr, y0, d0, d1, mat);
+        }
         if group.len() == 1 {
             opening(b, f, group[0], gl, gr, y0, y1, d0, d1, dm, mat, trim);
         } else {
@@ -168,6 +172,17 @@ pub fn wall(b: &mut Builder, f: WallFrame, s0: f32, s1: f32, d0: f32, d1: f32, y
         cursor = gr;
     }
     b.solid_v(f.bounds((cursor, s1), (y0, y1), (d0, d1)), mat);
+    socle(b, f, cursor, s1, y0, d0, d1, mat);
+}
+
+/// Цоколь: ряд тёсаных известняковых блоков у земли, чуть шире кладки стены
+/// (так строили в Херсонесе: бут на глине стоит на цоколе из тёсаного камня).
+fn socle(b: &mut Builder, f: WallFrame, s0: f32, s1: f32, y0: f32, d0: f32, d1: f32, mat: Mat) {
+    if s1 - s0 < 0.05 || y0.abs() > 0.3 || !matches!(mat, Mat::Rubble | Mat::Plaster | Mat::OpusMixtum | Mat::Signinum) {
+        return;
+    }
+    let (a, c) = f.bounds((s0, s1), (y0 - 0.15, y0 + 0.42), (d0 - 0.05, d1 + 0.05));
+    b.mesh(Mat::Limestone).cuboid(a, c);
 }
 
 /// Один проём: кладка над и под ним, обрамление, решётка, дверь.
@@ -632,90 +647,41 @@ pub fn awning(b: &mut Builder, a: Vec3, c: Vec3, out: Vec3, depth: f32, h: f32) 
 
 // ---------------- растения ----------------
 
-/// Крона: несколько сплюснутых «шаров» листвы.
-fn canopy(b: &mut Builder, c: Vec3, r: f32, mat: Mat, rng: &mut Rng) {
-    let n = 5;
-    for k in 0..n {
-        let a = k as f32 / n as f32 * TAU + rng.range(0.0, 1.0);
-        let off = if k == 0 { Vec3::ZERO } else { Vec3::new(a.cos() * r * 0.55, rng.range(-0.25, 0.3) * r, a.sin() * r * 0.55) };
-        let rr = r * if k == 0 { 0.8 } else { rng.range(0.5, 0.7) };
-        let prof: Vec<(f32, f32)> = (0..=6).map(|i| {
-            let t = -FRAC_PI_2 + PI * i as f32 / 6.0;
-            (t.cos() * rr, t.sin() * rr * 0.75)
-        }).collect();
-        b.mesh(mat).lathe(c + off, &prof, 9);
-    }
-}
 
 /// Инжир (смоковница) — обычное дерево херсонесских дворов.
 pub fn fig_tree(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
-    let m = b.mesh(Mat::Wood);
-    m.lathe(p, &[(0.16, 0.0), (0.12, h * 0.45), (0.08, h * 0.55)], 7);
-    for k in 0..3 {
-        let a = k as f32 * 2.1 + rng.f();
-        m.beam(p + Vec3::Y * h * 0.4, p + Vec3::new(a.cos() * h * 0.3, h * 0.7, a.sin() * h * 0.3), 0.06, 0.06, Vec3::Y);
-    }
-    canopy(b, p + Vec3::Y * h * 0.72, h * 0.42, Mat::Leaves, rng);
+    b.plant(PlantKind::Fig, p, h, rng.range(0.0, TAU), rng.int(16) as u32);
     b.invisible.push(Aabb::new(p - Vec3::new(0.18, 0.0, 0.18), p + Vec3::new(0.18, h * 0.5, 0.18)));
 }
 
 /// Кипарис.
 pub fn cypress(b: &mut Builder, p: Vec3, h: f32) {
-    b.mesh(Mat::Wood).lathe(p, &[(0.15, 0.0), (0.12, 0.8)], 6);
-    let prof: Vec<(f32, f32)> = (0..=8).map(|i| {
-        let t = i as f32 / 8.0;
-        let r = (h * 0.13) * (1.0 - t).powf(0.8) * (0.5 + 1.6 * t.min(0.3));
-        (r, 0.5 + t * (h - 0.5))
-    }).collect();
-    b.mesh(Mat::Conifer).lathe(p, &prof, 9);
+    let v = ((p.x * 7.3 + p.z * 3.1).abs() as u32) % 16;
+    b.plant(PlantKind::Cypress, p, h, (p.x * 0.37 + p.z * 0.11) % TAU, v);
     b.invisible.push(Aabb::new(p - Vec3::new(0.3, 0.0, 0.3), p + Vec3::new(0.3, h * 0.6, 0.3)));
 }
 
 /// Можжевельник высокий (Juniperus excelsa) — кустарник или невысокое дерево крымских склонов.
 pub fn juniper(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
-    let m = b.mesh(Mat::Wood);
-    m.lathe(p, &[(0.1, 0.0), (0.06, h * 0.4)], 6);
-    let n = 3 + rng.int(3);
-    for k in 0..n {
-        let a = rng.range(0.0, TAU);
-        let y = h * rng.range(0.25, 0.7);
-        let r = h * rng.range(0.18, 0.3) * (1.0 - y / h * 0.5);
-        let c = p + Vec3::new(a.cos() * h * 0.12 * k as f32 / n as f32, y, a.sin() * h * 0.12 * k as f32 / n as f32);
-        let prof: Vec<(f32, f32)> = (0..=5).map(|i| {
-            let t = -FRAC_PI_2 + PI * i as f32 / 5.0;
-            (t.cos() * r, t.sin() * r * 1.3)
-        }).collect();
-        b.mesh(Mat::Conifer).lathe(c, &prof, 7);
-    }
+    b.plant(PlantKind::Juniper, p, h, rng.range(0.0, TAU), rng.int(16) as u32);
     b.invisible.push(Aabb::new(p - Vec3::new(0.25, 0.0, 0.25), p + Vec3::new(0.25, h * 0.5, 0.25)));
 }
 
 /// Крымская сосна.
 pub fn pine(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
-    b.mesh(Mat::Wood).lathe(p, &[(0.22, 0.0), (0.14, h * 0.75), (0.05, h * 0.9)], 7);
-    for k in 0..3 {
-        let y = h * (0.62 + k as f32 * 0.13);
-        let r = h * (0.28 - k as f32 * 0.06);
-        let prof: Vec<(f32, f32)> = (0..=5).map(|i| {
-            let t = -FRAC_PI_2 + PI * i as f32 / 5.0;
-            (t.cos() * r, t.sin() * r * 0.4)
-        }).collect();
-        let a = rng.range(0.0, TAU);
-        b.mesh(Mat::Conifer).lathe(p + Vec3::new(a.cos() * 0.4, y, a.sin() * 0.4), &prof, 9);
-    }
+    b.plant(PlantKind::Pine, p, h, rng.range(0.0, TAU), rng.int(16) as u32);
     b.invisible.push(Aabb::new(p - Vec3::new(0.25, 0.0, 0.25), p + Vec3::new(0.25, h * 0.6, 0.25)));
 }
 
 /// Дуб пушистый (предгорья).
 pub fn oak(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
-    let m = b.mesh(Mat::Wood);
-    m.lathe(p, &[(0.3, 0.0), (0.22, h * 0.4), (0.15, h * 0.5)], 8);
-    for k in 0..4 {
-        let a = k as f32 * 1.6 + rng.f();
-        m.beam(p + Vec3::Y * h * 0.38, p + Vec3::new(a.cos() * h * 0.32, h * 0.62, a.sin() * h * 0.32), 0.09, 0.09, Vec3::Y);
-    }
-    canopy(b, p + Vec3::Y * h * 0.68, h * 0.42, Mat::Leaves, rng);
+    b.plant(PlantKind::Oak, p, h, rng.range(0.0, TAU), rng.int(16) as u32);
     b.invisible.push(Aabb::new(p - Vec3::new(0.3, 0.0, 0.3), p + Vec3::new(0.3, h * 0.5, 0.3)));
+}
+
+/// Куст шибляка (шиповник, боярышник, держидерево) — без коллизии.
+pub fn shrub(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
+    b.plant(PlantKind::Shrub, p, h, rng.range(0.0, TAU), rng.int(16) as u32);
 }
 
 /// Виноградная лоза на шпалере (беседка во дворе или ряд в винограднике).

@@ -17,7 +17,12 @@ pub mod places;
 mod terrain;
 
 pub use places::*;
-pub use terrain::{WATER_Y, ground_y, inside_city};
+pub use terrain::{WATER_Y, city_distance as city_wall_distance, fbm, ground_y, inside_city};
+
+/// Расстояние от точки до ближайшей загородной дороги (для травы и т. п.).
+pub fn road_distance(x: f32, z: f32) -> f32 {
+    city::outside::road_distance_at(Vec2::new(x, z))
+}
 
 use crate::collision::{Aabb, HeightField, LevelColliders};
 use bevy::light::NotShadowCaster;
@@ -119,6 +124,35 @@ pub struct Lamp {
     pub color: Color,
     pub intensity: f32,
     pub range: f32,
+}
+
+/// Растение или камень-модель (src/vegetation.rs): деревья, кусты, фотосканы камней.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum PlantKind {
+    /// Сосна крымская.
+    Pine,
+    /// Дуб пушистый.
+    Oak,
+    /// Можжевельник высокий.
+    Juniper,
+    /// Кипарис.
+    Cypress,
+    /// Смоковница (инжир).
+    Fig,
+    /// Куст шибляка (шиповник, боярышник, держидерево).
+    Shrub,
+    /// Глыба известняка (фотоскан).
+    Rock,
+}
+
+/// Где стоит растение: основание, высота (м), поворот и номер варианта модели.
+#[derive(Clone, Copy, Debug)]
+pub struct Plant {
+    pub kind: PlantKind,
+    pub pos: Vec3,
+    pub height: f32,
+    pub yaw: f32,
+    pub variant: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -230,6 +264,8 @@ pub struct Layout {
     pub hearths: Vec<Vec3>,
     /// Кузнечные и сыродутные горны (для кузнечного дела).
     pub forges: Vec<ForgeSpec>,
+    /// Деревья, кусты и камни-модели (рисует клиент, коллизии — в `invisible`).
+    pub plants: Vec<Plant>,
 }
 
 /// Рабочее место кузнеца: где огонь и где стоять у наковальни.
@@ -296,6 +332,7 @@ struct Builder {
     water_y: Option<f32>,
     hearths: Vec<Vec3>,
     forges: Vec<ForgeSpec>,
+    plants: Vec<Plant>,
     /// Где земля карты высот вырезана (свои полы из коробок).
     holes: Vec<(Vec2, Vec2)>,
     /// Участок, куда сейчас складываются декоративные меши (см. [`Builder::at`]).
@@ -320,6 +357,7 @@ impl Builder {
             water_y: None,
             hearths: Vec::new(),
             forges: Vec::new(),
+            plants: Vec::new(),
             holes: Vec::new(),
             chunk: (0, 0),
         }
@@ -340,6 +378,7 @@ impl Builder {
             water_y: self.water_y,
             hearths: self.hearths,
             forges: self.forges,
+            plants: self.plants,
         }
     }
 
@@ -364,6 +403,7 @@ impl Builder {
         self.doors.extend(t.doors.into_iter().map(|d| DoorSpec { center: d.center + offset, ..d }));
         self.containers.extend(t.containers.into_iter().map(|c| ContainerSpec { pos: c.pos + offset, ..c }));
         self.residents.extend(t.residents.into_iter().map(|r| Resident { pos: r.pos + offset, ..r }));
+        self.plants.extend(t.plants.into_iter().map(|p| Plant { pos: p.pos + offset, ..p }));
         for mut g in t.glass {
             g.pts.iter_mut().for_each(|p| *p += offset);
             self.glass.push(g);
@@ -411,6 +451,10 @@ impl Builder {
     }
     fn mesh(&mut self, mat: Mat) -> &mut MeshBuilder {
         self.decor.entry((mat, self.chunk)).or_default()
+    }
+    /// Дерево, куст или камень-модель с основанием в `pos`.
+    fn plant(&mut self, kind: PlantKind, pos: Vec3, height: f32, yaw: f32, variant: u32) {
+        self.plants.push(Plant { kind, pos, height, yaw, variant });
     }
     fn invisible(&mut self, (min, max): (Vec3, Vec3)) {
         self.invisible.push(Aabb::new(min, max));
@@ -751,6 +795,7 @@ pub fn spawn_level(
     mut smoke_mats: ResMut<Assets<crate::smoke::SmokeMaterial>>,
 ) {
     let mut layout = layout();
+    commands.insert_resource(crate::vegetation::PendingPlants(std::mem::take(&mut layout.plants)));
 
     // Все коробки и декор одного материала на одном участке — в один меш.
     for block in &layout.blocks {
