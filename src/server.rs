@@ -35,7 +35,7 @@ pub struct Actor {
     last_update: f64,
     respawn_at: Option<f64>,
     protected_until: f64,
-    brain: Option<Brain>,
+    pub brain: Option<Brain>,
     spawn: Option<NpcSpawn>,
     /// Участок траектории удара, пройденный за текущий кадр: (удар, от, до).
     sweep: Option<(Swing, f32, f32)>,
@@ -64,6 +64,18 @@ pub struct Corpse {
     pub yaw: f32,
     /// Во что был одет (тело лежит в своих доспехах).
     pub gear: crate::gear_look::Gear,
+    /// Погиб мирный человек (житель или торговец), а не боец.
+    pub civ: Option<CivCorpse>,
+}
+
+/// Что лежит при мирном человеке.
+#[derive(Clone, Debug)]
+pub struct CivCorpse {
+    pub civ: crate::civilians::Civ,
+    pub name: String,
+    pub table: crate::items::LootTableId,
+    /// Деньги в кошеле, нуммии.
+    pub coins: u32,
 }
 
 #[derive(Resource)]
@@ -110,7 +122,9 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         authentication: ServerAuthentication::Unsecure,
     };
     let transport = NetcodeServerTransport::new(config, socket).expect("не удалось запустить сервер");
-    let level = level::level_colliders();
+    let layout = level::layout();
+    let civil = crate::civil_server::CivilWorld::new(&layout.residents);
+    let level = level::colliders(layout);
     let mut world = GameWorld {
         actors: HashMap::new(),
         corpses: Vec::new(),
@@ -132,6 +146,8 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .insert_resource(transport)
         .insert_resource(level)
         .insert_resource(world)
+        .insert_resource(civil)
+        .add_plugins(crate::civil_server::CivilServerPlugin)
         .insert_resource(SnapshotTimer { timer: Timer::from_seconds((1.0 / SNAPSHOT_RATE_HZ) as f32, TimerMode::Repeating), tick: 0 })
         .add_observer(on_server_event)
         .add_plugins(crate::loot_server::LootServerPlugin)
@@ -180,7 +196,7 @@ fn on_server_event(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>,
             world.joined_count += 1;
             info!("Игрок {id} подключился");
             server.send_message(id, CH_RELIABLE, encode(&ServerMessage::Welcome { your_id: id, spawn: spawn.into() }));
-            for c in &world.corpses {
+            for c in world.corpses.iter().filter(|c| c.civ.is_none()) {
                 let msg = ServerMessage::CorpseSpawned { corpse_id: c.id, kind: c.kind, pos: c.pos.into(), yaw: c.yaw, gear: c.gear };
                 server.send_message(id, CH_RELIABLE, encode(&msg));
             }
@@ -215,14 +231,22 @@ fn on_server_event(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>,
     }
 }
 
-fn receive_client_messages(mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, level: Res<LevelColliders>, time: Res<Time>) {
+fn receive_client_messages(mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, mut civil: ResMut<crate::civil_server::CivilWorld>, level: Res<LevelColliders>, time: Res<Time>) {
     let now = time.elapsed_secs_f64();
     for id in server.clients_id() {
         // Боевые команды.
         while let Some(bytes) = server.receive_message(id, CH_RELIABLE) {
             let Some(msg) = decode::<ClientMessage>(&bytes) else { continue };
+            if let ClientMessage::Law(answer) = msg {
+                civil.answers.push((id, answer));
+                continue;
+            }
             let Some(actor) = world.actors.get_mut(&id) else { continue };
             if !actor.alive {
+                continue;
+            }
+            // В карцере не дерутся.
+            if civil.jailed(id) && matches!(msg, ClientMessage::Attack { .. }) {
                 continue;
             }
             match msg {
@@ -237,7 +261,7 @@ fn receive_client_messages(mut server: ResMut<RenetServer>, mut world: ResMut<Ga
                     actor.fighter.set_guard(on);
                 }
                 ClientMessage::Holster { on } => actor.holstered = on,
-                ClientMessage::PlayerState { .. } => {}
+                ClientMessage::Law(_) | ClientMessage::PlayerState { .. } => {}
             }
         }
         // Положение.
@@ -444,17 +468,23 @@ fn hit_damage(world: &GameWorld, loot: Option<&LootWorld>, attacker: u64, target
 enum Strike {
     Contact { attacker: u64, target: u64, contact: Contact, point: Vec3 },
     Wall { attacker: u64, point: Vec3 },
+    /// Клинок задел мирного человека (номер в `CivilWorld::people`).
+    Civil { attacker: u64, person: usize, point: Vec3, head: bool },
 }
 
 /// Игрок напал на человека фракции: тот и его товарищи рядом дают отпор, фракция злится.
 /// На разбойников можно нападать без последствий.
-fn on_player_attacks(world: &mut GameWorld, trade: Option<&mut crate::trade_server::TradeWorld>, attacker: u64, target: u64, killed: bool) {
+fn on_player_attacks(world: &mut GameWorld, trade: Option<&mut crate::trade_server::TradeWorld>, civil: &mut crate::civil_server::CivilWorld, attacker: u64, target: u64, killed: bool) {
     let (Some(a), Some(t)) = (world.actors.get(&attacker), world.actors.get(&target)) else { return };
     if a.kind != ActorKind::Player {
         return;
     }
     let Some(faction) = t.brain.as_ref().and_then(|b| b.faction) else { return };
     let at = t.pose.feet;
+    // В городе это преступление: если кто-то видел, донесут страже.
+    if faction.city_law() {
+        civil.queue.push(crate::civil_server::Offense { player: attacker, victim: crate::civil_server::Victim::Actor(target), faction, killed });
+    }
     for other in world.actors.values_mut() {
         if let Some(b) = other.brain.as_mut()
             && b.faction == Some(faction)
@@ -475,6 +505,7 @@ fn combat_tick(
     level: Res<LevelColliders>,
     loot: Option<Res<LootWorld>>,
     mut trade: Option<ResMut<crate::trade_server::TradeWorld>>,
+    mut civil: ResMut<crate::civil_server::CivilWorld>,
     time: Res<Time>,
 ) {
     let dt = time.delta_secs().min(0.1);
@@ -510,6 +541,7 @@ fn combat_tick(
     for (&aid, a) in &world.actors {
         let Some((swing, from, to)) = a.sweep else { continue };
         let mut done: Vec<u64> = a.fighter.hit_this_swing.clone();
+        let mut done_civ: Vec<usize> = a.fighter.hit_this_swing.iter().filter_map(|id| id.checked_sub(crate::civil_server::CIV_ID_BASE).map(|i| i as usize)).collect();
         'samples: for k in 0..=4 {
             let p = from + (to - from) * k as f32 / 4.0;
             let (hilt, tip) = combat::blade_segment(&a.pose, a.fighter.weapon, swing, p);
@@ -536,6 +568,20 @@ fn combat_tick(
                         if matches!(contact, Contact::Guard(_)) {
                             break 'samples;
                         }
+                    }
+                }
+            }
+            // Мирные люди рядом (бьёт их только игрок).
+            if a.kind == ActorKind::Player {
+                for (person, pose) in civil.targets_near(a.pose.feet, 3.5) {
+                    if done_civ.contains(&person) {
+                        continue;
+                    }
+                    if let Some(point) = combat::blade_hits_body(hilt, tip, &pose)
+                        && crate::civil_server::walls_clear(&level, a.pose.shoulder(), point)
+                    {
+                        done_civ.push(person);
+                        strikes.push(Strike::Civil { attacker: aid, person, point, head: point.y > pose.feet.y + 1.42 });
                     }
                 }
             }
@@ -573,7 +619,16 @@ fn combat_tick(
         world.next_arrow_id += 1;
         world.arrows.push(Arrow { id: arrow_id, owner: id, pos, vel, damage, life: 4.0, pierce });
     }
-    let targets: Vec<(u64, Pose)> = world.actors.iter().filter(|(_, a)| a.alive).map(|(id, a)| (*id, a.pose)).collect();
+    let mut targets: Vec<(u64, Pose)> = world.actors.iter().filter(|(_, a)| a.alive).map(|(id, a)| (*id, a.pose)).collect();
+    // Мирные люди рядом со стрелами игроков тоже могут попасть под выстрел.
+    for arrow in world.arrows.iter().filter(|ar| world.actors.get(&ar.owner).is_some_and(|a| a.kind == ActorKind::Player)) {
+        for (person, pose) in civil.targets_near(arrow.pos, 60.0) {
+            let id = crate::civil_server::CIV_ID_BASE + person as u64;
+            if !targets.iter().any(|(t, _)| *t == id) {
+                targets.push((id, pose));
+            }
+        }
+    }
     let mut arrows = std::mem::take(&mut world.arrows);
     let mut arrow_hits = Vec::new();
     arrows.retain_mut(|arrow| {
@@ -581,7 +636,11 @@ fn combat_tick(
         let owner_kind = world.actors.get(&arrow.owner).map(|a| a.kind);
         let valid: Vec<(u64, Pose)> = targets
             .iter()
-            .filter(|(id, _)| *id == arrow.owner || owner_kind.is_none_or(|k| world.actors.get(id).is_some_and(|t| k.hostile(t.kind))))
+            .filter(|(id, _)| {
+                *id == arrow.owner
+                    || (*id >= crate::civil_server::CIV_ID_BASE && owner_kind == Some(ActorKind::Player))
+                    || owner_kind.is_none_or(|k| world.actors.get(id).is_some_and(|t| k.hostile(t.kind)))
+            })
             .copied()
             .collect();
         match combat::step_arrow(arrow, dt, &level, &valid) {
@@ -595,6 +654,11 @@ fn combat_tick(
     });
     world.arrows = arrows;
     for (arrow, tid, point, head, shield_facing) in arrow_hits {
+        if let Some(person) = tid.checked_sub(crate::civil_server::CIV_ID_BASE) {
+            let damage = arrow.damage * if head { combat::HEAD_MULT } else { 1.0 };
+            crate::civil_server::hurt(&mut server, &mut world, &mut civil, &level, trade.as_deref_mut(), person as usize, arrow.owner, damage, point, head, now);
+            continue;
+        }
         let damage = mitigate_pierced(&world, loot, tid, arrow.damage, head, arrow.pierce);
         let Some(t) = world.actors.get_mut(&tid) else { continue };
         if !t.alive {
@@ -618,7 +682,7 @@ fn combat_tick(
         }
         server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: arrow.owner, target: tid, outcome, at: point.into() }));
         let killed = matches!(outcome, HitOutcome::Damage { killed: true, .. });
-        on_player_attacks(&mut world, trade.as_deref_mut(), arrow.owner, tid, killed);
+        on_player_attacks(&mut world, trade.as_deref_mut(), &mut civil, arrow.owner, tid, killed);
         if killed {
             kill(&mut server, &mut world, tid, Some(arrow.owner), now);
         }
@@ -635,6 +699,24 @@ fn combat_tick(
                 a.fighter.action = combat::Action::Stagger { t: 0.0, dur: combat::WALL_BOUNCE };
                 a.fighter.reset_combo();
                 server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker, target: attacker, outcome: HitOutcome::Bounced, at: point.into() }));
+            }
+            Strike::Civil { attacker, person, point, head } => {
+                let Some(a) = world.actors.get_mut(&attacker) else { continue };
+                if !matches!(a.fighter.action, combat::Action::Strike { .. }) {
+                    continue;
+                }
+                a.fighter.hit_this_swing.push(crate::civil_server::CIV_ID_BASE + person as u64);
+                let mut damage = base_damage(&world, loot, attacker);
+                if head {
+                    damage *= combat::HEAD_MULT;
+                }
+                if let Some(a) = world.actors.get(&attacker)
+                    && a.fighter.is_riposte_strike()
+                {
+                    damage *= combat::RIPOSTE_DAMAGE_MULT;
+                }
+                world.gear_wear.push((attacker, crate::smithing_server::Wear::Weapon(1.0)));
+                crate::civil_server::hurt(&mut server, &mut world, &mut civil, &level, trade.as_deref_mut(), person, attacker, damage, point, head, now);
             }
             Strike::Contact { attacker: aid, target: tid, contact, point } => {
                 let head = matches!(contact, Contact::Body { head: true, .. });
@@ -661,7 +743,7 @@ fn combat_tick(
                 }
                 server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: aid, target: tid, outcome, at: point.into() }));
                 let killed = matches!(outcome, HitOutcome::Damage { killed: true, .. });
-                on_player_attacks(&mut world, trade.as_deref_mut(), aid, tid, killed);
+                on_player_attacks(&mut world, trade.as_deref_mut(), &mut civil, aid, tid, killed);
                 if killed {
                     kill(&mut server, &mut world, tid, Some(aid), now);
                 }
@@ -721,12 +803,26 @@ fn kill(server: &mut RenetServer, world: &mut GameWorld, id: u64, killer: Option
 
     let corpse_id = world.next_corpse_id;
     world.next_corpse_id += 1;
-    world.corpses.push(Corpse { id: corpse_id, actor: id, killer, kind, pos, yaw, gear });
+    world.corpses.push(Corpse { id: corpse_id, actor: id, killer, kind, pos, yaw, gear, civ: None });
     server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::CorpseSpawned { corpse_id, kind, pos: pos.into(), yaw, gear }));
     if world.corpses.len() > MAX_CORPSES {
         let old = world.corpses.remove(0);
         server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::CorpseRemoved { corpse_id: old.id }));
     }
+}
+
+/// Тело мирного человека (жителя или торговца). Возвращает id тела для обыска.
+pub fn add_civ_corpse(server: &mut RenetServer, world: &mut GameWorld, killer: Option<u64>, pos: Vec3, yaw: f32, civ: CivCorpse) -> u64 {
+    let corpse_id = world.next_corpse_id;
+    world.next_corpse_id += 1;
+    let who = civ.civ;
+    world.corpses.push(Corpse { id: corpse_id, actor: 0, killer, kind: ActorKind::Player, pos, yaw, gear: Default::default(), civ: Some(civ) });
+    server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::CivilianDead { civ: who, corpse: Some((corpse_id, pos.into(), yaw)) }));
+    if world.corpses.len() > MAX_CORPSES {
+        let old = world.corpses.remove(0);
+        server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::CorpseRemoved { corpse_id: old.id }));
+    }
+    corpse_id
 }
 
 fn respawns(mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, level: Res<LevelColliders>, time: Res<Time>) {
