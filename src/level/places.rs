@@ -182,6 +182,38 @@ fn city_places() -> Vec<Place> {
     ]
 }
 
+/// Место торговца у прилавка: где он стоит и куда смотрит (единичный вектор по горизонтали).
+#[derive(Clone, Copy, Debug)]
+pub struct StallSlot {
+    pub pos: Vec3,
+    pub facing: Vec3,
+}
+
+/// Сколько от середины стола до продавца за ним.
+pub const SELLER_BEHIND: f32 = 0.95;
+
+/// Готовые места для торговцев у места `id`, по порядку занятия. На агоре и портовом торге —
+/// лотки под навесами (первые занимают торговцы, см. `staffed_stalls`, остальные стоят с товаром
+/// сами по себе), в лавках — за прилавком лицом к двери на улицу. Пусто — место без прилавков.
+pub fn stall_slots(id: &str) -> Vec<StallSlot> {
+    if active() != LevelKind::Chersonesus {
+        return Vec::new();
+    }
+    let behind = |(table, facing): (Vec3, Vec3)| StallSlot { pos: table - facing * SELLER_BEHIND, facing };
+    match id {
+        "agora" => public::agora_stalls().into_iter().map(behind).collect(),
+        "port_market" => port::market_stalls().into_iter().map(behind).collect(),
+        "apothecary_agora" => vec![behind(houses::shop_counter(17, -2, Side::S))],
+        "apothecary_port" => vec![behind(houses::shop_counter(17, 1, Side::N))],
+        _ => Vec::new(),
+    }
+}
+
+/// Сколько лотков места `id` занято торговцами (их столы и навесы ставит торговля).
+pub fn staffed_stalls(id: &str) -> usize {
+    crate::trade::MERCHANTS.iter().filter(|m| m.place == id).count().min(stall_slots(id).len())
+}
+
 /// Кузнечные и сыродутные горны активного уровня.
 pub fn forges() -> &'static [super::ForgeSpec] {
     static F: OnceLock<Vec<super::ForgeSpec>> = OnceLock::new();
