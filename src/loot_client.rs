@@ -453,7 +453,13 @@ fn update_use_bar(
     mut bar: Single<&mut Node, (With<UseBar>, Without<UseBarFill>)>,
     mut fill: Single<&mut Node, (With<UseBarFill>, Without<UseBar>)>,
     mut text: Single<&mut Text, With<UseBarText>>,
+    work: Option<Res<crate::work_client::MyWork>>,
 ) {
+    // Работу руками показывает своя шкала (work_client), полоска не нужна.
+    if crate::work_client::hands_busy(work.as_deref()) {
+        bar.display = Display::None;
+        return;
+    }
     match &state.using {
         Some((verb, start, duration)) => {
             let t = ((time.elapsed_secs() - start) / duration.max(0.01)).clamp(0.0, 1.0);
