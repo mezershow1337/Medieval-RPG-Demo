@@ -32,7 +32,7 @@ pub struct Actor {
     pub pose: Pose,
     pub fighter: Fighter,
     pub alive: bool,
-    last_update: f64,
+    pub(crate) last_update: f64,
     respawn_at: Option<f64>,
     protected_until: f64,
     pub brain: Option<Brain>,
@@ -49,10 +49,19 @@ pub struct Actor {
     pub body_mods: crate::medicine::BodyMods,
     /// Что дают навыки и умения игрока (ведёт skills_server.rs).
     pub skill_mods: crate::skill_tree::Mods,
+    /// Читы из консоли разработчика.
+    pub cheats: crate::console_net::Cheats,
     /// Игрок убрал оружие (хотбар, слот «Руки»): дерётся кулаками.
     holstered: bool,
     /// Что на нём видно (для снимков, чтобы другие видели доспех).
     gear: crate::gear_look::Gear,
+}
+
+impl Actor {
+    /// Вызванный консолью враг: после смерти не возрождается.
+    pub fn forget_spawn(&mut self) {
+        self.spawn = None;
+    }
 }
 
 /// Тело на земле. Предметы для обыска добавит система лута.
@@ -154,15 +163,17 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .add_observer(on_server_event)
         .add_plugins(crate::loot_server::LootServerPlugin)
         .add_plugins(crate::doors::DoorServerPlugin)
+        .add_plugins(crate::map::MapServerPlugin)
         .add_plugins(crate::trade_server::TradeServerPlugin)
         .add_plugins(crate::knowledge::KnowledgeServerPlugin)
         .add_plugins(crate::smithing_server::SmithingServerPlugin)
+        .add_plugins(crate::console_server::ConsoleServerPlugin)
         .add_systems(Update, (receive_client_messages, run_npcs, combat_tick, respawns, send_snapshots).chain());
     info!("Сервер слушает {addr}");
     app.run();
 }
 
-fn spawn_npc(world: &mut GameWorld, level: &LevelColliders, spawn: NpcSpawn, now: f64) {
+pub(crate) fn spawn_npc(world: &mut GameWorld, level: &LevelColliders, spawn: NpcSpawn, now: f64) -> u64 {
     let id = world.next_npc_id;
     world.next_npc_id += 1;
     let mut spawn = spawn;
@@ -185,10 +196,12 @@ fn spawn_npc(world: &mut GameWorld, level: &LevelColliders, spawn: NpcSpawn, now
             shoot: false,
             body_mods: Default::default(),
             skill_mods: Default::default(),
+            cheats: Default::default(),
             holstered: false,
             gear: Default::default(),
         },
     );
+    id
 }
 
 fn on_server_event(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, time: Res<Time>) {
@@ -222,6 +235,7 @@ fn on_server_event(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>,
                     shoot: false,
                     body_mods: Default::default(),
                     skill_mods: Default::default(),
+                    cheats: Default::default(),
                     holstered: false,
                     gear: Default::default(),
                 },
@@ -284,7 +298,9 @@ fn receive_client_messages(mut server: ResMut<RenetServer>, mut world: ResMut<Ga
             let body = if crouching { Body::CROUCHING } else { Body::STANDING };
             let too_fast = horizontal > MAX_HORIZONTAL_SPEED * dt + 0.5 || d.y.abs() > MAX_VERTICAL_SPEED * dt + 0.6;
             let in_wall = !level.body_is_free(&body, new_pos);
-            if !new_pos.is_finite() || too_fast || in_wall {
+            // Полёт и ускорение из консоли разработчика: не проверяем скорость и стены.
+            let free = player.cheats.free_move();
+            if !new_pos.is_finite() || (!free && (too_fast || in_wall)) {
                 server.send_message(id, CH_RELIABLE, encode(&ServerMessage::Correction { pos: player.pose.feet.into() }));
                 player.last_update = now;
                 continue;
@@ -320,7 +336,7 @@ fn run_npcs(mut world: ResMut<GameWorld>, level: Res<LevelColliders>, time: Res<
             weapon: a.fighter.weapon,
             shield: a.fighter.has_shield,
             alive: a.alive,
-            targetable: now >= a.protected_until,
+            targetable: now >= a.protected_until && !a.cheats.notarget,
         })
         .collect();
     let GameWorld { actors, rng, .. } = &mut *world;
@@ -390,6 +406,7 @@ fn sync_equipment(world: &mut GameWorld, loot: Option<&LootWorld>) {
             }
         }
         actor.gear = inv.map(crate::gear_look::Gear::from_inventory).unwrap_or_default();
+        actor.gear.holstered = actor.holstered;
         let e = gear_effects(&stats);
         let m = actor.body_mods;
         actor.fighter.action_speed = e.action_speed * m.action_speed * sk.action_speed;
@@ -468,7 +485,15 @@ fn mitigate_pierced(world: &GameWorld, loot: Option<&LootWorld>, target: u64, ba
 }
 
 /// Урон удара с учётом оружия атакующего и брони цели.
+/// Бессмертный из консоли разработчика.
+fn is_god(world: &GameWorld, id: u64) -> bool {
+    world.actors.get(&id).is_some_and(|a| a.cheats.god)
+}
+
 fn hit_damage(world: &GameWorld, loot: Option<&LootWorld>, attacker: u64, target: u64, head: bool) -> f32 {
+    if is_god(world, target) {
+        return 0.0;
+    }
     mitigate(world, loot, target, base_damage(world, loot, attacker), head)
 }
 
@@ -520,6 +545,11 @@ fn combat_tick(
     let now = time.elapsed_secs_f64();
     let loot = loot.as_deref();
     sync_equipment(&mut world, loot);
+    // Бессмертие из консоли: всегда полное здоровье и силы.
+    for a in world.actors.values_mut().filter(|a| a.alive && a.cheats.god) {
+        a.fighter.hp = a.fighter.max_hp;
+        a.fighter.stamina = a.fighter.max_stamina;
+    }
     // Умершие не от удара (кровопотеря, яд, антонов огонь).
     let dying: Vec<u64> = world.actors.iter().filter(|(_, a)| a.alive && a.fighter.hp <= 0.0).map(|(id, _)| *id).collect();
     for id in dying {
@@ -668,7 +698,7 @@ fn combat_tick(
             crate::civil_server::hurt(&mut server, &mut world, &mut civil, &level, trade.as_deref_mut(), person as usize, arrow.owner, damage, point, head, now);
             continue;
         }
-        let damage = mitigate_pierced(&world, loot, tid, arrow.damage, head, arrow.pierce);
+        let damage = if is_god(&world, tid) { 0.0 } else { mitigate_pierced(&world, loot, tid, arrow.damage, head, arrow.pierce) };
         let Some(t) = world.actors.get_mut(&tid) else { continue };
         if !t.alive {
             continue;
@@ -685,6 +715,7 @@ fn combat_tick(
         }
         if let HitOutcome::Damage { amount, head, .. } = outcome
             && player
+            && !is_god(&world, tid)
         {
             let part = world.actors.get(&tid).map_or(crate::medicine::BodyPart::Chest, |t| crate::medicine::BodyPart::from_hit(&t.pose, point, head));
             world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon: combat::WeaponKind::Bow, amount, head, part });
@@ -747,7 +778,7 @@ fn combat_tick(
                 debug!("Попадание {aid} -> {tid}: {outcome:?}");
                 record_wear(&mut world, aid, tid, outcome);
                 if let HitOutcome::Damage { amount, head, .. } = outcome
-                    && world.actors.get(&tid).is_some_and(|t| t.kind == ActorKind::Player)
+                    && world.actors.get(&tid).is_some_and(|t| t.kind == ActorKind::Player && !t.cheats.god)
                 {
                     let weapon = world.actors.get(&aid).map_or(combat::WeaponKind::Spatha, |a| a.fighter.weapon);
                     let part = world.actors.get(&tid).map_or(crate::medicine::BodyPart::Chest, |t| crate::medicine::BodyPart::from_hit(&t.pose, point, head));
@@ -802,16 +833,21 @@ fn record_wear(world: &mut GameWorld, attacker: u64, target: u64, outcome: HitOu
     }
 }
 
-fn kill(server: &mut RenetServer, world: &mut GameWorld, id: u64, killer: Option<u64>, now: f64) {
+pub(crate) fn kill(server: &mut RenetServer, world: &mut GameWorld, id: u64, killer: Option<u64>, now: f64) {
     let Some(actor) = world.actors.get_mut(&id) else { return };
     actor.alive = false;
     actor.fighter.action = combat::Action::Dead;
-    let (kind, pos, yaw, gear) = (actor.kind, actor.pose.feet, actor.pose.yaw, actor.gear);
+    let (kind, pos, yaw, mut gear) = (actor.kind, actor.pose.feet, actor.pose.yaw, actor.gear);
+    // Оружие убитого остаётся при теле (в ножнах), пока его не заберут при обыске.
+    gear.holstered = true;
     if kind == ActorKind::Player {
         actor.respawn_at = Some(now + PLAYER_RESPAWN_SECS);
     } else if let Some(spawn) = actor.spawn {
         world.actors.remove(&id);
         world.npc_respawns.push((now + NPC_RESPAWN_SECS, spawn));
+    } else {
+        // Вызванный консолью враг: тело остаётся, сам он не возвращается.
+        world.actors.remove(&id);
     }
     info!("{kind:?} {id} погиб");
     server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Died { id, killer }));

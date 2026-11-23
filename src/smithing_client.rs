@@ -55,6 +55,11 @@ pub struct SmithState {
     /// Предсказанная работа (шагается каждый кадр).
     pred: Option<Job>,
     bellows: bool,
+    /// Мехи качают пробелом в такт: до какого времени дует последний качок и когда он был.
+    pump_until: f32,
+    last_pump: f32,
+    /// Как удался последний качок 0..1.
+    pump_q: f32,
     swing_t: f32,
     last_strike: f32,
     tab: Tab,
@@ -84,6 +89,9 @@ impl Default for SmithState {
             work: None,
             pred: None,
             bellows: false,
+            pump_until: 0.0,
+            last_pump: -10.0,
+            pump_q: 0.0,
             swing_t: 0.0,
             last_strike: -10.0,
             tab: Tab::Forge,
@@ -223,14 +231,29 @@ fn smith_input(
     }
     state.swing_t += time.delta_secs();
     let Some(client) = client.as_mut() else { return };
-    // Мехи: держать пробел.
-    let want = state.open && keys.pressed(KeyCode::Space) && state.work.is_some();
+    // Мехи: качать пробелом в такт. Каждый качок дует, пока мехи выдыхают; держать
+    // пробел бесполезно, частить тоже — мехи не успевают набрать воздух.
+    let now = time.elapsed_secs();
+    if state.open && state.work.is_some() && keys.just_pressed(KeyCode::Space) {
+        let gap = now - state.last_pump;
+        state.last_pump = now;
+        let q = if gap > 3.0 { 0.6 } else if gap < 0.4 { 0.0 } else { (1.0 - (gap / PUMP_PERIOD).ln().abs() / 2.2f32.ln()).clamp(0.0, 1.0) };
+        state.pump_q = q;
+        if q > 0.0 {
+            state.pump_until = state.pump_until.max(now + 0.35 + 0.65 * q);
+        }
+    }
+    let want = state.open && state.work.is_some() && now < state.pump_until;
     if want != state.bellows {
         state.bellows = want;
         send(client, &SmithClientMessage::Bellows(want));
     }
     if !state.open {
         return;
+    }
+    // Перевернуть поковку клещами на другую грань.
+    if keys.just_pressed(KeyCode::KeyR) && matches!(state.pred, Some(Job::Forge(_))) {
+        send(client, &SmithClientMessage::Flip);
     }
     if keys.just_pressed(KeyCode::KeyF)
         && let Some(job) = &state.pred
@@ -257,6 +280,7 @@ enum Act {
     Fuel,
     Move(Spot),
     Quench(Quench),
+    Flip,
     Finish(bool),
     Abandon,
     Skim,
@@ -283,6 +307,9 @@ struct GrindPad;
 struct PourButton;
 
 #[allow(clippy::too_many_arguments)]
+/// Ровный такт мехов, секунд на качок.
+const PUMP_PERIOD: f32 = 0.9;
+
 fn smith_buttons(
     buttons: Query<(&Interaction, &SmithButton), Changed<Interaction>>,
     segments: Query<(&Interaction, &Segment)>,
@@ -353,6 +380,7 @@ fn smith_buttons(
             Act::Fuel => send(client, &SmithClientMessage::AddFuel { station }),
             Act::Move(s) => send(client, &SmithClientMessage::Move(s)),
             Act::Quench(q) => send(client, &SmithClientMessage::Quench(q)),
+            Act::Flip => send(client, &SmithClientMessage::Flip),
             Act::Finish(f) => send(client, &SmithClientMessage::Finish { fitting: f }),
             Act::Abandon => send(client, &SmithClientMessage::Abandon),
             Act::Skim => send(client, &SmithClientMessage::Skim),
@@ -619,7 +647,7 @@ fn rebuild_panel(
                 button(r, fonts, &format!("Подсыпать уголь ({})", have(&loot, CHARCOAL)), Act::Fuel, false);
                 r.spawn(label(fonts, "Дутьё:", 13.0, DIM, false));
                 bar(r, 90.0, Color::srgb(1.0, 0.5, 0.15), Live::Blast);
-                r.spawn(label(fonts, "Пробел — мехи", 12.0, DIM, false));
+                r.spawn(label(fonts, "Пробел — качнуть мехи (в такт, раз в секунду)", 12.0, DIM, false));
             });
         }
         match st.pred.clone() {
@@ -902,6 +930,7 @@ fn work_panel(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
                 button(r, fonts, "Отпуск у края углей", Act::Move(Spot::Temper), f.spot == Spot::Temper);
                 button(r, fonts, "В золу (отжиг)", Act::Move(Spot::Ashes), f.spot == Spot::Ashes);
                 button(r, fonts, "На точило", Act::Move(Spot::Grindstone), f.spot == Spot::Grindstone);
+                button(r, fonts, "Перевернуть (R)", Act::Flip, false);
             });
             if info.harden {
                 row(p).with_children(|r| {
@@ -1041,7 +1070,7 @@ fn work_panel(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
                 SoakKind::Bloomery { ore, charcoal } => format!("Плавка: руды {ore}, угля {charcoal}"),
                 SoakKind::Carburize => "Цементация полосы".into(),
             };
-            p.spawn(label(fonts, format!("{what} · держите пробел — мехи"), 15.0, TITLE, true));
+            p.spawn(label(fonts, format!("{what} · качайте мехи пробелом в такт"), 15.0, TITLE, true));
             row(p).with_children(|r| {
                 r.spawn(label(fonts, "Прошло:", 13.0, DIM, false));
                 bar(r, 200.0, Color::srgb(0.8, 0.6, 0.3), Live::Progress);
@@ -1264,6 +1293,9 @@ fn update_live(state: Res<SmithState>, knowledge: Res<MyKnowledge>, mut nodes: Q
                             }
                             if f.scale > 0.2 {
                                 v.push("окалина".into());
+                            }
+                            if f.lean.abs() > crate::smithing::LEAN_SAFE * 0.7 {
+                                v.push(if f.lean.abs() > crate::smithing::LEAN_SAFE { "заготовку ведёт — переверните (R)!".into() } else { "заготовку начинает вести".into() });
                             }
                             v.push(format!("ударов {}", f.strikes));
                             v.join(" · ")
