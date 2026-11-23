@@ -718,6 +718,19 @@ fn sync_combat_corpses(mut server: ResMut<RenetServer>, game: Res<GameWorld>, mu
             continue;
         }
         world.linked.insert(c.id);
+        // Мирный человек: что было при нём и кошель.
+        if let Some(cc) = &c.civ {
+            let luck = c.killer.map(|k| world.equipped_stats(k).get(Stat::Luck)).unwrap_or(0.0);
+            let mut items = world.roll(cc.table, luck);
+            for (base, count) in crate::economy::coins_for(cc.coins) {
+                let w = &mut *world;
+                items.push(roll_item(base, Quality::Common, count, &mut w.rng, &mut w.uids));
+            }
+            let mut inv = Inventory::new(CORPSE_GRID);
+            inv.fill(items, false);
+            world.insert_corpse(&mut server, c.id, c.pos, c.yaw, cc.name.clone(), inv, false);
+            continue;
+        }
         let (name, inv) = match c.kind {
             ActorKind::Player => {
                 let fresh = world.starter_inventory();

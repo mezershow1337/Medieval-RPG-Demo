@@ -384,15 +384,17 @@ pub enum Technique {
     MailMaking,
     /// Доспешное дело: пластины, ламеллы, шлемы.
     Armoury,
+    /// Гиппократ «О переломах», Цельс, книга VIII: вытянуть, вправить, наложить лубки и бинты.
+    Bonesetting,
 }
 
 impl Technique {
-    pub const ALL: [Technique; 31] = {
+    pub const ALL: [Technique; 32] = {
         use Technique::*;
         [
             Gathering, Poultice, WoundWashing, Decoction, Dosage, Maceration, Salve, Oxymel, Theriac, Fermentation, Distillation, Sublimation, Calcination, Mordanting,
             VatDyeing, Ink, Soap, Incendiary, Glassblowing, Pottery, ArrowExtraction, Forging, ForgeWelding, Quenching, Tempering, Smelting, Carburizing, Casting, LostWax,
-            MailMaking, Armoury,
+            MailMaking, Armoury, Bonesetting,
         ]
     };
 
@@ -430,6 +432,7 @@ impl Technique {
             LostWax => "Литьё по воску",
             MailMaking => "Кольчужное плетение",
             Armoury => "Доспешное дело",
+            Bonesetting => "Вправление переломов",
         }
     }
 
@@ -467,6 +470,7 @@ impl Technique {
             LostWax => "Вылепить вещь из воска, облепить глиной, выжечь воск — и лить в пустоту. Форма разбивается, зато вещь тонкая.",
             MailMaking => "Тянуть проволоку, навить кольца, каждое кольцо продеть в четыре соседних и заклепать холодным, лёгкими точными ударами.",
             Armoury => "Пластины выковать, пробить отверстия, связать ремнями; шлем собрать из сегментов на каркасе и склепать.",
+            Bonesetting => "Сломанную кость вытянуть за концы, пока обломки не встанут на место, обернуть льном и уложить в лубки. Неподвижно сорок дней — иначе срастётся криво.",
         }
     }
 
@@ -474,7 +478,7 @@ impl Technique {
         use Technique::*;
         match self {
             Gathering | Maceration => Skill::Herbalism,
-            Poultice | WoundWashing | Dosage | Theriac | ArrowExtraction => Skill::Medicine,
+            Poultice | WoundWashing | Dosage | Theriac | ArrowExtraction | Bonesetting => Skill::Medicine,
             Decoction | Salve | Oxymel => Skill::Herbalism,
             Forging | ForgeWelding | Quenching | Tempering | Smelting | Carburizing | Casting | LostWax | MailMaking | Armoury => Skill::Smithing,
             _ => Skill::Alchemy,
@@ -519,7 +523,7 @@ impl Lore {
                 Poultice | WoundWashing => 0.5,
                 Gathering | Decoction | Maceration | Oxymel | Fermentation | Ink => 1.0,
                 Salve | Calcination | Mordanting | Soap => 2.0,
-                Dosage | Incendiary | VatDyeing | ArrowExtraction => 3.0,
+                Dosage | Incendiary | VatDyeing | ArrowExtraction | Bonesetting => 3.0,
                 Distillation | Sublimation => 4.0,
                 Theriac | Pottery => 6.0,
                 Glassblowing => 10.0,
@@ -625,7 +629,7 @@ impl Book {
             DyerBook => t("Книга красильщика", Language::Greek, "рабочие записи на папирусе", 150.0, "Рецепты египетских красильщиков: квасцы, марена, вайда, чернила, щёлок."),
             Aeneas => t("Эней Тактик. Об обороне городов", Language::Greek, "свиток", 150.0, "Как оборонять осаждённый город, в том числе огнём: смола, сера, пакля, ладан."),
             Theophrastus => t("Феофраст. О камнях", Language::Greek, "свиток", 150.0, "О минералах и красках: киноварь, свинцовые белила, ярь-медянка."),
-            Celsus => t("Цельс. О медицине", Language::Latin, "кодекс", 240.0, "Авл Корнелий Цельс по-латыни: раны, кровотечения, мази, дозы."),
+            Celsus => t("Цельс. О медицине", Language::Latin, "кодекс", 240.0, "Авл Корнелий Цельс по-латыни: раны, кровотечения, мази, дозы, переломы."),
             Pliny => t(
                 "Плиний. Естественная история",
                 Language::Latin,
@@ -705,7 +709,7 @@ impl Book {
                 v
             }
             Book::Celsus => {
-                let mut v = vec![Lore::Technique(WoundWashing), Lore::Technique(Poultice), Lore::Technique(Salve), Lore::Technique(Dosage), Lore::Technique(ArrowExtraction)];
+                let mut v = vec![Lore::Technique(WoundWashing), Lore::Technique(Poultice), Lore::Technique(Salve), Lore::Technique(Dosage), Lore::Technique(ArrowExtraction), Lore::Technique(Bonesetting)];
                 v.extend(props(&[Yarrow, Plantain, Frankincense, Alum, Myrrh, Comfrey]));
                 v
             }
@@ -862,6 +866,7 @@ impl Teacher {
                 v.push(t(Dosage));
                 v.extend(props(&[Poppy, Henbane]));
                 v.push(t(ArrowExtraction));
+                v.push(t(Bonesetting));
                 v.push(t(Salve));
                 v.extend(props(&[Myrrh, Frankincense, Alum]));
                 v.push(t(Oxymel));

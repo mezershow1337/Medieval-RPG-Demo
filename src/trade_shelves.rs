@@ -329,6 +329,7 @@ mod tests {
                 grudges: HashMap::new(),
                 thefts: vec![],
                 stall: stall_layout(def.faction.outside_walls(), i % 2 == 0),
+                dead: false,
             };
             restock(&mut m, &mut rng, &mut uids, true);
             let placed = layout(&m);
