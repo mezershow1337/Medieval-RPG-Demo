@@ -25,7 +25,7 @@ impl Plugin for WorldSfxPlugin {
                 doors,
                 (ground_items, picked_up),
                 (activities, purse_and_bag, windows),
-                residents_talk,
+                (residents_talk, civilians_hurt),
                 alchemy.before(crate::alchemy_fx::AlchemyFxSet),
             )
                 .before(AudioSet),
@@ -248,7 +248,7 @@ fn residents_talk(
     aim: Option<Res<ResidentAim>>,
     loot: Option<Res<LootState>>,
     ears: Res<Ears>,
-    people: Query<(&ResidentView, &Transform, &Visibility)>,
+    people: Query<(&ResidentView, &Transform, &Visibility), Without<crate::civil_client::Fallen>>,
     mut next_chat: Local<f32>,
     mut rng: ResMut<SfxRng>,
     mut out: MessageWriter<Sfx>,
@@ -281,6 +281,29 @@ fn residents_talk(
     }
     let (r, t, _) = near[rng.index(near.len())];
     out.write(Sfx::at(voice_of(r.role), t.translation + Vec3::Y * 1.6 * t.scale.y).gain(0.35).range(1.5, 14.0).spread(0.06));
+}
+
+/// Мирного человека ударили или убили: вскрик, падение тела.
+fn civilians_hurt(mut events: MessageReader<crate::civil_client::CivilNet>, ears: Res<Ears>, people: Query<(&ResidentView, &Transform)>, mut out: MessageWriter<Sfx>) {
+    use crate::civil_client::CivilNet;
+    for ev in events.read() {
+        match ev {
+            CivilNet::Hit => {
+                // Кого ударили, сервер не говорит: ближайший к нам житель.
+                let near = people.iter().filter(|(_, t)| t.translation.distance(ears.pos) < 5.0).min_by(|a, b| a.1.translation.distance(ears.pos).total_cmp(&b.1.translation.distance(ears.pos)));
+                let (pos, pitch) = match near {
+                    Some((r, t)) => (t.translation + Vec3::Y * 1.5 * t.scale.y, if voice_of(r.role) == "murmur_m" { 1.0 } else { 1.35 }),
+                    None => (ears.pos + ears.forward, 1.0),
+                };
+                out.write(Sfx::at("pain", pos).gain(0.7).pitch(pitch).range(2.0, 35.0));
+            }
+            CivilNet::Dead { corpse: Some((_, pos, _)), fresh: true, .. } => {
+                out.write(Sfx::at("death", *pos + Vec3::Y * 0.8).gain(0.6).range(2.0, 35.0));
+                out.write(Sfx::at("body_fall", *pos + Vec3::Y * 0.3).gain(0.8).range(2.0, 30.0));
+            }
+            _ => {}
+        }
+    }
 }
 
 // ---------------------------------------------------------------- алхимия
