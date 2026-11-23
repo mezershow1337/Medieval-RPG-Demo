@@ -6,7 +6,7 @@ use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendTyp
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_0019;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_001A;
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -182,6 +182,8 @@ pub enum ServerMessage {
     CivilianBack { civ: crate::civilians::Civ },
     /// Закон: свидетели, стража, карцер.
     Law(crate::civilians::LawMessage),
+    /// Часы мира: игровые секунды от полуночи первого дня (см. `world_clock.rs`).
+    Clock { game: f64 },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

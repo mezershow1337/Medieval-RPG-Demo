@@ -83,6 +83,9 @@ mod weight;
 mod work;
 mod work_client;
 mod worn;
+mod world_clock;
+mod daily_life;
+mod life_client;
 
 use protocol::DEFAULT_PORT;
 use std::net::SocketAddr;
