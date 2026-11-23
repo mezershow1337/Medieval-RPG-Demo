@@ -94,8 +94,11 @@ fn take_hits(mut game: ResMut<GameWorld>, mut bodies: ResMut<Bodies>, mut seeded
         for (id, max_hp) in players {
             seeded.insert(id);
             let b = bodies.body(id);
-            b.hit(crate::medicine::WoundKind::Stab, 30.0, max_hp, false, 0.9);
-            b.hit(crate::medicine::WoundKind::Arrow, 20.0, max_hp, false, 0.1);
+            use crate::medicine::{BodyPart, WoundKind};
+            b.hit_on(WoundKind::Stab, 30.0, max_hp, BodyPart::Belly, 0.9, 0.0, 1.0);
+            b.hit_on(WoundKind::Arrow, 20.0, max_hp, BodyPart::LeftArm, 0.1, 0.0, 1.0);
+            b.hit_on(WoundKind::Cut, 15.0, max_hp, BodyPart::Head, 0.9, 0.0, 1.0);
+            b.fracture(BodyPart::RightLeg, 0.7);
             b.burn(0.3);
             b.poison(Toxin::Henbane, 0.8);
             bodies.touch(id);
@@ -106,7 +109,8 @@ fn take_hits(mut game: ResMut<GameWorld>, mut bodies: ResMut<Bodies>, mut seeded
         let Some(kind) = hit.wound_kind() else { continue };
         let max_hp = actor.fighter.max_hp;
         let roll = bodies.rng.f32();
-        if bodies.body(hit.target).hit(kind, hit.amount, max_hp, hit.head, roll).is_some() {
+        let bone_roll = bodies.rng.f32();
+        if bodies.body(hit.target).hit_on(kind, hit.amount, max_hp, hit.part, roll, hit.bone_chance(), bone_roll).is_some() {
             bodies.touch(hit.target);
         } else if bodies.bodies.get(&hit.target).is_some_and(Body::is_healthy) {
             bodies.bodies.remove(&hit.target);

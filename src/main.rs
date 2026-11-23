@@ -36,6 +36,7 @@ mod lore_net;
 mod medicine;
 mod medicine_server;
 mod medicine_client;
+mod health_ui;
 mod npc;
 mod player;
 mod props;
