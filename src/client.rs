@@ -162,6 +162,7 @@ pub fn run(server_addr: SocketAddr) {
         .add_plugins(crate::residents::ResidentsPlugin)
         .add_plugins(crate::world_clock::ClockClientPlugin)
         .add_plugins(crate::life_client::LifeClientPlugin)
+        .add_plugins(crate::night_lights::NightLightsPlugin)
         .add_plugins(crate::civil_client::CivilClientPlugin)
         .add_plugins(crate::trade_client::TradeClientPlugin)
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))
