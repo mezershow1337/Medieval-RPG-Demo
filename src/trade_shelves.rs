@@ -333,6 +333,8 @@ mod tests {
                 thefts: vec![],
                 stall: stall_layout(def.faction.outside_walls(), i % 2 == 0),
                 dead: false,
+                market: [1.0; Category::COUNT],
+                supply: [1.0; Category::COUNT],
             };
             restock(&mut m, &mut rng, &mut uids, true);
             let placed = layout(&m);

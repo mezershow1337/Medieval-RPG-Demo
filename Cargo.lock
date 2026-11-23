@@ -3778,6 +3778,7 @@ dependencies = [
  "bevy_renet",
  "postcard",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -14,7 +14,7 @@
 //! - Событие [`CrimeCommitted`] — игрок попался (для стражи).
 
 use crate::collision::LevelColliders;
-use crate::economy::{format_money, give_money, purse, take_money};
+use crate::economy::{format_money, give_money, purse, round_price, take_money};
 use crate::factions::{Crime, Faction, Reputation, Standing};
 use crate::inventory::{Inventory, Target};
 use crate::items::*;
@@ -117,6 +117,22 @@ pub struct MerchantState {
     pub stall: Vec<StallBox>,
     /// Торговец убит: лавка закрыта, пока дело не перейдёт к наследнику.
     pub dead: bool,
+    /// Цены по видам товара от рынка поселения (1 — обычные): двигает `towns_server`.
+    pub market: [f32; Category::COUNT],
+    /// Сколько товара привозят на полки (1 — как обычно).
+    pub supply: [f32; Category::COUNT],
+}
+
+impl MerchantState {
+    /// Множитель рынка для вещи.
+    pub fn market_for(&self, base: ItemBaseId) -> f32 {
+        self.market[category(base) as usize]
+    }
+}
+
+/// Цена с поправкой на рынок поселения (неурожай, мор, корабли).
+fn with_market(price: u32, mult: f32) -> u32 {
+    if (mult - 1.0).abs() < 0.005 { price } else { round_price(price as f32 * mult).max(crate::economy::SMALLEST_COIN) }
 }
 
 struct Order {
@@ -432,6 +448,8 @@ fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
                 thefts: Vec::new(),
                 stall,
                 dead: false,
+                market: [1.0; Category::COUNT],
+                supply: [1.0; Category::COUNT],
             };
             restock(&mut m, &mut rng, &mut uids, true);
             m
@@ -470,10 +488,13 @@ fn restock(m: &mut MerchantState, rng: &mut Rng, uids: &mut UidGen, first: bool)
             .filter(|i| i.base == base)
             .map(|i| i.count)
             .sum();
-        if !first && have >= st.min.max(1) {
+        // Неурожай, закрытое море, мор: привозят меньше; изобилие — больше.
+        let supply = m.supply[category(base) as usize];
+        let min = ((st.min as f32 * supply).round() as u16).min(st.max);
+        if !first && have >= min.max(1) {
             continue;
         }
-        let want = rng.range_u32(st.min as u32, st.max as u32) as u16;
+        let want = (rng.range_u32(st.min as u32, st.max as u32) as f32 * supply).round() as u16;
         let mut add = want.saturating_sub(have);
         while add > 0 {
             let stack = add.min(base.base().max_stack.max(1));
@@ -618,6 +639,7 @@ fn build_view(
             ShelfItem {
                 item: item.clone(),
                 price: haggled(
+                    with_market(
                     ask_price(
                         def,
                         item.base,
@@ -625,6 +647,8 @@ fn build_view(
                         standing,
                         count_of(item.base),
                         normal(item.base),
+                    ),
+                    m.market_for(item.base),
                     ),
                     buy_k,
                 ),
@@ -651,6 +675,7 @@ fn build_view(
                             count_of(p.item.base),
                             stolen,
                         )
+                        .map(|b| if crate::economy::coin_value(p.item.base).is_some() { b } else { with_market(b, m.market_for(p.item.base)) })
                         .map(|p| haggled(p, sell_k)),
                         contraband: is_contraband_for(def, p.item.base),
                     }
@@ -819,6 +844,8 @@ fn deal(
     let mut uids = loot.uids.clone();
     let mut shelf = tw.merchants[id.0 as usize].shelf.clone();
     let mut cash = tw.merchants[id.0 as usize].cash;
+    let market = tw.merchants[id.0 as usize].market;
+    let market_for = |base: ItemBaseId| market[category(base) as usize];
     let normal = |base: ItemBaseId| {
         def.stock
             .iter()
@@ -897,6 +924,7 @@ fn deal(
             return DealOutcome::Failed("Этого товара уже нет".into());
         };
         let price = haggled(
+            with_market(
             ask_price(
                 def,
                 item.base,
@@ -904,6 +932,8 @@ fn deal(
                 standing,
                 count_of(&shelf, item.base),
                 normal(item.base),
+            ),
+            market_for(item.base),
             ),
             buy_k,
         );
@@ -928,6 +958,7 @@ fn deal(
             count_of(&shelf, p.item.base),
             stolen,
         )
+        .map(|b| if crate::economy::coin_value(p.item.base).is_some() { b } else { with_market(b, market_for(p.item.base)) })
         .map(|p| haggled(p, sell_k)) else {
             return DealOutcome::Failed(format!("«{}» ему не нужно", p.item.info().name));
         };
@@ -2093,6 +2124,8 @@ mod tests {
                     thefts: vec![],
                     stall: stall_layout(false, true),
                     dead: false,
+                    market: [1.0; Category::COUNT],
+                    supply: [1.0; Category::COUNT],
                 };
                 restock(&mut m, &mut rng, &mut uids, true);
                 m

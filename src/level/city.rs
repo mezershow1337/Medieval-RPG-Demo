@@ -18,6 +18,7 @@
 //! Z — поперёк: −Z к морю (северный берег), +Z к суше (южная стена). Бухта — на +X.
 
 pub(crate) mod crafts;
+pub(crate) mod estate;
 pub(crate) mod houses;
 pub(crate) mod interior;
 pub(crate) mod kit;

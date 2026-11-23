@@ -3,6 +3,7 @@
 //! на глине, углы и проёмы — тёсаный известняк; крыши черепичные, скаты — во двор (вода стекает
 //! в цистерну). На главной улице первые этажи — лавки с широкими проёмами.
 
+use super::estate;
 use super::interior;
 use super::kit::{self, Op, Rect, Rng, Side};
 use super::*;
@@ -94,8 +95,100 @@ pub fn block_houses(b: &mut Builder, i: i32, j: i32, seed: u32) {
         let main_street = (j == -1 && front == Side::S) || (j == 1 && front == Side::N);
         let shop = special_shop(i, j, front);
         let f = Frame { r: lot, front, mirror: rng.chance(0.5) };
-        house(b, f, main_street || shop != Shop::None, shop, &mut rng);
+        match lot_mode(i, j, k, shop) {
+            LotMode::Lived => {
+                house(b, f, main_street || shop != Shop::None, shop, &mut rng, LotMode::Lived);
+            }
+            LotMode::Vacant => {
+                let (d0, c0, bl0) = (b.doors.len(), b.containers.len(), b.blocks.len());
+                let info = house(b, f, false, Shop::None, &mut rng, LotMode::Vacant);
+                let (d1, c1) = (b.doors.len(), b.containers.len());
+                let name = estate_name(&f, info.two_storey);
+                estate::register(b, name, crate::towns::TownId::Herson, f.r, info.top, info.entrance, d0..d1, c0..c1, bl0, info.rooms, info.two_storey, None);
+            }
+            LotMode::Site => site(b, f, &mut rng),
+        }
     }
+}
+
+/// Что стоит на участке.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LotMode {
+    /// Живут люди (обычная усадьба).
+    Lived,
+    /// Пустует: продаётся или сдаётся (выморочный дом, хозяева уехали).
+    Vacant,
+    /// Пепелище: его отстраивает город (стройплощадка).
+    Site,
+}
+
+/// Какие участки пустуют и какие сгорели (одинаково на сервере и у клиентов).
+pub fn lot_mode(i: i32, j: i32, k: usize, shop: Shop) -> LotMode {
+    if shop != Shop::None {
+        return LotMode::Lived;
+    }
+    match (i, j, k) {
+        // Пепелища — после пожара в квартале у главной улицы и в портовой части.
+        (14, 1, 1) | (10, -2, 0) | (6, 1, 1) | (15, -3, 1) => LotMode::Site,
+        // Пустующие дома: у агоры, у терм, у западной церкви, в порту.
+        (17, -3, 1) | (16, 2, 0) | (11, -1, 1) | (9, 1, 0) | (4, -2, 1) | (13, 3, 0) | (7, -1, 0) => LotMode::Vacant,
+        _ => LotMode::Lived,
+    }
+}
+
+/// «Усадьба у терм», «Двухэтажный дом у агоры».
+fn estate_name(f: &Frame, two_storey: bool) -> String {
+    let c = f.r.center(0.0);
+    let near = crate::level::places::places()
+        .iter()
+        .filter(|p| crate::level::inside_city(p.pos.x, p.pos.z))
+        .min_by(|a, b| a.pos.distance_squared(c).total_cmp(&b.pos.distance_squared(c)))
+        .map(|p| p.name)
+        .unwrap_or("Главная улица");
+    let what = if two_storey { "Двухэтажная усадьба" } else { "Усадьба" };
+    // Ближнее место — как адрес: «Усадьба · Западная церковь».
+    format!("{what} · {near}")
+}
+
+/// Сгоревшая усадьба: двор с цистерной есть всегда, а дом — по стадиям стройки.
+fn site(b: &mut Builder, f: Frame, rng: &mut Rng) {
+    let s = b.sites;
+    b.sites += 1;
+    let mut t = Builder::new();
+    t.chunk = b.chunk;
+    let near = f.r.inset(-3.0);
+    t.keep_clear = b.keep_clear.iter().filter(|p| p.x > near.x0 && p.x < near.x1 && p.z > near.z0 && p.z < near.z1).copied().collect();
+    let info = house(&mut t, f, false, Shop::None, rng, LotMode::Site);
+    // Двор (цистерна, пифосы, деревья) пережил пожар — он в общей геометрии.
+    courtyard(b, &f, info.court.0, info.court.1, info.back_wing, rng);
+    // Двери и сундуки готового дома — в общих списках (номера постоянные), пока дом не достроен,
+    // сервер держит двери открытыми, а клиент не рисует створки.
+    let (d0, c0) = (b.doors.len(), b.containers.len());
+    b.doors.extend(t.doors.iter().copied());
+    b.containers.extend(t.containers.iter().cloned());
+    let (d1, c1) = (b.doors.len(), b.containers.len());
+    let front_out = f.front_side().out();
+    estate::site_stages(b, s, &t, f.r, front_out, f.front.along_x(), info.top - 1.0, rng);
+    // Обстановку готового дома собираем по его же стенам и дверям.
+    let bl0 = b.blocks.len();
+    b.blocks.extend(t.blocks.iter().copied());
+    let name = estate_name(&f, info.two_storey);
+    let mut chars = name.chars();
+    let name = format!("Новая {}{}", chars.next().map(|c| c.to_lowercase().to_string()).unwrap_or_default(), chars.as_str());
+    estate::register(b, name, crate::towns::TownId::Herson, f.r, info.top, info.entrance, d0..d1, c0..c1, bl0, info.rooms, info.two_storey, Some(s));
+    // Блоки дома живут только в группах стадий.
+    b.blocks.truncate(bl0);
+}
+
+/// Что известно о построенном доме.
+pub struct HouseInfo {
+    pub rooms: Vec<estate::RoomPlan>,
+    pub entrance: Vec3,
+    pub two_storey: bool,
+    /// Высота конька (для границ усадьбы).
+    pub top: f32,
+    pub court: ((f32, f32), (f32, f32)),
+    pub back_wing: bool,
 }
 
 /// Особые лавки у агоры и у главных ворот.
@@ -145,7 +238,9 @@ fn front_rooms(f: &Frame) -> Vec<(f32, f32)> {
     (0..n).map(|k| (inner0 + step * k as f32 + if k > 0 { INNER_T / 2.0 } else { 0.0 }, inner0 + step * (k + 1) as f32 - if k + 1 < n { INNER_T / 2.0 } else { 0.0 })).collect()
 }
 
-fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng) {
+fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, mode: LotMode) -> HouseInfo {
+    let lived = mode == LotMode::Lived;
+    let mut entrance = f.p(f.w() / 2.0, 0.0, -1.2);
     let (w, d) = (f.w(), f.d());
     let mat = if rng.chance(0.35) { Mat::Plaster } else { Mat::Rubble };
     let two_storey = rng.chance(0.45);
@@ -169,6 +264,7 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng) {
         let uc = (u0 + u1) / 2.0;
         let is_shop = shops && k != vestibule && (special == Shop::None || k == SHOP_ROOM || rng.chance(0.6));
         if k == vestibule {
+            entrance = f.p(uc, 0.0, -1.2);
             front_ops.push(Op::Door { s: uc, w: 1.5, h: 2.6 });
             inner_ops.push(Op::Door { s: uc, w: 1.3, h: 2.4 });
             // Мощёный проход.
@@ -310,7 +406,31 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng) {
     b.mesh(Mat::Tile).gable_roof_slopes(Vec2::new(top.x0 - 0.08, top.z0), Vec2::new(top.x1 + 0.08, top.z1), yard_wall_h, yard_wall_h + 0.22, !f.front.along_x());
 
     // ---- Двор ----
-    courtyard(b, &f, (SIDE_D, w - OUTER_T), (FRONT_D, d - back_d - 0.3), has_back_wing, rng);
+    let court = ((SIDE_D, w - OUTER_T), (FRONT_D, d - back_d - 0.3));
+    if mode != LotMode::Site {
+        courtyard(b, &f, court.0, court.1, has_back_wing, rng);
+    }
+    let top = h_front + 1.4;
+    if !lived {
+        // Пустой дом: голые стены, сундук в первой комнате и ларь в кладовой — их отопрёт хозяин.
+        let mut rooms: Vec<estate::RoomPlan> = plan.iter().map(|r| estate::RoomPlan { r: *r, floor: 0.0, kinds: estate::GROUND_KINDS.to_vec() }).collect();
+        if has_back_wing {
+            let v0 = d - back_d;
+            rooms.push(estate::RoomPlan { r: f.rect(SIDE_D, w - OUTER_T, v0 + INNER_T, d - 0.15), floor: 0.0, kinds: vec![crate::level::FurnishKind::Storeroom, crate::level::FurnishKind::Kitchen, crate::level::FurnishKind::Workshop] });
+        }
+        if two_storey {
+            rooms.push(estate::RoomPlan { r: f.rect(OUTER_T, w - OUTER_T, OUTER_T, iv - INNER_T / 2.0), floor: H1 + 0.12, kinds: estate::UPPER_KINDS.to_vec() });
+        }
+        for (n, name) in [(0usize, "Сундук"), (1, "Ларь")] {
+            let Some(room) = rooms.get(n) else { continue };
+            let r = room.r.inset(0.15);
+            // В углу комнаты.
+            let along_x = r.w() > r.d();
+            let chest = if along_x { Rect::new(r.x1 - 1.1, r.z0, r.x1 - 0.1, r.z0 + 0.6) } else { Rect::new(r.x0, r.z1 - 1.1, r.x0 + 0.6, r.z1 - 0.1) };
+            interior::chest(b, chest, name);
+        }
+        return HouseInfo { rooms, entrance, two_storey, top, court, back_wing: has_back_wing };
+    }
 
     // ---- Обстановка ----
     let mut people = interior::Household::new();
@@ -352,6 +472,7 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng) {
     let yard = f.rect(SIDE_D, w - OUTER_T, FRONT_D, d - back_d - 0.3);
     let _ = stair_rect;
     interior::yard_extras(b, yard, stair_rect, &mut people, rng);
+    HouseInfo { rooms: Vec::new(), entrance, two_storey, top, court, back_wing: has_back_wing }
 }
 
 /// Мелочи фасада, без которых стена выглядит макетом: распахнутые ставни, подоконные плиты,

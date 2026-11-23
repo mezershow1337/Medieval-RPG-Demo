@@ -610,11 +610,11 @@ fn appear(
         match tf {
             Some(mut tf) => *tf = want,
             None => {
-                commands.entity(e).insert(want);
+                commands.entity(e).try_insert(want);
             }
         }
         if k >= 1.0 {
-            commands.entity(e).remove::<Appear>();
+            commands.entity(e).try_remove::<Appear>();
         }
     }
 }
@@ -625,10 +625,11 @@ pub struct AppearChildren;
 
 fn appear_children(mut commands: Commands, q: Query<(Entity, &Children), With<AppearChildren>>) {
     for (e, children) in &q {
+        // Окно могли пересобрать в том же кадре — тогда детей уже нет.
         for c in children.iter() {
-            commands.entity(c).insert(Appear::default());
+            commands.entity(c).try_insert(Appear::default());
         }
-        commands.entity(e).remove::<AppearChildren>();
+        commands.entity(e).try_remove::<AppearChildren>();
     }
 }
 
