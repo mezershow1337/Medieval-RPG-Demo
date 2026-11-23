@@ -159,6 +159,8 @@ pub fn run(server_addr: SocketAddr) {
         .add_plugins(crate::doors::DoorClientPlugin)
         .add_plugins(crate::map::MapClientPlugin)
         .add_plugins(crate::residents::ResidentsPlugin)
+        .add_plugins(crate::world_clock::ClockClientPlugin)
+        .add_plugins(crate::life_client::LifeClientPlugin)
         .add_plugins(crate::civil_client::CivilClientPlugin)
         .add_plugins(crate::trade_client::TradeClientPlugin)
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))
@@ -429,6 +431,8 @@ fn receive_reliable(
     time: Res<Time>,
     mut welcomed_at: Local<Option<f32>>,
     mut civil: MessageWriter<crate::civil_client::CivilNet>,
+    mut clock: MessageWriter<crate::world_clock::ClockSync>,
+    mut alarm: MessageWriter<crate::daily_life::Alarm>,
 ) {
     while let Some(bytes) = client.receive_message(CH_RELIABLE) {
         let Some(msg) = decode::<ServerMessage>(&bytes) else { continue };
@@ -497,6 +501,7 @@ fn receive_reliable(
                 feedback.write(CombatFeedback::Hit { attacker: 0, target: u64::MAX, outcome: combat::HitOutcome::Damage { amount, killed: false, head }, at: at.into() });
                 let _ = civ;
                 civil.write(crate::civil_client::CivilNet::Hit);
+                alarm.write(crate::daily_life::Alarm(at.into()));
             }
             ServerMessage::CivilianDead { civ, corpse } => {
                 let fresh = welcomed_at.is_some_and(|t| time.elapsed_secs() - t > 1.5);
@@ -507,6 +512,9 @@ fn receive_reliable(
             }
             ServerMessage::Law(msg) => {
                 civil.write(crate::civil_client::CivilNet::Law(msg));
+            }
+            ServerMessage::Clock { game } => {
+                clock.write(crate::world_clock::ClockSync(game));
             }
             ServerMessage::CorpseRemoved { corpse_id } => {
                 if let Some(e) = corpses.0.remove(&corpse_id) {

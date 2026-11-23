@@ -210,7 +210,16 @@ impl Resident {
     }
 }
 
+/// Ложе: середина постели (на высоте покрывала) и ось вдоль ложа (от ног к изголовью).
+#[derive(Clone, Copy, Debug)]
+pub struct Bed {
+    pub pos: Vec3,
+    pub along: Vec3,
+}
+
 pub struct Layout {
+    /// Постели (на них жители спят ночью, больные лежат в ксеноне).
+    pub beds: Vec<Bed>,
     pub doors: Vec<DoorSpec>,
     pub containers: Vec<ContainerSpec>,
     pub residents: Vec<Resident>,
@@ -279,6 +288,7 @@ impl Opening {
 }
 
 struct Builder {
+    beds: Vec<Bed>,
     doors: Vec<DoorSpec>,
     containers: Vec<ContainerSpec>,
     residents: Vec<Resident>,
@@ -305,6 +315,7 @@ struct Builder {
 impl Builder {
     fn new() -> Self {
         Self {
+            beds: Vec::new(),
             doors: Vec::new(),
             containers: Vec::new(),
             residents: Vec::new(),
@@ -327,6 +338,7 @@ impl Builder {
 
     fn finish(self) -> Layout {
         Layout {
+            beds: self.beds,
             doors: self.doors,
             containers: self.containers,
             residents: self.residents,
@@ -362,6 +374,7 @@ impl Builder {
         self.hearths.extend(t.hearths.into_iter().map(|p| p + offset));
         self.forges.extend(t.forges.into_iter().map(|f| ForgeSpec { fire: f.fire + offset, anvil: f.anvil + offset, trough: f.trough + offset, grind: f.grind + offset, ..f }));
         self.doors.extend(t.doors.into_iter().map(|d| DoorSpec { center: d.center + offset, ..d }));
+        self.beds.extend(t.beds.into_iter().map(|d| Bed { pos: d.pos + offset, ..d }));
         self.containers.extend(t.containers.into_iter().map(|c| ContainerSpec { pos: c.pos + offset, ..c }));
         self.residents.extend(t.residents.into_iter().map(|r| Resident { pos: r.pos + offset, ..r }));
         for mut g in t.glass {
@@ -391,6 +404,11 @@ impl Builder {
     /// Житель стоит в точке `pos` лицом по `yaw` (тело — невидимая коробка, чтобы сквозь него не ходили).
     fn resident(&mut self, pos: Vec3, yaw: f32, role: Role) {
         self.residents.push(Resident { pos, yaw, role });
+    }
+
+    /// Постель: середина и ось вдоль ложа.
+    fn bed(&mut self, pos: Vec3, along: Vec3) {
+        self.beds.push(Bed { pos, along });
     }
 
     /// Дальнейшие декоративные меши относятся к участку карты вокруг точки (x, z).
