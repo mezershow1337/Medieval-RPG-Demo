@@ -398,6 +398,11 @@ fn base_damage(world: &GameWorld, loot: Option<&LootWorld>, attacker: u64) -> f3
 
 /// Урон после брони цели.
 fn mitigate(world: &GameWorld, loot: Option<&LootWorld>, target: u64, base: f32, head: bool) -> f32 {
+    mitigate_pierced(world, loot, target, base, head, 0.0)
+}
+
+/// Урон после брони; `pierce` ослабляет доспех (бронебойный наконечник) или усиливает (срезень).
+fn mitigate_pierced(world: &GameWorld, loot: Option<&LootWorld>, target: u64, base: f32, head: bool, pierce: f32) -> f32 {
     let Some(t) = world.actors.get(&target) else { return 0.0 };
     let (armor, head_reduction) = if t.kind == ActorKind::Player {
         let stats = loot.map(|l| l.equipped_stats(target)).unwrap_or_default();
@@ -405,6 +410,7 @@ fn mitigate(world: &GameWorld, loot: Option<&LootWorld>, target: u64, base: f32,
     } else {
         (npc::armor(t.kind), 0.0)
     };
+    let armor = armor * (1.0 - pierce.clamp(-1.0, 0.9));
     let mut dmg = base * (1.0 - combat::armor_reduction(armor));
     if head {
         dmg *= 1.0 - (head_reduction / 100.0).clamp(0.0, 0.8);
@@ -525,7 +531,20 @@ fn combat_tick(
     // 3. Стрелы: новые и летящие.
     let shooters: Vec<u64> = world.actors.iter().filter(|(_, a)| a.shoot && a.alive).map(|(id, _)| *id).collect();
     for id in shooters {
-        let damage = base_damage(&world, loot, id);
+        let mut damage = base_damage(&world, loot, id);
+        let mut pierce = 0.0;
+        // Игрок стреляет стрелами из сумки: первой стопкой, что лежит в ней.
+        if world.actors[&id].kind == ActorKind::Player {
+            let quiver = loot.and_then(|l| l.inventories.get(&id)).and_then(|inv| inv.grid.items.iter().find(|p| crate::archery::is_arrow(p.item.info().name)));
+            let Some(p) = quiver else {
+                world.gear_wear.push((id, crate::smithing_server::Wear::NoAmmo));
+                continue;
+            };
+            let shot = crate::archery::Shot::of(&p.item);
+            damage *= shot.damage_mult;
+            pierce = shot.pierce;
+            world.gear_wear.push((id, crate::smithing_server::Wear::Ammo(p.item.uid)));
+        }
         let a = &world.actors[&id];
         let mut pose = a.pose;
         // Небольшой разброс: стрелы не летят в одну точку.
@@ -534,7 +553,7 @@ fn combat_tick(
         let (pos, vel) = combat::arrow_launch(&pose);
         let arrow_id = world.next_arrow_id;
         world.next_arrow_id += 1;
-        world.arrows.push(Arrow { id: arrow_id, owner: id, pos, vel, damage, life: 4.0 });
+        world.arrows.push(Arrow { id: arrow_id, owner: id, pos, vel, damage, life: 4.0, pierce });
     }
     let targets: Vec<(u64, Pose)> = world.actors.iter().filter(|(_, a)| a.alive).map(|(id, a)| (*id, a.pose)).collect();
     let mut arrows = std::mem::take(&mut world.arrows);
@@ -558,7 +577,7 @@ fn combat_tick(
     });
     world.arrows = arrows;
     for (arrow, tid, point, head, shield_facing) in arrow_hits {
-        let damage = mitigate(&world, loot, tid, arrow.damage, head);
+        let damage = mitigate_pierced(&world, loot, tid, arrow.damage, head, arrow.pierce);
         let Some(t) = world.actors.get_mut(&tid) else { continue };
         if !t.alive {
             continue;

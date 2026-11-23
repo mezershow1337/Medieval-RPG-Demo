@@ -10,6 +10,7 @@ use crate::smithing_net::*;
 use bevy::audio::{AddAudioSource, Decodable, Sample, Source, Volume};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
+use bevy::world_serialization::WorldAssetRoot;
 use std::collections::HashMap;
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 use std::num::NonZero;
@@ -24,6 +25,7 @@ impl Plugin for SmithFxPlugin {
             .init_resource::<FxRng>()
             .init_resource::<DipsOut>()
             .add_systems(Startup, setup_fx)
+            .add_systems(Update, showcase.run_if(|| std::env::var("MRPG_SMITH_SHOWCASE").is_ok()))
             .add_systems(Update, demo.run_if(|| std::env::var("MRPG_SMITH_DEMO").is_ok()).before(play_fx).after(crate::smithing_client::SmithSet))
             .add_systems(Update, (play_fx, forge_fires, pieces, dips, hammers, particles).chain().after(crate::smithing_client::SmithSet));
     }
@@ -833,6 +835,19 @@ fn piece_dims(p: Option<Pattern>, drawn: f32) -> Vec3 {
         Some(Pattern::Mace) => (Vec3::new(0.1, 0.06, 0.06), Vec3::new(0.12, 0.08, 0.08)),
         Some(Pattern::Arrowheads) => (Vec3::new(0.18, 0.012, 0.012), Vec3::new(0.24, 0.02, 0.006)),
         Some(Pattern::Mail) => (Vec3::new(0.25, 0.012, 0.012), Vec3::new(0.35, 0.006, 0.006)),
+        Some(Pattern::Arms(i)) => {
+            use crate::arsenal::Fam;
+            let a = &crate::arsenal::ARMS[(i as usize).min(crate::arsenal::ARMS.len() - 1)];
+            let len = a.mass * 0.6;
+            match a.fam {
+                Fam::Sword => (Vec3::new(len * 0.4, 0.03, 0.02), Vec3::new(len, 0.05, 0.006)),
+                Fam::Seax => (Vec3::new(0.12, 0.025, 0.015), Vec3::new(0.25 + len * 0.2, 0.04, 0.006)),
+                Fam::Axe => (Vec3::new(0.14, 0.05, 0.03), Vec3::new(0.18, 0.12 + a.mass * 0.03, 0.015)),
+                Fam::Mace => (Vec3::new(0.1, 0.06, 0.06), Vec3::new(0.12, 0.08, 0.08)),
+                Fam::Spear => (Vec3::new(0.18, 0.03, 0.02), Vec3::new(0.32, 0.045, 0.008)),
+                Fam::Head => (Vec3::new(0.18, 0.012, 0.012), Vec3::new(0.24, 0.02, 0.006)),
+            }
+        }
         // Пластины доспеха, шлема, умбон щита.
         Some(_) => (Vec3::new(0.18, 0.12, 0.02), Vec3::new(0.24, 0.18, 0.004)),
     };
@@ -1095,5 +1110,65 @@ fn demo(mut state: ResMut<SmithState>, time: Res<Time>, mut last: Local<f32>) {
     }
     if c >= 6.0 && prev < 6.0 {
         state.fx_queue.push((sid, 777, Fx::Quench { medium: Quench::Water, temp: 820.0, cracked: false }));
+    }
+}
+
+/// `MRPG_SMITH_SHOWCASE=weapons|armour[,x,y,z]`: витрина для снимков — одни и те же вещи грубой,
+/// средней и отличной работы. Ряды от камеры: грубая, средняя, отличная; по ширине — виды.
+pub fn showcase(mut commands: Commands, models: Option<Res<crate::icons::ItemModels>>, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>, mut done: Local<bool>) {
+    let Some(models) = models else { return };
+    if *done {
+        return;
+    }
+    *done = true;
+    let arg = std::env::var("MRPG_SMITH_SHOWCASE").unwrap_or_default();
+    let mut it = arg.split(',');
+    let mode = it.next().unwrap_or("weapons").trim().to_string();
+    let v: Vec<f32> = it.filter_map(|s| s.trim().parse().ok()).collect();
+    let o = if v.len() == 3 { Vec3::new(v[0], v[1], v[2]) } else { Vec3::new(174.0, 0.0, -22.0) };
+    let (kinds, dx, dz): (Vec<&str>, f32, f32) = if mode.starts_with("arm") {
+        (vec!["Спангенхельм", "Гребенчатый шлем", "Кольчуга", "Ламеллярный панцирь", "Железные поножи"], 0.85, 0.95)
+    } else if mode.starts_with("new") {
+        (crate::arsenal::ARMS.iter().filter(|a| a.fam == crate::arsenal::Fam::Sword).map(|a| a.name).take(12).collect(), 0.32, 1.25)
+    } else if let Some(fam) = crate::arsenal::Fam::ALL.into_iter().find(|f| format!("{f:?}").eq_ignore_ascii_case(&mode)) {
+        // Витрина одного семейства: всё в один ряд, хорошее качество.
+        let dx = match fam {
+            crate::arsenal::Fam::Axe | crate::arsenal::Fam::Mace => 0.34,
+            crate::arsenal::Fam::Head => 0.16,
+            _ => 0.26,
+        };
+        (crate::arsenal::ARMS.iter().filter(|a| a.fam == fam).map(|a| a.name).collect(), dx, 1.0)
+    } else if mode == "archery" {
+        (vec!["Простой лук", "Гуннский составной лук", "Стрелы", "Бронебойные стрелы", "Трёхлопастные стрелы", "Стрелы-срезни", "Древки стрел", "Маховые перья", "Рыбий клей", "Сухожилия"], 0.3, 1.0)
+    } else {
+        (vec!["Спата", "Кавалерийская спата", "Кинжал", "Булава", "Боевой топор"], 0.42, 1.3)
+    };
+    let single = !(mode.starts_with("arm") || mode.starts_with("new") || mode.starts_with("weap"));
+    let looks: &[u8] = if single { &[255] } else { &[12, 100, 255] };
+    let w = dx * kinds.len() as f32 + 0.4;
+    let d = dz * looks.len() as f32 + 0.2;
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(w, 0.04, d))),
+        MeshMaterial3d(materials.add(StandardMaterial { base_color: Color::srgb(0.2, 0.14, 0.1), perceptual_roughness: 0.95, ..default() })),
+        Transform::from_translation(o + Vec3::new(w * 0.5 - 0.2 - dx * 0.5 + dx * 0.5, 0.02, d * 0.5 - 0.1 - dz * 0.5 + dz * 0.5)),
+    ));
+    for (row, f) in looks.iter().enumerate() {
+        for (i, name) in kinds.iter().enumerate() {
+            let Some(base) = crate::items::ItemBaseId::find(name) else { continue };
+            let p = o + Vec3::new(i as f32 * dx, 0.05, row as f32 * dz);
+            let mut e = commands.spawn((WorldAssetRoot(models.get(base)), Transform::from_translation(p)));
+            if *f < 160 {
+                e.insert(crate::rig::LookTint(*f));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod where_agora {
+    #[test]
+    #[ignore]
+    fn print_agora() {
+        println!("AGORA {:?}", crate::level::place_pos("agora"));
     }
 }

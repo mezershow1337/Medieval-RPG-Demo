@@ -148,8 +148,12 @@ fn setup_loot_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
 }
 
 /// Предмет на земле: его 3D-модель (та же, что на иконке) и подсветка по качеству.
-fn spawn_item_model(p: &mut ChildSpawnerCommands, assets: &LootAssets, models: &ItemModels, base: ItemBaseId, quality: Quality, offset: Vec3, shelf: bool) {
-    p.spawn((WorldAssetRoot(models.get(base)), Transform::from_translation(offset)));
+#[allow(clippy::too_many_arguments)]
+fn spawn_item_model(p: &mut ChildSpawnerCommands, assets: &LootAssets, models: &ItemModels, base: ItemBaseId, quality: Quality, offset: Vec3, shelf: bool, finish: u8) {
+    let mut m = p.spawn((WorldAssetRoot(models.get(base)), Transform::from_translation(offset)));
+    if finish < 160 {
+        m.insert(crate::rig::LookTint(finish));
+    }
     // Товар на прилавке не светится: его и так видно, а луч над столом выглядел бы странно.
     if shelf {
         return;
@@ -257,7 +261,7 @@ fn receive_loot(
                     }
                 }
             }
-            LootServerMessage::GroundSpawned { id, pos, rot, vel, base, quality, count, asleep, shelf } => {
+            LootServerMessage::GroundSpawned { id, pos, rot, vel, base, quality, count, asleep, shelf, finish } => {
                 let pos: Vec3 = pos.into();
                 let rot = Quat::from_array(rot).normalize();
                 let body = crate::props::PropBody::for_item(base, count, pos, rot);
@@ -271,7 +275,7 @@ fn receive_loot(
                         Transform::from_translation(start).with_rotation(rot),
                         Visibility::default(),
                     ))
-                    .with_children(|p| spawn_item_model(p, &assets, &models, base, quality, offset, shelf.is_some()))
+                    .with_children(|p| spawn_item_model(p, &assets, &models, base, quality, offset, shelf.is_some(), finish))
                     .id();
                 if let Some(old) = index.0.insert(id, e) {
                     commands.entity(old).despawn();
