@@ -47,6 +47,8 @@ pub struct Actor {
     shoot: bool,
     /// Как раны, боль и яды меняют бойца (ведёт medicine_server.rs).
     pub body_mods: crate::medicine::BodyMods,
+    /// Что дают навыки и умения игрока (ведёт skills_server.rs).
+    pub skill_mods: crate::skill_tree::Mods,
     /// Читы из консоли разработчика.
     pub cheats: crate::console_net::Cheats,
     /// Игрок убрал оружие (хотбар, слот «Руки»): дерётся кулаками.
@@ -193,6 +195,7 @@ pub(crate) fn spawn_npc(world: &mut GameWorld, level: &LevelColliders, spawn: Np
             finish: 200,
             shoot: false,
             body_mods: Default::default(),
+            skill_mods: Default::default(),
             cheats: Default::default(),
             holstered: false,
             gear: Default::default(),
@@ -231,6 +234,7 @@ fn on_server_event(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>,
                     finish: 200,
                     shoot: false,
                     body_mods: Default::default(),
+                    skill_mods: Default::default(),
                     cheats: Default::default(),
                     holstered: false,
                     gear: Default::default(),
@@ -384,7 +388,8 @@ fn sync_equipment(world: &mut GameWorld, loot: Option<&LootWorld>) {
             actor.fighter.hp = (max_hp * k).min(max_hp);
         }
         let inv = loot.inventories.get(id);
-        actor.fighter.riposte_bonus = stats.get(Stat::ParryWindow) / 1000.0;
+        let sk = actor.skill_mods;
+        actor.fighter.riposte_bonus = stats.get(Stat::ParryWindow) / 1000.0 + sk.riposte;
         actor.fighter.has_shield = inv.and_then(|inv| inv.equipped(EquipSlot::OffHand)).is_some_and(|item| item.info().shape == ItemShape::Shield);
         // Оружие в руке определяет темп, длину и силу ударов. Менять можно только вне удара.
         actor.finish = inv.and_then(|inv| inv.equipped(EquipSlot::MainHand)).map_or(200, |item| (item.look() * 255.0) as u8);
@@ -404,15 +409,15 @@ fn sync_equipment(world: &mut GameWorld, loot: Option<&LootWorld>) {
         actor.gear.holstered = actor.holstered;
         let e = gear_effects(&stats);
         let m = actor.body_mods;
-        actor.fighter.action_speed = e.action_speed * m.action_speed;
-        actor.fighter.block_stability = e.block_stability;
-        actor.fighter.stamina_regen_mult = e.stamina_regen * m.stamina_regen;
-        actor.fighter.max_stamina = e.max_stamina * m.max_stamina;
+        actor.fighter.action_speed = e.action_speed * m.action_speed * sk.action_speed;
+        actor.fighter.block_stability = (e.block_stability + sk.block_stability).clamp(0.0, 0.8);
+        actor.fighter.stamina_regen_mult = e.stamina_regen * m.stamina_regen * sk.stamina_regen;
+        actor.fighter.max_stamina = (e.max_stamina + sk.max_stamina) * m.max_stamina;
         actor.fighter.stamina = actor.fighter.stamina.min(actor.fighter.max_stamina);
         // Ноша: сверх грузоподъёмности идёшь медленнее (вес — `weight.rs`).
         let load = inv.map(crate::weight::inventory_weight).unwrap_or(0.0);
-        let burden = crate::weight::encumbrance(load, crate::weight::carry_capacity(stats.get(Stat::Strength)));
-        actor.move_mult = e.move_mult * m.move_mult * burden;
+        let burden = crate::weight::encumbrance(load, crate::weight::carry_capacity(stats.get(Stat::Strength)) + sk.carry);
+        actor.move_mult = e.move_mult * m.move_mult * burden * sk.move_speed;
     }
 }
 
@@ -443,13 +448,15 @@ fn base_damage(world: &GameWorld, loot: Option<&LootWorld>, attacker: u64) -> f3
     let Some(a) = world.actors.get(&attacker) else { return 0.0 };
     if a.kind == ActorKind::Player {
         let stats = loot.map(|l| l.equipped_stats(attacker)).unwrap_or_default();
+        // Навыки: сила и выучка для ближнего боя, тугой лук и глаз для стрельбы.
+        let skill = if a.fighter.weapon.ranged() { a.skill_mods.bow_damage } else { a.skill_mods.melee_damage };
         if a.fighter.weapon == combat::WeaponKind::Fists {
             // Кулак: урон от силы, а не от оружия в сумке.
-            return combat::FIST_DAMAGE + stats.get(Stat::Strength).max(0.0) * 0.4 + stats.get(Stat::BonusDamage) * 0.5;
+            return (combat::FIST_DAMAGE + stats.get(Stat::Strength).max(0.0) * 0.4 + stats.get(Stat::BonusDamage) * 0.5) * skill;
         }
         let weapon = stats.get(Stat::WeaponDamage);
         let weapon = if weapon > 0.0 { weapon * PLAYER_WEAPON_DAMAGE_SCALE } else { a.fighter.weapon.stats().damage };
-        weapon + stats.get(Stat::BonusDamage)
+        (weapon + stats.get(Stat::BonusDamage)) * skill
     } else {
         a.fighter.weapon.stats().damage * npc::damage_mult(a.kind)
     }
@@ -531,6 +538,7 @@ fn combat_tick(
     loot: Option<Res<LootWorld>>,
     mut trade: Option<ResMut<crate::trade_server::TradeWorld>>,
     mut civil: ResMut<crate::civil_server::CivilWorld>,
+    mut practice: Option<ResMut<crate::skills_server::PracticeQueue>>,
     time: Res<Time>,
 ) {
     let dt = time.delta_secs().min(0.1);
@@ -641,9 +649,10 @@ fn combat_tick(
         }
         let a = &world.actors[&id];
         let mut pose = a.pose;
-        // Небольшой разброс: стрелы не летят в одну точку.
-        pose.yaw += (world.rng.next_f32() - 0.5) * 0.04;
-        pose.pitch += (world.rng.next_f32() - 0.5) * 0.03;
+        // Небольшой разброс: стрелы не летят в одну точку (у опытного стрелка — кучнее).
+        let spread = a.skill_mods.bow_spread;
+        pose.yaw += (world.rng.next_f32() - 0.5) * 0.04 * spread;
+        pose.pitch += (world.rng.next_f32() - 0.5) * 0.03 * spread;
         let (pos, vel) = combat::arrow_launch(&pose);
         let arrow_id = world.next_arrow_id;
         world.next_arrow_id += 1;
@@ -712,6 +721,9 @@ fn combat_tick(
             world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon: combat::WeaponKind::Bow, amount, head, part });
         }
         server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: arrow.owner, target: tid, outcome, at: point.into() }));
+        if let Some(q) = practice.as_mut() {
+            q.arrow(&world, arrow.owner, tid, outcome);
+        }
         let killed = matches!(outcome, HitOutcome::Damage { killed: true, .. });
         on_player_attacks(&mut world, trade.as_deref_mut(), &mut civil, arrow.owner, tid, killed);
         if killed {
@@ -773,6 +785,9 @@ fn combat_tick(
                     world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon, amount, head, part });
                 }
                 server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: aid, target: tid, outcome, at: point.into() }));
+                if let Some(q) = practice.as_mut() {
+                    q.melee(&world, aid, tid, outcome);
+                }
                 let killed = matches!(outcome, HitOutcome::Damage { killed: true, .. });
                 on_player_attacks(&mut world, trade.as_deref_mut(), &mut civil, aid, tid, killed);
                 if killed {

@@ -84,10 +84,11 @@ pub fn grab_cursor(
     loot: Option<Res<crate::loot_client::LootState>>,
     trade: Option<Res<crate::trade_client::TradeState>>,
     law: Option<Res<crate::civil_client::LawUi>>,
+    book: Option<Res<crate::skill_book::BookUi>>,
     map: Option<Res<crate::map::MapView>>,
 ) {
-    // Пока открыт инвентарь, окно торговли, разговор со стражей или карта, клики принадлежат окну, а не бою.
-    if loot.is_some_and(|l| l.ui_open) || trade.is_some_and(|t| t.window_open()) || law.is_some_and(|l| l.open()) || map.is_some_and(|m| m.open) {
+    // Пока открыт инвентарь, окно торговли, книга навыков, разговор со стражей или карта, клики принадлежат окну, а не бою.
+    if loot.is_some_and(|l| l.ui_open) || trade.is_some_and(|t| t.window_open()) || law.is_some_and(|l| l.open()) || book.is_some_and(|b| b.open) || map.is_some_and(|m| m.open) {
         return;
     }
     if mouse.just_pressed(MouseButton::Left) {

@@ -21,7 +21,8 @@ use std::collections::{BTreeMap, BTreeSet};
 // Навыки и языки
 // ---------------------------------------------------------------------------
 
-/// Практический навык (0–100): растёт только от работы руками.
+/// Практический навык (0–100): растёт только от дела (и немного — у мастера).
+/// Порядок вариантов — индекс в [`Knowledge::skills`]: новые добавлять только в конец.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Skill {
     Medicine,
@@ -29,10 +30,37 @@ pub enum Skill {
     Alchemy,
     /// Кузнечное и литейное дело.
     Smithing,
+    /// Сила: тяжёлый труд, ноша, удар.
+    Strength,
+    /// Выносливость: бег, долгий бой, работа без отдыха.
+    Endurance,
+    /// Ратное дело: ближний бой клинком, топором, копьём, щитом.
+    Arms,
+    /// Стрельба из лука.
+    Archery,
+    /// Торговля: торг, мена, знание цен.
+    Trade,
+    /// Книжность: чтение, письмо, учёба.
+    Letters,
 }
 
+/// Сколько всего навыков (длина [`Knowledge::skills`]).
+pub const SKILL_COUNT: usize = 10;
+
 impl Skill {
-    pub const ALL: [Skill; 4] = [Skill::Medicine, Skill::Herbalism, Skill::Alchemy, Skill::Smithing];
+    /// Порядок для окон: тело, бой, ремёсла, знахарство, город.
+    pub const ALL: [Skill; SKILL_COUNT] = [
+        Skill::Strength,
+        Skill::Endurance,
+        Skill::Arms,
+        Skill::Archery,
+        Skill::Smithing,
+        Skill::Alchemy,
+        Skill::Herbalism,
+        Skill::Medicine,
+        Skill::Letters,
+        Skill::Trade,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -40,11 +68,30 @@ impl Skill {
             Skill::Herbalism => "Травничество",
             Skill::Alchemy => "Алхимия",
             Skill::Smithing => "Кузнечное дело",
+            Skill::Strength => "Сила",
+            Skill::Endurance => "Выносливость",
+            Skill::Arms => "Ратное дело",
+            Skill::Archery => "Стрельба из лука",
+            Skill::Trade => "Торговля",
+            Skill::Letters => "Книжность",
         }
     }
 
     pub fn index(self) -> usize {
         self as usize
+    }
+
+    /// Какие навыки понемногу растут вместе с этим (кузнец крепнет, лучник набирает силу рук).
+    pub fn spillover(self) -> &'static [(Skill, f32)] {
+        match self {
+            Skill::Smithing => &[(Skill::Strength, 0.4), (Skill::Endurance, 0.15)],
+            Skill::Arms => &[(Skill::Strength, 0.25), (Skill::Endurance, 0.3)],
+            Skill::Archery => &[(Skill::Strength, 0.2)],
+            Skill::Herbalism => &[(Skill::Endurance, 0.1)],
+            Skill::Medicine => &[(Skill::Herbalism, 0.1)],
+            Skill::Trade => &[(Skill::Letters, 0.05)],
+            _ => &[],
+        }
     }
 }
 
@@ -558,7 +605,7 @@ impl Lore {
     /// Каким навыком подкрепляется практика этого знания.
     pub fn skill(self) -> Option<Skill> {
         match self {
-            Lore::Read(_) => None,
+            Lore::Read(_) => Some(Skill::Letters),
             Lore::Identify(_) | Lore::Properties(_) => Some(Skill::Herbalism),
             Lore::Technique(t) => Some(t.skill()),
         }
@@ -829,7 +876,7 @@ impl Teacher {
             Teacher::Rhizotomos | Teacher::Wisewoman | Teacher::Apothecary | Teacher::SteppeHealer => Some(Skill::Herbalism),
             Teacher::Alchemist | Teacher::Dyer | Teacher::Glassblower | Teacher::Potter => Some(Skill::Alchemy),
             Teacher::Smith | Teacher::Armourer | Teacher::GothSmith | Teacher::SteppeSmith => Some(Skill::Smithing),
-            Teacher::Scribe | Teacher::Grammarian => None,
+            Teacher::Scribe | Teacher::Grammarian => Some(Skill::Letters),
         }
     }
 
@@ -943,8 +990,8 @@ impl CannotRead {
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 pub struct Knowledge {
     pub known: BTreeSet<Lore>,
-    /// Навыки 0–100 по [`Skill::index`].
-    pub skills: [f32; 4],
+    /// Навыки 0–100 по [`Skill::index`] (без прибавок от умений).
+    pub skills: [f32; SKILL_COUNT],
     /// Незаконченные уроки: доля 0..1.
     pub lessons: BTreeMap<Lore, f32>,
     /// Сколько прочитано: доля 0..1.
@@ -962,12 +1009,26 @@ impl Knowledge {
         self.known.insert(lore)
     }
 
+    /// Навык в деле: наработанное плюс прибавка от умений ([`crate::skill_tree`]), не больше 100.
     pub fn skill(&self, skill: Skill) -> f32 {
+        (self.base_skill(skill) + crate::skill_tree::skill_bonus(self, skill)).min(100.0)
+    }
+
+    /// Наработанный навык без умений.
+    pub fn base_skill(&self, skill: Skill) -> f32 {
         self.skills[skill.index()]
     }
 
-    /// Навык растёт всё медленнее к сотне.
+    /// Навык растёт всё медленнее к сотне; заодно понемногу растут связанные навыки.
     pub fn practice(&mut self, skill: Skill, amount: f32) {
+        self.practice_only(skill, amount);
+        for (other, k) in skill.spillover() {
+            self.practice_only(*other, amount * k);
+        }
+    }
+
+    /// Только этот навык, без связанных.
+    pub fn practice_only(&mut self, skill: Skill, amount: f32) {
         let s = &mut self.skills[skill.index()];
         *s = (*s + amount * (1.0 - *s / 110.0)).clamp(0.0, 100.0);
     }
@@ -998,7 +1059,8 @@ impl Knowledge {
         if let Some(skill) = teacher.skill() {
             self.practice(skill, mode.skill_per_hour() * hours);
         }
-        let mut budget = hours * mode.knowledge_rate();
+        // Книжный человек схватывает объяснения быстрее.
+        let mut budget = hours * mode.knowledge_rate() * crate::skill_tree::Mods::of(self).lessons;
         let mut learned = Vec::new();
         while budget > 1e-4 {
             let Some(lore) = self.next_lesson(teacher) else { break };

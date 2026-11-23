@@ -188,12 +188,21 @@ pub struct TradeWorld {
     invites: HashMap<u64, (u64, f64)>,
     /// Кому разослать репутацию.
     standing_dirty: HashSet<u64>,
+    /// Умение торговаться (покупка, продажа) — множители цен от навыка «Торговля» (ведёт skills_server.rs).
+    pub haggle: HashMap<u64, (f32, f32)>,
+    /// Обороты сделок за кадр (игрок, нуммии) — из них растёт навык торговли.
+    pub turnover: Vec<(u64, u32)>,
     rng: Rng,
 }
 
 impl TradeWorld {
     pub fn rep(&mut self, player: u64) -> &mut Reputation {
         self.reps.entry(player).or_default()
+    }
+
+    /// Множители цен от навыка торговли: (покупка, продажа).
+    pub fn haggle(&self, player: u64) -> (f32, f32) {
+        self.haggle.get(&player).copied().unwrap_or((1.0, 1.0))
     }
 
     pub fn standing(&self, player: u64, f: Faction) -> Standing {
@@ -442,6 +451,8 @@ fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
         p2p: Vec::new(),
         invites: HashMap::new(),
         standing_dirty: HashSet::new(),
+        haggle: HashMap::new(),
+        turnover: Vec::new(),
         rng,
     });
 }
@@ -561,6 +572,14 @@ fn near(a: Vec3, b: Vec3, range: f32) -> bool {
 // Окно торговца
 // ---------------------------------------------------------------------------
 
+/// Цена с поправкой на умение торговаться (не меньше нуммия, если была).
+fn haggled(price: u32, k: f32) -> u32 {
+    if price == 0 {
+        return 0;
+    }
+    ((price as f32 * k).round() as u32).max(1)
+}
+
 fn build_view(
     tw: &TradeWorld,
     loot: &LootWorld,
@@ -571,6 +590,7 @@ fn build_view(
     let def = id.def();
     let m = &tw.merchants[id.0 as usize];
     let standing = tw.standing(player, def.faction);
+    let (buy_k, sell_k) = tw.haggle(player);
     let rep = tw
         .reps
         .get(&player)
@@ -597,13 +617,16 @@ fn build_view(
             let (w, h) = item.size();
             ShelfItem {
                 item: item.clone(),
-                price: ask_price(
-                    def,
-                    item.base,
-                    item.quality,
-                    standing,
-                    count_of(item.base),
-                    normal(item.base),
+                price: haggled(
+                    ask_price(
+                        def,
+                        item.base,
+                        item.quality,
+                        standing,
+                        count_of(item.base),
+                        normal(item.base),
+                    ),
+                    buy_k,
                 ),
                 pocketable: w * h <= MAX_STEAL_CELLS,
             }
@@ -627,7 +650,8 @@ fn build_view(
                             standing,
                             count_of(p.item.base),
                             stolen,
-                        ),
+                        )
+                        .map(|p| haggled(p, sell_k)),
                         contraband: is_contraband_for(def, p.item.base),
                     }
                 })
@@ -788,6 +812,7 @@ fn deal(
         return DealOutcome::Failed("Ничего не выбрано".into());
     }
     let standing = tw.standing(player, def.faction);
+    let (buy_k, sell_k) = tw.haggle(player);
     let Some(mut inv) = loot.inventories.get(&player).cloned() else {
         return DealOutcome::Failed("Нет сумки".into());
     };
@@ -871,13 +896,16 @@ fn deal(
         let Some(item) = shelf.iter().find(|i| i.uid == *uid) else {
             return DealOutcome::Failed("Этого товара уже нет".into());
         };
-        let price = ask_price(
-            def,
-            item.base,
-            item.quality,
-            standing,
-            count_of(&shelf, item.base),
-            normal(item.base),
+        let price = haggled(
+            ask_price(
+                def,
+                item.base,
+                item.quality,
+                standing,
+                count_of(&shelf, item.base),
+                normal(item.base),
+            ),
+            buy_k,
         );
         let part = split_from(&mut shelf, *uid, *count, &mut uids).unwrap();
         buy_total += price * part.count as u32;
@@ -899,7 +927,8 @@ fn deal(
             standing,
             count_of(&shelf, p.item.base),
             stolen,
-        ) else {
+        )
+        .map(|p| haggled(p, sell_k)) else {
             return DealOutcome::Failed(format!("«{}» ему не нужно", p.item.info().name));
         };
         if crate::economy::coin_value(p.item.base).is_none() && is_contraband_for(def, p.item.base)
@@ -979,6 +1008,8 @@ fn deal(
     ms.cash = cash;
     loot.inventories.insert(player, inv);
     loot.uids = uids;
+    // Оборот учит торговать.
+    tw.turnover.push((player, buy_total + sell_total));
     // Оборот улучшает отношения: +1 за каждые полсолида, не больше +3 за сделку.
     let turnover = (buy_total + sell_total) as f32;
     tw.change_rep(player, def.faction, (turnover / 3600.0).min(3.0));
@@ -2079,6 +2110,8 @@ mod tests {
             p2p: vec![],
             invites: HashMap::new(),
             standing_dirty: HashSet::new(),
+            haggle: HashMap::new(),
+            turnover: Vec::new(),
             rng: Rng::new(9),
         };
         let mut loot = LootWorld::default();
