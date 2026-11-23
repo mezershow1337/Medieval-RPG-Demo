@@ -175,8 +175,10 @@ fn combat_input(
     client: Option<ResMut<RenetClient>>,
     mut local: Query<(&LocalPlayer, &mut LocalFighter)>,
     grab: Option<Res<crate::props_client::PropGrab>>,
+    work: Option<Res<crate::work_client::MyWork>>,
 ) {
-    if !cursor_locked(&cursor) {
+    // Во время работы руками ЛКМ — удар молотом по заготовке, а не мечом.
+    if !cursor_locked(&cursor) || crate::work_client::hands_busy(work.as_deref()) {
         return;
     }
     // ЛКМ по предмету — захват (props_client), ПКМ с предметом в руках — бросок.
@@ -245,6 +247,7 @@ fn animate_view_sword(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut arm: Query<(&crate::rig::ViewArm, &mut Visibility), (With<ViewArmRoot>, Without<ViewSword>)>,
     mut joints: Query<&mut Transform, (Without<ViewSword>, Without<PlayerCamera>, Without<ViewArmRoot>)>,
+    work: Option<Res<crate::work_client::MyWork>>,
 ) {
     let Ok((p, f)) = local.single() else { return };
     // Поворот камеры по вертикали и тряска.
@@ -254,7 +257,7 @@ fn animate_view_sword(
         cam.rotation = Quat::from_rotation_x(p.pitch + (t.sin() * s)) * Quat::from_rotation_z((t * 1.3).cos() * s);
     }
     let Ok((mut st, mut vis, children)) = sword.single_mut() else { return };
-    *vis = if f.fighter.is_dead() { Visibility::Hidden } else { Visibility::Inherited };
+    *vis = if f.fighter.is_dead() || crate::work_client::hands_busy(work.as_deref()) { Visibility::Hidden } else { Visibility::Inherited };
     let (hilt, dir) = combat::weapon_pose(&f.fighter.action, f.fighter.weapon, time.elapsed_secs());
     // Удар в мире наклонён на 0.6 от взгляда, а камера — на весь взгляд; компенсируем разницу.
     let fix = Quat::from_rotation_x(-p.pitch * 0.4);

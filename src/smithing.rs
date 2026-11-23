@@ -348,7 +348,17 @@ pub struct Forging {
     pub strikes: u32,
     /// Время с последнего удара (с) — сервер не даёт бить чаще молота.
     pub since_strike: f32,
+    /// Сколько заготовку «ведёт» от ударов по одной грани (знак — в какую сторону).
+    /// Кузнец переворачивает её клещами, иначе полосу выгибает.
+    #[serde(default)]
+    pub lean: f32,
+    /// Какой гранью вверх лежит заготовка.
+    #[serde(default)]
+    pub flipped: bool,
 }
+
+/// До какого перекоса бить по одной грани безопасно.
+pub const LEAN_SAFE: f32 = 0.18;
 
 /// Что случилось после действия (для подсказки игроку).
 #[derive(Debug, Clone, PartialEq)]
@@ -408,7 +418,14 @@ impl Forging {
             ground: 0.0,
             strikes: 0,
             since_strike: 10.0,
+            lean: 0.0,
+            flipped: false,
         }
+    }
+
+    /// Перевернуть заготовку клещами на другую грань.
+    pub fn flip(&mut self) {
+        self.flipped = !self.flipped;
     }
 
     /// Шаг времени: жар горна (°C, 0 — горн погас), куда идёт тепло. Возвращает события.
@@ -526,6 +543,17 @@ impl Forging {
         let base = if info.cold { 0.06 } else { 0.065 };
         let gain = base * force * plast * (0.25 + 0.75 * quality) * noise;
         self.shape[zone] += gain;
+        // Удары по одной грани тянут её сильнее другой: полосу выгибает, пока не перевернёшь.
+        if !info.cold {
+            self.lean += gain * 0.5 * if self.flipped { -1.0 } else { 1.0 };
+            let over = self.lean.abs() - LEAN_SAFE;
+            if over > 0.0 {
+                self.warp += over * gain * 3.0 * (1.0 - 0.4 * s);
+                if over > 0.06 {
+                    ev.push(SmithEvent::Note("Заготовку повело на одну сторону — переверните (R)".into()));
+                }
+            }
+        }
         for nb in [zone.wrapping_sub(1), zone + 1] {
             if nb < n {
                 self.shape[nb] += gain * 0.25;
@@ -1200,6 +1228,37 @@ pub fn repair_price(make: &Make, value: u32) -> u32 {
     }
     let worn = 1.0 - make.condition();
     crate::economy::round_price((value as f32 * 0.25 * worn).max(if worn > 0.0 { 40.0 } else { 0.0 }))
+}
+
+#[cfg(test)]
+mod lean_tests {
+    use super::*;
+
+    fn forge_blade(flip_every: Option<u32>) -> Forging {
+        let mut f = Forging::new(Pattern::Spatha, 0.8, 0.5);
+        f.weld = 1.0;
+        f.temp = 1000.0;
+        let mut rng = Rng::new(5);
+        let n = f.shape.len();
+        for i in 0..120u32 {
+            if let Some(k) = flip_every
+                && i % k == 0
+            {
+                f.flip();
+            }
+            f.temp = 1000.0;
+            f.strike(i as usize % n, false, 1.0, 60.0, &mut rng);
+        }
+        f
+    }
+
+    #[test]
+    fn turning_the_bar_keeps_it_straight() {
+        let never = forge_blade(None);
+        let turned = forge_blade(Some(5));
+        assert!(never.warp > 0.25, "не переворачивали: {}", never.warp);
+        assert!(turned.warp < 0.05, "переворачивали: {}", turned.warp);
+    }
 }
 
 #[cfg(test)]

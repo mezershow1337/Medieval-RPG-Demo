@@ -553,6 +553,11 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                                 events.extend(f.strike(zone as usize, heavy, acc, skill, rng));
                             }
                         }
+                        (Job::Forge(f), SmithClientMessage::Flip) => {
+                            if f.spot == Spot::Anvil {
+                                f.flip();
+                            }
+                        }
                         (Job::Forge(f), SmithClientMessage::Quench(q)) => {
                             if f.spot == Spot::Fire {
                                 f.spot = Spot::Anvil;

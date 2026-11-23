@@ -97,13 +97,11 @@ struct BrewButton(BrewAction);
 #[derive(Component)]
 struct BrewPanel;
 
-const BG: Color = Color::srgba(0.07, 0.055, 0.04, 0.96);
-const BORDER: Color = Color::srgb(0.45, 0.36, 0.22);
-const TITLE: Color = Color::srgb(0.95, 0.85, 0.6);
-const TEXT: Color = Color::srgb(0.88, 0.84, 0.74);
-const DIM: Color = Color::srgb(0.62, 0.58, 0.5);
-const BTN: Color = Color::srgb(0.22, 0.17, 0.11);
-const BTN_ON: Color = Color::srgb(0.5, 0.36, 0.14);
+use crate::ui_theme::{Skin, ink, theme};
+
+const TITLE: Color = ink::TITLE;
+const TEXT: Color = ink::TEXT;
+const DIM: Color = ink::DIM;
 
 fn setup_brew_panel(mut commands: Commands) {
     commands.spawn((
@@ -113,17 +111,17 @@ fn setup_brew_panel(mut commands: Commands) {
             display: Display::None,
             left: px(12),
             top: px(60),
-            width: px(400),
-            max_height: percent(86),
+            width: px(440),
+            max_height: percent(88),
             flex_direction: FlexDirection::Column,
-            padding: UiRect::all(px(10)),
+            padding: Skin::Wood.padding(),
             row_gap: px(4),
-            border: UiRect::all(px(2)),
-            overflow: Overflow::clip_y(),
+            overflow: Overflow::scroll_y(),
             ..default()
         },
-        BackgroundColor(BG),
-        BorderColor::all(BORDER),
+        ScrollPosition::default(),
+        crate::ui_theme::ScrollWheel,
+        theme().skin(Skin::Wood),
         GlobalZIndex(30),
         Interaction::default(),
         FocusPolicy::Block,
@@ -139,17 +137,8 @@ fn label(fonts: &UiFonts, s: impl Into<String>, size: f32, color: Color, bold: b
 }
 
 fn button(p: &mut ChildSpawnerCommands, fonts: &UiFonts, text: &str, action: BrewAction, on: bool) {
-    p.spawn((
-        BrewButton(action),
-        Interaction::default(),
-        FocusPolicy::Block,
-        Node { padding: UiRect::axes(px(8), px(2)), border: UiRect::all(px(1)), justify_content: JustifyContent::Center, ..default() },
-        BackgroundColor(if on { BTN_ON } else { BTN }),
-        BorderColor::all(BORDER),
-    ))
-    .with_children(|b| {
-        b.spawn(label(fonts, text, 14.0, TEXT, true));
-    });
+    let _ = fonts;
+    theme().toggle_button(p, text, (BrewButton(action), FocusPolicy::Block), on);
 }
 
 fn row<'a>(p: &'a mut ChildSpawnerCommands<'_>) -> EntityCommands<'a> {
@@ -215,12 +204,22 @@ fn rebuild_brew_panel(
     knowledge: Res<MyKnowledge>,
     fonts: Res<UiFonts>,
     mut panel: Query<(Entity, &mut Node), With<BrewPanel>>,
+    mut dock: ResMut<crate::ui_theme::SideDock>,
 ) {
     let Ok((entity, mut node)) = panel.single_mut() else { return };
     let visible = state.open.is_some() && loot.ui_open;
     let want = if visible { Display::Flex } else { Display::None };
     if node.display != want {
+        if visible {
+            commands
+                .entity(entity)
+                .insert(crate::ui_theme::Appear::default());
+        }
         node.display = want;
+    }
+    let w = if visible { 440.0 } else { 0.0 };
+    if dock.brew != w {
+        dock.brew = w;
     }
     if !visible {
         return;
@@ -263,10 +262,23 @@ fn rebuild_brew_panel(
     let fonts = &*fonts;
     commands.entity(entity).with_children(|p| {
         row(p).with_children(|r| {
-            r.spawn((label(fonts, vessel.name(), 20.0, TITLE, true), Node { flex_grow: 1.0, ..default() }));
+            r.spawn((
+                theme().title(vessel.name(), 26.0),
+                Node {
+                    flex_grow: 1.0,
+                    ..default()
+                },
+            ));
             button(r, fonts, "×", BrewAction::Close, false);
         });
-        p.spawn(label(fonts, "Что положить (вес одной штуки):", 13.0, DIM, false));
+        theme().divider(p);
+        p.spawn(label(
+            fonts,
+            "Что положить (вес одной штуки):",
+            13.0,
+            DIM,
+            false,
+        ));
         if stock.is_empty() {
             p.spawn(label(fonts, "В сумке нет ничего, что кладут в сосуд", 14.0, DIM, false));
         }
@@ -349,8 +361,29 @@ fn rebuild_brew_panel(
                 _ if state.heat == Heat::None => "Начать",
                 _ => "Варить",
             };
-            button(r, fonts, verb, BrewAction::Start, !state.counts.is_empty());
-            r.spawn(label(fonts, format!("≈ {:.0} с", BrewSpec { items: vec![], water: 0, heat: state.heat, hours: state.hours, bath: false }.real_secs()), 13.0, DIM, false));
+            theme().button(
+                r,
+                verb,
+                (BrewButton(BrewAction::Start), FocusPolicy::Block),
+                !state.counts.is_empty(),
+            );
+            r.spawn(label(
+                fonts,
+                format!(
+                    "≈ {:.0} с",
+                    BrewSpec {
+                        items: vec![],
+                        water: 0,
+                        heat: state.heat,
+                        hours: state.hours,
+                        bath: false
+                    }
+                    .real_secs()
+                ),
+                13.0,
+                DIM,
+                false,
+            ));
         });
         let hints = brewing::known_hints(&knowledge.0);
         if hints.is_empty() {

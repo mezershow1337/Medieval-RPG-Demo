@@ -8,7 +8,7 @@ use crate::gear_look::{Gear, ShieldLook};
 use crate::rig::{self, Blade, CharacterModels, NeedsRig, NeedsShield, NeedsWeapon, Outfit, PoseInput, RigPose, ShieldKind};
 use crate::{graphics, hud, level, worn};
 use bevy::prelude::*;
-use bevy_renet::netcode::{ClientAuthentication, NetcodeClientPlugin, NetcodeClientTransport, NetcodeErrorEvent};
+use bevy_renet::netcode::{ClientAuthentication, ConnectToken, NETCODE_KEY_BYTES, NetcodeClientPlugin, NetcodeClientTransport, NetcodeErrorEvent};
 use bevy_renet::{RenetClient, RenetClientPlugin, client_connected};
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
@@ -100,7 +100,7 @@ pub struct CorpseMarker {
 pub struct RemoteIndex(pub HashMap<u64, Entity>);
 
 #[derive(Resource, Default)]
-struct CorpseIndex(HashMap<u64, Entity>);
+pub struct CorpseIndex(pub HashMap<u64, Entity>);
 
 #[derive(Resource)]
 struct SendTimer(Timer);
@@ -122,11 +122,31 @@ impl CharacterAssets {
     }
 }
 
+/// Сколько секунд тишины от другой стороны терпим, прежде чем считать связь потерянной.
+const CONNECTION_TIMEOUT_SECS: i32 = 60;
+/// Срок жизни билета: с запасом, чтобы часы хоста и друга могли расходиться до часа.
+const CONNECT_TOKEN_EXPIRE_SECS: u64 = 3600;
+
 pub fn run(server_addr: SocketAddr) {
     let client_id = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
     let socket = UdpSocket::bind("0.0.0.0:0").expect("не удалось открыть сокет клиента");
-    let auth = ClientAuthentication::Unsecure { protocol_id: PROTOCOL_ID, client_id, server_addr, user_data: None };
     let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+    // Билет подключения собираем сами, а не через ClientAuthentication::Unsecure: там таймаут
+    // жёстко 15 с, и если игра у друга замирает дольше (первая загрузка уровня, компиляция
+    // шейдеров, перетаскивание окна), сервер выкидывал его с «terminated by the transport layer».
+    // Сервер работает в режиме Unsecure — его ключ из нулей, тот же, что здесь.
+    let token = ConnectToken::generate(
+        current_time,
+        PROTOCOL_ID,
+        CONNECT_TOKEN_EXPIRE_SECS,
+        client_id,
+        CONNECTION_TIMEOUT_SECS,
+        vec![server_addr],
+        None,
+        &[0; NETCODE_KEY_BYTES],
+    )
+    .expect("не удалось создать билет подключения");
+    let auth = ClientAuthentication::Secure { connect_token: token };
     let transport = NetcodeClientTransport::new(current_time, auth, socket).expect("не удалось создать подключение");
 
     App::new()
@@ -139,10 +159,15 @@ pub fn run(server_addr: SocketAddr) {
         .add_plugins(crate::loot_client::LootClientPlugin)
         .add_plugins(crate::doors::DoorClientPlugin)
         .add_plugins(crate::residents::ResidentsPlugin)
+        .add_plugins(crate::civil_client::CivilClientPlugin)
         .add_plugins(crate::trade_client::TradeClientPlugin)
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))
         .add_plugins(crate::smithing_client::SmithingClientPlugin)
-        .add_systems(Update, hide_ui_for_shots.run_if(|| std::env::var("MRPG_CAM").is_ok()))
+        .add_plugins(crate::ui_theme::UiThemePlugin)
+        .add_plugins(crate::work_client::WorkClientPlugin)
+        .add_plugins(crate::console::ConsolePlugin)
+        .add_systems(Update, (hide_ui_for_shots, mute_player_camera_for_shots).run_if(|| std::env::var("MRPG_CAM").is_ok()))
+        .add_systems(Update, shot_tour.run_if(|| std::env::var("MRPG_TOUR").is_ok()))
         .insert_resource(RenetClient::new(connection_config()))
         .insert_resource(transport)
         .insert_resource(NetState { server_addr: Some(server_addr), ..default() })
@@ -179,6 +204,48 @@ struct WaitingCamera;
 fn hide_ui_for_shots(mut roots: Query<&mut Visibility, (With<Node>, Without<ChildOf>)>) {
     for mut v in &mut roots {
         *v = Visibility::Hidden;
+    }
+}
+
+/// Снимки уровня (MRPG_CAM): камера игрока не рисует — кадр снимает камера ожидания.
+fn mute_player_camera_for_shots(mut cams: Query<&mut Camera, With<crate::player::PlayerCamera>>) {
+    for mut c in &mut cams {
+        c.is_active = false;
+    }
+}
+
+/// Обход для снимков уровня (вместе с `MRPG_CAM`): `MRPG_TOUR="имя:x,y,z,tx,ty,tz;…"` — камера
+/// ожидания по очереди встаёт в каждую точку и сохраняет `MRPG_TOUR_DIR/имя.png` (первый снимок —
+/// через `MRPG_TOUR_FRAMES` кадров, пока всё грузится, следующие — через 8), потом игра выходит.
+/// Одна загрузка уровня на много снимков: на программном рендере это минуты и гигабайты.
+fn shot_tour(mut commands: Commands, mut cams: Query<&mut Transform, With<WaitingCamera>>, mut state: Local<(usize, u32)>, mut exit: MessageWriter<AppExit>) {
+    let tour = std::env::var("MRPG_TOUR").unwrap_or_default();
+    let views: Vec<(&str, Transform)> = tour
+        .split(';')
+        .filter_map(|v| {
+            let (name, cam) = v.split_once(':')?;
+            let f: Vec<f32> = cam.split(',').filter_map(|t| t.trim().parse().ok()).collect();
+            (f.len() == 6).then(|| (name.trim(), Transform::from_xyz(f[0], f[1], f[2]).looking_at(Vec3::new(f[3], f[4], f[5]), Vec3::Y)))
+        })
+        .collect();
+    let first: u32 = std::env::var("MRPG_TOUR_FRAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(30);
+    let dir = std::env::var("MRPG_TOUR_DIR").unwrap_or_else(|_| ".".into());
+    let (i, n) = &mut *state;
+    *n += 1;
+    let Some((name, tf)) = views.get(*i) else {
+        if *n > 12 {
+            exit.write(AppExit::Success);
+        }
+        return;
+    };
+    for mut c in &mut cams {
+        *c = *tf;
+    }
+    if *n >= if *i == 0 { first } else { 8 } {
+        info!("обход: снимок {name}");
+        commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(format!("{dir}/{name}.png")));
+        *i += 1;
+        *n = 0;
     }
 }
 
@@ -315,6 +382,22 @@ fn spawn_corpse(commands: &mut Commands, index: &mut CorpseIndex, corpse_id: u64
     index.0.insert(corpse_id, entity);
 }
 
+/// Тело мирного человека (в своей одежде, без оружия).
+pub fn spawn_civ_corpse(commands: &mut Commands, index: &mut CorpseIndex, corpse_id: u64, outfit: Outfit, scale: f32, pos: Vec3, yaw: f32, animate: bool) {
+    let entity = commands
+        .spawn((
+            CorpseMarker { corpse_id, kind: ActorKind::Player },
+            Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)).with_scale(Vec3::splat(scale)),
+            Visibility::default(),
+        ))
+        .with_children(|c| {
+            let t = if animate { 0.0 } else { 1.0 };
+            c.spawn((BodyRig, CorpseFall { t, seed: corpse_id }, NeedsRig(outfit), rig::fall_transform(t), Visibility::default()));
+        })
+        .id();
+    index.0.insert(corpse_id, entity);
+}
+
 /// Падение тела: поза из стойки в лежачую, корень скелета заваливается назад.
 fn animate_corpses(time: Res<Time>, mut corpses: Query<(&mut CorpseFall, &mut Transform, Option<&mut RigPose>)>) {
     const FALL_TIME: f32 = 0.8;
@@ -344,6 +427,7 @@ fn receive_reliable(
     waiting: Query<Entity, With<WaitingCamera>>,
     time: Res<Time>,
     mut welcomed_at: Local<Option<f32>>,
+    mut civil: MessageWriter<crate::civil_client::CivilNet>,
 ) {
     while let Some(bytes) = client.receive_message(CH_RELIABLE) {
         let Some(msg) = decode::<ServerMessage>(&bytes) else { continue };
@@ -353,8 +437,12 @@ fn receive_reliable(
                 state.my_id = Some(your_id);
                 state.error = None;
                 *welcomed_at = Some(time.elapsed_secs());
-                for e in &waiting {
-                    commands.entity(e).despawn();
+                // Снимок (MRPG_CAM) в режиме host: камеру ожидания оставляем, чтобы видеть
+                // торговцев и прочее, что приходит с сервера, с заданной точки.
+                if std::env::var("MRPG_CAM").is_err() {
+                    for e in &waiting {
+                        commands.entity(e).despawn();
+                    }
                 }
                 if local.is_empty() {
                     spawn_local_player(&mut commands, spawn.into(), &assets);
@@ -403,6 +491,21 @@ fn receive_reliable(
                     let fresh = welcomed_at.is_some_and(|t| time.elapsed_secs() - t > 1.5);
                     spawn_corpse(&mut commands, &mut corpses, corpse_id, kind, pos.into(), yaw, &gear, fresh);
                 }
+            }
+            ServerMessage::CivilianHit { civ, at, amount, head } => {
+                feedback.write(CombatFeedback::Hit { attacker: 0, target: u64::MAX, outcome: combat::HitOutcome::Damage { amount, killed: false, head }, at: at.into() });
+                let _ = civ;
+                civil.write(crate::civil_client::CivilNet::Hit);
+            }
+            ServerMessage::CivilianDead { civ, corpse } => {
+                let fresh = welcomed_at.is_some_and(|t| time.elapsed_secs() - t > 1.5);
+                civil.write(crate::civil_client::CivilNet::Dead { civ, corpse: corpse.map(|(id, p, y)| (id, p.into(), y)), fresh });
+            }
+            ServerMessage::CivilianBack { civ } => {
+                civil.write(crate::civil_client::CivilNet::Back(civ));
+            }
+            ServerMessage::Law(msg) => {
+                civil.write(crate::civil_client::CivilNet::Law(msg));
             }
             ServerMessage::CorpseRemoved { corpse_id } => {
                 if let Some(e) = corpses.0.remove(&corpse_id) {

@@ -11,8 +11,9 @@ pub struct MedicineClientPlugin;
 impl Plugin for MedicineClientPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(MyBody::default())
+            .add_plugins(crate::health_ui::HealthUiPlugin)
             .add_systems(Startup, setup_body_panel.after(crate::inventory_ui::setup_fonts))
-            .add_systems(Update, update_body_panel);
+            .add_systems(Update, (update_body_panel, hide_panel_in_inventory));
     }
 }
 
@@ -30,11 +31,14 @@ fn setup_body_panel(mut commands: Commands) {
             position_type: PositionType::Absolute,
             left: px(12),
             bottom: px(118),
-            max_width: px(520),
+            max_width: px(540),
             flex_direction: FlexDirection::Column,
             row_gap: px(2),
+            padding: crate::ui_theme::Skin::Leather.padding(),
+            display: Display::None,
             ..default()
         },
+        crate::ui_theme::theme().skin(crate::ui_theme::Skin::Leather),
     ));
 }
 
@@ -51,7 +55,7 @@ fn update_body_panel(
     body: Res<MyBody>,
     knowledge: Res<MyKnowledge>,
     fonts: Res<UiFonts>,
-    panel: Query<Entity, With<BodyPanel>>,
+    mut panel: Query<(Entity, &mut Node), With<BodyPanel>>,
     mut shown: Local<Vec<(String, Alarm)>>,
 ) {
     if !body.is_changed() && !knowledge.is_changed() {
@@ -61,7 +65,15 @@ fn update_body_panel(
     if *shown == lines {
         return;
     }
-    let Ok(panel) = panel.single() else { return };
+    let Ok((panel, mut node)) = panel.single_mut() else {
+        return;
+    };
+    // Пустая кожаная плашка не нужна: показываем, только когда есть что сказать.
+    node.display = if lines.is_empty() {
+        Display::None
+    } else {
+        Display::Flex
+    };
     commands.entity(panel).despawn_children();
     commands.entity(panel).with_children(|p| {
         for (line, alarm) in &lines {
@@ -74,4 +86,15 @@ fn update_body_panel(
         }
     });
     *shown = lines;
+}
+
+/// Пока открыта сумка с окном «Тело», строки на экране не нужны (и просвечивают сквозь окно).
+fn hide_panel_in_inventory(loot: Option<Res<crate::loot_client::LootState>>, mut panel: Query<&mut Visibility, With<BodyPanel>>) {
+    let open = loot.is_some_and(|l| l.ui_open);
+    for mut v in &mut panel {
+        let want = if open { Visibility::Hidden } else { Visibility::Inherited };
+        if *v != want {
+            *v = want;
+        }
+    }
 }

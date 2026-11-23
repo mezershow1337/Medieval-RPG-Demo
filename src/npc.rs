@@ -250,6 +250,114 @@ pub fn armor(kind: ActorKind) -> f32 {
     profile(kind).armor
 }
 
+/// Выучка бойца. От неё зависят реакция, точность защиты и умение беречь силы.
+/// У всех одни и те же правила боя, что у игрока: та же выносливость, те же замахи оружия.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Training {
+    /// Новобранец: реагирует поздно, часто ошибается, машет до последнего и выдыхается.
+    Recruit,
+    #[default]
+    /// Обученный солдат.
+    Regular,
+    /// Ветеран: быстрая реакция, бережёт силы, редко упускает ответный удар.
+    Veteran,
+}
+
+impl Training {
+    /// Выучка конкретного человека: у каждого типа свой разброс, выбор зависит от поста.
+    pub fn roll(kind: ActorKind, pos: Vec3) -> Training {
+        let seed = (pos.x * 73.0) as i64 as u64 ^ ((pos.z * 151.0) as i64 as u64).rotate_left(21) ^ (kind as u64).wrapping_mul(0x9E37_79B9);
+        let r = Rng::new(seed.wrapping_mul(0x2545_F491_4F6C_DD1D)).next_f32();
+        // Пороги: доля новобранцев, доля новобранцев + обученных.
+        let (recruit, regular) = match kind {
+            ActorKind::Player => (0.0, 1.0),
+            ActorKind::Stratiotes => (0.3, 0.85),
+            ActorKind::Bucellarius => (0.0, 0.3),
+            ActorKind::GothWarrior => (0.3, 0.8),
+            ActorKind::AlanLancer => (0.15, 0.7),
+            ActorKind::HunArcher => (0.4, 0.9),
+        };
+        if r < recruit {
+            Training::Recruit
+        } else if r < regular {
+            Training::Regular
+        } else {
+            Training::Veteran
+        }
+    }
+
+    pub fn skill(self) -> Skill {
+        match self {
+            Training::Recruit => Skill {
+                reaction: (0.34, 0.10),
+                read: 0.75,
+                misjudge: 0.35,
+                miss_riposte: 0.45,
+                reserve: 0.0,
+                winded: 0.0,
+                knows_limits: false,
+                max_stamina: 90.0,
+                cooldown_mult: 0.85,
+                fatigue_rate: 0.0015,
+            },
+            Training::Regular => Skill {
+                reaction: (0.27, 0.07),
+                read: 0.9,
+                misjudge: 0.2,
+                miss_riposte: 0.2,
+                reserve: 0.15,
+                winded: 0.2,
+                knows_limits: true,
+                max_stamina: 100.0,
+                cooldown_mult: 1.0,
+                fatigue_rate: 0.001,
+            },
+            Training::Veteran => Skill {
+                reaction: (0.21, 0.05),
+                read: 1.0,
+                misjudge: 0.1,
+                miss_riposte: 0.08,
+                reserve: 0.25,
+                winded: 0.3,
+                knows_limits: true,
+                max_stamina: 110.0,
+                cooldown_mult: 1.1,
+                fatigue_rate: 0.0007,
+            },
+        }
+    }
+}
+
+/// Насколько хорошо боец владеет собой и оружием.
+#[derive(Clone, Copy, Debug)]
+pub struct Skill {
+    /// Реакция на начало чужого замаха, с: среднее и разброс. Человеку нужно ~0,2–0,4 с,
+    /// а стойку ещё надо поднять, поэтому поздняя реакция = пропущенный удар.
+    pub reaction: (f32, f32),
+    /// Насколько верно читает замах (множитель к склонности защищаться).
+    pub read: f32,
+    /// Шанс ошибиться со временем и поднять защиту ещё позже.
+    pub misjudge: f32,
+    /// Шанс упустить окно ответного удара после парирования.
+    pub miss_riposte: f32,
+    /// Доля выносливости, которую бережёт на защиту (ниже — не атакует).
+    pub reserve: f32,
+    /// Ниже этой доли сил отходит отдышаться (0 — дерётся до изнеможения).
+    pub winded: f32,
+    /// Понимает, что без сил стойку пробьют, и не подставляется.
+    pub knows_limits: bool,
+    pub max_stamina: f32,
+    /// Множитель паузы между атаками.
+    pub cooldown_mult: f32,
+    /// Как быстро копится усталость от потраченных сил.
+    pub fatigue_rate: f32,
+}
+
+/// Тяжёлый доспех замедляет восстановление сил (как у игрока с тяжёлой бронёй).
+pub fn armor_regen_mult(armor: f32) -> f32 {
+    (1.0 - armor / 300.0).clamp(0.6, 1.0)
+}
+
 #[derive(Default)]
 pub struct Brain {
     pub home: Vec3,
@@ -276,6 +384,30 @@ pub struct Brain {
     wander: f32,
     stroll_to: Option<Vec3>,
     stroll_timer: f32,
+    /// Выучка этого человека.
+    pub training: Training,
+    /// Усталость от долгого боя, 0..0.8: медленнее восстанавливается и реагирует.
+    pub fatigue: f32,
+    last_stamina: f32,
+    /// Через сколько поднимет защиту на замеченный замах (человеческая задержка).
+    guard_react: Option<f32>,
+    /// Через сколько ответит после своего парирования (бесконечность — упустил момент).
+    riposte_wait: Option<f32>,
+    /// Через сколько ударит оглушённую цель.
+    punish_wait: Option<f32>,
+    target_was_staggered: bool,
+    /// Выдохся и отходит отдышаться.
+    pub winded: bool,
+    /// Отступает от удара, который нечем держать (сил на защиту нет).
+    evade_timer: f32,
+    /// Через сколько заметит чужой замах (тогда опытный не полезет под удар и может отступить).
+    notice: Option<f32>,
+    /// Заметил идущий на него удар.
+    noticed: bool,
+    /// Решил уйти от удара шагом назад, а не закрываться.
+    evade_on_notice: bool,
+    /// Стражник идёт задержать этого игрока (не нападает, пока тот не окажет сопротивление).
+    pub arrest: Option<u64>,
 }
 
 impl Brain {
@@ -287,6 +419,8 @@ impl Brain {
             faction: spawn.faction,
             wander: spawn.wander,
             stroll_timer: 3.0,
+            training: Training::roll(spawn.kind, spawn.pos),
+            last_stamina: combat::STAMINA_MAX,
             ..default()
         }
     }
@@ -339,7 +473,27 @@ pub fn think(
 ) {
     brain.attack_cooldown -= dt;
     brain.strafe_timer -= dt;
+    brain.evade_timer -= dt;
     let prof = profile(kind);
+    let skill = brain.training.skill();
+    // --- Выносливость и усталость: те же правила, что у игрока ---
+    let spent = (brain.last_stamina - fighter.stamina).max(0.0);
+    brain.fatigue = (brain.fatigue + spent * skill.fatigue_rate).min(0.8);
+    if brain.target.is_none() && fighter.stamina >= fighter.max_stamina - 0.5 {
+        brain.fatigue = (brain.fatigue - 0.02 * dt).max(0.0);
+    }
+    fighter.max_stamina = skill.max_stamina * (1.0 - 0.25 * brain.fatigue);
+    fighter.stamina = fighter.stamina.min(fighter.max_stamina);
+    fighter.stamina_regen_mult = armor_regen_mult(prof.armor) * (1.0 - 0.35 * brain.fatigue);
+    let stamina_frac = fighter.stamina / fighter.max_stamina.max(1.0);
+    if stamina_frac < skill.winded {
+        brain.winded = true;
+    } else if stamina_frac > 0.6 {
+        brain.winded = false;
+    }
+    // Уставший и запыхавшийся соображает медленнее.
+    let slow = 1.0 + 0.4 * brain.fatigue + 0.3 * (1.0 - stamina_frac);
+    let react = |rng: &mut Rng| (skill.reaction.0 + rng.range(-skill.reaction.1, skill.reaction.1)) * slow;
     // Лучник вблизи берётся за нож, отойдя — снова за лук.
     if kind == ActorKind::HunArcher && matches!(fighter.action, Action::Idle) {
         let close = brain.target.and_then(|id| others.iter().find(|o| o.id == id)).map(|t| t.pose.feet.distance(pose.feet));
@@ -412,6 +566,11 @@ pub fn think(
             let aim_to = t.pose.feet + Vec3::Y * 1.2;
             let want_pitch = combat::ballistic_pitch(combat::arrow_launch(pose).0, aim_to);
             pose.pitch += (want_pitch - pose.pitch).clamp(-2.0 * dt, 2.0 * dt);
+        } else if brain.winded || brain.evade_timer > 0.0 {
+            // Выдохся или нечем держать удар: отходим за длину чужого оружия.
+            if dist < t.weapon.stats().reach + 2.2 {
+                wish -= forward * 0.8;
+            }
         } else if dist > range {
             wish += forward;
         } else if dist < range - if fighter.weapon.thrust_only() { 0.9 } else { 0.7 } {
@@ -432,12 +591,52 @@ pub fn think(
         let winding = matches!(t.action, Action::Windup { .. });
         // Угроза — когда цель в замахе и её оружие почти достаёт.
         let threat_range = if t.weapon.ranged() { 30.0 } else { t.weapon.stats().reach + 2.0 };
-        if winding && !brain.target_was_winding_up && dist < threat_range {
-            // Без сил стойку не держат.
-            brain.want_guard = fighter.weapon.can_guard() && fighter.stamina > 15.0 && rng.chance(prof.defend_chance);
+        if winding && !brain.target_was_winding_up && dist < threat_range && combat::facing(pose, t.pose.feet) {
+            // Сколько сил уйдёт на этот удар. Опытный боец без сил не подставляет стойку, а отходит;
+            // новобранец закрывается всё равно, и его защиту пробивают.
+            let resist = if fighter.has_shield { combat::SHIELD_RESIST } else { stats.guard_resist };
+            let cost = combat::ImpactTier::from_diff(t.weapon.stats().impact_power, resist).guard_stamina(fighter.has_shield);
+            let can_hold = !skill.knows_limits || fighter.stamina >= cost;
+            brain.notice = Some(react(rng));
+            brain.evade_on_notice = false;
+            if fighter.weapon.can_guard() && !brain.want_guard && rng.chance(prof.defend_chance * skill.read) {
+                if can_hold {
+                    // Человек замечает замах не сразу, а иногда и ошибается со временем.
+                    let mut delay = react(rng);
+                    if rng.chance(skill.misjudge) {
+                        delay += rng.range(0.12, 0.3);
+                    }
+                    brain.guard_react = Some(delay.max(0.08));
+                } else {
+                    brain.evade_on_notice = true;
+                }
+            } else if skill.knows_limits && rng.chance(0.5) {
+                // Не закрывается, так хоть шаг назад из-под удара.
+                brain.evade_on_notice = true;
+            }
         }
         brain.target_was_winding_up = winding;
+        if let Some(left) = brain.guard_react.as_mut() {
+            *left -= dt;
+            if *left <= 0.0 {
+                brain.guard_react = None;
+                brain.want_guard = true;
+            }
+        }
         let threat = matches!(t.action, Action::Windup { .. } | Action::Strike { .. });
+        if let Some(left) = brain.notice.as_mut() {
+            *left -= dt;
+            if *left <= 0.0 {
+                brain.notice = None;
+                brain.noticed = threat;
+                if threat && brain.evade_on_notice {
+                    brain.evade_timer = 0.7;
+                }
+            }
+        }
+        if !threat {
+            brain.noticed = false;
+        }
         if brain.want_guard {
             if threat {
                 brain.guard_linger = 0.35;
@@ -456,28 +655,54 @@ pub fn think(
         }
 
         // --- Атака ---
-        // Ответный удар после парирования — сразу.
-        if fighter.can_riposte() && fighter.try_attack() {
-            brain.want_guard = false;
-            fighter.guard_held = false;
+        // Ответный удар после парирования — с человеческой задержкой, и момент можно упустить.
+        if fighter.can_riposte() {
+            let wait = *brain.riposte_wait.get_or_insert_with(|| if rng.chance(skill.miss_riposte) { f32::INFINITY } else { react(rng) * 0.8 });
+            brain.riposte_wait = Some(wait - dt);
+            if wait - dt <= 0.0 && fighter.try_attack() {
+                brain.want_guard = false;
+                brain.guard_react = None;
+                fighter.guard_held = false;
+                brain.riposte_wait = None;
+            }
+        } else {
+            brain.riposte_wait = None;
         }
-        let punish = matches!(t.action, Action::Stagger { .. });
+        // Оглушённую цель бьём, но тоже не мгновенно: сначала надо это заметить.
+        let staggered = matches!(t.action, Action::Stagger { .. });
+        if staggered && !brain.target_was_staggered {
+            brain.punish_wait = Some(react(rng));
+        } else if !staggered {
+            brain.punish_wait = None;
+        }
+        brain.target_was_staggered = staggered;
+        if let Some(w) = brain.punish_wait.as_mut() {
+            *w -= dt;
+        }
+        let punish = staggered && brain.punish_wait.is_some_and(|w| w <= 0.0);
         let in_reach = dist <= range + 0.15;
         // По защищающемуся бьём, только если зашли сбоку или он слишком долго стоит в стойке.
         // Стрелы щит держит, а оружием их не отбить, так что лучнику стойка цели не помеха.
         let shield_up = target_guarding && others.iter().any(|o| o.id == t.id && o.shield);
         let blocked_by_guard = if ranged { shield_up && brain.patience < prof.patience } else { target_guarding && brain.patience < prof.patience };
         let ready = if ranged { sees && (pose.pitch - combat::ballistic_pitch(combat::arrow_launch(pose).0, t.pose.feet + Vec3::Y * 1.2)).abs() < 0.08 } else { true };
-        // Если сил мало, отдыхаем, а не машем впустую.
-        let rested = fighter.stamina >= stats.stamina_cost;
-        if can_act && in_reach && aligned && ready && rested && !brain.want_guard && !blocked_by_guard && (brain.attack_cooldown <= 0.0 || punish) {
+        // Если сил мало, отдыхаем, а не машем впустую. Опытный держит запас сил на защиту
+        // (по оглушённому бьёт и из запаса).
+        let reserve = if punish { 0.0 } else { skill.reserve * fighter.max_stamina };
+        let rested = fighter.stamina >= stats.stamina_cost + reserve && !brain.winded;
+        // Опытный боец не начинает замах под уже летящий в него удар; новобранец лезет.
+        let busy_defending = brain.want_guard || brain.guard_react.is_some() || brain.evade_timer > 0.0 || (skill.knows_limits && brain.noticed);
+        if can_act && in_reach && aligned && ready && rested && !busy_defending && !blocked_by_guard && (brain.attack_cooldown <= 0.0 || punish) {
             if fighter.try_attack() {
-                brain.attack_cooldown = rng.range(prof.cooldown.0, prof.cooldown.1);
+                brain.attack_cooldown = rng.range(prof.cooldown.0, prof.cooldown.1) * skill.cooldown_mult;
                 brain.patience = 0.0;
             }
         }
     } else {
         brain.want_guard = false;
+        brain.guard_react = None;
+        brain.riposte_wait = None;
+        brain.punish_wait = None;
         pose.pitch *= 1.0 - (3.0 * dt).min(1.0);
         if fighter.guard_held {
             fighter.set_guard(false);
@@ -490,9 +715,16 @@ pub fn think(
             brain.stroll_to = Some(brain.home + Vec3::new(a.cos() * r, 0.0, a.sin() * r));
             brain.stroll_timer = rng.range(8.0, 16.0);
         }
-        let goal = brain.stroll_to.unwrap_or(brain.home);
+        // Стражник идёт к разыскиваемому и встаёт перед ним.
+        let arrest = brain.arrest.and_then(|id| others.iter().find(|o| o.id == id && o.alive)).map(|o| o.pose.feet);
+        let goal = arrest.unwrap_or(brain.stroll_to.unwrap_or(brain.home));
         let to_goal = goal - pose.feet;
-        if Vec2::new(to_goal.x, to_goal.z).length() > 1.0 {
+        if let Some(at) = arrest {
+            pose.yaw = turn_towards(pose.yaw, yaw_towards(pose.feet, at), 3.0 * dt);
+            if Vec2::new(to_goal.x, to_goal.z).length() > 1.7 {
+                wish = pose.forward_flat() * 0.9;
+            }
+        } else if Vec2::new(to_goal.x, to_goal.z).length() > 1.0 {
             pose.yaw = turn_towards(pose.yaw, yaw_towards(pose.feet, goal), 3.0 * dt);
             wish = pose.forward_flat() * if brain.stroll_to.is_some() { 0.45 } else { 0.6 };
         } else if brain.stroll_to.take().is_none() {
@@ -517,6 +749,8 @@ pub fn think(
         brain.velocity = Vec3::ZERO;
     }
     pose.feet = feet;
+    // Сколько сил потрачено, узнаем на следующем шаге (после удара/защиты в этом кадре).
+    brain.last_stamina = fighter.stamina;
 }
 
 #[cfg(test)]
@@ -527,14 +761,22 @@ mod tests {
 
     /// Прогоняет поединок игрока со стратегией `player_brain` против врага. Возвращает статистику.
     fn fight(kind: ActorKind, player_guard: bool, seconds: f32) -> (Fighter, Fighter, [u32; 3]) {
+        let (npc, player, stats, _) = fight_with(kind, None, player_guard, seconds, 7);
+        (npc, player, stats)
+    }
+
+    fn fight_with(kind: ActorKind, training: Option<Training>, player_guard: bool, seconds: f32, seed: u64) -> (Fighter, Fighter, [u32; 3], Brain) {
         let level = crate::level::level_colliders();
         let spawn = NpcSpawn::brigand(kind, Vec3::new(10.0, 0.0, 0.0), 0.0);
         let mut brain = Brain::new(&spawn);
+        if let Some(t) = training {
+            brain.training = t;
+        }
         let mut npc_pose = Pose { feet: find_free_spot(&level, spawn.pos), yaw: 0.0, pitch: 0.0, crouching: false };
         let mut npc = fighter_for(kind);
         let mut player = fighter_for(ActorKind::Player);
         let mut player_pose = Pose { feet: find_free_spot(&level, Vec3::new(10.0, 0.0, 2.0)), yaw: 0.0, pitch: 0.0, crouching: false };
-        let mut rng = Rng::new(7);
+        let mut rng = Rng::new(seed);
         let dt = 1.0 / 60.0;
         let mut stats = [0u32; 3]; // урон по врагу, отражено врагом, урон по игроку
         for _ in 0..(seconds / dt) as usize {
@@ -589,7 +831,7 @@ mod tests {
                 break;
             }
         }
-        (npc, player, stats)
+        (npc, player, stats, brain)
     }
 
     /// Рыцарь подходит к игроку, который только стоит в стойке… и обходит её.
@@ -626,7 +868,7 @@ mod tests {
     /// а бой длится заметно дольше пары секунд.
     #[test]
     fn stratiotes_defends_with_shield() {
-        let (npc, player, stats) = fight(ActorKind::Stratiotes, false, 120.0);
+        let (npc, player, stats, _) = fight_with(ActorKind::Stratiotes, Some(Training::Regular), false, 120.0, 7);
         eprintln!("урон по врагу {}, отражено {}, урон по игроку {}, hp игрока {}", stats[0], stats[1], stats[2], player.hp);
         assert!(stats[1] > 0, "мечник ни разу не закрылся щитом");
         assert!(npc.is_dead() || player.is_dead());
@@ -757,5 +999,113 @@ mod tests {
         assert!(stats[0] > 0, "ни одного ответного удара");
         assert!(!player.is_dead(), "игрок в стойке проиграл: {stats:?}");
         let _ = npc;
+    }
+
+    /// Враг не поднимает защиту мгновенно: человеку нужно время, чтобы заметить замах.
+    #[test]
+    fn guard_has_human_reaction_delay() {
+        let level = crate::level::level_colliders();
+        for training in [Training::Recruit, Training::Regular, Training::Veteran] {
+            for seed in 1..20u64 {
+                let spawn = NpcSpawn::brigand(ActorKind::AlanLancer, Vec3::new(10.0, 0.0, 0.0), 0.0);
+                let mut brain = Brain::new(&spawn);
+                brain.training = training;
+                let npc_feet = find_free_spot(&level, spawn.pos);
+                let mut pose = Pose { feet: npc_feet, yaw: 0.0, pitch: 0.0, crouching: false };
+                let player_feet = npc_feet + Vec3::new(0.0, 0.0, 1.5);
+                pose.yaw = yaw_towards(npc_feet, player_feet);
+                let mut npc = fighter_for(ActorKind::AlanLancer);
+                let mut player = fighter_for(ActorKind::Player);
+                let player_pose = Pose { feet: player_feet, yaw: yaw_towards(player_feet, npc_feet), pitch: 0.0, crouching: false };
+                let mut rng = Rng::new(seed);
+                brain.attack_cooldown = 100.0;
+                let dt = 1.0 / 60.0;
+                player.try_attack();
+                // Быстрее ~150 мс не реагирует никто.
+                for frame in 0..9 {
+                    let seen = [Seen { id: 1, kind: ActorKind::Player, pose: player_pose, action: player.action, weapon: player.weapon, shield: false, alive: true, targetable: true }];
+                    think(&mut brain, ActorKind::AlanLancer, &mut pose, &mut npc, &seen, &level, &mut rng, dt);
+                    npc.tick(dt);
+                    player.tick(dt);
+                    assert!(!npc.guard_held, "{training:?} поднял защиту через {} мс", frame * 16);
+                }
+            }
+        }
+    }
+
+    /// Сколько ударов игрока враг отразил (доля) в нескольких поединках.
+    fn defended_share(kind: ActorKind, training: Training) -> f32 {
+        let (mut hits, mut defended) = (0u32, 0u32);
+        for seed in [3u64, 11, 19, 27, 35, 43] {
+            let (_, _, stats, _) = fight_with(kind, Some(training), false, 40.0, seed);
+            hits += stats[0];
+            defended += stats[1];
+        }
+        defended as f32 / (hits + defended).max(1) as f32
+    }
+
+    /// Парирование не идеальное и зависит от выучки: ветеран отражает больше новобранца,
+    /// но и он пропускает удары.
+    #[test]
+    fn parry_depends_on_training() {
+        for kind in [ActorKind::AlanLancer, ActorKind::Stratiotes] {
+            let recruit = defended_share(kind, Training::Recruit);
+            let veteran = defended_share(kind, Training::Veteran);
+            eprintln!("{kind:?}: новобранец отражает {:.0}%, ветеран {:.0}%", recruit * 100.0, veteran * 100.0);
+            assert!(recruit < veteran, "{kind:?}: новобранец защищается не хуже ветерана");
+            assert!(veteran < 0.85, "{kind:?}: ветеран отражает почти всё ({veteran})");
+            assert!(recruit < 0.5, "{kind:?}: новобранец отражает слишком много ({recruit})");
+        }
+    }
+
+    /// Выносливость у врага та же, что у игрока: долгий бой выматывает, копится усталость,
+    /// а стойку без сил пробивают.
+    #[test]
+    fn npc_gets_tired_and_guard_breaks() {
+        let level = crate::level::level_colliders();
+        let spawn = NpcSpawn::brigand(ActorKind::Stratiotes, Vec3::new(10.0, 0.0, 0.0), 0.0);
+        let mut brain = Brain::new(&spawn);
+        brain.training = Training::Recruit;
+        let mut npc = fighter_for(ActorKind::Stratiotes);
+        let npc_feet = find_free_spot(&level, spawn.pos);
+        let mut pose = Pose { feet: npc_feet, yaw: 0.0, pitch: 0.0, crouching: false };
+        // Двое с топорами по очереди бьют новобранца со щитом.
+        let mut rng = Rng::new(9);
+        let dt = 1.0 / 60.0;
+        let mut broken = false;
+        let mut min_stamina = f32::MAX;
+        for i in 0..(60 * 30) {
+            let player_feet = npc_feet + Vec3::new(0.0, 0.0, 1.3);
+            let mut attacker = Fighter::new(WeaponKind::Axe, 150.0, false);
+            // Атакующий каждые 0,9 с начинает новый замах (как будто их несколько).
+            let phase = (i % 54) as f32 * dt;
+            attacker.action = if phase < 0.5 { Action::Windup { t: phase, swing: combat::Swing::Overhead, riposte: false } } else { Action::Strike { t: 0.0, swing: combat::Swing::Overhead, riposte: false } };
+            let ap = Pose { feet: player_feet, yaw: yaw_towards(player_feet, pose.feet), pitch: 0.0, crouching: false };
+            let seen = [Seen { id: 1, kind: ActorKind::Player, pose: ap, action: attacker.action, weapon: WeaponKind::Axe, shield: false, alive: true, targetable: true }];
+            think(&mut brain, ActorKind::Stratiotes, &mut pose, &mut npc, &seen, &level, &mut rng, dt);
+            npc.tick(dt);
+            if i % 54 == 31 && npc.guard_active() {
+                if resolve_contact(&mut attacker, &mut npc, Contact::Guard(Vec3::ZERO), 0.0) == HitOutcome::GuardBroken {
+                    broken = true;
+                }
+            }
+            min_stamina = min_stamina.min(npc.stamina);
+        }
+        eprintln!("усталость {:.2}, минимум сил {min_stamina:.0}, макс. сил {:.0}", brain.fatigue, npc.max_stamina);
+        assert!(brain.fatigue > 0.05, "усталость не копится");
+        assert!(npc.max_stamina < 90.0, "усталость не снижает запас сил");
+        assert!(broken || min_stamina < 15.0, "выносливость у врага не кончается");
+    }
+
+    /// Выучка раздаётся по типам: букелларии — ветераны или обученные, у готов бывают новобранцы.
+    #[test]
+    fn training_spread() {
+        let mut goths = [0; 3];
+        for i in 0..200 {
+            let p = Vec3::new(i as f32 * 3.7, 0.0, (i * 7 % 13) as f32 * 2.3);
+            assert_ne!(Training::roll(ActorKind::Bucellarius, p), Training::Recruit);
+            goths[Training::roll(ActorKind::GothWarrior, p) as usize] += 1;
+        }
+        assert!(goths.iter().all(|n| *n > 10), "разброс выучки готов: {goths:?}");
     }
 }
