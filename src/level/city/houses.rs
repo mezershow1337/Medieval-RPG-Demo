@@ -341,17 +341,18 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, m
         kit::quoins(b, p.x + sx * OUTER_T / 2.0, p.z + sz * OUTER_T / 2.0, h_front, OUTER_T);
     }
     // Навесы над лавками.
+    let mut frng = Rng::new((f.r.x0 * 7.0 + f.r.z0 * 131.0) as i32 as u32 ^ 0x5eed);
     if shops {
         for (k, &(u0, u1)) in rooms.iter().enumerate() {
             if k != vestibule && rng.chance(0.7) {
                 let out = f.front_side().out();
                 kit::awning(b, f.p(u0 + 0.2, 0.0, -0.02), f.p(u1 - 0.2, 0.0, -0.02), out, 1.6, 2.9);
+                shop_front(b, &f, u0, u1, &mut frng);
             }
         }
     }
 
-    // Своё зерно, чтобы мелочи фасада не сдвигали остальную планировку усадьбы.
-    let mut frng = Rng::new((f.r.x0 * 7.0 + f.r.z0 * 131.0) as i32 as u32 ^ 0x5eed);
+    // Своё зерно (`frng`), чтобы мелочи фасада не сдвигали остальную планировку усадьбы.
     facade_details(b, &f, &windows, rooms[vestibule], shops, two_storey, &mut frng);
 
     // ---- Боковое крыло вдоль боковой улицы (u = 0) ----
@@ -518,6 +519,63 @@ fn facade_details(b: &mut Builder, f: &Frame, windows: &[(f32, f32, f32, f32)], 
             }
         }
     }
+}
+
+/// Товар, выставленный под навесом по бокам от входа: корзины, мешки, кувшины, амфоры.
+/// Только декор у самой стены (проход в лавку и улица свободны), зерно — своё.
+fn shop_front(b: &mut Builder, f: &Frame, u0: f32, u1: f32, rng: &mut Rng) {
+    for (u, dir) in [(u0 + 0.45, 1.0f32), (u1 - 0.45, -1.0)] {
+        if rng.chance(0.25) {
+            continue;
+        }
+        let at = |du: f32, dv: f32| f.p(u + du * dir, 0.0, -0.35 - dv);
+        match rng.int(4) {
+            0 => {
+                // Корзины с зерном, бобами, луком.
+                for k in 0..2 {
+                    let fill = [Mat::Thatch, Mat::Earth, Mat::HerbGreen][rng.int(3)];
+                    basket(b, at(0.0, k as f32 * 0.55), rng.range(0.18, 0.24), fill);
+                }
+            }
+            1 => {
+                // Мешки, один на другом.
+                sack(b, at(0.0, 0.0), 0.62);
+                sack(b, at(0.05, 0.5), 0.55);
+                if rng.chance(0.5) {
+                    basket(b, at(0.0, 1.0), 0.2, Mat::Thatch);
+                }
+            }
+            2 => {
+                // Кувшины и миски на низкой подставке.
+                let c = at(0.0, 0.35);
+                let m = b.mesh(Mat::Wood);
+                m.cuboid(c - Vec3::new(0.32, 0.0, 0.32), c + Vec3::new(0.32, 0.42, 0.32));
+                for k in 0..3 {
+                    let q = c + Vec3::new(-0.18 + k as f32 * 0.18, 0.42, if k == 1 { 0.1 } else { -0.08 });
+                    kit::jug(b, q, rng.range(0.2, 0.32), Mat::Ceramic);
+                }
+            }
+            _ => {
+                // Амфоры, прислонённые к стене.
+                for k in 0..2 {
+                    kit::amphora(b, at(k as f32 * 0.4, 0.0), 0.95, rng.int(3) as u32);
+                }
+            }
+        }
+    }
+}
+
+/// Плетёная корзина с насыпанным товаром.
+fn basket(b: &mut Builder, p: Vec3, r: f32, fill: Mat) {
+    let h = r * 1.1;
+    b.mesh(Mat::Thatch).lathe(p, &[(0.0, 0.0), (r * 0.8, 0.0), (r, h * 0.85), (r * 1.04, h), (r * 0.94, h), (r * 0.86, h * 0.3), (0.0, h * 0.3)], 12);
+    b.mesh(fill).lathe(p + Vec3::Y * h * 0.82, &[(r * 0.95, 0.0), (r * 0.6, r * 0.22), (0.0, r * 0.3)], 12);
+}
+
+/// Мешок из грубого холста, завязанный у горла.
+fn sack(b: &mut Builder, p: Vec3, h: f32) {
+    let r = h * 0.36;
+    b.mesh(Mat::Canvas).lathe(p, &[(0.0, 0.0), (r * 0.9, 0.0), (r * 1.05, h * 0.3), (r, h * 0.62), (r * 0.55, h * 0.85), (r * 0.18, h * 0.9), (r * 0.3, h), (0.0, h)], 10);
 }
 
 fn shop_fittings(b: &mut Builder, f: &Frame, u0: f32, u1: f32, kind: Shop, rng: &mut Rng) {

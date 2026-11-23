@@ -231,7 +231,7 @@ fn look(kind: PlantKind) -> (&'static str, Color, [f32; 3]) {
         PlantKind::Cypress => ("scale", Color::srgb(0.75, 0.85, 0.75), [0.9, 0.8, 0.75]),
         // Инжир — светлая сочная листва, гладкая серая кора.
         PlantKind::Fig => ("broadleaf", Color::srgb(1.05, 1.12, 0.85), [1.25, 1.25, 1.25]),
-        PlantKind::Shrub => ("broadleaf", Color::srgb(0.95, 0.95, 0.8), [0.9, 0.85, 0.8]),
+        PlantKind::Shrub => ("broadleaf", Color::srgb(1.05, 1.05, 0.85), [0.9, 0.85, 0.8]),
         PlantKind::Rock => ("broadleaf", Color::WHITE, [1.0, 1.0, 1.0]),
     }
 }
@@ -305,8 +305,9 @@ fn spawn_plants(
                 cull_mode: None,
                 perceptual_roughness: 0.8,
                 reflectance: 0.25,
-                // Свет сквозь листву (контровое солнце просвечивает крону).
-                diffuse_transmission: 0.35,
+                // Свет сквозь листву (контровое солнце просвечивает крону). Больше не ставим:
+                // в Bevy пропускание отнимает столько же у отражённого света и крона темнеет.
+                diffuse_transmission: 0.15,
                 ..default()
             },
             WindKind::Leaves,
@@ -402,7 +403,13 @@ fn spawn_plants(
         if m.kind == PlantKind::Shrub {
             leaf.insert(NotShadowCaster);
         }
-        commands.spawn((Mesh3d(m.imp.clone()), MeshMaterial3d(m.imp_mat.clone()), t, far, NotShadowCaster));
+        if m.kind == PlantKind::Shrub {
+            // Кусты часто видны сверху (с холма, со стены), а импостер — плоский крест и сверху
+            // превращается в тёмную кляксу. Вдали у куста остаётся облегчённая листва (~450 треугольников).
+            commands.spawn((Mesh3d(m.lod1.1.clone()), MeshMaterial3d(m.leaf.clone()), t, far, NotShadowCaster));
+        } else {
+            commands.spawn((Mesh3d(m.imp.clone()), MeshMaterial3d(m.imp_mat.clone()), t, far, NotShadowCaster));
+        }
     }
     info!("Растительность: {:?} за {:.2} с", counts, started.elapsed().as_secs_f32());
     commands.remove_resource::<PendingPlants>();
