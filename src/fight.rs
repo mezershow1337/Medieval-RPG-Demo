@@ -121,7 +121,12 @@ const VIEW_SHOULDER: Vec3 = Vec3::new(0.24, -0.3, 0.12);
 /// Насколько меч от первого лица выше, чем в мире (только внешний вид).
 const VIEW_LIFT: f32 = 0.36;
 
-pub fn spawn_view_sword(parent: &mut ChildSpawnerCommands, _assets: &CharacterAssets) {
+/// Свечение рипоста у меча от первого лица.
+#[derive(Component)]
+struct ViewGlow;
+
+pub fn spawn_view_sword(parent: &mut ChildSpawnerCommands, assets: &CharacterAssets) {
+    parent.spawn((ViewGlow, crate::client::riposte_glow_bundle(assets)));
     parent.spawn((ViewSword, ShownViewWeapon(combat::WeaponKind::Spatha, None), crate::rig::NeedsWeapon(combat::WeaponKind::Spatha), Transform::default(), Visibility::default()));
     parent.spawn((ViewArmRoot, crate::rig::NeedsViewArm(None), Transform::default(), Visibility::default()));
 }
@@ -308,7 +313,8 @@ fn animate_view_sword(
     mut tints: ResMut<crate::rig::BladeTints>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut arm: Query<(&crate::rig::ViewArm, &mut Visibility), (With<ViewArmRoot>, Without<ViewSword>)>,
-    mut joints: Query<&mut Transform, (Without<ViewSword>, Without<PlayerCamera>, Without<ViewArmRoot>)>,
+    mut joints: Query<&mut Transform, (Without<ViewSword>, Without<PlayerCamera>, Without<ViewArmRoot>, Without<ViewGlow>)>,
+    mut glow: Query<(&mut Transform, &mut Visibility), (With<ViewGlow>, Without<ViewSword>, Without<PlayerCamera>, Without<ViewArmRoot>)>,
     mut cam_motion: Local<CamMotion>,
     mut smoothed: Local<Option<(Vec3, Quat)>>,
     work: Option<Res<crate::work_client::MyWork>>,
@@ -330,8 +336,9 @@ fn animate_view_sword(
     // Удар в мире наклонён на 0.6 от взгляда, а камера — на весь взгляд; компенсируем разницу.
     let fix = Quat::from_rotation_x(-p.pitch * 0.4);
     // Меч от первого лица чуть приподнят, чтобы в кадре была рука с рукоятью.
-    let want_pos = Vec3::new(-0.06, -0.25 + VIEW_LIFT, -0.04) + fix * hilt;
-    let want_rot = Quat::from_rotation_arc(Vec3::Y, (fix * dir).normalize());
+    let (hilt, dir) = view_framing(fix * hilt, fix * dir);
+    let want_pos = Vec3::new(-0.06, -0.25 + VIEW_LIFT, -0.04) + hilt;
+    let want_rot = Quat::from_rotation_arc(Vec3::Y, dir);
     // Сглаживаем: смена фаз (комбо, отбитый удар, поправка сервера) без рывков.
     let k = 1.0 - (-35.0 * dt).exp();
     match *smoothed {
@@ -347,6 +354,13 @@ fn animate_view_sword(
     *smoothed = Some((st.translation, st.rotation));
     let riposte = matches!(f.fighter.action, Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. });
     let _ = (&assets, &models);
+    if let Ok((mut gt, mut gv)) = glow.single_mut() {
+        let g = riposte.then(|| crate::client::riposte_glow_transform(&st, f.fighter.weapon)).flatten().filter(|_| *vis != Visibility::Hidden);
+        *gv = if g.is_some() { Visibility::Inherited } else { Visibility::Hidden };
+        if let Some(g) = g {
+            *gt = g;
+        }
+    }
     for c in children.iter() {
         if let Ok((b, mut m)) = blades.get_mut(c) {
             m.0 = if riposte { assets.blade_red.clone() } else { tints.get(&mut materials, &b.0, f.finish) };
@@ -364,6 +378,24 @@ fn animate_view_sword(
             }
         }
     }
+}
+
+/// Кадрирование меча от первого лица: замах в мире уходит за плечо и над головой — за край
+/// экрана. Для глаза рукоять держим перед камерой (не ближе `VIEW_MIN_DEPTH`), высоту над
+/// плечом сжимаем, а клинок не даём завалить назад — видно, откуда пойдёт удар.
+/// Бой по-прежнему считается по настоящей позе.
+fn view_framing(hilt: Vec3, dir: Vec3) -> (Vec3, Vec3) {
+    const VIEW_MIN_DEPTH: f32 = 0.42;
+    let mut y = if hilt.y > 0.0 { hilt.y * 0.6 } else { hilt.y };
+    let mut z = hilt.z.min(-VIEW_MIN_DEPTH + 0.04);
+    // Замах через грудь (рукоять левее центра): рука идёт ниже и дальше, не закрывая полэкрана.
+    let cross = (-hilt.x / 0.3).clamp(0.0, 1.0);
+    y = y.min(0.2 - 0.32 * cross);
+    z = z.min(-0.38 - 0.16 * cross);
+    // Клинок «раскрываем» поперёк взгляда: острие, смотрящее прямо от глаза, превращается
+    // в точку — так дуга удара видна.
+    let d = Vec3::new(dir.x, dir.y, (dir.z * 0.6).min(-0.08)).normalize_or(dir);
+    (Vec3::new(hilt.x, y, z), d)
 }
 
 /// Сглаженный сдвиг камеры от удара: (наклон, поворот, крен).

@@ -113,6 +113,38 @@ pub struct CharacterAssets {
     pub steel: Handle<StandardMaterial>,
     /// Светящийся клинок: этот удар нельзя парировать.
     pub blade_red: Handle<StandardMaterial>,
+    /// Красное свечение вдоль клинка на ответном ударе (поверх любой модели оружия):
+    /// цилиндр высотой 1 по оси Y.
+    pub glow_mesh: Handle<Mesh>,
+    pub glow: Handle<StandardMaterial>,
+}
+
+/// Свечение рипоста: стоит рядом с оружием и повторяет его положение.
+#[derive(Component)]
+pub struct RiposteGlow;
+
+pub fn riposte_glow_bundle(assets: &CharacterAssets) -> impl Bundle {
+    (RiposteGlow, Mesh3d(assets.glow_mesh.clone()), MeshMaterial3d(assets.glow.clone()), Transform::default(), Visibility::Hidden, bevy::light::NotShadowCaster)
+}
+
+/// Каждому новому бойцу — своё свечение рипоста.
+fn attach_riposte_glow(mut commands: Commands, assets: Res<CharacterAssets>, added: Query<Entity, Added<RemoteActor>>) {
+    for e in &added {
+        commands.entity(e).with_children(|p| {
+            p.spawn(riposte_glow_bundle(&assets));
+        });
+    }
+}
+
+/// Положение свечения вдоль клинка оружия `weapon`, стоящего в `sword`. `None` — у оружия
+/// нет клинка (кулаки, лук).
+pub fn riposte_glow_transform(sword: &Transform, weapon: WeaponKind) -> Option<Transform> {
+    if weapon == WeaponKind::Fists || weapon.ranged() {
+        return None;
+    }
+    let (from, to) = (0.08, weapon.stats().reach);
+    let len = (to - from).max(0.1);
+    Some(Transform { translation: sword.transform_point(Vec3::Y * (from + len * 0.5)), rotation: sword.rotation, scale: Vec3::new(1.0, len, 1.0) })
 }
 
 impl CharacterAssets {
@@ -187,7 +219,7 @@ pub fn run(server_addr: SocketAddr) {
             ((receive_reliable, receive_snapshots).chain(), send_state, animate_remote).run_if(client_connected).before(fight::FightSet).in_set(rig::PoseSet),
         )
         .add_systems(Update, animate_corpses.in_set(rig::PoseSet))
-        .add_systems(Update, (fly_arrows, refresh_remote_weapons, refresh_remote_gear, worn::attach_worn))
+        .add_systems(Update, (fly_arrows, refresh_remote_weapons, refresh_remote_gear, worn::attach_worn, attach_riposte_glow))
         .add_systems(Update, gear_showcase.run_if(|| std::env::var("MRPG_GEAR_SHOWCASE").is_ok()))
         .add_systems(Update, pose_showcase.in_set(rig::PoseSet).run_if(|| std::env::var("MRPG_GEAR_SHOWCASE").is_ok()))
         .add_systems(Update, duel_showcase.run_if(|| std::env::var("MRPG_DUEL_SHOWCASE").is_ok()))
@@ -281,6 +313,14 @@ fn setup_character_assets(mut commands: Commands, mut materials: ResMut<Assets<S
         blade_red: materials.add(StandardMaterial {
             base_color: Color::srgb(0.9, 0.2, 0.1),
             emissive: LinearRgba::rgb(6.0, 0.6, 0.2),
+            ..default()
+        }),
+        glow_mesh: meshes.add(Cylinder::new(0.022, 1.0)),
+        glow: materials.add(StandardMaterial {
+            base_color: Color::srgba(1.0, 0.25, 0.1, 0.45),
+            emissive: LinearRgba::rgb(5.0, 0.5, 0.15),
+            alpha_mode: AlphaMode::Add,
+            unlit: true,
             ..default()
         }),
     });
@@ -829,7 +869,7 @@ fn duel_showcase(mut commands: Commands, mut index: ResMut<RemoteIndex>, mut cam
         let pairs: [(&str, ActorKind, WeaponKind, bool, &str, ActorKind, WeaponKind, bool); 3] = [
             ("strike:ur:0.4", ActorKind::Player, WeaponKind::Spatha, false, "guard:o:0.2", ActorKind::Player, WeaponKind::Spatha, false),
             ("recoil:r:0.15", ActorKind::GothWarrior, WeaponKind::Axe, false, "riposte:l:0.8", ActorKind::Player, WeaponKind::Spatha, false),
-            ("strike:t:0.55", ActorKind::AlanLancer, WeaponKind::Spear, false, "guard:o:0.8", ActorKind::Stratiotes, WeaponKind::Spatha, true),
+            ("strike:t:0.3", ActorKind::AlanLancer, WeaponKind::Spear, false, "guard:o:0.8", ActorKind::Stratiotes, WeaponKind::Spatha, true),
         ];
         for (i, (sa, ka, wa, sha, sb, kb, wb, shb)) in pairs.into_iter().enumerate() {
             let a = o + Vec3::X * (i as f32 * 3.6);
@@ -852,7 +892,14 @@ fn duel_showcase(mut commands: Commands, mut index: ResMut<RemoteIndex>, mut cam
             spawn(9100 + i as u64, ActorKind::Player, o + Vec3::X * (i as f32 * 1.3), std::f32::consts::PI, WeaponKind::Spatha, false, spec);
         }
         if std::env::var("MRPG_CAM").is_err() {
-            *cam = Transform::from_translation(o + Vec3::new(3.25, 1.5, 5.2)).looking_at(o + Vec3::new(3.25, 1.05, 0.0), Vec3::Y);
+            let f: f32 = std::env::var("MRPG_DUEL_FOCUS").ok().and_then(|s| s.parse().ok()).unwrap_or(-1.0);
+            *cam = if f >= 0.0 {
+                // Крупно одного бойца, чуть сбоку — чтобы клинок, смотрящий в камеру, был виден.
+                let c = o + Vec3::new(f * 1.3, 1.25, 0.0);
+                Transform::from_translation(c + Vec3::new(1.1, 0.25, 2.2)).looking_at(c, Vec3::Y)
+            } else {
+                Transform::from_translation(o + Vec3::new(3.25, 1.5, 5.2)).looking_at(o + Vec3::new(3.25, 1.05, 0.0), Vec3::Y)
+            };
         }
     }
 }
@@ -912,9 +959,10 @@ fn animate_remote(
     time: Res<Time>,
     assets: Res<CharacterAssets>,
     models: Option<Res<CharacterModels>>,
-    mut remotes: Query<(&mut RemoteActor, &mut Transform, &Children), (Without<RemoteSword>, Without<RemoteShield>)>,
+    mut remotes: Query<(&mut RemoteActor, &mut Transform, &Children, Option<&Frozen>), (Without<RemoteSword>, Without<RemoteShield>)>,
     mut swords: Query<(&mut Transform, &Children), (With<RemoteSword>, Without<RemoteActor>, Without<RemoteShield>)>,
     mut shields: Query<&mut Transform, (With<RemoteShield>, Without<RemoteActor>, Without<RemoteSword>)>,
+    mut glows: Query<(&mut Transform, &mut Visibility), (With<RiposteGlow>, Without<RemoteActor>, Without<RemoteSword>, Without<RemoteShield>)>,
     mut rigs: Query<&mut RigPose, With<BodyRig>>,
     mut blades: Query<(&Blade, &mut MeshMaterial3d<StandardMaterial>)>,
     mut tints: ResMut<rig::BladeTints>,
@@ -924,8 +972,12 @@ fn animate_remote(
     let now = time.elapsed_secs();
     let t = 1.0 - (-15.0 * dt).exp();
     let _ = models;
-    for (mut r, mut transform, children) in &mut remotes {
-        r.fighter.tick(dt);
+    for (mut r, mut transform, children, frozen) in &mut remotes {
+        // Застывший для снимка боец не живёт по таймеру: иначе замах сам переходит в удар.
+        match frozen {
+            Some(f) => r.fighter.action = f.0,
+            None => { r.fighter.tick(dt); }
+        }
         if transform.translation.distance(r.target_pos) > 5.0 {
             transform.translation = r.target_pos;
             r.last_pos = r.target_pos;
@@ -985,8 +1037,11 @@ fn animate_remote(
         let mut sword_entity = None;
         let mut shield_entity = None;
         let mut rig_entity = None;
+        let mut glow_entity = None;
         for child in children.iter() {
-            if swords.contains(child) {
+            if glows.contains(child) {
+                glow_entity = Some(child);
+            } else if swords.contains(child) {
                 sword_entity = Some(child);
             } else if shields.contains(child) {
                 shield_entity = Some(child);
@@ -1053,6 +1108,15 @@ fn animate_remote(
             && let Ok(mut pose) = rigs.get_mut(e)
         {
             *pose = solved.pose;
+        }
+        if let Some(e) = glow_entity
+            && let Ok((mut gt, mut gv)) = glows.get_mut(e)
+        {
+            let glow = riposte.then(|| riposte_glow_transform(&sword_tf, r.fighter.weapon)).flatten();
+            *gv = if glow.is_some() { Visibility::Inherited } else { Visibility::Hidden };
+            if let Some(g) = glow {
+                *gt = g;
+            }
         }
         if let Some(e) = sword_entity
             && let Ok((mut sword, blade_children)) = swords.get_mut(e)
