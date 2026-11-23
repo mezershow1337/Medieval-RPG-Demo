@@ -579,6 +579,44 @@ fn sack(b: &mut Builder, p: Vec3, h: f32) {
     b.mesh(Mat::Felt).lathe(p, &[(0.0, 0.0), (r * 0.9, 0.0), (r * 1.05, h * 0.3), (r, h * 0.62), (r * 0.55, h * 0.85), (r * 0.18, h * 0.9), (r * 0.3, h), (0.0, h)], 10);
 }
 
+/// Настенная полка на кронштейнах (без коллизии) с кувшинами, мисками и кружками.
+fn wall_shelf(b: &mut Builder, a: Vec3, c: Vec3, n: Vec3, rng: &mut Rng) {
+    let along = (c - a).normalize_or_zero();
+    let len = (c - a).length();
+    b.mesh(Mat::Wood).beam(a + n * 0.14, c + n * 0.14, 0.13, 0.02, Vec3::Y);
+    for t in [0.12, 0.88] {
+        let q = a + (c - a) * t;
+        b.mesh(Mat::Wood).beam(q + n * 0.02 - Vec3::Y * 0.25, q + n * 0.24 - Vec3::Y * 0.02, 0.02, 0.02, along);
+    }
+    let k = (len / 0.2) as usize;
+    for i in 0..k {
+        if rng.chance(0.3) {
+            continue;
+        }
+        let q = a + along * (0.1 + i as f32 * 0.2) + n * 0.14 + Vec3::Y * 0.02;
+        if rng.chance(0.4) {
+            // Миска.
+            b.mesh(Mat::Ceramic).lathe(q, &[(0.0, 0.0), (0.04, 0.0), (0.08, 0.06), (0.07, 0.06), (0.0, 0.02)], 9);
+        } else {
+            kit::jug(b, q, rng.range(0.1, 0.24), Mat::Ceramic);
+        }
+    }
+}
+
+/// Шест под потолком с подвешенными связками (лук, чеснок, травы, колбасы).
+fn hanging_wares(b: &mut Builder, a: Vec3, c: Vec3, mats: &[Mat], rng: &mut Rng) {
+    b.mesh(Mat::Wood).beam(a, c, 0.025, 0.025, Vec3::Y);
+    let len = (c - a).length();
+    let n = (len / 0.35) as usize;
+    for i in 0..n {
+        let q = a + (c - a) * ((i as f32 + 0.5) / n as f32);
+        let drop = rng.range(0.18, 0.34);
+        b.mesh(Mat::Wood).beam(q, q - Vec3::Y * 0.12, 0.004, 0.004, Vec3::X);
+        let m = mats[rng.int(mats.len())];
+        b.mesh(m).lathe(q - Vec3::Y * (0.12 + drop), &[(0.0, 0.0), (0.035, 0.04), (0.045, drop * 0.5), (0.03, drop), (0.0, drop)], 7);
+    }
+}
+
 fn shop_fittings(b: &mut Builder, f: &Frame, u0: f32, u1: f32, kind: Shop, rng: &mut Rng) {
     let r = f.rect(u0, u1, OUTER_T, FRONT_D - INNER_T / 2.0).inset(0.1);
     // Прилавок у входа (каменный, с деревянной доской), проход сбоку.
@@ -588,6 +626,35 @@ fn shop_fittings(b: &mut Builder, f: &Frame, u0: f32, u1: f32, kind: Shop, rng: 
     // Полки у задней стены.
     let back = f.rect(u0 + 0.1, u1 - 0.1, FRONT_D - INNER_T / 2.0 - 0.45, FRONT_D - INNER_T / 2.0 - 0.1);
     let p = counter.center(1.0);
+    // Мелочи, которые делают лавку обжитой: полка на боковой стене и связки под потолком.
+    // Своё зерно — чтобы не сдвинуть выбор товара и обстановку.
+    {
+        let mut drng = Rng::new((r.x0 * 3.0 + r.z0 * 17.0) as i32 as u32 ^ 0xdec0);
+        let n = (f.p(u0 + 1.0, 0.0, 1.0) - f.p(u0, 0.0, 1.0)).normalize();
+        let (v0, v1) = (OUTER_T + 1.8, FRONT_D - INNER_T / 2.0 - 0.6);
+        if v1 - v0 > 0.6 {
+            wall_shelf(b, f.p(u0 + 0.02, 1.55, v0), f.p(u0 + 0.02, 1.55, v1), n, &mut drng);
+        }
+        let mats: &[Mat] = match kind {
+            Shop::Apothecary => &[Mat::HerbGreen, Mat::HerbSilver],
+            Shop::Tavern => &[Mat::Thatch, Mat::Earth, Mat::Wood],
+            Shop::Bookseller => &[],
+            Shop::None => &[Mat::Thatch, Mat::HerbGreen, Mat::Earth],
+        };
+        if !mats.is_empty() && kind != Shop::Apothecary {
+            let v = (OUTER_T + FRONT_D) / 2.0 + 0.3;
+            hanging_wares(b, f.p(u0 + 0.4, H1 - 0.35, v), f.p(u1 - 0.4, H1 - 0.35, v), mats, &mut drng);
+        }
+        if kind == Shop::Tavern {
+            // Кружки и кувшинчики на прилавке, штабель амфор в углу.
+            for k in 0..4 {
+                kit::jug(b, f.p(u0 + 0.5 + k as f32 * 0.35, 1.0, OUTER_T + 1.15), drng.range(0.1, 0.16), Mat::Ceramic);
+            }
+            for k in 0..3 {
+                kit::amphora(b, f.p(u0 + 0.35 + k as f32 * 0.4, 0.0, FRONT_D - 1.3), 1.0, drng.int(3) as u32);
+            }
+        }
+    }
     match kind {
         Shop::Apothecary => {
             // Аптекарь: склянки, ступка, весы, пучки сушёных трав под потолком.
