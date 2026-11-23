@@ -661,6 +661,18 @@ fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelCo
 
 #[cfg(test)]
 mod tests {
+    /// Координаты мест и горнов для снимков: `cargo test print_places -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn print_places() {
+        for p in crate::level::places() {
+            println!("place {} {:?}", p.id, p.pos);
+        }
+        for f in &crate::level::layout().forges {
+            println!("forge {} fire {:?} anvil {:?}", f.name, f.fire, f.anvil);
+        }
+    }
+
     use super::*;
 
     /// Все модели и текстуры растительности на месте.

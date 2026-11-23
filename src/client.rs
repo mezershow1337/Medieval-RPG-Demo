@@ -299,7 +299,17 @@ fn shot_tour(mut commands: Commands, mut cams: Query<&mut Transform, With<Waitin
 fn spawn_waiting_camera(mut commands: Commands) {
     // Для снимков уровня: MRPG_CAM="x,y,z,tx,ty,tz" — откуда и куда смотрит камера ожидания.
     // Высота с префиксом «g» отсчитывается от земли: "g1.7" — на уровне глаз.
+    // Или "@место,dx,dy,dz" — смотреть на точку из `places()` (например "@smithy,-6,2.5,4").
     let cam = std::env::var("MRPG_CAM").ok().and_then(|s| {
+        if let Some(rest) = s.strip_prefix('@') {
+            let t: Vec<&str> = rest.split(',').map(str::trim).collect();
+            let p = crate::level::place_pos(t[0])?;
+            let d: Vec<f32> = t[1..].iter().filter_map(|v| v.parse().ok()).collect();
+            let off = if d.len() == 3 { Vec3::new(d[0], d[1], d[2]) } else { Vec3::new(-6.0, 2.5, 4.0) };
+            let at = p + Vec3::Y * 1.2;
+            info!("камера снимка: {} -> {at}", p + off);
+            return Some(Transform::from_translation(p + off).looking_at(at, Vec3::Y));
+        }
         let t: Vec<&str> = s.split(',').map(str::trim).collect();
         let v: Vec<f32> = t.iter().filter_map(|t| t.trim_start_matches('g').parse().ok()).collect();
         if v.len() != 6 {

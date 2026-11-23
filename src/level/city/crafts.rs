@@ -255,7 +255,11 @@ pub fn smithy(b: &mut Builder) {
     let w = Rect::new(r.x1 - 12.0, r.z0 + 2.0, r.x1, r.z0 + 14.0);
     kit::wall_x(b, w.x0, w.x1, w.z0 + 0.3, 0.6, 4.0, &[], Mat::Rubble);
     kit::wall_x(b, w.x0, w.x1, w.z1 - 0.3, 0.6, 4.0, &[Op::Door { s: w.x0 + 3.0, w: 1.2, h: 2.3 }], Mat::Rubble);
-    kit::wall_z(b, w.z0 + 0.6, w.z1 - 0.6, w.x0 + 0.3, 0.6, 4.0, &[], Mat::Rubble);
+    // Западная стена — под высоким краем ската; боковые стены добраны треугольниками кладки.
+    kit::wall_z(b, w.z0 + 0.6, w.z1 - 0.6, w.x0 + 0.3, 0.6, 5.15, &[], Mat::Rubble);
+    for z in [w.z0 + 0.3, w.z1 - 0.3] {
+        kit::lean_gable(b, Mat::Rubble, Vec3::new(w.x0, 4.0, z), Vec3::new(w.x1 - 0.5, 4.0, z), 1.15, Vec3::Z, 0.6);
+    }
     // Восточная сторона открыта: два столба держат крышу.
     for z in [w.z0 + 4.0, w.z1 - 4.0] {
         b.solid([w.x1 - 0.5, 0.0, z - 0.2], [w.x1 - 0.1, 3.9, z + 0.2], Mat::Wood);
@@ -274,19 +278,21 @@ pub fn smithy(b: &mut Builder) {
     b.lamp(f + Vec3::new(1.0, 1.6, 0.0), Color::srgb(1.0, 0.45, 0.15), 18_000.0, 7.0);
     // Наковальня на колоде, корыто.
     let a = Vec3::new(f.x + 3.0, 0.0, f.z);
-    b.mesh(Mat::Wood).lathe(a, &[(0.32, 0.0), (0.3, 0.55), (0.0, 0.55)], 10);
-    b.mesh(Mat::Iron).cuboid(a + Vec3::new(-0.3, 0.55, -0.12), a + Vec3::new(0.3, 0.8, 0.12));
-    b.mesh(Mat::Iron).spire(a + Vec3::new(0.3, 0.7, 0.0), 0.1, 0.25, 4);
-    kit::hidden(b, a - Vec3::new(0.35, 0.0, 0.35), a + Vec3::new(0.35, 0.8, 0.35));
+    kit::anvil(b, a, Vec3::X, Vec3::Z);
+    kit::hammer(b, a + Vec3::new(-0.15, 0.78, 0.05), Vec3::Z, Vec3::Y, 0.36, 0.14);
+    kit::tongs(b, a + Vec3::new(0.12, 0.79, -0.05), -Vec3::Z, Vec3::X, 0.35);
     b.forges.push(crate::level::ForgeSpec { name: "Кузница Филиппа", kind: crate::smithing_net::StationKind::Forge, fire: f + Vec3::Y * 1.08, anvil: a, trough: Vec3::new(f.x + 3.0, 0.61, w.z0 + 1.35), grind: a + Vec3::new(-1.2, 0.75, 1.2) });
     let q = Rect::new(f.x + 2.0, w.z0 + 1.0, f.x + 4.0, w.z0 + 1.7);
     b.solid([q.x0, 0.0, q.z0], [q.x1, 0.6, q.z1], Mat::Wood);
     b.decor([q.x0 + 0.08, 0.6, q.z0 + 0.08], [q.x1 - 0.08, 0.61, q.z1 - 0.08], Mat::Water);
-    // Инструмент на стене и уголь.
-    for k in 0..6 {
-        let x = w.x0 + 4.0 + k as f32 * 0.35;
-        b.mesh(Mat::Iron).beam(Vec3::new(x, 1.0, w.z0 + 0.65), Vec3::new(x, 1.9, w.z0 + 0.65), 0.02, 0.02, Vec3::Z);
-    }
+    // Инструмент на стене, верстак с готовым товаром, прутки, окалина, вёдра.
+    kit::tool_rack(b, Vec3::new(w.x0 + 5.2, 1.55, w.z0 + 0.6), Vec3::Z, Vec3::X);
+    let bench = Rect::new(w.x0 + 4.6, w.z1 - 1.35, w.x0 + 7.4, w.z1 - 0.65);
+    kit::table(b, bench, 0.85);
+    kit::smith_goods(b, Vec3::new(bench.cx(), 0.85, bench.cz()), Vec3::X, -Vec3::Z);
+    kit::bar_stock(b, Vec3::new(w.x0 + 0.6, 0.0, w.z0 + 2.6), Vec3::X, Vec3::Z);
+    kit::bucket(b, a + Vec3::new(0.6, 0.0, -0.7));
+    kit::scrap(b, Vec3::new(f.x + 1.6, 0.0, f.z + 1.3), &mut Rng::new(77));
     let c = Vec3::new(w.x0 + 2.0, 0.0, w.z1 - 1.8);
     b.mesh(Mat::Coals).lathe(c, &[(1.0, 0.0), (0.0, 0.6)], 10);
     kit::hidden(b, c - Vec3::new(0.7, 0.0, 0.7), c + Vec3::new(0.7, 0.4, 0.7));

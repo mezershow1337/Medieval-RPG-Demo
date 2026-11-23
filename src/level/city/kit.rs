@@ -823,11 +823,15 @@ pub fn forge_set(b: &mut Builder, name: &'static str, o: Vec3, out: Vec3, field:
     hidden(b, m - Vec3::new(0.45, 0.6, 0.45), m + Vec3::new(0.45, 0.4, 0.45));
     // Наковальня на колоде.
     let a = l.anvil;
-    b.mesh(Mat::Wood).lathe(a, &[(0.32, 0.0), (0.3, 0.55), (0.0, 0.55)], 10);
     let along = out;
-    b.mesh(Mat::Iron).cuboid(a + Vec3::Y * 0.55 - along.abs() * 0.12 - side.abs() * 0.3, a + Vec3::Y * 0.8 + along.abs() * 0.12 + side.abs() * 0.3);
-    b.mesh(Mat::Iron).spire(a + side * 0.3 + Vec3::Y * 0.7, 0.1, 0.25, 4);
-    hidden(b, a - Vec3::new(0.38, 0.0, 0.38), a + Vec3::new(0.38, 0.8, 0.38));
+    anvil(b, a, side, out);
+    // Вёдра, окалина у горна, прутки.
+    bucket(b, a - side * 0.7 + out * 0.3);
+    let mut r = Rng::new((o.x * 13.0 + o.z * 7.0) as i32 as u32);
+    scrap(b, o + out * 1.3 - side * 1.1, &mut r);
+    if !field {
+        bar_stock(b, o - out * (hw + 0.1) + side * 1.3, out, side);
+    }
     // Молоты и клещи на колоде.
     b.mesh(Mat::Wood).beam(a + Vec3::Y * 0.82 - side * 0.1, a + Vec3::Y * 0.82 - side * 0.1 + along * 0.35, 0.015, 0.015, Vec3::Y);
     b.mesh(Mat::Iron).cuboid(a + Vec3::Y * 0.8 - side * 0.16 - along * 0.05, a + Vec3::Y * 0.88 - side * 0.04 + along * 0.05);
@@ -852,6 +856,112 @@ pub fn forge_set(b: &mut Builder, name: &'static str, o: Vec3, out: Vec3, field:
     hidden(b, g - Vec3::new(0.45, 0.0, 0.45), g + Vec3::new(0.45, 1.1, 0.45));
     b.lamp(o + Vec3::Y * (h + 0.8), Color::srgb(1.0, 0.45, 0.15), 16_000.0, 7.0);
     b.forges.push(crate::level::ForgeSpec { name, kind: crate::smithing_net::StationKind::Forge, fire: o + Vec3::Y * (h + 0.08), anvil: a, trough: l.trough + Vec3::Y * 0.51, grind: l.grind + Vec3::Y * 0.75 });
+}
+
+/// Наковальня на дубовой колоде: широкое основание, перехват, рабочая плита и короткий рог
+/// (поздняя античность — блочная наковальня с небольшим клювом). `along` — вдоль плиты.
+pub fn anvil(b: &mut Builder, a: Vec3, along: Vec3, side: Vec3) {
+    b.mesh(Mat::Wood).lathe(a, &[(0.34, 0.0), (0.31, 0.06), (0.3, 0.5), (0.27, 0.55), (0.0, 0.55)], 12);
+    // Железные обручи на колоде.
+    for y in [0.08, 0.45] {
+        b.mesh(Mat::Iron).lathe(a + Vec3::Y * y, &[(0.315, 0.0), (0.315, 0.035), (0.0, 0.035)], 12);
+    }
+    let y0 = a + Vec3::Y * 0.55;
+    let m = b.mesh(Mat::Iron);
+    m.beam(y0 - along * 0.17, y0 + along * 0.17, 0.13, 0.06, side);
+    m.beam(y0 + Vec3::Y * 0.06 - along * 0.11, y0 + Vec3::Y * 0.06 + along * 0.11, 0.08, 0.07, side);
+    m.beam(y0 + Vec3::Y * 0.16 - along * 0.26, y0 + Vec3::Y * 0.16 + along * 0.2, 0.12, 0.055, side);
+    // Клюв.
+    m.beam(y0 + Vec3::Y * 0.17 + along * 0.2, y0 + Vec3::Y * 0.2 + along * 0.4, 0.06, 0.035, side);
+    m.beam(y0 + Vec3::Y * 0.2 + along * 0.4, y0 + Vec3::Y * 0.23 + along * 0.48, 0.02, 0.015, side);
+    hidden(b, a - Vec3::new(0.38, 0.0, 0.38), a + Vec3::new(0.38, 0.8, 0.38));
+}
+
+/// Молот: рукоять и железный боёк. `p` — конец рукояти, `dir` — к бойку.
+pub fn hammer(b: &mut Builder, p: Vec3, dir: Vec3, up: Vec3, len: f32, head: f32) {
+    let top = p + dir * len;
+    b.mesh(Mat::Wood).beam(p, top, 0.018, 0.022, up);
+    b.mesh(Mat::Iron).beam(top - up * head * 0.5, top + up * head * 0.5, 0.034, 0.034, dir);
+}
+
+/// Клещи: две сведённые губки и расходящиеся рукояти.
+pub fn tongs(b: &mut Builder, jaw: Vec3, dir: Vec3, open: Vec3, len: f32) {
+    let pivot = jaw + dir * 0.12;
+    let m = b.mesh(Mat::Iron);
+    for s in [-1.0f32, 1.0] {
+        m.beam(jaw + open * 0.015 * s, pivot - open * 0.015 * s, 0.014, 0.018, open);
+        m.beam(pivot, pivot + dir * len + open * 0.06 * s, 0.011, 0.011, open);
+    }
+}
+
+/// Доска с инструментом на стене: клещи, молоты, напильник. `p` — середина доски у стены,
+/// `n` — от стены в комнату, `along` — вдоль стены.
+pub fn tool_rack(b: &mut Builder, p: Vec3, n: Vec3, along: Vec3) {
+    b.mesh(Mat::Wood).beam(p - along * 0.8 + n * 0.02, p + along * 0.8 + n * 0.02, 0.2, 0.02, n);
+    // Колышки.
+    for k in 0..7 {
+        let q = p + along * (-0.69 + k as f32 * 0.23) + Vec3::Y * 0.12 + n * 0.04;
+        b.mesh(Mat::Wood).beam(q, q + n * 0.08, 0.01, 0.01, Vec3::Y);
+        let hang = q + n * 0.07;
+        match k {
+            0 | 2 | 5 => tongs(b, hang - Vec3::Y * 0.62, Vec3::Y, along, 0.42),
+            1 | 4 => hammer(b, hang - Vec3::Y * 0.5, Vec3::Y, n, 0.42, 0.16),
+            3 => b.mesh(Mat::Iron).beam(hang, hang - Vec3::Y * 0.4, 0.012, 0.004, n),
+            _ => hammer(b, hang - Vec3::Y * 0.36, Vec3::Y, n, 0.3, 0.1),
+        }
+    }
+}
+
+/// Прутки и полосы железа, прислонённые к стене. `p` — у основания стены, `n` — от стены.
+pub fn bar_stock(b: &mut Builder, p: Vec3, n: Vec3, along: Vec3) {
+    let m = b.mesh(Mat::Iron);
+    for k in 0..8 {
+        let o = along * (k as f32 * 0.06 - 0.21);
+        let h = 1.1 + (k % 3) as f32 * 0.15;
+        let foot = p + o + n * (0.28 + (k % 2) as f32 * 0.05);
+        let w = if k % 3 == 0 { 0.018 } else { 0.01 };
+        m.beam(foot, p + o + n * 0.03 + Vec3::Y * h, w, 0.008, n);
+    }
+}
+
+/// Готовый товар кузнеца на верстаке: наконечники копий, ножи, топор, гвозди.
+pub fn smith_goods(b: &mut Builder, top: Vec3, along: Vec3, depth: Vec3) {
+    let m = b.mesh(Mat::Iron);
+    for k in 0..3 {
+        let c = top + along * (-0.55 + k as f32 * 0.2) + Vec3::Y * 0.01;
+        m.beam(c - depth * 0.18, c + depth * 0.12, 0.012, 0.006, Vec3::Y);
+        m.beam(c + depth * 0.12, c + depth * 0.25, 0.03, 0.005, Vec3::Y);
+    }
+    for k in 0..2 {
+        let c = top + along * (0.1 + k as f32 * 0.12) + Vec3::Y * 0.01;
+        b.mesh(Mat::Iron).beam(c - depth * 0.12, c + depth * 0.14, 0.016, 0.004, Vec3::Y);
+        b.mesh(Mat::Wood).beam(c - depth * 0.22, c - depth * 0.12, 0.012, 0.012, Vec3::Y);
+    }
+    // Топор.
+    let c = top + along * 0.5 + Vec3::Y * 0.02;
+    b.mesh(Mat::Wood).beam(c - depth * 0.25, c + depth * 0.2, 0.015, 0.015, Vec3::Y);
+    b.mesh(Mat::Iron).beam(c + depth * 0.16 - along * 0.02, c + depth * 0.16 + along * 0.12, 0.03, 0.04, Vec3::Y);
+    // Горка гвоздей.
+    b.mesh(Mat::Iron).lathe(top + along * 0.32 - depth * 0.15, &[(0.07, 0.0), (0.0, 0.04)], 7);
+}
+
+/// Деревянное ведро с водой.
+pub fn bucket(b: &mut Builder, p: Vec3) {
+    b.mesh(Mat::Wood).lathe(p, &[(0.0, 0.0), (0.15, 0.0), (0.18, 0.32), (0.16, 0.32), (0.13, 0.03), (0.0, 0.03)], 10);
+    b.mesh(Mat::Iron).lathe(p + Vec3::Y * 0.24, &[(0.176, 0.0), (0.176, 0.03), (0.0, 0.03)], 10);
+    b.mesh(Mat::Water).disc(p + Vec3::Y * 0.26, 0.16, 10, true);
+}
+
+/// Куча окалины и обрезков у горна.
+pub fn scrap(b: &mut Builder, p: Vec3, rng: &mut Rng) {
+    b.mesh(Mat::DarkStone).lathe(p, &[(0.3, 0.0), (0.15, 0.08), (0.0, 0.1)], 9);
+    let m = b.mesh(Mat::Iron);
+    for _ in 0..6 {
+        let a = rng.range(0.0, TAU);
+        let c = p + Vec3::new(a.cos(), 0.0, a.sin()) * rng.range(0.0, 0.35) + Vec3::Y * 0.06;
+        let d = Vec3::new(rng.range(-1.0, 1.0), 0.1, rng.range(-1.0, 1.0)).normalize() * rng.range(0.1, 0.3);
+        m.beam(c - d, c + d, 0.012, 0.008, Vec3::Y);
+    }
 }
 
 /// Сыродутный горн: глиняная шахта в рост человека, мехи у фурмы, куча шлака и руды.
