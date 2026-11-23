@@ -285,6 +285,54 @@ impl MeshBuilder {
         self.idx.extend(other.idx.into_iter().map(|i| i + base));
     }
 
+    /// Часть геометрии, где `keep(p) >= 0` (например, `h - p.y` — всё ниже высоты `h`).
+    /// Треугольники, пересекающие границу, режутся по ней (с интерполяцией нормалей и UV).
+    pub fn clipped(&self, keep: impl Fn(Vec3) -> f32) -> MeshBuilder {
+        let mut out = MeshBuilder::default();
+        for t in self.idx.chunks_exact(3) {
+            let v: [(Vec3, Vec3, Vec2, f32); 3] = [0, 1, 2].map(|k| {
+                let i = t[k] as usize;
+                let p = Vec3::from(self.pos[i]);
+                (p, Vec3::from(self.nrm[i]), Vec2::from(self.uv[i]), keep(p))
+            });
+            if v.iter().all(|x| x.3 >= 0.0) {
+                let base = out.pos.len() as u32;
+                for x in v {
+                    out.vert(x.0, x.1, x.2);
+                }
+                out.idx.extend_from_slice(&[base, base + 1, base + 2]);
+                continue;
+            }
+            if v.iter().all(|x| x.3 < 0.0) {
+                continue;
+            }
+            // Сазерленд — Ходжмен для одного треугольника.
+            let mut poly: Vec<(Vec3, Vec3, Vec2)> = Vec::with_capacity(4);
+            for k in 0..3 {
+                let a = v[k];
+                let b = v[(k + 1) % 3];
+                if a.3 >= 0.0 {
+                    poly.push((a.0, a.1, a.2));
+                }
+                if (a.3 >= 0.0) != (b.3 >= 0.0) {
+                    let s = a.3 / (a.3 - b.3);
+                    poly.push((a.0.lerp(b.0, s), a.1.lerp(b.1, s).normalize_or_zero(), a.2.lerp(b.2, s)));
+                }
+            }
+            if poly.len() < 3 {
+                continue;
+            }
+            let base = out.pos.len() as u32;
+            for (p, n, uv) in &poly {
+                out.vert(*p, *n, *uv);
+            }
+            for k in 1..poly.len() as u32 - 1 {
+                out.idx.extend_from_slice(&[base, base + k, base + k + 1]);
+            }
+        }
+        out
+    }
+
     /// Сдвигает всю геометрию.
     pub fn translate(&mut self, d: Vec3) {
         for p in &mut self.pos {

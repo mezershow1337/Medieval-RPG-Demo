@@ -135,6 +135,11 @@ struct DoorFlags {
     /// Тела жителей: коробки после дверей (с индекса `bodies_first`); погибший не мешает.
     bodies_first: usize,
     gone: Vec<std::sync::atomic::AtomicBool>,
+    /// Переключаемые группы (стройки по стадиям, обстановка купленных домов): коробки после тел
+    /// (с индекса `switch_first`), у каждой — номер группы; выключенная группа не мешает.
+    switch_first: usize,
+    switch_of: Vec<u32>,
+    switch_on: Vec<std::sync::atomic::AtomicBool>,
 }
 
 /// Размеры тела персонажа. Позиция персонажа = точка у ног (центр по X/Z, низ по Y).
@@ -180,16 +185,39 @@ impl LevelColliders {
     }
 
     /// То же плюс тела жителей (номер тела — индекс в `bodies`).
-    pub fn with_bodies(mut boxes: Vec<Aabb>, ground: Option<HeightField>, doors: Vec<(Aabb, bool)>, bodies: Vec<Aabb>) -> Self {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_bodies(boxes: Vec<Aabb>, ground: Option<HeightField>, doors: Vec<(Aabb, bool)>, bodies: Vec<Aabb>) -> Self {
+        Self::with_switches(boxes, ground, doors, bodies, Vec::new(), 0)
+    }
+
+    /// То же плюс переключаемые группы коробок: `(коробка, номер группы)`, групп — `groups`
+    /// (все выключены, пока не включат [`LevelColliders::set_switch`]).
+    pub fn with_switches(mut boxes: Vec<Aabb>, ground: Option<HeightField>, doors: Vec<(Aabb, bool)>, bodies: Vec<Aabb>, switches: Vec<(Aabb, u32)>, groups: usize) -> Self {
         let first = boxes.len();
         let open = doors.iter().map(|(_, o)| std::sync::atomic::AtomicBool::new(*o)).collect();
         boxes.extend(doors.iter().map(|(a, _)| *a));
         let bodies_first = boxes.len();
         let gone = bodies.iter().map(|_| std::sync::atomic::AtomicBool::new(false)).collect();
         boxes.extend(bodies);
+        let switch_first = boxes.len();
+        let switch_of = switches.iter().map(|(_, g)| *g).collect();
+        boxes.extend(switches.iter().map(|(a, _)| *a));
+        let switch_on = (0..groups).map(|_| std::sync::atomic::AtomicBool::new(false)).collect();
         let grid = Grid::build(&boxes);
-        LevelColliders(boxes, Accel { grid, ground: ground.map(std::sync::Arc::new), doors: std::sync::Arc::new(DoorFlags { first, open, bodies_first, gone }) })
+        LevelColliders(boxes, Accel { grid, ground: ground.map(std::sync::Arc::new), doors: std::sync::Arc::new(DoorFlags { first, open, bodies_first, gone, switch_first, switch_of, switch_on }) })
     }
+
+    /// Включить или выключить группу коробок.
+    pub fn set_switch(&self, group: usize, on: bool) {
+        if let Some(f) = self.1.doors.switch_on.get(group) {
+            f.store(on, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    pub fn switch_on(&self, group: usize) -> bool {
+        self.1.doors.switch_on.get(group).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
 
     /// Житель погиб (его тело больше не загораживает проход) или на его место пришёл новый.
     pub fn set_body_gone(&self, id: usize, gone: bool) {
@@ -201,8 +229,8 @@ impl LevelColliders {
     /// Точка внутри стены (не считая живых людей): для отскока клинка.
     pub fn point_in_wall(&self, p: Vec3) -> Option<&Aabb> {
         let a = Aabb { min: p, max: p };
-        let bodies_first = self.1.doors.bodies_first;
-        self.near_ids(a).filter(|&i| i < bodies_first).map(|i| &self.0[i]).find(|c| p.cmpgt(c.min).all() && p.cmplt(c.max).all())
+        let (bodies_first, switch_first) = (self.1.doors.bodies_first, self.1.doors.switch_first);
+        self.near_ids(a).filter(|&i| i < bodies_first || i >= switch_first).map(|i| &self.0[i]).find(|c| p.cmpgt(c.min).all() && p.cmplt(c.max).all())
     }
 
     pub fn door_count(&self) -> usize {
@@ -257,8 +285,10 @@ impl LevelColliders {
                     true
                 } else if i < doors.bodies_first {
                     !doors.open.get(i - doors.first).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
-                } else {
+                } else if i < doors.switch_first {
                     !doors.gone.get(i - doors.bodies_first).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+                } else {
+                    doors.switch_of.get(i - doors.switch_first).and_then(|g| doors.switch_on.get(*g as usize)).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
                 }
             })
             .map(|&i| i as usize)

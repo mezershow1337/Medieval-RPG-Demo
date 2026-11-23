@@ -492,6 +492,8 @@ fn goth_village(b: &mut Builder) {
 }
 
 fn goth_house(b: &mut Builder, p: Vec2, front: kit::Side, k: usize, rng: &mut Rng) {
+    // Одна мазанка пустует (хозяева ушли в горы) — её можно купить.
+    let vacant = k == 4;
     let along_x = front.along_x();
     let (w, d) = if along_x { (7.4, 5.4) } else { (5.4, 7.4) };
     let r = Rect::new(p.x - w / 2.0, p.y - d / 2.0, p.x + w / 2.0, p.y + d / 2.0);
@@ -515,6 +517,18 @@ fn goth_house(b: &mut Builder, p: Vec2, front: kit::Side, k: usize, rng: &mut Rn
         // Внутри: очаг в центре, лежанка у дальней стены, пифос, ткацкий станок или жернов.
         let back = -front.out() * (if along_x { d } else { w } / 2.0 - wt - 0.6);
         kit::hearth(t, Vec3::new(0.0, 0.0, 0.0) + front.out() * 0.3);
+        if vacant {
+            // Хозяева ушли в Дори: пустая мазанка с очагом и ларём — продаётся.
+            let side = Vec3::new(front.out().z, 0.0, front.out().x).abs();
+            let c = back + side * 1.5;
+            let half = side * 0.5 + (Vec3::ONE - side - Vec3::Y) * 0.3;
+            super::interior::chest(t, Rect::new(c.x - half.x, c.z - half.z, c.x + half.x, c.z + half.z), "Ларь");
+            let room = super::estate::RoomPlan { r: r.inset(wt + 0.05), floor: 0.0, kinds: vec![crate::level::FurnishKind::Bedroom, crate::level::FurnishKind::Storeroom, crate::level::FurnishKind::Weaving, crate::level::FurnishKind::Workshop] };
+            let entrance = front.out() * ((if along_x { d } else { w }) / 2.0 + 1.3);
+            let (nd, nc) = (t.doors.len(), t.containers.len());
+            super::estate::register(t, "Мазанка в готском селе".into(), crate::towns::TownId::GothVillage, r.inset(-1.0), h + 2.0, entrance, 0..nd, 0..nc, 0, vec![room], false, None);
+            return;
+        }
         let side = Vec3::new(front.out().z, 0.0, front.out().x).abs();
         let bed_c = back + side * 1.4 * if k.is_multiple_of(2) { 1.0 } else { -1.0 };
         let half = side * 0.95 + (Vec3::ONE - side - Vec3::Y) * 0.45;

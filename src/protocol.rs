@@ -68,6 +68,14 @@ pub fn connection_config() -> ConnectionConfig {
     };
     config.server_channels_config.push(smith.clone());
     config.client_channels_config.push(smith);
+    // Канал 11 — города, вести и свои дома (см. estates.rs).
+    let town = ChannelConfig {
+        channel_id: crate::estates::CH_TOWN,
+        max_memory_usage_bytes: 2 * 1024 * 1024,
+        send_type: SendType::ReliableOrdered { resend_time: std::time::Duration::from_millis(300) },
+    };
+    config.server_channels_config.push(town.clone());
+    config.client_channels_config.push(town);
     config
 }
 

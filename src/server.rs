@@ -155,9 +155,30 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .add_plugins(crate::trade_server::TradeServerPlugin)
         .add_plugins(crate::knowledge::KnowledgeServerPlugin)
         .add_plugins(crate::smithing_server::SmithingServerPlugin)
+        .add_plugins(crate::towns_server::TownServerPlugin)
         .add_systems(Update, (receive_client_messages, run_npcs, combat_tick, respawns, send_snapshots).chain());
     info!("Сервер слушает {addr}");
     app.run();
+}
+
+impl GameWorld {
+    /// Налётчик (набег на селение): не возвращается после смерти. Возвращает номер.
+    pub fn spawn_raider(&mut self, level: &LevelColliders, spawn: NpcSpawn, now: f64) -> u64 {
+        let id = self.next_npc_id;
+        spawn_npc(self, level, spawn, now);
+        if let Some(a) = self.actors.get_mut(&id) {
+            a.spawn = None;
+        }
+        id
+    }
+
+    /// Убрать NPC из мира (налётчики ушли в степь).
+    pub fn remove_npc(&mut self, server: &mut RenetServer, id: u64) {
+        if self.actors.get(&id).is_some_and(|a| a.kind.is_npc()) {
+            self.actors.remove(&id);
+            server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::PlayerLeft { id }));
+        }
+    }
 }
 
 fn spawn_npc(world: &mut GameWorld, level: &LevelColliders, spawn: NpcSpawn, now: f64) {
@@ -797,6 +818,9 @@ fn kill(server: &mut RenetServer, world: &mut GameWorld, id: u64, killer: Option
     } else if let Some(spawn) = actor.spawn {
         world.actors.remove(&id);
         world.npc_respawns.push((now + NPC_RESPAWN_SECS, spawn));
+    } else {
+        // Налётчик: не возвращается.
+        world.actors.remove(&id);
     }
     info!("{kind:?} {id} погиб");
     server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Died { id, killer }));

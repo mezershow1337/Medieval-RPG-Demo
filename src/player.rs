@@ -84,9 +84,10 @@ pub fn grab_cursor(
     loot: Option<Res<crate::loot_client::LootState>>,
     trade: Option<Res<crate::trade_client::TradeState>>,
     law: Option<Res<crate::civil_client::LawUi>>,
+    towns: Option<Res<crate::towns_client::TownUi>>,
 ) {
     // Пока открыт инвентарь, окно торговли или разговор со стражей, клики принадлежат окну, а не бою.
-    if loot.is_some_and(|l| l.ui_open) || trade.is_some_and(|t| t.window_open()) || law.is_some_and(|l| l.open()) {
+    if loot.is_some_and(|l| l.ui_open) || trade.is_some_and(|t| t.window_open()) || law.is_some_and(|l| l.open()) || towns.is_some_and(|t| t.open()) {
         return;
     }
     if mouse.just_pressed(MouseButton::Left) {

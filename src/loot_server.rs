@@ -304,6 +304,19 @@ impl LootWorld {
         }
     }
 
+    /// Сундук уровня становится личным (в купленном доме): не наполняется сам и пуст с самого начала.
+    pub fn make_private(&mut self, id: LootId) {
+        self.fixed.remove(&id);
+        if let Some(c) = self.corpses.get_mut(&id) {
+            c.inv.grid.items.clear();
+        }
+    }
+
+    /// Содержимое сундука уровня.
+    pub fn container_mut(&mut self, id: LootId) -> Option<&mut Inventory> {
+        self.corpses.get_mut(&id).map(|c| &mut c.inv)
+    }
+
     /// Разослать изменения: свой инвентарь и тело всем, у кого оно открыто.
     fn sync(&self, server: &mut RenetServer, player: u64, owners: &[Owner], was_empty: &[(LootId, bool)]) {
         for owner in owners {
@@ -496,6 +509,7 @@ fn receive_loot_messages(
     level: Res<LevelColliders>,
     mut world: ResMut<LootWorld>,
     mut healing: ResMut<crate::consumables::Healing>,
+    mut locks: Option<ResMut<crate::towns_server::Locks>>,
 ) {
     for pid in server.clients_id() {
         while let Some(bytes) = server.receive_message(pid, CH_LOOT) {
@@ -515,6 +529,13 @@ fn receive_loot_messages(
                         }
                         if id >= CONTAINER_ID_BASE && !crate::combat::line_of_sight(&level, feet + Vec3::Y * 1.6, c.pos) {
                             notice(&mut server, pid, "Не дотянуться");
+                            continue;
+                        }
+                        // Сундук в чужом доме заперт.
+                        if id >= CONTAINER_ID_BASE
+                            && let Some(locks) = locks.as_mut()
+                            && !locks.container((id - CONTAINER_ID_BASE) as u32, pid)
+                        {
                             continue;
                         }
                         let msg = LootServerMessage::ContainerOpened { id, title: c.name.clone(), inv: c.inv.clone() };

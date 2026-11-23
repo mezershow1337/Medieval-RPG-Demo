@@ -230,6 +230,167 @@ pub struct Layout {
     pub hearths: Vec<Vec3>,
     /// Кузнечные и сыродутные горны (для кузнечного дела).
     pub forges: Vec<ForgeSpec>,
+    /// Усадьбы, которые можно купить или снять (пустующие и построенные на стройках).
+    pub estates: Vec<EstateSpec>,
+    /// Переключаемая геометрия: стадии строек и обстановка комнат купленных домов.
+    pub switches: Vec<SwitchGroup>,
+}
+
+/// Чем обставить комнату купленного дома.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum FurnishKind {
+    Living,
+    Bedroom,
+    Kitchen,
+    Storeroom,
+    Weaving,
+    Workshop,
+    /// Горница наверху: ложа и сундуки.
+    Loft,
+}
+
+impl FurnishKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            FurnishKind::Living => "Горница-триклиний",
+            FurnishKind::Bedroom => "Спальня",
+            FurnishKind::Kitchen => "Кухня с очагом",
+            FurnishKind::Storeroom => "Кладовая",
+            FurnishKind::Weaving => "Ткацкая",
+            FurnishKind::Workshop => "Мастерская",
+            FurnishKind::Loft => "Верхняя спальня",
+        }
+    }
+    /// Что делают мастера: стол, ложа, очаг, полки…
+    pub fn what(self) -> &'static str {
+        match self {
+            FurnishKind::Living => "стол, скамьи, кресло хозяина, шкаф, ковёр",
+            FurnishKind::Bedroom => "ложа с тюфяками, сундук, светильник",
+            FurnishKind::Kitchen => "очаг с котлом, полки с посудой, ручная мельница",
+            FurnishKind::Storeroom => "пифосы, амфоры, мешки, полки",
+            FurnishKind::Weaving => "вертикальный ткацкий стан, корзины с пряжей",
+            FurnishKind::Workshop => "верстак с инструментом",
+            FurnishKind::Loft => "ложа, сундуки, светильник",
+        }
+    }
+    /// Плотник, гончар, ткач — работа и материалы, нуммии (поденщик получал ~240 нуммиев в день).
+    pub fn price(self) -> u32 {
+        match self {
+            FurnishKind::Living => 2400,
+            FurnishKind::Bedroom => 1800,
+            FurnishKind::Kitchen => 2000,
+            FurnishKind::Storeroom => 1200,
+            FurnishKind::Weaving => 2600,
+            FurnishKind::Workshop => 2200,
+            FurnishKind::Loft => 2000,
+        }
+    }
+    /// Сколько игровых недель делают.
+    pub fn weeks(self) -> u32 {
+        match self {
+            FurnishKind::Storeroom => 1,
+            _ => 2,
+        }
+    }
+}
+
+/// Комната усадьбы, которую можно обставить.
+#[derive(Clone, Debug)]
+pub struct EstateRoom {
+    pub min: Vec3,
+    pub max: Vec3,
+    /// Чем можно её обставить (горница наверху — только как спальню или кладовую).
+    pub kinds: Vec<FurnishKind>,
+}
+
+/// Усадьба, которую можно купить или снять.
+#[derive(Clone, Debug)]
+pub struct EstateSpec {
+    pub name: String,
+    pub town: crate::towns::TownId,
+    /// Границы участка (с двором) и высота крыши.
+    pub min: Vec3,
+    pub max: Vec3,
+    /// Где стоять перед входом (на улице).
+    pub entrance: Vec3,
+    /// Двери усадьбы (номера в `Layout::doors`).
+    pub doors: Vec<u32>,
+    /// Сундуки (номера в `Layout::containers`).
+    pub containers: Vec<u32>,
+    pub rooms: Vec<EstateRoom>,
+    pub two_storey: bool,
+    /// Поставлена на месте пепелища (номер стройплощадки): до конца стройки её нет.
+    pub site: Option<u16>,
+}
+
+impl EstateSpec {
+    pub fn contains(&self, p: Vec3) -> bool {
+        p.x >= self.min.x && p.x <= self.max.x && p.z >= self.min.z && p.z <= self.max.z && p.y > self.min.y - 1.0 && p.y < self.max.y
+    }
+}
+
+/// Что включает переключаемая группа.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SwitchKey {
+    /// Стадия стройки на площадке (0 — пепелище … 4 — готовый дом).
+    Site { site: u16, stage: u8 },
+    /// Обстановка комнаты усадьбы.
+    Furnish { estate: u16, room: u8, kind: FurnishKind },
+}
+
+/// Геометрия, которую можно включить и выключить во время игры.
+#[derive(Clone)]
+pub struct SwitchGroup {
+    pub key: SwitchKey,
+    /// Твёрдые коробки (коллизии) и коробки, которые надо нарисовать.
+    pub blocks: Vec<Block>,
+    pub invisible: Vec<Aabb>,
+    pub decor: Vec<(Mat, MeshBuilder)>,
+    pub lamps: Vec<Lamp>,
+}
+
+/// Клиент: меш или свет переключаемой группы (виден, когда группа включена).
+#[derive(Component)]
+pub struct SwitchVisual(pub u32);
+
+/// Клиент: показывает и прячет переключаемую геометрию по флагам коллизий.
+pub fn sync_switch_visuals(level: Res<LevelColliders>, mut q: Query<(&SwitchVisual, &mut Visibility)>) {
+    for (s, mut vis) in &mut q {
+        let want = if level.switch_on(s.0 as usize) { Visibility::Inherited } else { Visibility::Hidden };
+        if *vis != want {
+            *vis = want;
+        }
+    }
+}
+
+/// Номера групп и усадеб уровня (считается один раз; уровень строится одинаково везде).
+pub struct EstateCatalog {
+    pub estates: Vec<EstateSpec>,
+    pub keys: Vec<SwitchKey>,
+    pub sites: usize,
+    /// Двери стройплощадки: пока не достроено, створок нет.
+    pub site_doors: Vec<Vec<u32>>,
+}
+
+impl EstateCatalog {
+    fn from_layout(layout: &Layout) -> Self {
+        let keys: Vec<SwitchKey> = layout.switches.iter().map(|g| g.key).collect();
+        let sites = keys.iter().filter_map(|k| if let SwitchKey::Site { site, .. } = k { Some(*site as usize + 1) } else { None }).max().unwrap_or(0);
+        let mut site_doors = vec![Vec::new(); sites];
+        for e in &layout.estates {
+            if let Some(s) = e.site {
+                site_doors[s as usize] = e.doors.clone();
+            }
+        }
+        EstateCatalog { estates: layout.estates.clone(), keys, sites, site_doors }
+    }
+
+}
+
+/// Усадьбы и переключаемые группы активного уровня.
+pub fn estates() -> &'static EstateCatalog {
+    static CAT: std::sync::OnceLock<EstateCatalog> = std::sync::OnceLock::new();
+    CAT.get_or_init(|| EstateCatalog::from_layout(&layout()))
 }
 
 /// Рабочее место кузнеца: где огонь и где стоять у наковальни.
@@ -300,6 +461,10 @@ struct Builder {
     holes: Vec<(Vec2, Vec2)>,
     /// Участок, куда сейчас складываются декоративные меши (см. [`Builder::at`]).
     chunk: Chunk,
+    estates: Vec<EstateSpec>,
+    switches: Vec<SwitchGroup>,
+    /// Сколько стройплощадок уже заложено.
+    sites: u16,
 }
 
 impl Builder {
@@ -322,6 +487,9 @@ impl Builder {
             forges: Vec::new(),
             holes: Vec::new(),
             chunk: (0, 0),
+            estates: Vec::new(),
+            switches: Vec::new(),
+            sites: 0,
         }
     }
 
@@ -340,6 +508,8 @@ impl Builder {
             water_y: self.water_y,
             hearths: self.hearths,
             forges: self.forges,
+            estates: self.estates,
+            switches: self.switches,
         }
     }
 
@@ -361,8 +531,34 @@ impl Builder {
         self.lamps.extend(t.lamps.into_iter().map(|x| Lamp { pos: x.pos + offset, ..x }));
         self.hearths.extend(t.hearths.into_iter().map(|p| p + offset));
         self.forges.extend(t.forges.into_iter().map(|f| ForgeSpec { fire: f.fire + offset, anvil: f.anvil + offset, trough: f.trough + offset, grind: f.grind + offset, ..f }));
+        let (d0, c0) = (self.doors.len() as u32, self.containers.len() as u32);
         self.doors.extend(t.doors.into_iter().map(|d| DoorSpec { center: d.center + offset, ..d }));
         self.containers.extend(t.containers.into_iter().map(|c| ContainerSpec { pos: c.pos + offset, ..c }));
+        let e0 = self.estates.len() as u16;
+        for mut e in t.estates {
+            e.min += offset;
+            e.max += offset;
+            e.entrance += offset;
+            e.doors.iter_mut().for_each(|d| *d += d0);
+            e.containers.iter_mut().for_each(|c| *c += c0);
+            for r in &mut e.rooms {
+                r.min += offset;
+                r.max += offset;
+            }
+            self.estates.push(e);
+        }
+        for mut g in t.switches {
+            for b in &mut g.blocks {
+                b.aabb = shift(b.aabb);
+            }
+            g.invisible.iter_mut().for_each(|a| *a = shift(*a));
+            g.decor.iter_mut().for_each(|(_, mb)| mb.translate(offset));
+            g.lamps.iter_mut().for_each(|l| l.pos += offset);
+            if let SwitchKey::Furnish { estate, room, kind } = g.key {
+                g.key = SwitchKey::Furnish { estate: estate + e0, room, kind };
+            }
+            self.switches.push(g);
+        }
         self.residents.extend(t.residents.into_iter().map(|r| Resident { pos: r.pos + offset, ..r }));
         for mut g in t.glass {
             g.pts.iter_mut().for_each(|p| *p += offset);
@@ -716,7 +912,20 @@ pub fn colliders(layout: Layout) -> LevelColliders {
     boxes.extend(layout.invisible);
     let doors = layout.doors.iter().map(|d| (d.closed_box(), d.open)).collect();
     let bodies = layout.residents.iter().map(Resident::body).collect();
-    LevelColliders::with_bodies(boxes, layout.ground, doors, bodies)
+    let mut switches = Vec::new();
+    for (g, group) in layout.switches.iter().enumerate() {
+        switches.extend(group.blocks.iter().filter(|b| b.solid).map(|b| (b.aabb, g as u32)));
+        switches.extend(group.invisible.iter().map(|a| (*a, g as u32)));
+    }
+    let groups = layout.switches.len();
+    let level = LevelColliders::with_switches(boxes, layout.ground, doors, bodies, switches, groups);
+    // Пока мир не загружен — пепелища на всех стройплощадках.
+    for (g, group) in layout.switches.iter().enumerate() {
+        if matches!(group.key, SwitchKey::Site { stage: 0, .. }) {
+            level.set_switch(g, true);
+        }
+    }
+    level
 }
 
 pub fn level_colliders() -> LevelColliders {
@@ -786,6 +995,32 @@ pub fn spawn_level(
         let mut e = commands.spawn((Mesh3d(meshes.add(mb.build())), MeshMaterial3d(handle), Transform::IDENTITY));
         if matches!(mat, Mat::Coals | Mat::Water) {
             e.insert(NotShadowCaster);
+        }
+    }
+
+    // Переключаемая геометрия (стройки, обстановка купленных домов): скрыта, пока группа выключена.
+    for (g, group) in layout.switches.iter().enumerate() {
+        let mut by_mat: HashMap<Mat, MeshBuilder> = HashMap::new();
+        for block in &group.blocks {
+            by_mat.entry(block.mat).or_default().cuboid(block.aabb.min, block.aabb.max);
+        }
+        for (mat, mb) in &group.decor {
+            by_mat.entry(*mat).or_default().append(mb.clone());
+        }
+        for (mat, mb) in by_mat {
+            if mb.is_empty() {
+                continue;
+            }
+            let handle = materials.entry(mat).or_insert_with(|| surfaces.add(crate::graphics::surface_material(mat))).clone();
+            commands.spawn((Mesh3d(meshes.add(mb.build())), MeshMaterial3d(handle), Transform::IDENTITY, Visibility::Hidden, SwitchVisual(g as u32)));
+        }
+        for lamp in &group.lamps {
+            commands.spawn((
+                PointLight { color: lamp.color, intensity: lamp.intensity, range: lamp.range, shadow_maps_enabled: false, ..default() },
+                Transform::from_translation(lamp.pos),
+                Visibility::Hidden,
+                SwitchVisual(g as u32),
+            ));
         }
     }
 
