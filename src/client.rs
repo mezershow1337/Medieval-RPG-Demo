@@ -7,7 +7,7 @@ use crate::protocol::*;
 use crate::rig::{self, Blade, CharacterModels, NeedsRig, NeedsShield, NeedsWeapon, Outfit, PoseInput, RigPose, ShieldKind};
 use crate::{graphics, hud, level};
 use bevy::prelude::*;
-use bevy_renet::netcode::{ClientAuthentication, NetcodeClientPlugin, NetcodeClientTransport, NetcodeErrorEvent};
+use bevy_renet::netcode::{ClientAuthentication, ConnectToken, NETCODE_KEY_BYTES, NetcodeClientPlugin, NetcodeClientTransport, NetcodeErrorEvent};
 use bevy_renet::{RenetClient, RenetClientPlugin, client_connected};
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
@@ -113,11 +113,31 @@ impl CharacterAssets {
     }
 }
 
+/// Сколько секунд тишины от другой стороны терпим, прежде чем считать связь потерянной.
+const CONNECTION_TIMEOUT_SECS: i32 = 60;
+/// Срок жизни билета: с запасом, чтобы часы хоста и друга могли расходиться до часа.
+const CONNECT_TOKEN_EXPIRE_SECS: u64 = 3600;
+
 pub fn run(server_addr: SocketAddr) {
     let client_id = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
     let socket = UdpSocket::bind("0.0.0.0:0").expect("не удалось открыть сокет клиента");
-    let auth = ClientAuthentication::Unsecure { protocol_id: PROTOCOL_ID, client_id, server_addr, user_data: None };
     let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+    // Билет подключения собираем сами, а не через ClientAuthentication::Unsecure: там таймаут
+    // жёстко 15 с, и если игра у друга замирает дольше (первая загрузка уровня, компиляция
+    // шейдеров, перетаскивание окна), сервер выкидывал его с «terminated by the transport layer».
+    // Сервер работает в режиме Unsecure — его ключ из нулей, тот же, что здесь.
+    let token = ConnectToken::generate(
+        current_time,
+        PROTOCOL_ID,
+        CONNECT_TOKEN_EXPIRE_SECS,
+        client_id,
+        CONNECTION_TIMEOUT_SECS,
+        vec![server_addr],
+        None,
+        &[0; NETCODE_KEY_BYTES],
+    )
+    .expect("не удалось создать билет подключения");
+    let auth = ClientAuthentication::Secure { connect_token: token };
     let transport = NetcodeClientTransport::new(current_time, auth, socket).expect("не удалось создать подключение");
 
     App::new()
