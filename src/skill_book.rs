@@ -24,7 +24,18 @@ impl Plugin for SkillBookPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BookUi>()
             .add_systems(Startup, setup_book.after(crate::inventory_ui::setup_fonts))
-            .add_systems(Update, (book_input, book_clicks, book_hover, rebuild_book, rebuild_detail, highlight_links).chain());
+            .add_systems(
+                Update,
+                (
+                    book_input,
+                    book_clicks,
+                    book_hover,
+                    rebuild_book,
+                    rebuild_detail,
+                    highlight_links,
+                )
+                    .chain(),
+            );
         if std::env::var("MRPG_SHOT").is_ok() {
             app.add_systems(Update, dev_open_book);
         }
@@ -70,7 +81,16 @@ pub struct BookUi {
 
 impl Default for BookUi {
     fn default() -> Self {
-        Self { open: false, tab: Tab::Skills, chapter: Chapter::Start, hovered: None, pinned: None, rev: 1, built: 0, detail_built: None }
+        Self {
+            open: false,
+            tab: Tab::Skills,
+            chapter: Chapter::Start,
+            hovered: None,
+            pinned: None,
+            rev: 1,
+            built: 0,
+            detail_built: None,
+        }
     }
 }
 
@@ -138,15 +158,23 @@ fn setup_book(mut commands: Commands, theme: Res<UiTheme>) {
     commands
         .spawn((
             BookRoot,
-            Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), display: Display::None, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                height: percent(100),
+                display: Display::None,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
             theme.backdrop(),
             GlobalZIndex(22),
         ))
         .with_children(|root| {
             root.spawn((
                 Node {
-                    width: percent(94),
-                    height: percent(90),
+                    width: percent(96),
+                    height: percent(94),
                     flex_direction: FlexDirection::Column,
                     padding: Skin::Parchment.padding(),
                     row_gap: px(4),
@@ -156,18 +184,47 @@ fn setup_book(mut commands: Commands, theme: Res<UiTheme>) {
             ))
             .with_children(|panel| {
                 // Шапка: вкладки слева, заголовок посередине, «закрыть» справа.
-                panel.spawn(Node { width: percent(100), align_items: AlignItems::Center, column_gap: px(8), ..default() }).with_children(|head| {
-                    for tab in [Tab::Skills, Tab::Knowledge, Tab::Journal] {
-                        theme.toggle_button(head, tab.label(), TabButton(tab), tab == Tab::Skills);
-                    }
-                    head.spawn(Node { flex_grow: 1.0, justify_content: JustifyContent::Center, ..default() }).with_children(|t| {
-                        t.spawn((BookTitle, theme.title_colored("Книга навыков", 30.0, ink::RUBRIC)));
+                panel
+                    .spawn(Node {
+                        width: percent(100),
+                        align_items: AlignItems::Center,
+                        column_gap: px(8),
+                        ..default()
+                    })
+                    .with_children(|head| {
+                        for tab in [Tab::Skills, Tab::Knowledge, Tab::Journal] {
+                            theme.toggle_button(
+                                head,
+                                tab.label(),
+                                TabButton(tab),
+                                tab == Tab::Skills,
+                            );
+                        }
+                        head.spawn(Node {
+                            flex_grow: 1.0,
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        })
+                        .with_children(|t| {
+                            t.spawn((
+                                BookTitle,
+                                theme.title_colored("Книга навыков", 30.0, ink::RUBRIC),
+                            ));
+                        });
+                        head.spawn(theme.text("K — книга · F1 — журнал · Esc", 13.0, ink::INK_DIM));
+                        theme.small_button(head, "Закрыть", CloseButton, true);
                     });
-                    head.spawn(theme.text("K — книга · F1 — журнал · Esc", 13.0, ink::INK_DIM));
-                    theme.small_button(head, "Закрыть", CloseButton, true);
-                });
                 theme.divider(panel);
-                panel.spawn((BookBody, Node { width: percent(100), flex_grow: 1.0, min_height: px(0), flex_direction: FlexDirection::Column, ..default() }));
+                panel.spawn((
+                    BookBody,
+                    Node {
+                        width: percent(100),
+                        flex_grow: 1.0,
+                        min_height: px(0),
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },
+                ));
             });
         });
 }
@@ -187,7 +244,11 @@ fn book_input(
         if ui.open && ui.tab != Tab::Journal {
             ui.open = false;
         } else {
-            let tab = if ui.tab == Tab::Journal { Tab::Skills } else { ui.tab };
+            let tab = if ui.tab == Tab::Journal {
+                Tab::Skills
+            } else {
+                ui.tab
+            };
             ui.show(tab);
         }
     }
@@ -207,7 +268,11 @@ fn book_input(
         loot.rev += 1;
     }
     let (entity, node) = &mut *root;
-    let want = if ui.open { Display::Flex } else { Display::None };
+    let want = if ui.open {
+        Display::Flex
+    } else {
+        Display::None
+    };
     if node.display != want {
         node.display = want;
         if ui.open {
@@ -284,7 +349,11 @@ fn book_clicks(
     }
 }
 
-fn book_hover(mut ui: ResMut<BookUi>, perks: Query<(&Interaction, &PerkNode)>, headers: Query<(&Interaction, &SkillHeader)>) {
+fn book_hover(
+    mut ui: ResMut<BookUi>,
+    perks: Query<(&Interaction, &PerkNode)>,
+    headers: Query<(&Interaction, &SkillHeader)>,
+) {
     if !ui.open || ui.tab != Tab::Skills {
         return;
     }
@@ -292,7 +361,12 @@ fn book_hover(mut ui: ResMut<BookUi>, perks: Query<(&Interaction, &PerkNode)>, h
         .iter()
         .find(|(i, _)| **i != Interaction::None)
         .map(|(_, p)| Focus::Perk(p.0))
-        .or_else(|| headers.iter().find(|(i, _)| **i != Interaction::None).map(|(_, h)| Focus::Skill(h.0)));
+        .or_else(|| {
+            headers
+                .iter()
+                .find(|(i, _)| **i != Interaction::None)
+                .map(|(_, h)| Focus::Skill(h.0))
+        });
     if ui.hovered != hovered {
         ui.hovered = hovered;
     }
@@ -331,11 +405,14 @@ fn rebuild_book(
     let k = &knowledge.0;
     let tab = ui.tab;
     let chapter = ui.chapter;
-    commands.entity(*body).despawn_children().with_children(|p| match tab {
-        Tab::Skills => build_tree(p, &theme, k),
-        Tab::Knowledge => build_knowledge(p, &theme, k),
-        Tab::Journal => build_journal(p, &theme, chapter, hints.enabled()),
-    });
+    commands
+        .entity(*body)
+        .despawn_children()
+        .with_children(|p| match tab {
+            Tab::Skills => build_tree(p, &theme, k),
+            Tab::Knowledge => build_knowledge(p, &theme, k),
+            Tab::Journal => build_journal(p, &theme, chapter, hints.enabled()),
+        });
 }
 
 /// Состояние умения для рамки и цвета.
@@ -351,7 +428,14 @@ fn perk_state(p: Perk, k: &Knowledge, earned: &[Perk]) -> State {
     if earned.contains(&p) {
         return State::Earned;
     }
-    if p.missing(k, earned).iter().all(|n| matches!(n, Need::Skill(..))) { State::Near } else { State::Far }
+    if p.missing(k, earned)
+        .iter()
+        .all(|n| matches!(n, Need::Skill(..)))
+    {
+        State::Near
+    } else {
+        State::Far
+    }
 }
 
 /// Коротко об условиях: «от 35 · + Сила 20 · знание».
@@ -367,7 +451,18 @@ fn short_needs(p: Perk) -> String {
                     parts.push("знание".into());
                 }
             }
-            Need::Perk(q) if q.info().skill != own => parts.push(format!("+{}", short(q.info().skill))),
+            Need::Perk(q) if q.info().skill != own => {
+                // Ветвь уже названа навыком — не повторяем.
+                let tag = short(q.info().skill);
+                if !p
+                    .info()
+                    .needs
+                    .iter()
+                    .any(|m| matches!(m, Need::Skill(s, _) if *s == q.info().skill))
+                {
+                    parts.push(format!("+{tag}"));
+                }
+            }
             Need::Perk(_) => {}
             Need::HerbsKnown(n) => parts.push(format!("{n} трав")),
         }
@@ -376,17 +471,36 @@ fn short_needs(p: Perk) -> String {
 }
 
 const NODE_H: f32 = 78.0;
-const LINK_H: f32 = 16.0;
+const LINK_H: f32 = 12.0;
 
 fn build_tree(p: &mut ChildSpawnerCommands, theme: &UiTheme, k: &Knowledge) {
     let earned = skill_tree::earned(k);
-    p.spawn(Node { width: percent(100), flex_grow: 1.0, min_height: px(0), column_gap: px(6), ..default() }).with_children(|row| {
+    p.spawn(Node {
+        width: percent(100),
+        flex_grow: 1.0,
+        min_height: px(0),
+        column_gap: px(6),
+        ..default()
+    })
+    .with_children(|row| {
         for skill in Skill::ALL {
-            row.spawn(Node { flex_grow: 1.0, flex_basis: px(0), min_width: px(0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, ..default() }).with_children(|col| {
+            row.spawn(Node {
+                flex_grow: 1.0,
+                flex_basis: px(0),
+                min_width: px(0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|col| {
                 // Шапка ветви: имя, уровень, полоса.
                 let base = k.base_skill(skill);
                 let bonus = k.skill(skill) - base;
-                let level = if bonus > 0.05 { format!("{base:.0} (+{bonus:.0})") } else { format!("{base:.0}") };
+                let level = if bonus > 0.05 {
+                    format!("{base:.0} (+{bonus:.0})")
+                } else {
+                    format!("{base:.0}")
+                };
                 col.spawn((
                     SkillHeader(skill),
                     Interaction::default(),
@@ -404,70 +518,151 @@ fn build_tree(p: &mut ChildSpawnerCommands, theme: &UiTheme, k: &Knowledge) {
                     BorderColor::all(Color::NONE),
                 ))
                 .with_children(|h| {
-                    h.spawn((theme.bold(skill.name(), 14.0, ink::INK), TextLayout::justify(Justify::Center)));
+                    h.spawn(Node {
+                        height: px(22),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    })
+                    .with_children(|t| {
+                        t.spawn((
+                            theme.bold(skill.name(), 14.0, ink::INK),
+                            TextLayout::justify(Justify::Center),
+                        ));
+                    });
                     h.spawn(theme.bold(level, 17.0, ink::RUBRIC));
-                    theme.bar(h, Node { width: percent(92), height: px(13), ..default() }, base / 100.0, Color::srgb(0.58, 0.16, 0.08), ());
-                });
-                // Ступени.
-                let perks: Vec<Perk> = Perk::ALL.into_iter().filter(|q| q.info().skill == skill).collect();
-                let mut prev: Option<State> = None;
-                for tier in 0..4u8 {
-                    let Some(perk) = perks.iter().copied().find(|q| q.info().tier == tier) else {
-                        col.spawn(Node { height: px(NODE_H + LINK_H), ..default() });
-                        prev = None;
-                        continue;
-                    };
-                    let state = perk_state(perk, k, &earned);
-                    // Соединитель от предыдущей ступени.
-                    let line = match prev {
-                        Some(State::Earned) if state == State::Earned => ink::RUBRIC,
-                        Some(_) => ink::INK_DIM,
-                        None => Color::NONE,
-                    };
-                    col.spawn((Node { width: px(3), height: px(LINK_H), ..default() }, BackgroundColor(line)));
-                    let (border, fill, name_color) = match state {
-                        State::Earned => (ink::RUBRIC, RUBRIC_FILL, ink::RUBRIC),
-                        State::Near => (ink::INK, Color::NONE, ink::INK),
-                        State::Far => (ink::INK_DIM.with_alpha(0.45), Color::NONE, ink::INK_DIM),
-                    };
-                    col.spawn((
-                        PerkNode(perk),
-                        Interaction::default(),
-                        BaseBorder(border),
+                    theme.bar(
+                        h,
                         Node {
-                            width: percent(96),
-                            height: px(NODE_H),
-                            flex_direction: FlexDirection::Column,
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            padding: UiRect::axes(px(4), px(3)),
-                            border: UiRect::all(px(if state == State::Earned { 2 } else { 1 })),
-                            border_radius: BorderRadius::all(px(6)),
-                            row_gap: px(3),
+                            width: percent(92),
+                            height: px(13),
                             ..default()
                         },
-                        BorderColor::all(border),
-                        BackgroundColor(fill),
-                    ))
-                    .with_children(|n| {
-                        n.spawn((theme.bold(perk.info().name, 13.0, name_color), TextLayout::justify(Justify::Center)));
-                        n.spawn((theme.text(short_needs(perk), 11.0, ink::INK_DIM), TextLayout::justify(Justify::Center)));
-                    });
-                    prev = Some(state);
-                }
+                        base / 100.0,
+                        Color::srgb(0.58, 0.16, 0.08),
+                        (),
+                    );
+                });
+                // Ступени.
+                let perks: Vec<Perk> = Perk::ALL
+                    .into_iter()
+                    .filter(|q| q.info().skill == skill)
+                    .collect();
+                let mut prev: Option<State> = None;
+                // Ступени делят высоту поровну: древо влезает и в 720 строк, и в 1440.
+                col.spawn(Node {
+                    width: percent(100),
+                    flex_grow: 1.0,
+                    min_height: px(0),
+                    flex_direction: FlexDirection::Column,
+                    ..default()
+                })
+                .with_children(|col| {
+                    for tier in 0..4u8 {
+                        let Some(perk) = perks.iter().copied().find(|q| q.info().tier == tier)
+                        else {
+                            col.spawn(Node {
+                                flex_grow: 1.0,
+                                flex_basis: px(0),
+                                ..default()
+                            });
+                            prev = None;
+                            continue;
+                        };
+                        let state = perk_state(perk, k, &earned);
+                        // Соединитель от предыдущей ступени.
+                        let line = match prev {
+                            Some(State::Earned) if state == State::Earned => ink::RUBRIC,
+                            Some(_) => ink::INK_DIM,
+                            None => Color::NONE,
+                        };
+                        col.spawn(Node {
+                            flex_grow: 1.0,
+                            flex_basis: px(0),
+                            min_height: px(0),
+                            max_height: px(NODE_H + LINK_H),
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        })
+                        .with_children(|col| {
+                            col.spawn((
+                                Node {
+                                    width: px(3),
+                                    height: px(LINK_H),
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                },
+                                BackgroundColor(line),
+                            ));
+                            let (border, fill, name_color) = match state {
+                                State::Earned => (ink::RUBRIC, RUBRIC_FILL, ink::RUBRIC),
+                                State::Near => (ink::INK, Color::NONE, ink::INK),
+                                State::Far => {
+                                    (ink::INK_DIM.with_alpha(0.45), Color::NONE, ink::INK_DIM)
+                                }
+                            };
+                            col.spawn((
+                                PerkNode(perk),
+                                Interaction::default(),
+                                BaseBorder(border),
+                                Node {
+                                    width: percent(96),
+                                    flex_grow: 1.0,
+                                    min_height: px(0),
+                                    overflow: Overflow::clip(),
+                                    flex_direction: FlexDirection::Column,
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    padding: UiRect::axes(px(4), px(3)),
+                                    border: UiRect::all(px(if state == State::Earned {
+                                        2
+                                    } else {
+                                        1
+                                    })),
+                                    border_radius: BorderRadius::all(px(6)),
+                                    row_gap: px(3),
+                                    ..default()
+                                },
+                                BorderColor::all(border),
+                                BackgroundColor(fill),
+                            ))
+                            .with_children(|n| {
+                                n.spawn((
+                                    theme.bold(perk.info().name, 13.0, name_color),
+                                    TextLayout::justify(Justify::Center),
+                                ));
+                                n.spawn((
+                                    theme.text(short_needs(perk), 11.0, ink::INK_DIM),
+                                    TextLayout::justify(Justify::Center),
+                                ));
+                            });
+                        });
+                        prev = Some(state);
+                    }
+                });
             });
         }
     });
     theme.divider(p);
-    p.spawn((DetailBox, Node { width: percent(100), height: px(178), flex_shrink: 0.0, column_gap: px(28), ..default() }));
-    p.spawn(theme.text(
-        "Киноварью — освоено, чернилами — осталось набить навык, бледно — нужны ещё знания или другие умения. Наведите на умение или навык — подсветятся связи; щелчок закрепляет описание.",
-        12.0,
-        ink::INK_DIM,
+    p.spawn((
+        DetailBox,
+        Node {
+            width: percent(100),
+            height: px(128),
+            flex_shrink: 0.0,
+            column_gap: px(28),
+            ..default()
+        },
     ));
 }
 
-fn rebuild_detail(mut commands: Commands, mut ui: ResMut<BookUi>, knowledge: Res<MyKnowledge>, theme: Res<UiTheme>, boxes: Query<Entity, With<DetailBox>>) {
+fn rebuild_detail(
+    mut commands: Commands,
+    mut ui: ResMut<BookUi>,
+    knowledge: Res<MyKnowledge>,
+    theme: Res<UiTheme>,
+    boxes: Query<Entity, With<DetailBox>>,
+) {
     if !ui.open || ui.tab != Tab::Skills {
         return;
     }
@@ -492,6 +687,11 @@ fn rebuild_detail(mut commands: Commands, mut ui: ResMut<BookUi>, knowledge: Res
                     15.0,
                     ink::INK,
                 ));
+                c.spawn(theme.text(
+                    "Киноварью — освоено, чернилами — осталось набить навык, бледно — нужны ещё знания или другие умения. Наведите на умение или навык — подсветятся связи; щелчок закрепляет описание.",
+                    13.0,
+                    ink::INK_DIM,
+                ));
             });
         }
         Some(Focus::Perk(perk)) => perk_detail(p, &theme, k, perk),
@@ -503,9 +703,24 @@ fn perk_detail(p: &mut ChildSpawnerCommands, theme: &UiTheme, k: &Knowledge, per
     let info = perk.info();
     let earned = skill_tree::earned(k);
     let state = perk_state(perk, k, &earned);
-    p.spawn(Node { flex_direction: FlexDirection::Column, row_gap: px(5), flex_basis: percent(55), flex_grow: 1.0, ..default() }).with_children(|c| {
+    p.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        row_gap: px(5),
+        flex_basis: percent(55),
+        flex_grow: 1.0,
+        ..default()
+    })
+    .with_children(|c| {
         c.spawn(theme.title_colored(info.name, 24.0, ink::RUBRIC));
-        c.spawn(theme.text(format!("Ветвь: {} · ступень {}", info.skill.name().to_lowercase(), info.tier + 1), 13.0, ink::INK_DIM));
+        c.spawn(theme.text(
+            format!(
+                "Ветвь: {} · ступень {}",
+                info.skill.name().to_lowercase(),
+                info.tier + 1
+            ),
+            13.0,
+            ink::INK_DIM,
+        ));
         c.spawn(theme.text(info.about, 15.0, ink::INK));
         c.spawn(theme.bold(format!("Даёт: {}", info.effect), 15.0, ink::INK));
         let status = match state {
@@ -513,9 +728,24 @@ fn perk_detail(p: &mut ChildSpawnerCommands, theme: &UiTheme, k: &Knowledge, per
             State::Near => "Знаний хватает — осталось набить руку.".to_string(),
             State::Far => "Пока далеко.".to_string(),
         };
-        c.spawn(theme.bold(status, 14.0, if state == State::Earned { ink::RUBRIC } else { ink::INK_DIM }));
+        c.spawn(theme.bold(
+            status,
+            14.0,
+            if state == State::Earned {
+                ink::RUBRIC
+            } else {
+                ink::INK_DIM
+            },
+        ));
     });
-    p.spawn(Node { flex_direction: FlexDirection::Column, row_gap: px(4), flex_basis: percent(45), flex_grow: 1.0, ..default() }).with_children(|c| {
+    p.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        row_gap: px(4),
+        flex_basis: percent(45),
+        flex_grow: 1.0,
+        ..default()
+    })
+    .with_children(|c| {
         c.spawn(theme.bold("Что нужно", 16.0, ink::RUBRIC));
         for n in info.needs {
             let met = n.met(k, &earned);
@@ -524,13 +754,26 @@ fn perk_detail(p: &mut ChildSpawnerCommands, theme: &UiTheme, k: &Knowledge, per
                 Need::HerbsKnown(_) => format!(" (узнаёте {})", skill_tree::herbs_known(k)),
                 _ => String::new(),
             };
-            let line = format!("{} {}{}", if met { "есть —" } else { "нужно —" }, n.label(), have);
+            let line = format!(
+                "{} {}{}",
+                if met {
+                    "есть —"
+                } else {
+                    "нужно —"
+                },
+                n.label(),
+                have
+            );
             c.spawn(theme.text(line, 14.0, if met { OK_INK } else { ink::RUBRIC }));
         }
         let links = perk.links();
         if !links.is_empty() {
             let names: Vec<&str> = links.iter().map(|s| s.name()).collect();
-            c.spawn(theme.text(format!("Связано с: {}", names.join(", ").to_lowercase()), 13.0, ink::INK_DIM));
+            c.spawn(theme.text(
+                format!("Связано с: {}", names.join(", ").to_lowercase()),
+                13.0,
+                ink::INK_DIM,
+            ));
         }
     });
 }
@@ -539,18 +782,40 @@ fn skill_detail(p: &mut ChildSpawnerCommands, theme: &UiTheme, k: &Knowledge, sk
     let about = skill_tree::about(skill);
     let base = k.base_skill(skill);
     let bonus = k.skill(skill) - base;
-    p.spawn(Node { flex_direction: FlexDirection::Column, row_gap: px(5), flex_basis: percent(55), flex_grow: 1.0, ..default() }).with_children(|c| {
+    p.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        row_gap: px(5),
+        flex_basis: percent(55),
+        flex_grow: 1.0,
+        ..default()
+    })
+    .with_children(|c| {
         c.spawn(theme.title_colored(skill.name(), 24.0, ink::RUBRIC));
-        let lvl = if bonus > 0.05 { format!("Навык {base:.1} из 100, в работе +{bonus:.0} от умений") } else { format!("Навык {base:.1} из 100") };
+        let lvl = if bonus > 0.05 {
+            format!("Навык {base:.1} из 100, в работе +{bonus:.0} от умений")
+        } else {
+            format!("Навык {base:.1} из 100")
+        };
         c.spawn(theme.text(lvl, 13.0, ink::INK_DIM));
         c.spawn(theme.text(format!("Даёт: {}", about.gives), 15.0, ink::INK));
         c.spawn(theme.text(format!("Растёт: {}", about.grows), 15.0, ink::INK));
     });
-    p.spawn(Node { flex_direction: FlexDirection::Column, row_gap: px(4), flex_basis: percent(45), flex_grow: 1.0, ..default() }).with_children(|c| {
+    p.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        row_gap: px(4),
+        flex_basis: percent(45),
+        flex_grow: 1.0,
+        ..default()
+    })
+    .with_children(|c| {
         let spill = skill.spillover();
         if !spill.is_empty() {
             let names: Vec<&str> = spill.iter().map(|(s, _)| s.name()).collect();
-            c.spawn(theme.text(format!("Заодно растёт: {}", names.join(", ").to_lowercase()), 14.0, ink::INK));
+            c.spawn(theme.text(
+                format!("Заодно растёт: {}", names.join(", ").to_lowercase()),
+                14.0,
+                ink::INK,
+            ));
         }
         let teachers = crate::guide::teachers(skill);
         c.spawn(theme.bold("Кто учит", 16.0, ink::RUBRIC));
@@ -582,14 +847,32 @@ fn highlight_links(
     *last = Some((focus, ui.built));
     let (lit_perks, lit_skills): (Vec<Perk>, Vec<Skill>) = match focus {
         Some(Focus::Perk(p)) => {
-            let mut ps: Vec<Perk> = p.info().needs.iter().filter_map(|n| if let Need::Perk(q) = n { Some(*q) } else { None }).collect();
+            let mut ps: Vec<Perk> = p
+                .info()
+                .needs
+                .iter()
+                .filter_map(|n| {
+                    if let Need::Perk(q) = n {
+                        Some(*q)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
             // И то, что откроется следом.
-            ps.extend(Perk::ALL.iter().filter(|q| q.info().needs.contains(&Need::Perk(p))));
+            ps.extend(
+                Perk::ALL
+                    .iter()
+                    .filter(|q| q.info().needs.contains(&Need::Perk(p))),
+            );
             ps.push(p);
             (ps, p.links())
         }
         Some(Focus::Skill(s)) => {
-            let ps: Vec<Perk> = Perk::ALL.into_iter().filter(|q| q.info().skill != s && q.links().contains(&s)).collect();
+            let ps: Vec<Perk> = Perk::ALL
+                .into_iter()
+                .filter(|q| q.info().skill != s && q.links().contains(&s))
+                .collect();
             let mut ss: Vec<Skill> = s.spillover().iter().map(|(t, _)| *t).collect();
             ss.push(s);
             (ps, ss)
@@ -597,16 +880,28 @@ fn highlight_links(
         None => (Vec::new(), Vec::new()),
     };
     for (n, base, mut color) in &mut perks {
-        let want = if lit_perks.contains(&n.0) { LINK } else { base.0 };
+        let want = if lit_perks.contains(&n.0) {
+            LINK
+        } else {
+            base.0
+        };
         *color = BorderColor::all(want);
     }
     for (h, base, mut color) in &mut headers {
-        let want = if lit_skills.contains(&h.0) { LINK } else { base.0 };
+        let want = if lit_skills.contains(&h.0) {
+            LINK
+        } else {
+            base.0
+        };
         *color = BorderColor::all(want);
     }
 }
 
-fn scroll_column(p: &mut ChildSpawnerCommands, flex_basis: Val, f: impl FnOnce(&mut ChildSpawnerCommands)) {
+fn scroll_column(
+    p: &mut ChildSpawnerCommands,
+    flex_basis: Val,
+    f: impl FnOnce(&mut ChildSpawnerCommands),
+) {
     p.spawn((
         Node {
             flex_direction: FlexDirection::Column,
@@ -627,16 +922,34 @@ fn scroll_column(p: &mut ChildSpawnerCommands, flex_basis: Val, f: impl FnOnce(&
 
 fn build_knowledge(p: &mut ChildSpawnerCommands, theme: &UiTheme, k: &Knowledge) {
     let [left, mid, right] = crate::lore_client::knowledge_lines(k);
-    p.spawn(Node { width: percent(100), flex_grow: 1.0, min_height: px(0), column_gap: px(28), ..default() }).with_children(|row| {
-        for (title, lines) in [("Навыки и грамота", left), ("Травы и вещества", mid), ("Приёмы", right)] {
+    p.spawn(Node {
+        width: percent(100),
+        flex_grow: 1.0,
+        min_height: px(0),
+        column_gap: px(28),
+        ..default()
+    })
+    .with_children(|row| {
+        for (title, lines) in [
+            ("Навыки и грамота", left),
+            ("Травы и вещества", mid),
+            ("Приёмы", right),
+        ] {
             scroll_column(row, percent(33), |c| {
                 c.spawn(theme.title_colored(title, 24.0, ink::RUBRIC));
                 if lines.is_empty() {
-                    c.spawn(theme.text("Пока ничего. Узнавайте у мастеров и из книг.", 15.0, ink::INK_DIM));
+                    c.spawn(theme.text(
+                        "Пока ничего. Узнавайте у мастеров и из книг.",
+                        15.0,
+                        ink::INK_DIM,
+                    ));
                 }
                 for line in lines {
                     if line.is_empty() {
-                        c.spawn(Node { height: px(6), ..default() });
+                        c.spawn(Node {
+                            height: px(6),
+                            ..default()
+                        });
                     } else if line.ends_with(':') {
                         c.spawn(theme.bold(line, 15.0, ink::RUBRIC));
                     } else {
@@ -649,14 +962,35 @@ fn build_knowledge(p: &mut ChildSpawnerCommands, theme: &UiTheme, k: &Knowledge)
 }
 
 fn build_journal(p: &mut ChildSpawnerCommands, theme: &UiTheme, chapter: Chapter, hints_on: bool) {
-    p.spawn(Node { width: percent(100), flex_grow: 1.0, min_height: px(0), column_gap: px(26), ..default() }).with_children(|row| {
-        row.spawn(Node { flex_direction: FlexDirection::Column, width: px(230), flex_shrink: 0.0, row_gap: px(3), ..default() }).with_children(|list| {
+    p.spawn(Node {
+        width: percent(100),
+        flex_grow: 1.0,
+        min_height: px(0),
+        column_gap: px(26),
+        ..default()
+    })
+    .with_children(|row| {
+        row.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            width: px(230),
+            flex_shrink: 0.0,
+            row_gap: px(3),
+            ..default()
+        })
+        .with_children(|list| {
             for c in Chapter::all() {
                 let mut b = theme.toggle_button(list, &c.title(), ChapterButton(c), c == chapter);
                 b.entry::<Node>().and_modify(|mut n| n.width = percent(100));
             }
-            list.spawn(Node { flex_grow: 1.0, ..default() });
-            let label = if hints_on { "Подсказки: включены" } else { "Подсказки: выключены" };
+            list.spawn(Node {
+                flex_grow: 1.0,
+                ..default()
+            });
+            let label = if hints_on {
+                "Подсказки: включены"
+            } else {
+                "Подсказки: выключены"
+            };
             let mut b = theme.toggle_button(list, label, HintsToggle, hints_on);
             b.entry::<Node>().and_modify(|mut n| n.width = percent(100));
         });
@@ -664,7 +998,13 @@ fn build_journal(p: &mut ChildSpawnerCommands, theme: &UiTheme, chapter: Chapter
             page.spawn(theme.title_colored(chapter.title(), 30.0, ink::RUBRIC));
             for para in chapter.page() {
                 if let Some(h) = para.strip_prefix("# ") {
-                    page.spawn((theme.bold(h, 18.0, ink::RUBRIC), Node { margin: UiRect::top(px(8)), ..default() }));
+                    page.spawn((
+                        theme.bold(h, 18.0, ink::RUBRIC),
+                        Node {
+                            margin: UiRect::top(px(8)),
+                            ..default()
+                        },
+                    ));
                 } else {
                     page.spawn(theme.text(para, 16.0, ink::INK));
                 }
@@ -674,13 +1014,24 @@ fn build_journal(p: &mut ChildSpawnerCommands, theme: &UiTheme, chapter: Chapter
 }
 
 /// `MRPG_SHOT_UI=skills|knowledge|journal[:глава]` — открыть книгу перед снимком.
-fn dev_open_book(time: Res<Time>, mut ui: ResMut<BookUi>, mut done: Local<bool>, mut frames: Local<u32>) {
+fn dev_open_book(
+    time: Res<Time>,
+    mut ui: ResMut<BookUi>,
+    mut done: Local<bool>,
+    mut frames: Local<u32>,
+) {
     if *done {
         return;
     }
-    let delay: f32 = std::env::var("MRPG_SHOT_DELAY").ok().and_then(|s| s.parse().ok()).unwrap_or(8.0);
+    let delay: f32 = std::env::var("MRPG_SHOT_DELAY")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(8.0);
     *frames += 1;
-    let ready = match std::env::var("MRPG_SHOT_FRAMES").ok().and_then(|s| s.parse::<u32>().ok()) {
+    let ready = match std::env::var("MRPG_SHOT_FRAMES")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+    {
         Some(n) => *frames >= n,
         None => time.elapsed_secs() > delay - 1.5,
     };
@@ -693,13 +1044,21 @@ fn dev_open_book(time: Res<Time>, mut ui: ResMut<BookUi>, mut done: Local<bool>,
         "skills" => ui.show(Tab::Skills),
         "knowledge" => ui.show(Tab::Knowledge),
         "journal" => {
-            let chapter = Chapter::all().into_iter().find(|c| c.title().to_lowercase().starts_with(&arg.to_lowercase()) && !arg.is_empty()).unwrap_or(Chapter::Start);
+            let chapter = Chapter::all()
+                .into_iter()
+                .find(|c| {
+                    c.title().to_lowercase().starts_with(&arg.to_lowercase()) && !arg.is_empty()
+                })
+                .unwrap_or(Chapter::Start);
             ui.show_chapter(chapter);
         }
         _ => {}
     }
     if let Ok(focus) = std::env::var("MRPG_SHOT_FOCUS") {
-        ui.pinned = Perk::ALL.into_iter().find(|p| p.info().name == focus).map(Focus::Perk);
+        ui.pinned = Perk::ALL
+            .into_iter()
+            .find(|p| p.info().name == focus)
+            .map(Focus::Perk);
     }
     *done = true;
 }

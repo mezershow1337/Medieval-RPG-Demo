@@ -644,7 +644,8 @@ fn update_patch_looks(view: Res<LoreView>, mut patches: Query<(&PatchModel, &Chi
 pub fn knowledge_lines(k: &Knowledge) -> [Vec<String>; 3] {
     let mut left = Vec::new();
     for s in Skill::ALL {
-        left.push(format!("{}: {:.0}", s.name(), k.skill(s)));
+        let (base, bonus) = (k.base_skill(s), k.skill(s) - k.base_skill(s));
+        left.push(if bonus > 0.05 { format!("{}: {base:.0} (+{bonus:.0} от умений)", s.name()) } else { format!("{}: {base:.0}", s.name()) });
     }
     left.push(String::new());
     for lang in [Language::Greek, Language::Latin] {

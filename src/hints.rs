@@ -109,7 +109,7 @@ fn setup_hint_ui(mut commands: Commands, theme: Res<UiTheme>) {
                 position_type: PositionType::Absolute,
                 right: px(18),
                 top: percent(20),
-                max_width: px(390),
+                width: px(390),
                 padding: Skin::Leather.padding(),
                 flex_direction: FlexDirection::Column,
                 row_gap: px(4),
