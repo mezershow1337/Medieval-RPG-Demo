@@ -17,7 +17,7 @@ pub mod places;
 mod terrain;
 
 pub use places::*;
-pub use terrain::{WATER_Y, ground_y, inside_city};
+pub use terrain::{WATER_Y, ground_y, height_at, inside_city};
 
 use crate::collision::{Aabb, HeightField, LevelColliders};
 use bevy::light::NotShadowCaster;
