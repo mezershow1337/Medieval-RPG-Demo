@@ -1,0 +1,64 @@
+# Готовая сборка для Windows: MedievalRPG.exe + assets в zip-архиве.
+# На каждый PR — проверка, что всё собирается и тесты проходят.
+# На каждый push в main — ещё и релиз с архивом (Releases → Latest).
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust
+        run: rustup update stable && rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Тесты
+        run: cargo test --release
+
+      - name: Сборка
+        run: cargo build --release
+
+      - name: Упаковка
+        shell: pwsh
+        run: |
+          $dir = "MedievalRPG"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item target/release/medieval_rpg.exe "$dir/MedievalRPG.exe"
+          Copy-Item -Recurse assets "$dir/assets"
+          Copy-Item "dist/README-Как-играть.txt" "$dir/"
+          Compress-Archive -Path $dir -DestinationPath MedievalRPG-windows.zip -CompressionLevel Optimal
+          "{0:N1} МБ" -f ((Get-Item MedievalRPG-windows.zip).Length / 1MB)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MedievalRPG-windows
+          path: MedievalRPG-windows.zip
+          compression-level: 0
+
+      - name: Релиз
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Сборка для Windows №${{ github.run_number }}
+          body: |
+            Распакуй архив и запусти MedievalRPG.exe — откроется меню «Создать игру / Подключиться».
+            Подробности в README-Как-играть.txt внутри архива.
+          files: MedievalRPG-windows.zip
+          make_latest: true

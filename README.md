@@ -12,7 +12,16 @@
 | **Некрополь за южными воротами** | **Стан кочевников** |
 | ![Некрополь](docs/chersonesus_necropolis.jpg) | ![Стан кочевников](docs/chersonesus_steppe_camp.jpg) |
 
-## Что нужно установить (Windows)
+## Готовая сборка для друзей (без Rust)
+
+Каждый merge в `main` собирает архив **MedievalRPG-windows.zip** (exe + assets) — он лежит в
+[Releases → Latest](../../releases/latest). Распаковать, запустить `MedievalRPG.exe`, в меню выбрать
+«1 — Создать игру» или «2 — Подключиться» и ввести адрес (например `abc.at.ply.gg:12345`).
+Подробно — в [dist/README-Как-играть.txt](dist/README-Как-играть.txt).
+
+`cargo run` меню не показывает и, как раньше, сразу запускает хост.
+
+## Что нужно установить для разработки (Windows)
 
 1. **Visual Studio** с нагрузкой «Разработка классических приложений на C++» (нужны MSVC и Windows SDK).
 2. **Rust**: https://rustup.rs (установка по умолчанию).
