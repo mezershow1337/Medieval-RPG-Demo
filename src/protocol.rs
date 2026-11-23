@@ -6,7 +6,24 @@ use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendTyp
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_0011;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_0012;
+/// Имя, под которым другие видят игрока: греческое или готское имя той эпохи, всегда одно
+/// и то же для одного игрока (по его номеру соединения), чтобы не показывать голый номер.
+pub fn player_name(id: u64) -> &'static str {
+    const NAMES: [&str; 32] = [
+        "Иоанн", "Феодор", "Георгий", "Стефан", "Василий", "Никифор", "Евстафий", "Лев",
+        "Маркиан", "Сергий", "Петр", "Димитрий", "Константин", "Анастасий", "Фока", "Зинон",
+        "Мина", "Прокопий", "Феофил", "Никита", "Варда", "Евагрий", "Аркадий", "Кирилл",
+        "Феодорих", "Витигес", "Тотила", "Гайна", "Сабир", "Аспар", "Ардабур", "Велизарий",
+    ];
+    // Номера соединений берутся из времени и бывают похожи: перемешиваем биты.
+    let mut x = id ^ 0x9E37_79B9_7F4A_7C15;
+    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^= x >> 31;
+    NAMES[(x % NAMES.len() as u64) as usize]
+}
+
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -206,4 +223,16 @@ pub fn encode<T: Serialize>(value: &T) -> Vec<u8> {
 
 pub fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Option<T> {
     postcard::from_bytes(bytes).ok()
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    #[test]
+    fn player_names_are_stable_and_varied() {
+        assert_eq!(player_name(1785456253816348000), player_name(1785456253816348000));
+        let names: std::collections::HashSet<_> = (0..64u64).map(|i| player_name(1785456253816348000 + i * 1000)).collect();
+        assert!(names.len() > 16, "{names:?}");
+    }
 }

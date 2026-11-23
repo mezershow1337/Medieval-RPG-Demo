@@ -808,6 +808,7 @@ fn dev_shot(
     mut done: Local<u8>,
     mut placed: Local<u8>,
     mut frames: Local<u32>,
+    mut since_shot: Local<u32>,
     mut client: Option<ResMut<RenetClient>>,
     mut fx: ResMut<crate::alchemy_fx::FxQueue>,
     mut exit: MessageWriter<AppExit>,
@@ -917,7 +918,12 @@ fn dev_shot(
         commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(path));
         *done = 2;
     }
-    if *done == 2 && t > delay + 2.0 {
+    if *done == 2 {
+        *since_shot += 1;
+    }
+    // Снимок сохраняется не сразу (кадр читается из видеокарты), даём ему несколько кадров.
+    let saved = std::env::var("MRPG_SHOT").is_ok_and(|p| std::path::Path::new(&p).exists());
+    if *done == 2 && t > delay + 2.0 && (saved && *since_shot > 4 || *since_shot > 120) {
         exit.write(AppExit::Success);
     }
 }

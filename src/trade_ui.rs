@@ -833,7 +833,7 @@ fn p2p_window(
     panel(root, 380.0).with_children(|p| {
         p.spawn(text(
             fonts,
-            format!("Обмен с игроком {}", p2p.partner),
+            format!("Обмен: {}", crate::protocol::player_name(p2p.partner)),
             22.0,
             TITLE,
             true,

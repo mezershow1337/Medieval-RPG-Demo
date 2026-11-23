@@ -609,7 +609,7 @@ fn update_trade_hud(
                     lines.push(format!("{} · {}", m.faction.name(), standing));
                 }
             }
-            Some(Aim::Player(id)) => lines.push(format!("[T] Предложить обмен игроку {id}")),
+            Some(Aim::Player(id)) => lines.push(format!("[T] Предложить обмен: {}", crate::protocol::player_name(id))),
             None => {}
         }
     }
@@ -617,7 +617,8 @@ fn update_trade_hud(
         && now - at <= 30.0
     {
         lines.push(format!(
-            "Игрок {from} предлагает обмен: [Y] согласиться, [N] отказать"
+            "{} предлагает обмен: [Y] согласиться, [N] отказать",
+            crate::protocol::player_name(from)
         ));
     }
     if state.fine > 0 && !state.window_open() {
