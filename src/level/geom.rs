@@ -22,6 +22,11 @@ impl MeshBuilder {
         self.idx.is_empty()
     }
 
+    /// Все треугольники (для расчётов на процессоре: над чем крыша и т. п.).
+    pub fn triangles(&self) -> impl Iterator<Item = [Vec3; 3]> + '_ {
+        self.idx.chunks_exact(3).map(|t| [0, 1, 2].map(|k| Vec3::from_array(self.pos[t[k] as usize])))
+    }
+
     /// Четырёхугольник. Порядок вершин переворачивается так, чтобы лицевая сторона смотрела по `facing`.
     pub fn quad_uv(&mut self, v: [Vec3; 4], uv: [Vec2; 4], facing: Vec3) {
         let mut n = (v[1] - v[0]).cross(v[2] - v[0]);

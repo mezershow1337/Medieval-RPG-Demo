@@ -49,6 +49,8 @@ mod smithing_client;
 mod smithing_fx;
 mod smithing_net;
 mod smithing_server;
+mod sky;
+mod smoke;
 mod surface_layers;
 mod textures;
 mod trade;

@@ -1,7 +1,7 @@
 //! Сгенерировано tools/textures/build_surface_textures.py — не править руками.
-//! Фотоматериалы ambientCG (CC0): assets/textures/surface/<слой>_albedo.jpg и _nrm.jpg.
+//! Фотоматериалы ambientCG и Poly Haven (CC0), своя черепица из Blender: assets/textures/surface/<слой>_albedo.jpg и _nrm.jpg.
 
-/// Слой фотоматериала: имя файла, id на ambientCG, метров на тайл, средний линейный цвет.
+/// Слой фотоматериала: имя файла, id на ambientCG или Poly Haven, метров на тайл, средний линейный цвет.
 pub struct Layer {
     pub name: &'static str,
     pub source: &'static str,
@@ -10,14 +10,14 @@ pub struct Layer {
 }
 
 pub const LAYERS: &[Layer] = &[
-    // 0 — тёсаный известняк рядами
-    Layer { name: "ashlar", source: "Bricks109A", meters: 2.60, mean: [0.2326, 0.1692, 0.0938] },
-    // 1 — бутовая кладка из рваного камня
-    Layer { name: "rubble", source: "Bricks102", meters: 2.40, mean: [0.2241, 0.1835, 0.1122] },
-    // 2 — старая известковая штукатурка
-    Layer { name: "plaster", source: "Plaster007", meters: 2.50, mean: [0.4996, 0.4941, 0.4532] },
-    // 3 — глиняная черепица
-    Layer { name: "roof", source: "RoofingTiles014B", meters: 2.20, mean: [0.2131, 0.0926, 0.0532] },
+    // 0 — крупные тёсаные блоки известняка, выветренные, с лишайником (фотоскан Poly Haven)
+    Layer { name: "ashlar", source: "large_sandstone_blocks_01", meters: 3.00, mean: [0.1953, 0.1597, 0.0975] },
+    // 1 — бутовая кладка из рваного известняка на растворе (фотоскан Poly Haven)
+    Layer { name: "rubble", source: "medieval_blocks_05", meters: 2.00, mean: [0.3079, 0.2013, 0.1142] },
+    // 2 — старая известковая штукатурка в потёках (фотоскан Poly Haven)
+    Layer { name: "plaster", source: "worn_mossy_plasterwall", meters: 1.80, mean: [0.2385, 0.2176, 0.1798] },
+    // 3 — черепица VI века: тегулы и калиптеры (своя, Blender: tools/textures/blender_byz_roof.py, глина — из фотоскана)
+    Layer { name: "roof", source: "MrpgByzRoof", meters: 1.50, mean: [0.1762, 0.0766, 0.0430] },
     // 4 — грубые старые доски
     Layer { name: "wood", source: "Planks039", meters: 2.40, mean: [0.4729, 0.3091, 0.1390] },
     // 5 — тёмное дерево без швов

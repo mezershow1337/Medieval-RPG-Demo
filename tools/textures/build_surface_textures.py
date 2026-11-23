@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Фотоматериалы уровня: камень, дерево, земля, черепица, ткань, металл.
 
-Источник — ambientCG (https://ambientcg.com), все материалы там под лицензией CC0
-(общественное достояние). Скрипт:
-  1. берёт (или скачивает) архивы <Id>_1K-JPG.zip;
+Источники — ambientCG (https://ambientcg.com) и Poly Haven (https://polyhaven.com, id в нижнем
+регистре), все материалы там под лицензией CC0 (общественное достояние); слой roof — свой
+(Blender). Скрипт:
+  1. берёт (или скачивает) архивы <Id>_1K-JPG.zip, либо карты <id>_Color/NormalGL/Roughness/
+     AmbientOcclusion.(jpg|png) из папки;
   2. для каждого слоя собирает две картинки 1024×1024:
        <layer>_albedo.jpg — цвет × мягкая AO (sRGB);
        <layer>_nrm.jpg    — R,G = нормаль (OpenGL, +Y вверх), B = шероховатость;
@@ -26,10 +28,10 @@ SIZE = 1024
 
 # (слой, id ambientCG, метров на тайл, что это)
 LAYERS = [
-    ("ashlar", "Bricks109A", 2.6, "тёсаный известняк рядами"),
-    ("rubble", "Bricks102", 2.4, "бутовая кладка из рваного камня"),
-    ("plaster", "Plaster007", 2.5, "старая известковая штукатурка"),
-    ("roof", "RoofingTiles014B", 2.2, "глиняная черепица"),
+    ("ashlar", "large_sandstone_blocks_01", 3.0, "крупные тёсаные блоки известняка, выветренные, с лишайником (фотоскан Poly Haven)"),
+    ("rubble", "medieval_blocks_05", 2.0, "бутовая кладка из рваного известняка на растворе (фотоскан Poly Haven)"),
+    ("plaster", "worn_mossy_plasterwall", 1.8, "старая известковая штукатурка в потёках (фотоскан Poly Haven)"),
+    ("roof", "MrpgByzRoof", 1.5, "черепица VI века: тегулы и калиптеры (своя, Blender: tools/textures/blender_byz_roof.py, глина — из фотоскана)"),
     ("wood", "Planks039", 2.4, "грубые старые доски"),
     ("beam", "Wood060", 1.6, "тёмное дерево без швов"),
     ("earth", "Ground109", 3.0, "утоптанная сухая земля"),
@@ -48,6 +50,25 @@ LAYERS = [
 ]
 
 
+# Крупные пятна на фото (тёмный лишайник на одном блоке) при повторе тайла бросаются в глаза:
+# у этих слоёв гасим низкие частоты яркости (доля 0..1), мелкая фактура остаётся.
+FLATTEN = {"ashlar": 0.6, "plaster": 0.4}
+
+
+def flatten(lin, k):
+    lum = lin.mean(-1)
+    n = SIZE // 16
+    small = lum.reshape(n, 16, n, 16).mean((1, 3))
+    for _ in range(3):  # сглаживание с заворотом краёв — тайл остаётся бесшовным
+        small = (small + np.roll(small, 1, 0) + np.roll(small, -1, 0) + np.roll(small, 1, 1) + np.roll(small, -1, 1)) / 5
+    pad = 2
+    big = Image.fromarray(np.pad(small, pad, mode="wrap").astype(np.float32), "F")
+    big = big.resize(((n + 2 * pad) * 16,) * 2, Image.BILINEAR)
+    low = np.asarray(big)[pad * 16 + 8 - 8:pad * 16 + SIZE, pad * 16:pad * 16 + SIZE][:SIZE, :SIZE]
+    gain = (lum.mean() / np.maximum(low, 1e-4)) ** k
+    return lin * gain[..., None]
+
+
 def fetch(asset, src):
     """Возвращает словарь карта -> PIL.Image."""
     maps = {}
@@ -61,6 +82,8 @@ def fetch(asset, src):
         zp = os.path.join(src, asset + "_1K-JPG.zip")
         if not maps and os.path.exists(zp):
             maps = from_zip(open(zp, "rb").read(), names)
+    if not maps and asset.islower():
+        maps = from_polyhaven(asset, names)
     if not maps:
         cache = os.path.expanduser("~/.cache/mrpg-ambientcg")
         os.makedirs(cache, exist_ok=True)
@@ -71,6 +94,22 @@ def fetch(asset, src):
             req = urllib.request.Request(url, headers={"User-Agent": "mrpg-texture-builder"})
             open(zp, "wb").write(urllib.request.urlopen(req, timeout=120).read())
         maps = from_zip(open(zp, "rb").read(), names)
+    return maps
+
+
+def from_polyhaven(asset, names):
+    """Фотоскан Poly Haven (CC0, https://polyhaven.com/license), карты 2K."""
+    import json
+    get = lambda u: urllib.request.urlopen(urllib.request.Request(u, headers={"User-Agent": "mrpg-texture-builder"}), timeout=120).read()
+    files = json.loads(get("https://api.polyhaven.com/files/" + asset))
+    keys = {"Diffuse": "color", "nor_gl": "normal", "Rough": "rough", "AO": "ao"}
+    maps = {}
+    for k, v in keys.items():
+        if k in files:
+            d = files[k]["2k"]
+            fmt = "jpg" if "jpg" in d else "png"
+            print("скачиваю", d[fmt]["url"])
+            maps[v] = Image.open(io.BytesIO(get(d[fmt]["url"])))
     return maps
 
 
@@ -111,6 +150,8 @@ def main():
             # AO вносим в цвет мягко: прямой свет её не знает, а SSAO крупнее масштабом.
             ao = arr(m["ao"], "L")[..., None]
             lin = lin * (0.35 + 0.65 * ao)
+        if layer in FLATTEN:
+            lin = flatten(lin, FLATTEN[layer])
         alb = (np.clip(to_srgb(lin), 0, 1) * 255 + 0.5).astype(np.uint8)
         Image.fromarray(alb, "RGB").save(os.path.join(OUT, layer + "_albedo.jpg"), quality=93, subsampling=0)
         nrm = arr(m["normal"], "RGB")
@@ -123,8 +164,8 @@ def main():
 
     with open(RS, "w", encoding="utf-8") as f:
         f.write("//! Сгенерировано tools/textures/build_surface_textures.py — не править руками.\n")
-        f.write("//! Фотоматериалы ambientCG (CC0): assets/textures/surface/<слой>_albedo.jpg и _nrm.jpg.\n\n")
-        f.write("/// Слой фотоматериала: имя файла, id на ambientCG, метров на тайл, средний линейный цвет.\n")
+        f.write("//! Фотоматериалы ambientCG и Poly Haven (CC0), своя черепица из Blender: assets/textures/surface/<слой>_albedo.jpg и _nrm.jpg.\n\n")
+        f.write("/// Слой фотоматериала: имя файла, id на ambientCG или Poly Haven, метров на тайл, средний линейный цвет.\n")
         f.write("pub struct Layer {\n    pub name: &'static str,\n    pub source: &'static str,\n    pub meters: f32,\n    pub mean: [f32; 3],\n}\n\n")
         f.write("pub const LAYERS: &[Layer] = &[\n")
         for i, layer, asset, meters, mean, what in rows:

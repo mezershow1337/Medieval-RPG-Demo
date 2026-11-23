@@ -694,6 +694,16 @@ fn fragment(
         // Крупные пятна выцветания и потемнения — ломают повтор тайла.
         let macro_v = fbm(wp.xz * 0.07 + wp.y * 0.05) - 0.5;
         color *= 1.0 + macro_v * variation * 1.2;
+        if kind == 12 {
+            // Черепичные крыши издалека: у одних домов черепица новее и краснее, у других —
+            // старая, бурая и серая от копоти очагов и лишайника; пятнами, а не ровной заливкой.
+            let age = smoothstep(0.3, 0.7, fbm(wp.xz * 0.035 + vec2<f32>(3.7, 9.1)));
+            color *= mix(vec3<f32>(1.12, 1.04, 0.96), vec3<f32>(0.68, 0.64, 0.62), age);
+            let patches = smoothstep(0.5, 0.8, fbm(wp.xz * 0.32 + vec2<f32>(wp.y * 0.2, 1.3)));
+            color = mix(color, vec3<f32>(0.075, 0.068, 0.058), patches * (0.25 + 0.35 * age));
+            let lichen = smoothstep(0.72, 0.86, fbm(wp.xz * 1.7 + vec2<f32>(5.1, 2.3))) * age;
+            color = mix(color, vec3<f32>(0.24, 0.23, 0.17), lichen * 0.45);
+        }
         rough = clamp(mix(rough, ph.rough, 0.85), 0.05, 1.0);
         N = ph.n;
 

@@ -807,12 +807,20 @@ fn dev_shot(
     mut brew: ResMut<crate::brewing_client::BrewState>,
     mut done: Local<u8>,
     mut placed: Local<u8>,
+    mut frames: Local<u32>,
     mut client: Option<ResMut<RenetClient>>,
     mut fx: ResMut<crate::alchemy_fx::FxQueue>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let delay: f32 = std::env::var("MRPG_SHOT_DELAY").ok().and_then(|s| s.parse().ok()).unwrap_or(8.0);
-    let t = time.elapsed_secs();
+    let mut t = time.elapsed_secs();
+    // `MRPG_SHOT_FRAMES=n` — снимок после n кадров (на программном рендере кадр идёт секунды,
+    // а игровое время за кадр ограничено 0,25 с, поэтому задержка в секундах тянется долго).
+    if let Some(n) = std::env::var("MRPG_SHOT_FRAMES").ok().and_then(|s| s.parse::<u32>().ok()) {
+        *frames += 1;
+        info!("снимок: кадр {} из {n}", *frames);
+        t = if *frames >= n + 4 { delay + 3.0 } else if *frames >= n { delay + 1.0 } else { 0.0 };
+    }
     let ui = std::env::var("MRPG_SHOT_UI").unwrap_or_default();
     // `MRPG_SHOT_UI=fx` — выставить перед камерой сосуды на огне и показать вспышку и осколки.
     if ui == "fx"

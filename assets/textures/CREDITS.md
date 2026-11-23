@@ -1,16 +1,22 @@
 # Происхождение текстур
 
 `surface/` собирает `tools/textures/build_surface_textures.py` из фотоматериалов
-[ambientCG](https://ambientcg.com). Все они выпущены под **CC0 1.0** (общественное достояние,
-https://docs.ambientcg.com/license/): можно использовать, менять и распространять без ограничений.
-Ассеты сторонних игр не используются.
+[ambientCG](https://ambientcg.com) и фотосканов [Poly Haven](https://polyhaven.com). Все они
+выпущены под **CC0 1.0** (общественное достояние, https://docs.ambientcg.com/license/,
+https://polyhaven.com/license): можно использовать, менять и распространять без ограничений.
+Слой `roof` — своя работа: черепица VI века (плоские тегулы с бортиками и полукруглые калиптеры
+над стыками, как в Херсонесе того времени) смоделирована и запечена в Blender скриптом
+`tools/textures/blender_byz_roof.py`. Поверхность глины для неё собрана
+`tools/textures/quilt_clay.py` из кусочков фотоскана Poly Haven `clay_roof_tiles_02` (без его
+рисунка черепицы), поры — карта высот `clay_plaster`, пятна грязи — `worn_mossy_plasterwall`
+(все CC0). Ассеты сторонних игр не используются.
 
-| Слой | Материал ambientCG | Что это |
+| Слой | Материал | Что это |
 |---|---|---|
-| ashlar | [Bricks109A](https://ambientcg.com/view?id=Bricks109A) | тёсаный известняк рядами |
-| rubble | [Bricks102](https://ambientcg.com/view?id=Bricks102) | бутовая кладка из рваного камня |
-| plaster | [Plaster007](https://ambientcg.com/view?id=Plaster007) | старая известковая штукатурка |
-| roof | [RoofingTiles014B](https://ambientcg.com/view?id=RoofingTiles014B) | глиняная черепица |
+| ashlar | [large_sandstone_blocks_01](https://polyhaven.com/a/large_sandstone_blocks_01) (Poly Haven, Rob Tuytel) | крупные тёсаные блоки известняка |
+| rubble | [medieval_blocks_05](https://polyhaven.com/a/medieval_blocks_05) (Poly Haven, Rob Tuytel) | бутовая кладка из рваного известняка на растворе |
+| plaster | [worn_mossy_plasterwall](https://polyhaven.com/a/worn_mossy_plasterwall) (Poly Haven, Amal Kumar) | старая известковая штукатурка в потёках |
+| roof | своя (Blender, `tools/textures/blender_byz_roof.py`; глина из [clay_roof_tiles_02](https://polyhaven.com/a/clay_roof_tiles_02), Amal Kumar) | черепица VI века: тегулы и калиптеры |
 | wood | [Planks039](https://ambientcg.com/view?id=Planks039) | грубые старые доски |
 | beam | [Wood060](https://ambientcg.com/view?id=Wood060) | тёмное дерево без швов |
 | earth | [Ground109](https://ambientcg.com/view?id=Ground109) | утоптанная сухая земля |
