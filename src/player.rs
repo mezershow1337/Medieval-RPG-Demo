@@ -123,11 +123,17 @@ fn movement(
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     mut player: Query<(&mut LocalPlayer, &mut Transform, Option<&mut crate::fight::LocalFighter>)>,
     others: Query<&Transform, (With<crate::client::RemoteActor>, Without<LocalPlayer>)>,
+    dev: Option<Res<crate::console::DevMove>>,
 ) {
     let dt = time.delta_secs().min(1.0 / 20.0);
     let controls = cursor_locked(&cursor);
+    let cheats = dev.map(|d| d.cheats).unwrap_or_default();
     for (mut p, mut transform, mut fighter) in &mut player {
         let pressed = |k| controls && keys.pressed(k);
+        if cheats.fly {
+            fly(&mut p, &mut transform, &level, cheats, dt, pressed);
+            continue;
+        }
         let mut wish = Vec3::ZERO;
         if pressed(KeyCode::KeyW) {
             wish.z -= 1.0;
@@ -168,7 +174,7 @@ fn movement(
             WALK_SPEED
         };
 
-        let target = wish * speed * p.speed_mult * gear_mult;
+        let target = wish * speed * p.speed_mult * gear_mult * cheats.speed;
         let accel = if p.grounded { GROUND_ACCEL } else { AIR_ACCEL };
         let horizontal = Vec3::new(p.velocity.x, 0.0, p.velocity.z);
         let diff = target - horizontal;
@@ -219,6 +225,48 @@ fn movement(
             feet = crate::level::spawn_point(0);
             p.velocity = Vec3::ZERO;
         }
+        transform.translation = feet;
+    }
+}
+
+/// Полёт из консоли разработчика: WASD по направлению взгляда, Пробел вверх, Ctrl/C вниз,
+/// Shift быстрее. С `noclip` — сквозь стены.
+fn fly(p: &mut LocalPlayer, transform: &mut Transform, level: &LevelColliders, cheats: crate::console_net::Cheats, dt: f32, pressed: impl Fn(KeyCode) -> bool) {
+    const FLY_SPEED: f32 = 9.0;
+    let look = Quat::from_rotation_y(p.yaw) * Quat::from_rotation_x(p.pitch);
+    let mut wish = Vec3::ZERO;
+    if pressed(KeyCode::KeyW) {
+        wish += look * Vec3::NEG_Z;
+    }
+    if pressed(KeyCode::KeyS) {
+        wish += look * Vec3::Z;
+    }
+    if pressed(KeyCode::KeyA) {
+        wish += look * Vec3::NEG_X;
+    }
+    if pressed(KeyCode::KeyD) {
+        wish += look * Vec3::X;
+    }
+    if pressed(KeyCode::Space) {
+        wish += Vec3::Y;
+    }
+    if pressed(KeyCode::ControlLeft) || pressed(KeyCode::KeyC) {
+        wish -= Vec3::Y;
+    }
+    let boost = if pressed(KeyCode::ShiftLeft) { 4.0 } else { 1.0 };
+    let target = wish.normalize_or_zero() * FLY_SPEED * boost * cheats.speed;
+    // Плавный разгон и торможение.
+    let t = 1.0 - (-10.0 * dt).exp();
+    p.velocity += (target - p.velocity) * t;
+    p.grounded = false;
+    p.crouching = false;
+    p.sprinting = false;
+    let delta = p.velocity * dt;
+    if cheats.noclip {
+        transform.translation += delta;
+    } else {
+        let mut feet = transform.translation;
+        level.move_body(&Body::STANDING, &mut feet, delta, false);
         transform.translation = feet;
     }
 }
