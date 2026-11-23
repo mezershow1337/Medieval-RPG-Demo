@@ -1,6 +1,5 @@
-//! Интерфейс: прицел, здоровье, надписи боя, статус подключения, подсказка по управлению.
-//! Пока на английском: встроенный шрифт Bevy не содержит кириллицы
-//! (русский шрифт добавляется в треде про инвентарь).
+//! Интерфейс: прицел с меткой направления удара и окна парирования, здоровье, надписи боя,
+//! статус подключения, подсказка по управлению. Надписи боя и подсказка — по-русски (шрифт Lora).
 
 use crate::client::{NetState, RemoteActor};
 use crate::fight::{Banner, DamageFlash, LocalFighter};
@@ -26,21 +25,29 @@ struct FlashOverlay;
 struct TargetText;
 #[derive(Component)]
 struct StaminaFill;
+#[derive(Component)]
+struct HelpText;
+/// Точка у прицела: направление удара `Swing::ALL[i]` (через каждые 45°, от «справа» против часовой).
+#[derive(Component)]
+struct AimDot(usize);
+/// Кольцо у прицела: окно парирования, глухой блок, заминка, рипост.
+#[derive(Component)]
+struct ParryRing;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FrameTimeDiagnosticsPlugin::default())
             .add_systems(Startup, setup_hud.after(crate::inventory_ui::setup_fonts))
-            .add_systems(
-                Update,
-                (update_status, update_health, update_banner, update_target),
-            );
+            .add_systems(Update, (update_status, update_health, update_banner, update_target, update_aim));
     }
 }
 
 fn text(s: &str, size: f32, color: Color) -> (Text, TextFont, TextColor) {
     (Text::new(s), TextFont { font_size: FontSize::Px(size), ..default() }, TextColor(color))
 }
+
+const AIM_BOX: f32 = 76.0;
+const AIM_RADIUS: f32 = 26.0;
 
 fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
     // Красная вспышка при уроне (на весь экран).
@@ -49,7 +56,42 @@ fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
     commands
         .spawn(Node { width: percent(100), height: percent(100), position_type: PositionType::Absolute, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() })
         .with_children(|p| {
-            p.spawn((Node { width: px(4), height: px(4), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.8))));
+            // Прицел, вокруг — восемь точек направлений удара и кольцо парирования.
+            p.spawn(Node { width: px(AIM_BOX), height: px(AIM_BOX), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() }).with_children(|b| {
+                b.spawn((Node { width: px(4), height: px(4), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.8))));
+                let ring = 34.0;
+                b.spawn((
+                    ParryRing,
+                    Node {
+                        width: px(ring),
+                        height: px(ring),
+                        position_type: PositionType::Absolute,
+                        left: px((AIM_BOX - ring) / 2.0),
+                        top: px((AIM_BOX - ring) / 2.0),
+                        border: UiRect::all(px(2)),
+                        border_radius: BorderRadius::all(px(ring / 2.0)),
+                        ..default()
+                    },
+                    BorderColor::all(Color::NONE),
+                ));
+                for i in 0..8 {
+                    let a = (i as f32 * 45.0).to_radians();
+                    let d = 6.0;
+                    b.spawn((
+                        AimDot(i),
+                        Node {
+                            width: px(d),
+                            height: px(d),
+                            position_type: PositionType::Absolute,
+                            left: px(AIM_BOX / 2.0 + a.cos() * AIM_RADIUS - d / 2.0),
+                            top: px(AIM_BOX / 2.0 - a.sin() * AIM_RADIUS - d / 2.0),
+                            border_radius: BorderRadius::all(px(d / 2.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::NONE),
+                    ));
+                }
+            });
         });
     // Надпись по центру (парирование, смерть).
     commands
@@ -147,14 +189,68 @@ fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
         Node { position_type: PositionType::Absolute, left: px(12), top: px(10), ..default() },
     ));
     commands.spawn((
-        text(
-            "Click - capture mouse | Esc - release\nWASD - move | Shift - sprint (uses stamina) | Space - jump | Ctrl/C - crouch\nLMB - attack | RMB (hold) - guard: parry with weapon / block with shield\nAfter a successful parry press LMB for a fast riposte\n1 - bare fists | 2-9 / mouse wheel - hotbar (in inventory: hover an item and press 2-9)",
+        HelpText,
+        theme.text(
+
+            "Клик — захватить мышь | Esc — отпустить\n\
+             WASD — ходьба | Shift — бег | Пробел — прыжок | Ctrl/C — присесть\n\
+             ЛКМ — удар оттуда, куда ведёте мышь (вправо, влево, вверх, наискось; вниз — укол), СКМ — укол\n\
+             ПКМ вовремя — парирование и рипост (ЛКМ); держать — глухой блок (дорого, без рипоста)\n\
+             Q или ПКМ на замахе — финт | другой удар на замахе — морф | встречный зеркальный удар — чембер\n\
+             1 — кулаки | 2–9 / колесо — хотбар | F7 — подсказки боя у прицела",
             14.0,
-            Color::srgba(1.0, 1.0, 1.0, 0.75),
+            Color::srgba(1.0, 1.0, 1.0, 0.8),
         ),
         // Сверху слева под строкой статуса: низ экрана занят хотбаром.
         Node { position_type: PositionType::Absolute, left: px(12), top: px(64), ..default() },
     ));
+}
+
+/// Метка у прицела: куда пойдёт удар (по движению мыши), какой удар идёт сейчас,
+/// и кольцо — открыто ли окно парирования (золотое), глухой блок (серое), заминка (красное).
+fn update_aim(
+    time: Res<Time>,
+    aim: Res<crate::fight::AttackAim>,
+    local: Query<&LocalFighter>,
+    mut dots: Query<(&AimDot, &mut BackgroundColor)>,
+    mut ring: Single<&mut BorderColor, With<ParryRing>>,
+    hints: Res<crate::fight::CombatHints>,
+) {
+    use crate::combat::{Action, Swing};
+    let Ok(f) = local.single() else { return };
+    let melee = !f.fighter.weapon.ranged() && !f.fighter.is_dead() && hints.0;
+    let active = f.fighter.action.swing().filter(|_| f.fighter.action.is_attacking());
+    let riposte = matches!(f.fighter.action, Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. });
+    let pulse = 0.6 + 0.4 * (time.elapsed_secs() * 14.0).sin();
+    for (dot, mut bg) in &mut dots {
+        let swing = Swing::ALL[dot.0];
+        let allowed = f.fighter.weapon.normalize(swing) == swing;
+        bg.0 = if !melee || !allowed {
+            Color::NONE
+        } else if active == Some(swing) {
+            if riposte { Color::srgb(1.0, 0.25, 0.15) } else { Color::srgb(1.0, 0.65, 0.2) }
+        } else if active.is_none() && aim.pending == Some(swing) {
+            Color::srgba(1.0, 1.0, 1.0, 0.95)
+        } else if active.is_none() && f.fighter.can_riposte() {
+            Color::srgba(1.0, 0.8, 0.3, 0.5 * pulse)
+        } else {
+            Color::srgba(1.0, 1.0, 1.0, 0.16)
+        };
+    }
+    let c = if !melee {
+        Color::NONE
+    } else if f.fighter.can_riposte() {
+        Color::srgba(1.0, 0.8, 0.25, pulse)
+    } else if f.fighter.in_parry_window() {
+        Color::srgba(1.0, 0.85, 0.3, 0.95)
+    } else if f.fighter.guard_active() {
+        Color::srgba(0.75, 0.75, 0.8, 0.55)
+    } else if matches!(f.fighter.action, Action::ParryRecovery { .. } | Action::Recoil { .. }) {
+        Color::srgba(1.0, 0.3, 0.2, 0.6)
+    } else {
+        Color::NONE
+    };
+    **ring = BorderColor::all(c);
 }
 
 fn update_status(
