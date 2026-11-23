@@ -740,6 +740,8 @@ pub fn spawn_level(
     mut surfaces: ResMut<Assets<crate::graphics::SurfaceMaterial>>,
     mut glass_mats: ResMut<Assets<crate::graphics::GlassMaterial>>,
     mut flame_mats: ResMut<Assets<crate::graphics::FlameMaterial>>,
+    mut water_mats: ResMut<Assets<crate::sky::WaterMaterial>>,
+    mut smoke_mats: ResMut<Assets<crate::smoke::SmokeMaterial>>,
 ) {
     let mut layout = layout();
 
@@ -753,12 +755,19 @@ pub fn spawn_level(
     if let Some(ground) = &layout.ground {
         terrain::terrain_meshes(ground, &mut layout.decor);
     }
+    // Море — свой материал (отражения неба, солнечная дорожка, пена у берега).
     if let Some(y) = layout.water_y {
         let mut mb = MeshBuilder::default();
         let r = 1200.0;
         mb.quad([Vec3::new(-r, y, -r), Vec3::new(r, y, -r), Vec3::new(r, y, r), Vec3::new(-r, y, r)], Vec3::Y);
-        layout.decor.entry((Mat::Water, (i16::MAX, i16::MAX))).or_default().append(mb);
+        let mat = water_mats.add(crate::sky::water_material(&crate::graphics::mood()));
+        commands.spawn((Mesh3d(meshes.add(mb.build())), MeshMaterial3d(mat), Transform::IDENTITY, NotShadowCaster));
     }
+    // Дым из очагов и горнов: над крышей, если очаг под черепицей.
+    let roofs: Vec<[Vec3; 3]> = layout.decor.iter().filter(|((m, _), _)| *m == Mat::Tile).flat_map(|(_, mb)| mb.triangles()).collect();
+    let forges: Vec<Vec3> = layout.forges.iter().map(|f| f.fire).collect();
+    let smoke = crate::smoke::smoke_sources(&layout.hearths, &forges, &roofs);
+    crate::smoke::spawn_smoke(&mut commands, &mut meshes, &mut smoke_mats, &smoke);
     let mut decor: Vec<((Mat, Chunk), MeshBuilder)> = layout.decor.into_iter().collect();
     decor.sort_by_key(|(k, _)| *k);
     let mut materials: HashMap<Mat, Handle<crate::graphics::SurfaceMaterial>> = HashMap::new();

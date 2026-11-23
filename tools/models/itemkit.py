@@ -27,7 +27,7 @@ OUT_ICONS = os.path.join(ROOT, "assets", "icons", "items")
 # Пикселей на клетку инвентаря в файле иконки (в игре клетка 44 px; запас под 4K).
 ICON_PX_PER_CELL = 128
 ICON_SAMPLES = 160
-BAKE_SIZE = 512
+BAKE_SIZE = 1024
 
 
 # =========================================================================== сцена
@@ -458,6 +458,8 @@ class Nodes:
 
     def image(self, name, vec, non_color=False, box_blend=0.25):
         path = os.path.join(CHAR_TEX, name + ".png")
+        if not os.path.exists(path):
+            path = _char_texture_from_glb(name)
         img = bpy.data.images.get(name) or bpy.data.images.load(path)
         img.name = name
         if non_color:
@@ -467,6 +469,24 @@ class Nodes:
         self.link(vec, t.inputs["Vector"])
         return t.outputs["Color"]
 
+    def photo(self, asset, scale_m, stretch=(1.0, 1.0, 1.0), contrast=1.0):
+        """Яркость фото-материала ambientCG (CC0) в кубической проекции, ~1 в среднем.
+        stretch — растяжение по осям объекта (волокна дерева вдоль оси)."""
+        import photo as ph
+        path, mean = ph.color_path(asset)
+        name = "photo_" + asset
+        img = bpy.data.images.get(name) or bpy.data.images.load(path)
+        img.name = name
+        img.colorspace_settings.name = "Non-Color"
+        vec = self.coord(tuple(1.0 / (scale_m * s) for s in stretch))
+        t = self.new("ShaderNodeTexImage", projection="BOX", projection_blend=0.3)
+        t.image = img
+        self.link(vec, t.inputs["Vector"])
+        bw = self.new("ShaderNodeRGBToBW")
+        self.link(t.outputs["Color"], bw.inputs["Color"])
+        # (яркость/среднее − 1)·контраст + 1
+        return self.math("ADD", self.math("MULTIPLY", self.math("SUBTRACT", self.math("DIVIDE", bw.outputs["Val"], max(mean, 0.05)), 1.0), contrast), 1.0)
+
     def bump(self, height, strength=0.3, distance=0.002, normal=None):
         b = self.new("ShaderNodeBump")
         b.inputs["Strength"].default_value = strength
@@ -475,6 +495,30 @@ class Nodes:
         if normal is not None:
             self.link(normal, b.inputs["Normal"])
         return b.outputs["Normal"]
+
+
+def _char_texture_from_glb(name):
+    """Текстуры персонажей (кольчуга) теперь лежат только внутри humans.glb: «mail_color» —
+    картинка «mail.base», «mail_mr» — «mail.mr», «mail_normal» — «mail.normal». Достаём в кэш."""
+    import json
+    import struct
+    part, kind = name.rsplit("_", 1)
+    want = f"{part}.{ {'color': 'base'}.get(kind, kind) }"
+    cache = os.path.expanduser("~/.cache/mrpg-char-tex")
+    os.makedirs(cache, exist_ok=True)
+    data = open(os.path.join(ROOT, "assets", "models", "humans.glb"), "rb").read()
+    jlen = struct.unpack("<I", data[12:16])[0]
+    j = json.loads(data[20:20 + jlen])
+    b0 = 20 + jlen + 8
+    for im in j["images"]:
+        if im.get("name") == want:
+            bv = j["bufferViews"][im["bufferView"]]
+            ext = ".png" if im.get("mimeType") == "image/png" else ".jpg"
+            out = os.path.join(cache, name + ext)
+            o = b0 + bv.get("byteOffset", 0)
+            open(out, "wb").write(data[o:o + bv["byteLength"]])
+            return out
+    raise FileNotFoundError(f"нет текстуры {name} ни в {CHAR_TEX}, ни в humans.glb")
 
 
 def new_material(name):
@@ -509,6 +553,9 @@ def metal_mat(name, color, color2=None, rough=(0.28, 0.5), scratches=0.5, rust=0
     n_big = nb.noise(6.0, 4, 0.5, vec)
     n_fine = nb.noise(60.0, 8, 0.6, vec)
     base = nb.mix(n_big, c2, c1)
+    # Фото кованого железа (Metal052C, CC0): неровности ковки и проковки поверх процедурного тона.
+    forged = nb.photo("Metal052C", 0.25 / scale, contrast=0.9)
+    base = nb.mix(1.0, base, nb.mix(0.0, forged, forged), "MULTIPLY")
     # Следы шлифовки или хаотичные царапины.
     if polish_dir:
         sc = {"X": (1, 40, 40), "Y": (40, 1, 40), "Z": (40, 40, 1)}[polish_dir]
@@ -542,7 +589,7 @@ def metal_mat(name, color, color2=None, rough=(0.28, 0.5), scratches=0.5, rust=0
     nb.val(bsdf.inputs["Base Color"], base)
     nb.val(bsdf.inputs["Roughness"], roughv)
     nb.val(bsdf.inputs["Metallic"], metallic)
-    nb.val(bsdf.inputs["Normal"], nb.bump(nb.math("ADD", nb.math("MULTIPLY", n_fine, 0.3), nb.math("MULTIPLY", scr, -0.4)), bump, 0.001))
+    nb.val(bsdf.inputs["Normal"], nb.bump(nb.math("ADD", nb.math("ADD", nb.math("MULTIPLY", n_fine, 0.3), nb.math("MULTIPLY", scr, -0.4)), nb.math("MULTIPLY", forged, 0.25)), bump, 0.001))
     return m
 
 
@@ -567,6 +614,17 @@ def organic_mat(name, color, color2, rough=(0.6, 0.85), scale=1.0, bump=0.4, bum
         # Мелкая фактура кожи/ткани.
         v = nb.voronoi(cells, vec)
         height = nb.math("ADD", nb.math("MULTIPLY", height, 0.5), nb.math("MULTIPLY", v, 0.5))
+    # Фото-фактура (ambientCG, CC0): зерно и потёртости кожи или волокна дерева.
+    if cells:
+        pd = nb.photo("Leather014", 0.3 / scale, contrast=1.2)
+    elif grain:
+        st = {"X": (3.0, 1.0, 1.0), "Y": (1.0, 3.0, 1.0), "Z": (1.0, 1.0, 3.0)}[grain]
+        pd = nb.photo("Wood060", 0.35 / scale, st, contrast=1.1)
+    else:
+        pd = None
+    if pd is not None:
+        tone = nb.mix(1.0, tone, nb.mix(0.0, pd, pd), "MULTIPLY")
+        height = nb.math("ADD", nb.math("MULTIPLY", height, 0.6), nb.math("MULTIPLY", pd, 0.4))
     roughv = nb.math("ADD", rough[0], nb.math("MULTIPLY", nb.noise(10.0, 4, 0.5, vec), rough[1] - rough[0]))
     if wear > 0:
         wmask = nb.ramp(nb.math("ADD", nb.pointiness(), nb.math("MULTIPLY", nb.noise(30.0, 4, 0.6, vec), 0.15)), [(0.52, 0.0), (0.6, 1.0)])

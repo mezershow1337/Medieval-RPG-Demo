@@ -21,6 +21,7 @@ import geom  # noqa: E402
 import glbwrite  # noqa: E402
 import humanrig  # noqa: E402
 import mhbase  # noqa: E402
+import photo  # noqa: E402
 from bake import fbm, smooth, value_noise  # noqa: E402
 from humanrig import B, BONES  # noqa: E402
 
@@ -41,7 +42,9 @@ def srgb(*c):
 def run_shader(shader, P, N, hit):
     """Считает шейдер только в покрытых текселях (их обычно половина) и раскладывает обратно."""
     idx = np.nonzero(hit)
+    photo.set_normals(N[idx][:, None, :])
     out = shader(P[idx][:, None, :], N[idx][:, None, :], hit[idx][:, None])
+    photo.set_normals(None)
     res = {}
     for k, val in out.items():
         val = np.asarray(val, float)
@@ -327,10 +330,19 @@ def skin_shader(P, N, hit):
     return {"color": col, "rough": rough, "height": height}
 
 
-def wool(P, freq=700.0, seed=0):
-    """Шерстяное полотно: плетение + ворс."""
-    weave = 0.5 + 0.25 * np.sin(P[..., 1] * freq * 2.2) * np.sin((P[..., 0] + P[..., 2]) * freq * 2.2)
+def wool(P, freq=700.0, seed=0, N=None, cloth="Fabric045", meters=0.25, texel=0.002):
+    """Шерстяное полотно: плетение + ворс.
+
+    С нормалями N плетение берётся с фото настоящей ткани (ambientCG, CC0): грубая
+    домотканая шерсть Fabric045 или полотняное переплетение Fabric030 (лён).
+    weave ~0.5 в среднем, как у прежнего синусного узора.
+    """
     fuzz = fbm(P, 220.0, 3, seed)
+    if N is not None:
+        d = photo.detail(P, N, cloth, meters, texel)
+        weave = np.clip(0.5 + (d - 1.0) * 1.4, 0.0, 1.0)
+        return weave, fuzz
+    weave = 0.5 + 0.25 * np.sin(P[..., 1] * freq * 2.2) * np.sin((P[..., 0] + P[..., 2]) * freq * 2.2)
     return weave, fuzz
 
 
@@ -341,14 +353,14 @@ def tunic_shader(style):
     def f(P, N, hit):
         x, y, z = P[..., 0], P[..., 1], P[..., 2]
         ax = np.abs(x)
-        weave, fuzz = wool(P, seed=4)
+        weave, fuzz = wool(P, seed=4, N=N, cloth="Fabric030" if style == "byz" else "Fabric045", texel=2.4 / TEX_HI)
         dirt = fbm(P, 6.0, 3, 7)
         hem_dist = y - 0.5  # подол туники ~ на уровне колена
         if style == "kaftan":
             base = srgb(0.86, 0.8, 0.7)
         else:
             base = srgb(0.93, 0.9, 0.84)
-        col = base * (0.85 + 0.12 * fuzz + 0.06 * weave)[..., None]
+        col = base * (0.78 + 0.1 * fuzz + 0.24 * weave)[..., None]
         # Грязь снизу и на локтях.
         grime = smooth(0.75, 0.48, y) * 0.25 + 0.12 * dirt
         col *= (1 - 0.35 * grime)[..., None]
@@ -392,9 +404,9 @@ def tunic_shader(style):
 
 
 def trousers_shader(P, N, hit):
-    weave, fuzz = wool(P, 900.0, 12)
+    weave, fuzz = wool(P, 900.0, 12, N=N)
     dirt = fbm(P, 5.0, 3, 13)
-    col = srgb(0.62, 0.6, 0.57) * (0.85 + 0.15 * fuzz + 0.05 * weave)[..., None]
+    col = srgb(0.62, 0.6, 0.57) * (0.8 + 0.12 * fuzz + 0.2 * weave)[..., None]
     col *= (1 - 0.4 * smooth(0.4, 0.05, P[..., 1]) - 0.15 * dirt)[..., None]
     return {"color": col, "rough": 0.9 + 0.05 * fuzz, "height": 0.5 * weave + 0.5 * fuzz}
 
@@ -404,8 +416,8 @@ def wraps_shader(P, N, hit):
     ang = np.arctan2(P[..., 0] - np.sign(P[..., 0]) * 0.1, P[..., 2])
     t = (P[..., 1] * 22.0 + ang / (2 * np.pi) * (np.sign(P[..., 0]) + 0.001)) % 1.0
     ridge = smooth(0.0, 0.12, t) * smooth(1.0, 0.85, t)
-    weave, fuzz = wool(P, 800.0, 14)
-    col = srgb(0.7, 0.64, 0.52) * (0.7 + 0.3 * ridge + 0.1 * fuzz)[..., None]
+    weave, fuzz = wool(P, 800.0, 14, N=N, cloth="Fabric030", meters=0.2)
+    col = srgb(0.7, 0.64, 0.52) * (0.62 + 0.3 * ridge + 0.08 * fuzz + 0.16 * weave)[..., None]
     col *= (1 - 0.35 * smooth(0.35, 0.08, P[..., 1]))[..., None]
     # Перекрёстные ремешки (подвязки).
     straps = smooth(0.006, 0.002, np.abs(((P[..., 1] * 9 + ang / np.pi * 0.5) % 1.0) - 0.5) / 9)
@@ -413,15 +425,20 @@ def wraps_shader(P, N, hit):
     return {"color": col, "rough": 0.9, "height": ridge + 0.5 * straps + 0.2 * fuzz}
 
 
-def leather(P, seed=20, color=(0.32, 0.21, 0.13)):
+def leather(P, seed=20, color=(0.32, 0.21, 0.13), N=None):
     grain = fbm(P, 500.0, 3, seed)
     wear = fbm(P, 30.0, 3, seed + 1)
+    if N is not None:
+        # Зерно, складки и потёртости настоящей кожи (Leather014, CC0).
+        d = photo.detail(P, N, "Leather014", 0.5, 2.0 / TEX)
+        grain = np.clip(0.5 + (d - 1.0) * 1.2, 0.0, 1.0)
+        wear = np.clip(wear * 0.6 + (d - 1.0) * 0.8 + 0.2, 0.0, 1.0)
     col = srgb(*color) * (0.75 + 0.35 * grain + 0.25 * wear)[..., None]
     return col, grain, wear
 
 
 def boots_shader(P, N, hit):
-    col, grain, wear = leather(P, 21)
+    col, grain, wear = leather(P, 21, N=N)
     # Подошва темнее, шнуровка по подъёму.
     sole = smooth(0.012, 0.004, P[..., 1])
     col *= (1 - 0.5 * sole)[..., None]
@@ -431,7 +448,7 @@ def boots_shader(P, N, hit):
 
 
 def belt_shader(P, N, hit):
-    col, grain, wear = leather(P, 30, (0.25, 0.15, 0.09))
+    col, grain, wear = leather(P, 30, (0.25, 0.15, 0.09), N=N)
     x, y, z = P[..., 0], P[..., 1], P[..., 2]
     # Бронзовые накладки по поясу и пряжка спереди.
     ang = np.arctan2(x, -z)
@@ -622,8 +639,8 @@ def build():
         top = tights(lambda c: c[1] > 0.84 and not collar(c, 0.068) and (c[1] > sleeves_to or abs(c[0]) < 0.15), lambda r: 0.009 + 0.012 * smooth(1.1, 0.88, r[:, 1]), 3)
         sk = skirt(0.5 if style != "goth" else 0.53, 0.012)
         sh = tunic_shader(style)
-        m_top = bld.material(f"tunic_{style}", bld.bake(top, TEX, sh), normal_strength=1.5, double=True, metallic=0.0)
-        m_sk = bld.material(f"tunic_{style}.skirt", bld.bake(sk, TEX, sh), normal_strength=1.5, double=True, metallic=0.0)
+        m_top = bld.material(f"tunic_{style}", bld.bake(top, TEX_HI, sh), normal_strength=1.5, double=True, metallic=0.0)
+        m_sk = bld.material(f"tunic_{style}.skirt", bld.bake(sk, TEX_HI, sh), normal_strength=1.5, double=True, metallic=0.0)
         bld.emit(f"tunic.{style}", [(top, m_top), (sk, m_sk)])
 
     trousers = tights(lambda c: 0.06 < c[1] < 1.0 and abs(c[0]) < 0.17, 0.004, 1)

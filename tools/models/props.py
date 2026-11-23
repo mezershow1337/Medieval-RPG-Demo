@@ -7,7 +7,8 @@
 
 import numpy as np
 
-import geom
+import geom  # noqa: E402
+import photo
 from bake import fbm, smooth, value_noise
 
 HEAD_C = np.array([0.0, 1.655, -0.054])  # центр обода шлема
@@ -24,9 +25,13 @@ def srgb(*c):
 
 def iron(P, seed=80, polish=0.0, tone=(0.46, 0.46, 0.48)):
     n = fbm(P, 60.0, 3, seed)
-    rust = smooth(0.6, 0.85, fbm(P, 18.0, 3, seed + 1)) * (1 - polish)
+    # Фото кованого железа (ambientCG Metal052C) и ржавчины (Metal053C), CC0.
+    forged = photo.here(P + seed * 0.37, "Metal052C", 0.3)
+    rust_photo = photo.rust_here(P + seed * 0.53)
+    rust = np.clip(smooth(0.6, 0.85, fbm(P, 18.0, 3, seed + 1)) * 0.5 + rust_photo * 0.8, 0, 1) * (1 - polish) ** 1.5
     scratches = value_noise(P * np.array([1, 20, 1]), 300.0, seed + 2)
-    col = srgb(*tone) * (0.75 + 0.3 * n + 0.08 * scratches)[..., None]
+    n = np.clip(n * 0.5 + (forged - 1.0) * 1.5 + 0.25, 0, 1)
+    col = srgb(*tone) * (0.72 + 0.32 * n + 0.08 * scratches)[..., None]
     col = col * (1 - 0.5 * rust[..., None]) + srgb(0.36, 0.2, 0.09) * 0.5 * rust[..., None]
     rough = 0.32 + 0.25 * n + 0.35 * rust - 0.15 * polish
     metal = 0.95 - 0.6 * rust
@@ -34,7 +39,7 @@ def iron(P, seed=80, polish=0.0, tone=(0.46, 0.46, 0.48)):
 
 
 def bronze(P, seed=90):
-    n = fbm(P, 50.0, 3, seed)
+    n = np.clip(fbm(P, 50.0, 3, seed) * 0.5 + (photo.here(P + seed * 0.29, "Metal047B", 0.3) - 1.0) * 1.2 + 0.25, 0, 1)
     patina = smooth(0.62, 0.85, fbm(P, 15.0, 3, seed + 1))
     col = srgb(0.78, 0.56, 0.28) * (0.8 + 0.3 * n)[..., None]
     col = col * (1 - 0.6 * patina[..., None]) + srgb(0.25, 0.42, 0.33) * 0.6 * patina[..., None]
@@ -45,15 +50,19 @@ def wood(P, seed=100, color=(0.45, 0.3, 0.17), axis=1):
     q = P.copy()
     rings = np.sin((np.hypot(q[..., (axis + 1) % 3], q[..., (axis + 2) % 3]) * 300 + fbm(P, 8.0, 3, seed) * 8.0))
     grain = fbm(P * np.where(np.arange(3) == axis, 0.08, 1.0), 120.0, 3, seed + 1)
-    col = srgb(*color) * (0.75 + 0.15 * rings + 0.3 * grain)[..., None]
+    # Волокна настоящего дерева (Wood060, CC0), вытянутые вдоль оси детали.
+    stretch = np.where(np.arange(3) == axis, 0.35, 1.0)
+    fib = photo.here(P * stretch + seed * 0.41, "Wood060", 0.4)
+    grain = np.clip(grain * 0.4 + (fib - 1.0) * 1.3 + 0.3, 0, 1)
+    col = srgb(*color) * (0.72 + 0.12 * rings + 0.4 * grain)[..., None]
     return col, 0.7 + 0.1 * grain, np.zeros_like(grain), grain * 0.6 + rings * 0.2
 
 
 def leather_wrap(P, seed=110, color=(0.3, 0.18, 0.1), pitch=0.012):
     t = (P[..., 1] / pitch + np.arctan2(P[..., 0], P[..., 2]) / (2 * np.pi)) % 1.0
     ridge = smooth(0.0, 0.2, t) * smooth(1.0, 0.8, t)
-    g = fbm(P, 400.0, 2, seed)
-    col = srgb(*color) * (0.6 + 0.4 * ridge + 0.2 * g)[..., None]
+    g = np.clip(fbm(P, 400.0, 2, seed) * 0.4 + (photo.here(P + seed * 0.3, "Leather014", 0.3) - 1.0) * 1.2 + 0.3, 0, 1)
+    col = srgb(*color) * (0.58 + 0.4 * ridge + 0.25 * g)[..., None]
     return col, 0.6 + 0.2 * g, np.zeros_like(g), ridge
 
 
@@ -211,8 +220,8 @@ def build_weapons(bld):
         return pack(col, rough, metal, h + rings)
 
     hilt = geom.merge(guard, grip, pommel)
-    m_blade = bld.rigid_bake(blade, 512, blade_shader, "blade", normal_strength=2.0)
-    m_hilt = bld.rigid_bake(hilt, 256, hilt_shader, "spatha_hilt", normal_strength=2.0)
+    m_blade = bld.rigid_bake(blade, 1024, blade_shader, "blade", normal_strength=2.0)
+    m_hilt = bld.rigid_bake(hilt, 512, hilt_shader, "spatha_hilt", normal_strength=2.0)
     bld.emit_rigid("spatha.blade", [(blade, m_blade)])
     bld.emit_rigid("spatha.hilt", [(hilt, m_hilt)])
 
@@ -232,7 +241,7 @@ def build_weapons(bld):
     seax_hilt = geom.merge(geom.sweep([geom.ellipse(0.013, 0.011, 12), geom.ellipse(0.015, 0.012, 12), geom.ellipse(0.012, 0.01, 12)], [-0.13, -0.06, 0.0]),
                            geom.lathe([(0.0, -0.142), (0.014, -0.14), (0.016, -0.132), (0.0, -0.128)], 12, 1, 0.8))
     bld.emit_rigid("seax.blade", [(seax_blade, m_blade)])
-    bld.emit_rigid("seax.hilt", [(seax_hilt, bld.rigid_bake(seax_hilt, 256, lambda P, N, h: pack(*wood(P, 150, (0.3, 0.2, 0.12))), "seax_hilt", metallic=0.0))])
+    bld.emit_rigid("seax.hilt", [(seax_hilt, bld.rigid_bake(seax_hilt, 512, lambda P, N, h: pack(*wood(P, 150, (0.3, 0.2, 0.12))), "seax_hilt", metallic=0.0))])
 
     # --- Боевой топор готов: топорище ~70 см, бородовидное лезвие вперёд (-Z).
     haft = geom.sweep([geom.ellipse(0.015, 0.019, 12)] * 2, [-0.12, 0.62], cap=True)
@@ -260,8 +269,8 @@ def build_weapons(bld):
         col = col * (1 + 0.3 * edge)[..., None]
         return pack(col, rough - 0.15 * edge, metal, h)
 
-    bld.emit_rigid("axe.blade", [(axe_head, bld.rigid_bake(axe_head, 256, axe_shader, "axe_head", normal_strength=2.0))])
-    bld.emit_rigid("axe.hilt", [(haft, bld.rigid_bake(haft, 256, lambda P, N, h: pack(*wood(P, 161, (0.5, 0.36, 0.22))), "axe_haft", metallic=0.0))])
+    bld.emit_rigid("axe.blade", [(axe_head, bld.rigid_bake(axe_head, 512, axe_shader, "axe_head", normal_strength=2.0))])
+    bld.emit_rigid("axe.hilt", [(haft, bld.rigid_bake(haft, 512, lambda P, N, h: pack(*wood(P, 161, (0.5, 0.36, 0.22))), "axe_haft", metallic=0.0))])
 
     # --- Контос: древко ~2,55 м, листовидный наконечник; начало координат — у передней руки.
     shaft = geom.sweep([geom.ellipse(0.016, 0.016, 10), geom.ellipse(0.017, 0.017, 10), geom.ellipse(0.014, 0.014, 10)], [-0.72, 0.4, 1.86])
@@ -274,9 +283,9 @@ def build_weapons(bld):
         tip_ys.append(1.95 + 0.22 * k)
     spear_tip = geom.merge(socket, geom.sweep(tip_secs, tip_ys))
     butt = geom.lathe([(0.0, -0.76), (0.012, -0.76), (0.018, -0.72), (0.0, -0.72)], 10)
-    bld.emit_rigid("spear.blade", [(spear_tip, bld.rigid_bake(spear_tip, 256, lambda P, N, h: pack(*iron(P, 170, polish=0.6)), "spear_head", normal_strength=2.0))])
+    bld.emit_rigid("spear.blade", [(spear_tip, bld.rigid_bake(spear_tip, 512, lambda P, N, h: pack(*iron(P, 170, polish=0.6)), "spear_head", normal_strength=2.0))])
     spear_shaft = geom.merge(shaft, butt)
-    bld.emit_rigid("spear.hilt", [(spear_shaft, bld.rigid_bake(spear_shaft, 512, lambda P, N, h: pack(*wood(P, 171, (0.55, 0.42, 0.27))), "spear_shaft", metallic=0.0))])
+    bld.emit_rigid("spear.hilt", [(spear_shaft, bld.rigid_bake(spear_shaft, 1024, lambda P, N, h: pack(*wood(P, 171, (0.55, 0.42, 0.27))), "spear_shaft", metallic=0.0))])
 
     # --- Составной гуннский лук: несимметричный (верхнее плечо длиннее), костяные накладки
     # на рукояти и на жёстких концах (сиях). Тетива со стороны стрелка (+Z).
@@ -307,11 +316,11 @@ def build_weapons(bld):
         col = col * (1 - 0.3 * birch[..., None]) + srgb(0.6, 0.5, 0.35) * 0.3 * birch[..., None]
         return pack(col, 0.6 - 0.2 * bone, np.zeros_like(y), bone * 0.5 + sinew)
 
-    bld.emit_rigid("bow.blade", [(limbs, bld.rigid_bake(limbs, 512, bow_shader, "bow", normal_strength=1.5, metallic=0.0)),
+    bld.emit_rigid("bow.blade", [(limbs, bld.rigid_bake(limbs, 1024, bow_shader, "bow", normal_strength=1.5, metallic=0.0)),
                                  (string, bld.rigid_bake(string, 64, lambda P, N, h: pack(np.full(P.shape, 0.75), np.full(P.shape[:2], 0.7), np.zeros(P.shape[:2]), np.zeros(P.shape[:2])), "bowstring", metallic=0.0))])
     # У лука нет отдельной рукояти, но деталь .hilt нужна по соглашению.
     grip_wrap = geom.sweep([geom.ellipse(0.019, 0.016, 10)] * 2, [-0.06, 0.06])
-    bld.emit_rigid("bow.hilt", [(grip_wrap, bld.rigid_bake(grip_wrap, 64, lambda P, N, h: pack(*leather_wrap(P, 182)), "bow_grip", metallic=0.0))])
+    bld.emit_rigid("bow.hilt", [(grip_wrap, bld.rigid_bake(grip_wrap, 256, lambda P, N, h: pack(*leather_wrap(P, 182)), "bow_grip", metallic=0.0))])
 
     build_shields(bld)
 
@@ -395,8 +404,8 @@ def build_shields(bld):
     boss = geom.transform(boss, R, (0, 0, -0.045))
     grip_bar = geom.box(0.03, 0.2, 0.02, (0, -0.02, 0.07 - 0.0))
     grip_bar = geom.transform(grip_bar, np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]], float).T, (0, 0, 0))
-    m_oval = bld.rigid_bake(oval, 1024, oval_shader, "shield_oval", normal_strength=2.0, metallic=0.0, double=True)
-    m_boss = bld.rigid_bake(geom.merge(boss, grip_bar), 256, lambda P, N, h: pack(*iron(P, 193)), "shield_boss", normal_strength=2.0)
+    m_oval = bld.rigid_bake(oval, 2048, oval_shader, "shield_oval", normal_strength=2.0, metallic=0.0, double=True)
+    m_boss = bld.rigid_bake(geom.merge(boss, grip_bar), 512, lambda P, N, h: pack(*iron(P, 193)), "shield_boss", normal_strength=2.0)
     bld.emit_rigid("shield_oval.body", [(oval, m_oval)])
     bld.emit_rigid("shield_oval.boss", [(geom.merge(boss, grip_bar), m_boss)])
 
@@ -422,6 +431,6 @@ def build_shields(bld):
 
     boss2 = geom.lathe([(0.08, 0.0), (0.08, 0.008), (0.07, 0.012), (0.065, 0.04), (0.035, 0.07), (0.015, 0.1), (0.012, 0.11), (0.0, 0.112)], 24)
     boss2 = geom.transform(boss2, R, (0, 0, -0.02))
-    m_r = bld.rigid_bake(rnd, 1024, round_shader, "shield_round", normal_strength=2.0, metallic=0.0, double=True)
+    m_r = bld.rigid_bake(rnd, 2048, round_shader, "shield_round", normal_strength=2.0, metallic=0.0, double=True)
     bld.emit_rigid("shield_round.body", [(rnd, m_r)])
     bld.emit_rigid("shield_round.boss", [(geom.merge(boss2, grip_bar), m_boss)])

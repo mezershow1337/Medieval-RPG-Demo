@@ -6,7 +6,7 @@
 import bevy_pbr::render::{
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::alpha_discard,
-    mesh_view_bindings::globals,
+    mesh_view_bindings::{globals, view},
 };
 
 @if(PREPASS_PIPELINE)
@@ -24,10 +24,87 @@ struct Surface {
     color_b: vec4<f32>,
     params: vec4<f32>,
     params2: vec4<f32>,
+    // Фотоматериал (ambientCG, CC0): x — слой сверху (−1 — нет), y — 1/м, z — слой сбоку, w — 1/м.
+    photo: vec4<f32>,
+    // rgb — средний цвет верхнего слоя, w — сила перекраски.
+    photo_mean: vec4<f32>,
+    // rgb — средний цвет бокового слоя, w — сила нормалей фото.
+    photo_mean_b: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100)
 var<uniform> surface: Surface;
+@group(constants::MATERIAL_BIND_GROUP) @binding(101)
+var photo_albedo: texture_2d_array<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(102)
+var photo_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(103)
+var photo_nrm: texture_2d_array<f32>;
+
+// ---------- фотоматериалы ----------
+
+struct Photo {
+    albedo: vec3<f32>, // линейный цвет
+    n: vec3<f32>,      // мировая нормаль с рельефом
+    rough: f32,
+}
+
+// Одна проекция: цвет, шероховатость и нормаль, развёрнутая в мир по осям t (u) и b (v вверх по картинке).
+fn photo_plane(layer: i32, uv: vec2<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f32>, relief: f32) -> Photo {
+    var o: Photo;
+    o.albedo = textureSample(photo_albedo, photo_sampler, uv, layer).rgb;
+    let m = textureSample(photo_nrm, photo_sampler, uv, layer);
+    let xy = (m.xy * 2.0 - 1.0) * relief;
+    let z = sqrt(max(1.0 - dot(xy, xy), 0.0));
+    o.n = t * xy.x + b * xy.y + n * z;
+    o.rough = m.z;
+    return o;
+}
+
+// Сверху — две выборки: обычная и повёрнутая на ~37° крупнее, смешанные по мягкому шуму,
+// чтобы на больших площадях не было видно повтора тайла.
+fn photo_top(layer: i32, inv: f32, wp: vec3<f32>, n: vec3<f32>, relief: f32, sy: f32) -> Photo {
+    let a = photo_plane(layer, vec2<f32>(wp.x, -wp.z * sy) * inv, vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, sy), n, relief);
+    let r = mat2x2<f32>(0.8, 0.6, -0.6, 0.8);
+    let q = r * vec2<f32>(wp.x, -wp.z * sy) * inv * 0.61 + vec2<f32>(0.37, 0.71);
+    let tb = r * vec2<f32>(1.0, 0.0);
+    let bb = r * vec2<f32>(0.0, 1.0);
+    let b = photo_plane(layer, q, vec3<f32>(tb.x, 0.0, -tb.y * sy), vec3<f32>(bb.x, 0.0, -bb.y * sy), n, relief);
+    let k = smoothstep(0.35, 0.65, fbm(wp.xz * 0.11));
+    var o: Photo;
+    o.albedo = mix(a.albedo, b.albedo, k);
+    o.n = mix(a.n, b.n, k);
+    o.rough = mix(a.rough, b.rough, k);
+    return o;
+}
+
+// Трипланарная выборка фото: сверху слой `top`, на стенах и снизу — `side`.
+// Все проекции читаются всегда (без ветвлений по нормали): выборка текстуры с мипами
+// разрешена только в однородном потоке управления.
+fn photo_triplanar(top: i32, side: i32, inv_top: f32, inv_side: f32, wp: vec3<f32>, n: vec3<f32>, relief: f32) -> Photo {
+    var w = pow(abs(n), vec3<f32>(4.0));
+    w = w / (w.x + w.y + w.z);
+    let sx = select(-1.0, 1.0, n.x >= 0.0);
+    let sy = select(-1.0, 1.0, n.y >= 0.0);
+    let sz = select(-1.0, 1.0, n.z >= 0.0);
+    // Картинка «вверх» — мировой +Y на стенах; v в текстуре растёт вниз, отсюда минус.
+    let px = photo_plane(side, vec2<f32>(-wp.z * sx, -wp.y) * inv_side, vec3<f32>(0.0, 0.0, -sx), vec3<f32>(0.0, 1.0, 0.0), n, relief);
+    let pz = photo_plane(side, vec2<f32>(wp.x * sz, -wp.y) * inv_side, vec3<f32>(sz, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), n, relief);
+    let layer = select(side, top, n.y > 0.0);
+    let inv = select(inv_side, inv_top, n.y > 0.0);
+    let py = photo_top(layer, inv, wp, n, relief, sy);
+    var o: Photo;
+    o.albedo = px.albedo * w.x + py.albedo * w.y + pz.albedo * w.z;
+    o.n = normalize(px.n * w.x + py.n * w.y + pz.n * w.z);
+    o.rough = px.rough * w.x + py.rough * w.y + pz.rough * w.z;
+    return o;
+}
+
+// Перекраска фото в цвет материала: сохраняем рисунок, меняем средний тон.
+fn retint(albedo: vec3<f32>, mean: vec3<f32>, target_c: vec3<f32>, amount: f32) -> vec3<f32> {
+    let recolored = albedo * target_c / max(mean, vec3<f32>(0.01));
+    return mix(albedo, recolored, amount);
+}
 
 // ---------- шум ----------
 
@@ -430,6 +507,7 @@ fn fragment(
     var rough = pbr_input.material.perceptual_roughness;
     var N = pbr_input.N;
     var emissive = vec3<f32>(0.0);
+    var water = false;
 
     if kind == 5 || kind == 6 || kind == 7 || kind == 8 || kind == 9 || kind == 12 {
         // Узоры, завязанные на UV или особые.
@@ -473,6 +551,25 @@ fn fragment(
                 N = perturb(N, (t * hu + b * hv) / e, bump);
             }
             case 12: {
+                if surface.photo.x >= 0.0 {
+                    // Фото черепицы по развёртке ската: u — вдоль карниза, v — вниз по скату.
+                    let tt = normalize(cross(n, vec3<f32>(0.0, 1.0, 0.0)) + vec3<f32>(1e-4, 0.0, 0.0));
+                    let bb = cross(tt, n);
+                    let ph = photo_plane(i32(surface.photo.x + 0.5), uv * surface.photo.y, tt, bb, n, surface.photo_mean_b.w);
+                    color = retint(ph.albedo, surface.photo_mean.rgb, base_a, surface.photo_mean.w);
+                    color *= 1.0 + (fbm(wp.xz * 0.2) - 0.5) * variation * 1.5;
+                    // Издалека: у одних домов черепица новее и краснее, у других — старая,
+                    // бурая и серая от копоти очагов и лишайника; пятнами, а не ровной заливкой.
+                    let age = smoothstep(0.38, 0.62, fbm(wp.xz * 0.035 + vec2<f32>(3.7, 9.1)));
+                    color *= mix(vec3<f32>(1.1, 1.03, 0.96), vec3<f32>(0.7, 0.66, 0.64), age);
+                    let soot = smoothstep(0.52, 0.68, fbm(wp.xz * 0.32 + vec2<f32>(wp.y * 0.2, 1.3)));
+                    color = mix(color, vec3<f32>(0.075, 0.068, 0.058), soot * (0.2 + 0.35 * age));
+                    let lichen = smoothstep(0.62, 0.78, fbm(uv * 0.7 + wp.xz * 0.05)) * (0.5 + age);
+                    color = mix(color, vec3<f32>(0.36, 0.36, 0.22), lichen * moss_amount * 0.7);
+                    rough = clamp(ph.rough + lichen * 0.2, 0.3, 1.0);
+                    N = normalize(ph.n);
+                    break;
+                }
                 // Керамическая черепица: плоские тегулы с бортиками и полукруглые калиптеры
                 // над стыками. u — вдоль карниза, v — вниз по скату.
                 let t = tile(uv);
@@ -489,6 +586,15 @@ fn fragment(
                 N = perturb(N, (tt * hu + bb * hv) / e, bump);
             }
             case 7: {
+                if surface.photo.x >= 0.0 {
+                    let ph = photo_triplanar(i32(surface.photo.x + 0.5), i32(surface.photo.z + 0.5), surface.photo.y, surface.photo.w, wp, n, surface.photo_mean_b.w);
+                    let rust = smoothstep(0.6, 0.85, fbm(wp.xy * 3.0 + wp.zz * 2.0));
+                    color = mix(retint(ph.albedo, surface.photo_mean.rgb, base_a, surface.photo_mean.w), base_b, rust * variation * 1.5);
+                    rough = clamp(ph.rough * 0.8 + rust * 0.4, 0.15, 1.0);
+                    pbr_input.material.metallic = pbr_input.material.metallic * (1.0 - rust * 0.7);
+                    N = ph.n;
+                    break;
+                }
                 // Металл: кованые пятна и потёртости.
                 let nn = fbm(wp.xz * 6.0 + wp.y * 4.0);
                 let rust = smoothstep(0.55, 0.8, fbm(wp.xy * 3.0 + wp.zz * 2.0));
@@ -505,9 +611,33 @@ fn fragment(
                     0.0,
                     cos(p.y * 6.3 - t * 1.3) + sin(p.y * 2.7 + p.x * 5.1 + t * 0.9),
                 );
-                N = normalize(N + g * 0.035);
+                // Крупная зыбь + мелкая рябь.
+                let g2 = vec3<f32>(
+                    sin(p.x * 0.9 + p.y * 0.4 + t * 0.6) + 0.5 * sin(p.x * 1.7 - p.y * 1.1 + t * 0.8),
+                    0.0,
+                    cos(p.y * 0.8 - p.x * 0.3 + t * 0.5) + 0.5 * cos(p.y * 2.1 + p.x * 0.7 - t * 0.7),
+                );
+                N = normalize(N + g * 0.03 + g2 * 0.045);
                 color = mix(base_a, base_b, fbm(p * 2.0 + t * 0.1));
                 rough = 0.04;
+                // Отражение неба по Френелю и солнечная дорожка (небо — не карта окружения,
+                // поэтому считаем его здесь тем же градиентом, что и купол неба).
+                let v = normalize(view.world_position - wp);
+                let r = reflect(-v, N);
+                let sun = normalize(surface.photo_mean.xyz);
+                let fres = 0.02 + 0.98 * pow(1.0 - max(dot(N, v), 0.0), 5.0);
+                let h = clamp(r.y, 0.0, 1.0);
+                let toward = pow(max(dot(normalize(r.xz + vec2<f32>(1e-5)), normalize(sun.xz + vec2<f32>(1e-5))), 0.0), 3.0);
+                var skyc: vec3<f32>;
+                if surface.photo_mean_b.x > 0.5 {
+                    skyc = mix(vec3<f32>(0.62, 0.74, 0.9), vec3<f32>(0.2, 0.4, 0.8), smoothstep(0.0, 0.5, h));
+                } else {
+                    let hor = mix(vec3<f32>(0.62, 0.48, 0.55), vec3<f32>(1.25, 0.55, 0.28), toward);
+                    skyc = mix(hor, vec3<f32>(0.12, 0.13, 0.3), smoothstep(0.0, 0.6, h));
+                }
+                let glint = pow(max(dot(r, sun), 0.0), 900.0) * 40.0 + pow(max(dot(r, sun), 0.0), 60.0) * 1.2;
+                emissive = (skyc * fres + vec3<f32>(1.0, 0.78, 0.5) * glint) * 0.9;
+                water = true;
             }
             default: {
                 // Угли: тёмная корка и пульсирующий жар в трещинах.
@@ -519,6 +649,68 @@ fn fragment(
                 emissive = base_b * glow * (crack * 0.8 + 0.25) * pulse;
             }
         }
+    } else if surface.photo.x >= 0.0 && kind != 17 {
+        // Фотоматериал: настоящая текстура камня, дерева, земли с картами нормалей и шероховатости.
+        let top = i32(surface.photo.x + 0.5);
+        let side = i32(surface.photo.z + 0.5);
+        let relief = max(surface.photo_mean_b.w, 0.0);
+        let tint = surface.photo_mean.w;
+        var ph: Photo;
+        var mean = surface.photo_mean.rgb;
+        if kind == 19 {
+            // Рельеф: трава и сухая почва на пологих местах, скала на крутых, галька у воды.
+            let slope = 1.0 - clamp(n.y, 0.0, 1.0);
+            // Номера слоёв почвы и гальки — L_SOIL и L_GRAVEL из surface_layers.rs.
+            let grass = photo_top(top, surface.photo.y, wp, n, relief, 1.0);
+            let soil = photo_top(8, 1.0 / 3.5, wp + vec3<f32>(17.0, 0.0, 5.0), n, relief, 1.0);
+            let rock = photo_triplanar(side, side, surface.photo.w, surface.photo.w, wp * 0.5, n, relief);
+            let gravel = photo_top(18, 0.5, wp, n, relief, 1.0);
+            let dry = smoothstep(0.42, 0.7, fbm(wp.xz * 0.045) + fbm(wp.xz * 0.4) * 0.25);
+            let g_col = retint(grass.albedo, mean, base_a, tint) * mix(vec3<f32>(1.0), vec3<f32>(1.25, 1.05, 0.7), smoothstep(0.3, 0.8, fbm(wp.xz * 0.02)));
+            ph.albedo = mix(g_col, soil.albedo, dry);
+            ph.n = normalize(mix(grass.n, soil.n, dry));
+            ph.rough = mix(grass.rough, soil.rough, dry);
+            let rk = smoothstep(0.38, 0.62, slope + (fbm(wp.xz * 0.08) - 0.5) * 0.35);
+            ph.albedo = mix(ph.albedo, retint(rock.albedo, surface.photo_mean_b.rgb, base_b, 0.5), rk);
+            ph.n = normalize(mix(ph.n, rock.n, rk));
+            ph.rough = mix(ph.rough, rock.rough, rk);
+            let shore = 1.0 - smoothstep(-1.0, 0.4, wp.y + (fbm(wp.xz * 0.3) - 0.5) * 0.8);
+            ph.albedo = mix(ph.albedo, gravel.albedo, shore);
+            ph.n = normalize(mix(ph.n, gravel.n, shore));
+            ph.rough = mix(ph.rough, gravel.rough * 0.7, shore);
+            color = ph.albedo;
+        } else {
+            if kind == 15 {
+                // Смешанная кладка (opus mixtum): камень, а через каждые 1,6 м — пояс плинфы.
+                ph = photo_triplanar(top, top, surface.photo.y, surface.photo.y, wp, n, relief);
+                let br = photo_triplanar(side, side, surface.photo.w, surface.photo.w, wp, n, relief);
+                let band = step(fract(wp.y / 1.6), 0.27) * (1.0 - step(0.7, n.y));
+                let stone_c = retint(ph.albedo, mean, base_a, tint);
+                let brick_c = retint(br.albedo, surface.photo_mean_b.rgb, vec3<f32>(0.42, 0.17, 0.09), 0.6);
+                color = mix(stone_c, brick_c, band);
+                ph.n = normalize(mix(ph.n, br.n, band));
+                ph.rough = mix(ph.rough, br.rough, band);
+            } else {
+                ph = photo_triplanar(top, side, surface.photo.y, surface.photo.w, wp, n, relief);
+                // Средний цвет того слоя, что виден: сверху — верхнего, на стенах — бокового.
+                let m = mix(surface.photo_mean_b.rgb, mean, smoothstep(0.3, 0.9, n.y));
+                color = retint(ph.albedo, m, base_a, tint);
+            }
+        }
+        // Крупные пятна выцветания и потемнения — ломают повтор тайла.
+        let macro_v = fbm(wp.xz * 0.07 + wp.y * 0.05) - 0.5;
+        color *= 1.0 + macro_v * variation * 1.2;
+        rough = clamp(mix(rough, ph.rough, 0.85), 0.05, 1.0);
+        N = ph.n;
+
+        // Мох у земли и на верхних гранях, грязь и подтёки снизу.
+        let up = clamp(n.y, 0.0, 1.0);
+        let large = fbm(wp.xz * 0.15 + wp.y * 0.05);
+        let moss = smoothstep(0.62, 0.82, large + up * 0.3 - clamp(wp.y - 1.0, 0.0, 6.0) * 0.08) * moss_amount;
+        color = mix(color, vec3<f32>(0.10, 0.14, 0.05) * (0.8 + 0.4 * fbm(wp.xz * 3.0)), moss);
+        let ground = 1.0 - smoothstep(0.0, 1.4, wp.y + fbm(wp.xz * 0.8 + wp.zx) * 0.6);
+        let streaks = smoothstep(0.45, 0.85, fbm(vec2<f32>(wp.x + wp.z, wp.y * 0.08) * 1.7)) * (1.0 - up);
+        color *= 1.0 - (ground * 0.35 + streaks * 0.2) * grime_amount;
     } else {
         let s = triplanar(kind, wp, n);
         var tone = s.tone;
@@ -591,7 +783,8 @@ fn fragment(
     pbr_input.material.base_color = vec4<f32>(max(color, vec3<f32>(0.0)), 1.0);
     pbr_input.material.perceptual_roughness = rough;
     pbr_input.N = N;
-    pbr_input.material.emissive = vec4<f32>(emissive, 1.0);
+    // Отражение неба у воды — в тех же единицах, что и купол неба (без экспозиции камеры).
+    pbr_input.material.emissive = vec4<f32>(emissive, select(1.0, 0.0, water));
 
     pbr_input.material.base_color = alpha_discard(
         pbr_input.material.flags,

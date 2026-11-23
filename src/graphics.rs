@@ -14,52 +14,109 @@ use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, PrimitiveTopology};
 use bevy::camera::Hdr;
-use bevy::render::view::{ColorGrading, ColorGradingGlobal};
+use bevy::light::EnvironmentMapLight;
+use bevy::post_process::effect_stack::Vignette;
+use bevy::render::view::{ColorGrading, ColorGradingGlobal, ColorGradingSection};
+pub use crate::sky::{SkyMaterial, SkyUniform};
 use bevy::shader::ShaderRef;
 
-/// Направление на солнце (низкое закатное солнце с запада-юго-запада).
+/// Направление на солнце в замке (закатное солнце с запада-юго-запада).
 pub const SUN_DIR: Vec3 = Vec3::new(-0.78, 0.42, 0.40);
-/// Цвет тумана — совпадает с горизонтом неба.
-const FOG_COLOR: Color = Color::srgb(0.40, 0.38, 0.46);
 
-/// Освещение уровня: готический замок — в закатной дымке; Херсонес — ясный летний день
-/// у моря (послеполуденное солнце с запада-юго-запада, морская дымка у горизонта).
+/// Освещение уровня. Небо, дымка и туман согласованы: туман Bevy вдали даёт ровно цвет
+/// горизонта неба (`horizon` + `horizon_sun` в сторону солнца), поэтому стены и море
+/// растворяются в небе без шва.
 #[derive(Clone, Copy)]
-struct Mood {
-    sun: Vec3,
-    sun_color: Color,
-    lux: f32,
-    ambient: (Color, f32),
-    fog: Color,
-    fog_far: (Color, Color),
-    visibility: f32,
-    shadow_distance: f32,
-    day: bool,
+pub struct Mood {
+    pub sun: Vec3,
+    pub sun_color: Color,
+    pub lux: f32,
+    /// Равномерная подсветка (в дополнение к свету неба из карты окружения).
+    pub ambient: (Color, f32),
+    /// Горизонт со стороны от солнца (линейный, в единицах экрана) — он же цвет дымки.
+    pub horizon: Vec3,
+    /// Добавка к горизонту в сторону солнца и показатель её резкости.
+    pub horizon_sun: (Vec3, f32),
+    pub zenith: Vec3,
+    /// Облачность 0..1.
+    pub clouds: f32,
+    /// Цвета поглощения и рассеяния дымки (см. `FogFalloff::from_visibility_colors`).
+    pub fog_far: (Color, Color),
+    pub visibility: f32,
+    pub shadow_distance: f32,
+    pub day: bool,
+    /// Яркость неба как источника света (кд/м² на единицу цвета неба).
+    pub sky_light: f32,
 }
 
-fn mood() -> Mood {
+impl Mood {
+    pub fn fog(&self) -> Color {
+        Color::linear_rgb(self.horizon.x, self.horizon.y, self.horizon.z)
+    }
+    pub fn sky_uniform(&self) -> SkyUniform {
+        SkyUniform {
+            sun: self.sun.normalize().extend(if self.day { 1.0 } else { 0.0 }),
+            horizon: self.horizon.extend(self.clouds),
+            horizon_sun: self.horizon_sun.0.extend(self.horizon_sun.1),
+            zenith: self.zenith.extend(0.0),
+        }
+    }
+}
+
+/// Время суток в Херсонесе: `MRPG_TIME=day` — ясный полдень, иначе золотой час.
+fn golden_hour() -> bool {
+    !std::env::var("MRPG_TIME").is_ok_and(|t| t == "day")
+}
+
+pub fn mood() -> Mood {
     match crate::level::active() {
         crate::level::LevelKind::Castle => Mood {
             sun: SUN_DIR,
             sun_color: Color::srgb(1.0, 0.84, 0.66),
             lux: 11_000.0,
-            ambient: (Color::srgb(0.62, 0.62, 0.8), 420.0),
-            fog: FOG_COLOR,
+            ambient: (Color::srgb(0.62, 0.62, 0.8), 200.0),
+            horizon: Vec3::new(0.44, 0.36, 0.46),
+            horizon_sun: (Vec3::new(0.8, 0.22, 0.0), 6.0),
+            zenith: Vec3::new(0.09, 0.11, 0.27),
+            clouds: 0.5,
             fog_far: (Color::srgb(0.36, 0.36, 0.46), Color::srgb(0.62, 0.56, 0.60)),
             visibility: 380.0,
             shadow_distance: 160.0,
             day: false,
+            sky_light: 700.0,
         },
-        crate::level::LevelKind::Chersonesus => Mood {
+        crate::level::LevelKind::Chersonesus if !golden_hour() => Mood {
             sun: Vec3::new(-0.72, 0.62, 0.22),
             sun_color: Color::srgb(1.0, 0.93, 0.8),
             lux: 15_000.0,
-            ambient: (Color::srgb(0.6, 0.7, 0.9), 650.0),
-            fog: Color::srgb(0.66, 0.74, 0.84),
+            ambient: (Color::srgb(0.6, 0.7, 0.9), 250.0),
+            horizon: Vec3::new(0.62, 0.72, 0.86),
+            horizon_sun: (Vec3::new(0.35, 0.28, 0.15), 8.0),
+            zenith: Vec3::new(0.07, 0.2, 0.62),
+            clouds: 0.45,
             fog_far: (Color::srgb(0.55, 0.64, 0.78), Color::srgb(0.80, 0.78, 0.72)),
             visibility: 1100.0,
             shadow_distance: 220.0,
             day: true,
+            sky_light: 900.0,
+        },
+        // Золотой час: солнце (≈10° над горизонтом) садится в море на северо-западе (−X, −Z).
+        // Длинные тёплые тени, золотая дорожка на воде, облака подсвечены снизу; тени —
+        // холодные от синего неба, вдали — тёплая дымка, горы Таврики в розовом отсвете.
+        crate::level::LevelKind::Chersonesus => Mood {
+            sun: Vec3::new(-0.80, 0.175, -0.42),
+            sun_color: Color::srgb(1.0, 0.8, 0.6),
+            lux: 9_500.0,
+            ambient: (Color::srgb(0.55, 0.58, 0.8), 110.0),
+            horizon: Vec3::new(0.56, 0.48, 0.54),
+            horizon_sun: (Vec3::new(1.5, 0.78, 0.24), 5.0),
+            zenith: Vec3::new(0.11, 0.2, 0.46),
+            clouds: 0.55,
+            fog_far: (Color::srgb(0.5, 0.5, 0.56), Color::srgb(0.8, 0.77, 0.74)),
+            visibility: 1600.0,
+            shadow_distance: 240.0,
+            day: false,
+            sky_light: 950.0,
         },
     }
 }
@@ -72,16 +129,32 @@ impl Plugin for GraphicsPlugin {
         embedded_asset!(app, "shaders/glass.wesl");
         embedded_asset!(app, "shaders/flame.wesl");
         embedded_asset!(app, "shaders/sky.wesl");
+        embedded_asset!(app, "shaders/water.wesl");
+        embedded_asset!(app, "shaders/smoke.wesl");
+        // Общая функция неба — модуль, который импортируют небо, море и дым.
+        bevy::shader::load_shader_library!(app, "shaders/sky_common.wesl");
         app.add_plugins((
             MaterialPlugin::<SurfaceMaterial>::default(),
             MaterialPlugin::<GlassMaterial>::default(),
             MaterialPlugin::<FlameMaterial>::default(),
             MaterialPlugin::<SkyMaterial>::default(),
+            MaterialPlugin::<crate::sky::WaterMaterial>::default(),
+            MaterialPlugin::<crate::smoke::SmokeMaterial>::default(),
         ))
         .insert_resource(GraphicsSettings { heavy: true })
         .add_observer(setup_camera)
         .add_systems(Startup, setup_environment)
-        .add_systems(Update, (billboard_flames, flicker_lights, cull_far_lights, follow_sky, toggle_heavy));
+        .add_systems(Update, (billboard_flames, flicker_lights, cull_far_lights, follow_sky, toggle_heavy, attach_sky_light));
+    }
+
+    fn finish(&self, app: &mut App) {
+        // Фотоматериалы нужны раньше, чем уровень создаст свои материалы.
+        let mut images = app.world_mut().resource_mut::<Assets<Image>>();
+        let tex = load_surface_textures(&mut images);
+        if tex.is_none() {
+            warn!("Фотоматериалы не загружены — остаются процедурные поверхности");
+        }
+        let _ = SURFACE_TEXTURES.set(tex);
     }
 }
 
@@ -94,7 +167,7 @@ pub struct GraphicsSettings {
 
 pub type SurfaceMaterial = ExtendedMaterial<StandardMaterial, SurfaceExt>;
 
-/// Параметры процедурной поверхности (см. shaders/surface.wesl).
+/// Параметры поверхности (см. shaders/surface.wesl): процедурный узор + фотоматериал.
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
 pub struct SurfaceExt {
     /// Второй цвет: шов кладки, волокна дерева, тёмная плитка и т. п.
@@ -106,6 +179,23 @@ pub struct SurfaceExt {
     /// x — мох, y — грязь у земли, z — свечение (угли), w — запас.
     #[uniform(100)]
     pub params2: Vec4,
+    /// Фотоматериал: x — слой на горизонтальных гранях (−1 — без фото), y — 1/метров на тайл,
+    /// z — слой на вертикальных гранях, w — 1/метров на тайл для него.
+    #[uniform(100)]
+    pub photo: Vec4,
+    /// rgb — средний линейный цвет слоя x, w — насколько перекрашивать фото в цвет материала (0..1).
+    #[uniform(100)]
+    pub photo_mean: Vec4,
+    /// rgb — средний линейный цвет слоя z, w — сила рельефа нормалей фото.
+    #[uniform(100)]
+    pub photo_mean_b: Vec4,
+    /// Цвет фото (массив слоёв, sRGB).
+    #[texture(101, dimension = "2d_array")]
+    #[sampler(102)]
+    pub albedo: Option<Handle<Image>>,
+    /// Нормаль (RG) и шероховатость (B).
+    #[texture(103, dimension = "2d_array")]
+    pub nrm: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for SurfaceExt {
@@ -164,7 +254,7 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         Mat::Limestone => (Color::srgb(0.70, 0.64, 0.52), Color::srgb(0.42, 0.38, 0.31), P_ASHLAR, 0.62, 0.22, 1.0, 0.9, 0.0, 0.25, 0.55, 0.0),
         Mat::Rubble => (Color::srgb(0.62, 0.57, 0.47), Color::srgb(0.55, 0.50, 0.42), P_RUBBLE, 1.0, 0.35, 1.2, 0.92, 0.0, 0.15, 0.6, 0.0),
         Mat::Plaster => (Color::srgb(0.86, 0.83, 0.76), Color::srgb(0.66, 0.60, 0.50), P_PLASTER, 1.0, 0.18, 0.3, 0.9, 0.0, 0.05, 0.8, 0.0),
-        Mat::Tile => (Color::srgb(0.62, 0.30, 0.17), Color::srgb(0.30, 0.15, 0.09), P_TILE, 1.0, 0.25, 1.2, 0.7, 0.0, 0.35, 0.0, 0.0),
+        Mat::Tile => (Color::srgb(0.56, 0.29, 0.18), Color::srgb(0.30, 0.15, 0.09), P_TILE, 1.0, 0.25, 1.2, 0.7, 0.0, 0.35, 0.0, 0.0),
         Mat::Brick => (Color::srgb(0.55, 0.25, 0.14), Color::srgb(0.68, 0.63, 0.55), P_BRICK, 1.0, 0.25, 0.8, 0.9, 0.0, 0.0, 0.5, 0.0),
         Mat::OpusMixtum => (Color::srgb(0.68, 0.63, 0.53), Color::srgb(0.62, 0.58, 0.50), P_MIXTUM, 1.0, 0.25, 1.0, 0.9, 0.0, 0.1, 0.55, 0.0),
         Mat::Marble => (Color::srgb(0.88, 0.87, 0.84), Color::srgb(0.52, 0.55, 0.60), P_MARBLE, 1.0, 0.1, 0.25, 0.3, 0.0, 0.0, 0.2, 0.0),
@@ -189,14 +279,114 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         Mat::PetalRed => (Color::srgb(0.80, 0.08, 0.05), Color::srgb(0.6, 0.05, 0.03), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
         Mat::PetalPink => (Color::srgb(0.85, 0.50, 0.65), Color::srgb(0.7, 0.4, 0.5), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
     };
+    let photo = photo_layers(mat);
+    let tex = surface_textures();
+    let has_photo = tex.is_some() && photo.is_some();
+    let (top, side, tint, relief) = photo.unwrap_or((0, 0, 0.0, 0.0));
+    let layer = |l: u32| &crate::surface_layers::LAYERS[l as usize];
+    let mean = |l: u32| Vec3::from_array(layer(l).mean);
     ExtendedMaterial {
         base: StandardMaterial { base_color: a, perceptual_roughness: rough, metallic: metal, reflectance: 0.4, ..default() },
         extension: SurfaceExt {
             color_b: lin(b),
             params: Vec4::new(pattern, scale, var, bump),
             params2: Vec4::new(moss, grime, glow, 0.0),
+            photo: if has_photo { Vec4::new(top as f32, 1.0 / layer(top).meters, side as f32, 1.0 / layer(side).meters) } else { Vec4::new(-1.0, 1.0, -1.0, 1.0) },
+            // Воде вместо фото передаём солнце (для отражений неба и солнечной дорожки) и «день».
+            photo_mean: if mat == Mat::Water { mood().sun.normalize().extend(0.0) } else { mean(top).extend(tint) },
+            photo_mean_b: if mat == Mat::Water { Vec4::new(if mood().day { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0) } else { mean(side).extend(relief) },
+            albedo: tex.map(|t| t.0.clone()),
+            nrm: tex.map(|t| t.1.clone()),
         },
     }
+}
+
+/// Какие фотослои берёт материал: (горизонтальные грани, вертикальные, перекраска 0..1, сила нормалей).
+/// `None` — остаётся чисто процедурным (мозаика, листва, вода, угли, знамёна, лепестки).
+fn photo_layers(mat: Mat) -> Option<(u32, u32, f32, f32)> {
+    use crate::surface_layers::*;
+    Some(match mat {
+        Mat::DarkStone => (L_ASHLAR, L_ASHLAR, 0.85, 1.0),
+        // Местный известняк Херсонеса — тёплый серо-бежевый: оставляем фото почти как есть.
+        Mat::Stone | Mat::Trim => (L_ASHLAR, L_ASHLAR, 0.5, 1.0),
+        Mat::Limestone => (L_ASHLAR, L_ASHLAR, 0.75, 1.0),
+        Mat::Floor => (L_FLAGSTONE, L_ASHLAR, 0.8, 0.8),
+        Mat::Paving => (L_FLAGSTONE, L_ASHLAR, 0.6, 0.9),
+        Mat::Cobble => (L_COBBLE, L_ASHLAR, 0.5, 1.0),
+        Mat::Grass => (L_GRASS, L_SOIL, 0.55, 0.8),
+        Mat::Rubble => (L_RUBBLE, L_RUBBLE, 0.6, 1.0),
+        Mat::Plaster => (L_PLASTER, L_PLASTER, 0.9, 0.6),
+        Mat::Signinum => (L_PLASTER, L_PLASTER, 1.0, 0.5),
+        Mat::Brick => (L_BRICK, L_BRICK, 0.5, 1.0),
+        Mat::OpusMixtum => (L_ASHLAR, L_BRICK, 0.7, 1.0),
+        Mat::Marble => (L_MARBLE, L_MARBLE, 0.6, 0.4),
+        Mat::Earth => (L_EARTH, L_EARTH, 0.6, 0.9),
+        Mat::Terrain => (L_GRASS, L_ROCK, 0.5, 1.0),
+        Mat::Wood => (L_WOOD, L_WOOD, 0.85, 0.9),
+        // Своя черепица (запечена в Blender) уже нужного тона — перекрашиваем слегка.
+        Mat::Tile => (L_ROOF, L_ROOF, 0.15, 1.0),
+        Mat::Iron => (L_IRON, L_IRON, 0.9, 0.6),
+        Mat::Bronze => (L_BRONZE, L_BRONZE, 0.5, 0.6),
+        Mat::Gold => (L_GOLD, L_GOLD, 0.4, 0.5),
+        Mat::Canvas | Mat::Felt | Mat::Rug | Mat::Cloth => (L_WOOL, L_WOOL, 1.0, 0.7),
+        _ => return None,
+    })
+}
+
+static SURFACE_TEXTURES: std::sync::OnceLock<Option<(Handle<Image>, Handle<Image>)>> = std::sync::OnceLock::new();
+
+fn surface_textures() -> Option<&'static (Handle<Image>, Handle<Image>)> {
+    SURFACE_TEXTURES.get().and_then(|t| t.as_ref())
+}
+
+/// Собирает массивы слоёв фотоматериалов (assets/textures/surface) с мип-уровнями.
+fn load_surface_textures(images: &mut Assets<Image>) -> Option<(Handle<Image>, Handle<Image>)> {
+    use bevy::image::{CompressedImageFormats, ImageSampler, ImageType};
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension};
+    let dir = bevy::asset::io::file::FileAssetReader::get_base_path().join("assets/textures/surface");
+    let layers = crate::surface_layers::LAYERS;
+    let load = |suffix: &str, srgb: bool| -> Option<Image> {
+        // Слои декодируем и уменьшаем параллельно — это ~40 картинок 1024².
+        let decoded: Vec<Option<Image>> = std::thread::scope(|s| {
+            let jobs: Vec<_> = layers
+                .iter()
+                .map(|l| {
+                    let path = dir.join(format!("{}_{}.jpg", l.name, suffix));
+                    s.spawn(move || {
+                        let bytes = std::fs::read(&path).map_err(|e| warn!("нет текстуры {}: {e}", path.display())).ok()?;
+                        let mut img = Image::from_buffer(&bytes, ImageType::Extension("jpg"), CompressedImageFormats::NONE, srgb, ImageSampler::Default, RenderAssetUsages::default()).ok()?;
+                        crate::textures::generate_mips(&mut img, suffix == "nrm");
+                        Some(img)
+                    })
+                })
+                .collect();
+            jobs.into_iter().map(|j| j.join().ok().flatten()).collect()
+        });
+        let decoded: Vec<Image> = decoded.into_iter().collect::<Option<_>>()?;
+        let first = &decoded[0];
+        let (w, h) = (first.width(), first.height());
+        if decoded.iter().any(|i| i.width() != w || i.height() != h) {
+            warn!("слои фотоматериалов разного размера");
+            return None;
+        }
+        let levels = first.texture_descriptor.mip_level_count;
+        let mut data = Vec::new();
+        for img in &decoded {
+            data.extend_from_slice(img.data.as_ref()?);
+        }
+        let format = if srgb { TextureFormat::Rgba8UnormSrgb } else { TextureFormat::Rgba8Unorm };
+        let mut arr = Image::new_uninit(Extent3d { width: w, height: h, depth_or_array_layers: decoded.len() as u32 }, TextureDimension::D2, format, RenderAssetUsages::RENDER_WORLD);
+        arr.data = Some(data);
+        arr.texture_descriptor.mip_level_count = levels;
+        arr.sampler = crate::textures::quality_sampler(true);
+        arr.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::D2Array), ..default() });
+        Some(arr)
+    };
+    let started = std::time::Instant::now();
+    let albedo = load("albedo", true)?;
+    let nrm = load("nrm", false)?;
+    info!("Фотоматериалы: {} слоёв за {:.2} с", layers.len(), started.elapsed().as_secs_f32());
+    Some((images.add(albedo), images.add(nrm)))
 }
 
 // ---------- Витражи ----------
@@ -296,19 +486,6 @@ fn cull_far_lights(time: Res<Time>, mut next: Local<f32>, cameras: Query<&Global
 
 // ---------- Небо ----------
 
-#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
-pub struct SkyMaterial {
-    /// xyz — направление на солнце.
-    #[uniform(0)]
-    pub sun: Vec4,
-}
-
-impl Material for SkyMaterial {
-    fn fragment_shader() -> ShaderRef {
-        "embedded://medieval_rpg/shaders/sky.wesl".into()
-    }
-}
-
 #[derive(Component)]
 struct SkyDome;
 
@@ -343,15 +520,22 @@ fn sky_mesh(radius: f32) -> Mesh {
         .with_inserted_indices(Indices::U32(idx))
 }
 
-fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut skies: ResMut<Assets<SkyMaterial>>) {
+fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut skies: ResMut<Assets<SkyMaterial>>, mut images: ResMut<Assets<Image>>) {
     let m = mood();
-    commands.insert_resource(ClearColor(m.fog));
+    commands.insert_resource(ClearColor(m.fog()));
+    // Свет неба: то же небо в кубической карте, отфильтрованной на процессоре один раз.
+    let started = std::time::Instant::now();
+    let (diffuse, specular) = crate::sky::sky_environment(&m.sky_uniform());
+    info!("Карта окружения неба за {:.2} с", started.elapsed().as_secs_f32());
+    commands.insert_resource(crate::sky::SkyEnvironment { diffuse: images.add(diffuse), specular: images.add(specular) });
+    // Тени в 4096² на каскад: края теней от карнизов и колонн не «лесенкой».
+    commands.insert_resource(bevy::light::DirectionalLightShadowMap { size: 4096 });
     commands.insert_resource(GlobalAmbientLight { color: m.ambient.0, brightness: m.ambient.1, ..default() });
 
     let sun = m.sun.normalize();
     commands.spawn((
         Mesh3d(meshes.add(sky_mesh(900.0))),
-        MeshMaterial3d(skies.add(SkyMaterial { sun: sun.extend(if m.day { 1.0 } else { 0.0 }) })),
+        MeshMaterial3d(skies.add(SkyMaterial { sky: m.sky_uniform() })),
         Transform::IDENTITY,
         SkyDome,
         NotShadowCaster,
@@ -365,19 +549,22 @@ fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
         CascadeShadowConfigBuilder { num_cascades: 4, first_cascade_far_bound: 12.0, maximum_distance: m.shadow_distance, ..default() }.build(),
         VolumetricLight,
     ));
-    // Лёгкая дымка над замком — в ней видны лучи из окон и от факелов (днём у моря её нет).
-    if !m.day {
-        commands.spawn((
-            FogVolume {
-                fog_color: Color::srgb(0.85, 0.8, 0.8),
-                density_factor: 0.03,
-                absorption: 0.0,
-                scattering: 0.25,
-                scattering_asymmetry: 0.6,
-                ..default()
-            },
-            Transform::from_xyz(0.0, 20.0, 0.0).with_scale(Vec3::new(600.0, 40.0, 600.0)),
-        ));
+    // Лёгкая дымка: в ней видны лучи низкого солнца между домами, из окон и от факелов
+    // (днём у моря её нет). В Херсонесе она гуще у земли — вечерний дым очагов и морская мгла.
+    match (m.day, crate::level::active()) {
+        (true, _) => {}
+        (false, crate::level::LevelKind::Castle) => {
+            commands.spawn((
+                FogVolume { fog_color: Color::srgb(0.85, 0.8, 0.8), density_factor: 0.03, absorption: 0.0, scattering: 0.25, scattering_asymmetry: 0.6, ..default() },
+                Transform::from_xyz(0.0, 20.0, 0.0).with_scale(Vec3::new(600.0, 40.0, 600.0)),
+            ));
+        }
+        (false, crate::level::LevelKind::Chersonesus) => {
+            commands.spawn((
+                FogVolume { fog_color: Color::srgb(0.95, 0.9, 0.88), density_factor: 0.0012, absorption: 0.0, scattering: 0.3, scattering_asymmetry: 0.72, ..default() },
+                Transform::from_xyz(0.0, 6.0, 0.0).with_scale(Vec3::new(1800.0, 14.0, 1800.0)),
+            ));
+        }
     }
 }
 
@@ -396,15 +583,16 @@ fn setup_camera(event: On<Add<Camera3d>>, mut commands: Commands, settings: Res<
     e.insert((
         Hdr,
         Tonemapping::TonyMcMapface,
-        Bloom { intensity: 0.16, ..Bloom::NATURAL },
-        ColorGrading {
-            global: ColorGradingGlobal { exposure: 0.3, post_saturation: 1.08, ..default() },
-            ..default()
-        },
+        Bloom { intensity: if m.day { 0.16 } else { 0.2 }, ..Bloom::NATURAL },
+        color_grading(&m),
+        // Лёгкое затемнение углов кадра, как у объектива.
+        Vignette { intensity: 0.32, radius: 0.85, smoothness: 3.0, ..default() },
+        // Дальняя дымка того же цвета, что горизонт неба (см. `Mood`).
         DistanceFog {
-            color: m.fog,
-            directional_light_color: if m.day { Color::srgba(1.0, 0.9, 0.7, 0.3) } else { Color::srgba(1.0, 0.62, 0.35, 0.5) },
-            directional_light_exponent: 18.0,
+            color: m.fog(),
+            // Свечение дымки к солнцу — слабее, чем у неба: иначе город против солнца тонет в оранжевом.
+            directional_light_color: Color::linear_rgba(m.horizon_sun.0.x * 0.55, m.horizon_sun.0.y * 0.55, m.horizon_sun.0.z * 0.55, 1.0),
+            directional_light_exponent: m.horizon_sun.1,
             falloff: FogFalloff::from_visibility_colors(m.visibility, m.fog_far.0, m.fog_far.1),
         },
         Msaa::Off,
@@ -413,6 +601,27 @@ fn setup_camera(event: On<Add<Camera3d>>, mut commands: Commands, settings: Res<
     ));
     if settings.heavy {
         e.insert(heavy_effects());
+    }
+}
+
+/// Цветокоррекция: чуть больше контраста в средних тонах, насыщенные света (закатное
+/// золото), чуть приглушённые тени — как на плёнке.
+fn color_grading(m: &Mood) -> ColorGrading {
+    let section = |saturation: f32, contrast: f32| ColorGradingSection { saturation, contrast, ..default() };
+    ColorGrading {
+        global: ColorGradingGlobal { exposure: if m.day { 0.3 } else { 0.2 }, post_saturation: 1.06, ..default() },
+        shadows: section(0.92, 1.0),
+        midtones: section(1.04, 1.08),
+        highlights: section(1.1, 1.0),
+    }
+}
+
+/// Свет неба (карта окружения) — на каждую 3D-камеру, как только карта готова.
+fn attach_sky_light(mut commands: Commands, env: Option<Res<crate::sky::SkyEnvironment>>, cameras: Query<Entity, (With<Camera3d>, Without<EnvironmentMapLight>)>) {
+    let Some(env) = env else { return };
+    let m = mood();
+    for e in &cameras {
+        commands.entity(e).insert(crate::sky::sky_environment_light(&env, &m));
     }
 }
 
@@ -431,6 +640,29 @@ fn toggle_heavy(keys: Res<ButtonInput<KeyCode>>, mut settings: ResMut<GraphicsSe
             commands.entity(e).insert(heavy_effects());
         } else {
             commands.entity(e).remove::<(ScreenSpaceAmbientOcclusion, VolumetricFog)>();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::surface_layers::*;
+
+    /// Шейдер рельефа берёт почву и гальку по номерам слоёв напрямую.
+    #[test]
+    fn terrain_layers_match_shader() {
+        assert_eq!(L_SOIL, 8);
+        assert_eq!(L_GRAVEL, 18);
+    }
+
+    #[test]
+    fn every_surface_layer_file_exists() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/textures/surface");
+        for l in LAYERS {
+            for suffix in ["albedo", "nrm"] {
+                let p = dir.join(format!("{}_{}.jpg", l.name, suffix));
+                assert!(p.exists(), "нет {}", p.display());
+            }
         }
     }
 }

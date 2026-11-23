@@ -125,7 +125,7 @@ pub fn run(server_addr: SocketAddr) {
             primary_window: Some(Window { title: "Medieval RPG — прототип".into(), ..default() }),
             ..default()
         }))
-        .add_plugins((RenetClientPlugin, NetcodeClientPlugin, PlayerPlugin, fight::FightPlugin, hud::HudPlugin, graphics::GraphicsPlugin))
+        .add_plugins((RenetClientPlugin, NetcodeClientPlugin, PlayerPlugin, fight::FightPlugin, hud::HudPlugin, graphics::GraphicsPlugin, crate::textures::TexturesPlugin))
         .add_plugins(rig::RigPlugin)
         .add_plugins(crate::loot_client::LootClientPlugin)
         .add_plugins(crate::doors::DoorClientPlugin)
