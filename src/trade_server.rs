@@ -130,8 +130,18 @@ struct Order {
 struct ActiveLesson {
     merchant: MerchantId,
     index: usize,
-    ends_at: f64,
+    /// Урок идёт, пока ученик работает руками (см. work.rs).
+    effort: crate::work::Effort,
     fee: u32,
+    send_in: f32,
+}
+
+/// Каким движением идёт урок или смена у мастера-торговца.
+fn lesson_drill(l: &crate::trade::LessonDef) -> crate::work::Drill {
+    match l.mode {
+        LessonMode::Paid => crate::work::Drill::Mimic,
+        LessonMode::Apprentice => crate::work::chore_drill(crate::knowledge::teacher_from_trade(l.teacher)),
+    }
 }
 
 struct Stolen {
@@ -1230,6 +1240,7 @@ fn receive_trade_messages(
     time: Res<Time>,
     mut loot: ResMut<LootWorld>,
     tw: Option<ResMut<TradeWorld>>,
+    knowledge: Option<Res<crate::knowledge::KnowledgeWorld>>,
 ) {
     let Some(mut tw) = tw else { return };
     let tw = &mut *tw;
@@ -1418,8 +1429,9 @@ fn receive_trade_messages(
                             ActiveLesson {
                                 merchant: id,
                                 index: index as usize,
-                                ends_at: now + l.secs as f64,
+                                effort: crate::work::Effort::new(lesson_drill(l), l.secs),
                                 fee,
+                                send_in: 0.0,
                             },
                         );
                         Ok(())
@@ -1431,11 +1443,26 @@ fn receive_trade_messages(
                             &TradeServerMessage::LessonStarted {
                                 title: l.title.to_string(),
                                 secs: l.secs,
+                                drill: Some(lesson_drill(l)),
+                                skill: crate::knowledge::teacher_from_trade(l.teacher)
+                                    .skill()
+                                    .and_then(|sk| {
+                                        knowledge
+                                            .as_ref()
+                                            .and_then(|k| k.players.get(&pid))
+                                            .map(|k| k.skill(sk) / 100.0)
+                                    })
+                                    .unwrap_or(0.0),
                             },
                         ),
                         Err(r) => send(&mut server, pid, &TradeServerMessage::Say(r)),
                     }
                     send_inventory(&mut server, &loot, pid);
+                }
+                TradeClientMessage::Stroke { q } => {
+                    if let Some(l) = tw.lessons.get_mut(&pid) {
+                        l.effort.stroke(q);
+                    }
                 }
                 TradeClientMessage::StopLesson => {
                     if tw.lessons.remove(&pid).is_some() {
@@ -1735,7 +1762,6 @@ fn tick_lessons(
     tw: Option<ResMut<TradeWorld>>,
 ) {
     let Some(mut tw) = tw else { return };
-    let now = time.elapsed_secs_f64();
     let players: Vec<u64> = tw.lessons.keys().copied().collect();
     for pid in players {
         let l = &tw.lessons[&pid];
@@ -1754,31 +1780,48 @@ fn tick_lessons(
             notice(&mut server, pid, "Урок прерван: вы ушли от мастера");
             continue;
         }
-        if now < l.ends_at {
+        let dt = time.delta_secs();
+        let l = tw.lessons.get_mut(&pid).unwrap();
+        l.effort.tick(dt);
+        l.send_in -= dt;
+        if l.send_in <= 0.0 {
+            l.send_in = 0.2;
+            let p = l.effort.frac();
+            send(&mut server, pid, &TradeServerMessage::LessonProgress(p));
+        }
+        if !l.effort.finished() {
             continue;
         }
         let l = tw.lessons.remove(&pid).unwrap();
+        let q = l.effort.quality();
         let def = l.merchant.def();
         let lesson = &def.lessons[l.index];
         if lesson.mode == LessonMode::Apprentice {
             let mut uids = loot.uids.clone();
+            // Платят по работе: кто работал рывками, получает меньше.
+            let pay = ((lesson.money as f32 * crate::work::wage_mult(q)).round() as u32).max(1);
             if let Some(inv) = loot.inventories.get_mut(&pid)
-                && give_money(inv, lesson.money, &mut uids).is_ok()
+                && give_money(inv, pay, &mut uids).is_ok()
             {
                 loot.uids = uids;
                 notice(
                     &mut server,
                     pid,
                     format!(
-                        "Смена окончена. {} платит вам {}",
+                        "Смена окончена: работали {}. {} платит вам {}",
+                        crate::work::quality_word(q),
                         def.name,
-                        format_money(lesson.money)
+                        format_money(pay)
                     ),
                 );
             }
             send_inventory(&mut server, &loot, pid);
         } else {
-            notice(&mut server, pid, format!("Урок у {} окончен", def.name));
+            notice(
+                &mut server,
+                pid,
+                format!("Урок у {} окончен: повторяли {}", def.name, crate::work::quality_word(q)),
+            );
         }
         tw.change_rep(pid, def.faction, 1.0);
         send(
@@ -1789,7 +1832,8 @@ fn tick_lessons(
         commands.trigger(LessonRequested {
             player: pid,
             teacher: lesson.teacher,
-            hours: lesson.hours,
+            // Прилежный ученик берёт с урока больше.
+            hours: lesson.hours * crate::work::lesson_mult(q),
             mode: lesson.mode,
             fee: l.fee,
         });

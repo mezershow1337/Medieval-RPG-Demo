@@ -102,8 +102,10 @@ fn mouse_look(
     motion: Res<AccumulatedMouseMotion>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     mut player: Query<(&mut LocalPlayer, &mut Transform)>,
+    work: Option<Res<crate::work_client::MyWork>>,
 ) {
-    if !cursor_locked(&cursor) {
+    // Руки заняты работой: мышь водит пестик, а не голову.
+    if !cursor_locked(&cursor) || crate::work_client::hands_busy(work.as_deref()) {
         return;
     }
     for (mut p, mut transform) in &mut player {

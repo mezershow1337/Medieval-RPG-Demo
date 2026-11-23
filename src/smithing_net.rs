@@ -109,6 +109,8 @@ pub enum SmithClientMessage {
     /// Переложить поковку или тигель.
     Move(Spot),
     Strike { zone: u8, heavy: bool, acc: f32 },
+    /// Перевернуть поковку клещами на другую грань.
+    Flip,
     Quench(Quench),
     Grind { acc: f32 },
     /// Снять шлак с расплава.

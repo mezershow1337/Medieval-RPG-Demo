@@ -60,6 +60,8 @@ mod trade_net;
 mod trade_server;
 mod trade_ui;
 mod weight;
+mod work;
+mod work_client;
 
 use protocol::DEFAULT_PORT;
 use std::net::SocketAddr;

@@ -325,6 +325,7 @@ fn receive_lore(
     mut body: ResMut<crate::medicine_client::MyBody>,
     mut fx: ResMut<crate::alchemy_fx::FxQueue>,
     mut tending: ResMut<MyTending>,
+    mut work: ResMut<crate::work_client::MyWork>,
     assets: Res<LoreAssets>,
     time: Res<Time>,
 ) {
@@ -379,10 +380,15 @@ fn receive_lore(
                     view.masters.insert(m.id, (m, e));
                 }
             }
-            LoreServerMessage::Activity { verb, done, total } => loot.using = Some((verb, now - done, total)),
+            LoreServerMessage::Activity { verb, done, total, drill, skill } => {
+                work.begin(drill, skill, crate::work_client::Via::Lore, &verb, done / total.max(0.01));
+                loot.using = Some((verb, now - done, total));
+            }
+            LoreServerMessage::Progress(p) => work.progress = p,
             LoreServerMessage::ActivityEnded => {
                 loot.using = None;
                 tending.0 = None;
+                work.end(crate::work_client::Via::Lore);
             }
             LoreServerMessage::Tending(t) => tending.0 = Some(t),
             LoreServerMessage::Notice(text) => loot.notify(text, now),
@@ -494,7 +500,7 @@ struct KnowledgeWindow;
 struct TendingHud;
 
 /// Знающий видит жар и нагрев купола; новичок — только слышит кипение и видит дым.
-fn tending_lines(t: &TendView, k: &Knowledge) -> (String, bool) {
+fn tending_lines(t: &TendView, k: &Knowledge, pumping: bool) -> (String, bool) {
     let mut out = Vec::new();
     let reads_fire = k.knows(Lore::Technique(Technique::Decoction)) || k.knows(Lore::Technique(Technique::Distillation)) || k.skill(Skill::Alchemy) >= 25.0;
     let diff = t.fire - t.target;
@@ -532,7 +538,7 @@ fn tending_lines(t: &TendView, k: &Knowledge) -> (String, bool) {
         };
         out.push(cue.to_string());
     }
-    let mut keys = "[1] мехи   [2] заслонка".to_string();
+    let mut keys = if pumping { "Мехи — мышью вверх-вниз   [2] заслонка".to_string() } else { "[1] мехи   [2] заслонка".to_string() };
     if t.dome.is_some() {
         keys.push_str("   [3] мокрая тряпица на купол");
     }
@@ -543,14 +549,21 @@ fn tending_lines(t: &TendView, k: &Knowledge) -> (String, bool) {
 /// Предел шкалы жара (раскалено сверх сильного).
 const FIRE_SCALE: f32 = 3.6;
 
-fn update_tending_hud(tending: Res<MyTending>, knowledge: Res<MyKnowledge>, loot: Res<LootState>, mut hud: Single<(&mut Text, &mut TextColor, &mut Node), With<TendingHud>>) {
+fn update_tending_hud(
+    tending: Res<MyTending>,
+    knowledge: Res<MyKnowledge>,
+    loot: Res<LootState>,
+    work: Res<crate::work_client::MyWork>,
+    mut hud: Single<(&mut Text, &mut TextColor, &mut Node), With<TendingHud>>,
+) {
     if !tending.is_changed() && !knowledge.is_changed() && !loot.is_changed() {
         return;
     }
+    let pumping = work.meter.as_ref().is_some_and(|m| m.drill == crate::work::Drill::Pump);
     let (text, color, node) = &mut *hud;
     match tending.0.as_ref().filter(|_| loot.using.is_some()) {
         Some(t) => {
-            let (line, danger) = tending_lines(t, &knowledge.0);
+            let (line, danger) = tending_lines(t, &knowledge.0, pumping);
             text.0 = line;
             color.0 = if danger { Color::srgb(1.0, 0.45, 0.3) } else { Color::srgb(0.95, 0.88, 0.7) };
             node.display = Display::Flex;

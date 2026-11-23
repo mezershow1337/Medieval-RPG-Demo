@@ -615,6 +615,19 @@ pub fn plan(body: &Body, item: &str) -> Option<(&'static str, f32)> {
     intake.map(|i| (i.verb, i.secs))
 }
 
+/// Каким движением лечат: повязку и припарку накладывают и тянут, наконечник вынимают
+/// с ровным натяжением; выпить — просто выпить.
+pub fn plan_drill(body: &Body, item: &str) -> Option<crate::work::Drill> {
+    let (care, _) = remedy(item);
+    if let Some(c) = care
+        && let Some(w) = body.worst_wound()
+        && ((w.arrowhead && w.kind == WoundKind::Arrow) || !(c.dress && w.dressed && w.bleeding() < 0.05))
+    {
+        return Some(crate::work::Drill::Tension);
+    }
+    None
+}
+
 /// Применить средство. `has_bandage` — есть ли в сумке бинт, чтобы прибинтовать припарку.
 /// `roll` 0..1 — случай (неудача при извлечении, доза на глаз).
 pub fn apply(body: &mut Body, k: &Knowledge, item: &str, quality_index: usize, has_bandage: bool, roll: f32) -> Treated {
