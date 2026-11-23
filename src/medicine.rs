@@ -523,6 +523,12 @@ pub fn remedy(item: &str) -> (Option<WoundCare>, Option<Intake>) {
         // Готовые снадобья.
         "Кровоостанавливающая припарка" => (w(WoundCare { verb: "Прикладываете припарку", poultice: true, styptic: 0.2, antiseptic: 0.2, ..CARE }), None),
         "Ранозаживляющая мазь" => (w(WoundCare { verb: "Накладываете мазь", antiseptic: 0.7, heal: 1.8, soothe: 0.4, technique: Salve, ..CARE }), None),
+        "Сок подорожника" => (w(WoundCare { verb: "Льёте на рану сок подорожника", secs: 3.0, styptic: 0.45, antiseptic: 0.15, heal: 1.3, ..CARE }), None),
+        "Вино с миррой" => (w(WoundCare { verb: "Промываете рану вином с миррой", secs: 3.0, wash: 0.2, antiseptic: 0.45, heal: 1.1, technique: WoundWashing, ..CARE }), None),
+        "Чабрецовый уксус" => (w(WoundCare { verb: "Промываете рану чабрецовым уксусом", secs: 3.0, wash: 0.25, antiseptic: 0.4, styptic: 0.7, technique: WoundWashing, ..CARE }), None),
+        "Мазь из окопника" => (w(WoundCare { verb: "Накладываете мазь из окопника", antiseptic: 0.1, heal: 2.1, soothe: 0.3, technique: Salve, ..CARE }), None),
+        "Вяжущая мазь" => (w(WoundCare { verb: "Накладываете вяжущую мазь", styptic: 0.35, antiseptic: 0.3, heal: 1.3, technique: Salve, ..CARE }), None),
+        "Мазь от ожогов" => (w(WoundCare { verb: "Смазываете ожог мазью", antiseptic: 0.3, heal: 1.4, soothe: 0.9, technique: Salve, ..CARE }), None),
         "Зверобойное масло" => (w(WoundCare { verb: "Смазываете зверобойным маслом", secs: 3.0, antiseptic: 0.3, heal: 1.3, soothe: 0.8, technique: Maceration, ..CARE }), None),
         // Внутрь.
         "Отвар шалфея" => (None, i(Intake { verb: "Пьёте отвар шалфея", antipyretic: 0.3, ..INTAKE })),
@@ -533,6 +539,9 @@ pub fn remedy(item: &str) -> (Option<WoundCare>, Option<Intake>) {
         "Мятный отвар" => (None, i(Intake { verb: "Пьёте мятный отвар", antidote: 0.15, antipyretic: 0.1, ..INTAKE })),
         "Отвар девясила" => (None, i(Intake { verb: "Пьёте отвар девясила", antipyretic: 0.4, ..INTAKE })),
         "Отвар шиповника" => (None, i(Intake { verb: "Пьёте отвар шиповника", vigor: 1.0, ..INTAKE })),
+        "Полынное вино" => (None, i(Intake { verb: "Пьёте горькое полынное вино", antidote: 0.5, vigor: 0.2, ..INTAKE })),
+        "Отвар ревеня" => (None, i(Intake { verb: "Пьёте отвар ревеня: слабит и чистит чрево", antidote: 0.45, ..INTAKE })),
+        "Маковый сок" => (None, i(Intake { verb: "Глотаете несколько капель макового сока", secs: 1.5, toxins: &[(Toxin::Opium, 0.7)], needs_dosage: true, ..INTAKE })),
         "Маковый отвар" => (None, i(Intake { verb: "Пьёте маковый отвар", toxins: &[(Toxin::Opium, 0.9)], needs_dosage: true, ..INTAKE })),
         "Маковые коробочки" => (None, i(Intake { verb: "Жуёте маковые коробочки", secs: 3.0, toxins: &[(Toxin::Opium, 0.35)], ..INTAKE })),
         "Опий" => (None, i(Intake { verb: "Глотаете кусочек опия", secs: 1.5, toxins: &[(Toxin::Opium, 1.4)], needs_dosage: true, ..INTAKE })),

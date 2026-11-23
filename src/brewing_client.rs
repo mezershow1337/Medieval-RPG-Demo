@@ -3,6 +3,9 @@
 //! В окне видно, что из сумки можно положить в сосуд (и сколько это драхм), сколько налить
 //! воды, какой огонь и сколько варить. Ниже — что выходит по весу (чтобы игрок, нашедший
 //! рецепт у Галена, мог отмерить «один к четырём»), и подсказки из выученных приёмов.
+//!
+//! Драхмы видит только тот, у кого есть весы с гирями или кто выучил дозировку; остальные
+//! сыплют на глаз — горстями и щепотями.
 #![allow(deprecated)] // Interaction: в Bevy 0.20 помечен устаревшим, но работает и проще.
 
 use crate::brewing::{self, BrewSpec, DRACHMS_PER_KOTYLE, Heat, Vessel};
@@ -35,13 +38,14 @@ pub struct BrewState {
     water: u8,
     heat: Heat,
     hours: f32,
+    bath: bool,
     rev: u64,
     built: Option<(u64, u64, u64)>,
 }
 
 impl Default for BrewState {
     fn default() -> Self {
-        Self { open: None, counts: BTreeMap::new(), water: 2, heat: Heat::Low, hours: 1.0, rev: 1, built: None }
+        Self { open: None, counts: BTreeMap::new(), water: 2, heat: Heat::Low, hours: 1.0, bath: false, rev: 1, built: None }
     }
 }
 
@@ -50,6 +54,7 @@ impl BrewState {
     pub fn open_vessel(&mut self, uid: ItemUid, vessel: Vessel) {
         if self.open.map(|o| o.0) != Some(uid) {
             self.counts.clear();
+            self.bath = false;
             if !vessel.takes_water() {
                 self.water = 0;
             }
@@ -59,6 +64,10 @@ impl BrewState {
                     self.hours = 0.25;
                 }
                 Vessel::Crucible => self.heat = Heat::High,
+                Vessel::DryingTray => {
+                    self.heat = Heat::None;
+                    self.hours = 12.0;
+                }
                 v if v.still() => self.heat = Heat::Medium,
                 _ => {}
             }
@@ -77,6 +86,7 @@ enum BrewAction {
     Heat(Heat),
     TimeUp,
     TimeDown,
+    Bath,
     Start,
     Close,
 }
@@ -182,10 +192,11 @@ fn brew_buttons(
             BrewAction::WaterUp => state.water = (state.water + 1).min(brewing::MAX_WATER),
             BrewAction::WaterDown => state.water = state.water.saturating_sub(1),
             BrewAction::Heat(h) => state.heat = *h,
+            BrewAction::Bath => state.bath = !state.bath,
             BrewAction::TimeUp => state.hours = TIME_STEPS.iter().copied().find(|t| *t > state.hours + 1e-3).unwrap_or(state.hours),
             BrewAction::TimeDown => state.hours = TIME_STEPS.iter().rev().copied().find(|t| *t < state.hours - 1e-3).unwrap_or(state.hours),
             BrewAction::Start => {
-                let spec = BrewSpec { items: state.counts.iter().map(|(n, c)| (n.clone(), *c)).collect(), water: state.water, heat: state.heat, hours: state.hours };
+                let spec = BrewSpec { items: state.counts.iter().map(|(n, c)| (n.clone(), *c)).collect(), water: state.water, heat: state.heat, hours: state.hours, bath: state.bath && state.heat != Heat::None };
                 if let Some(client) = client.as_mut() {
                     send(client, &LoreClientMessage::Brew { vessel, spec });
                 }
@@ -241,6 +252,9 @@ fn rebuild_brew_panel(
         }
     }
     let flasks: u32 = inv.all_items().filter(|i| i.info().name == brewing::FLASK).map(|i| i.count as u32).sum();
+    // Весы или выученная дозировка — точные драхмы; иначе — на глаз.
+    let weighs = inv.all_items().any(|i| i.info().name == "Весы с гирями") || knowledge.0.knows(crate::lore::Lore::Technique(crate::lore::Technique::Dosage));
+    let pots = inv.all_items().filter(|i| matches!(i.info().name, "Глиняный горшок" | "Медный котелок")).count();
     let dry: f32 = state.counts.iter().map(|(n, c)| brewing::mass(n).unwrap_or(0.0) * *c as f32).sum::<f32>() + 0.0;
     let water = state.water as f32 * DRACHMS_PER_KOTYLE;
 
@@ -270,13 +284,16 @@ fn rebuild_brew_panel(
                 button(r, fonts, "−", BrewAction::Sub(name.clone()), false);
                 r.spawn(label(fonts, format!("{c}/{have}"), 14.0, if c > 0 { TITLE } else { TEXT }, true));
                 button(r, fonts, "+", BrewAction::Add(name.clone()), false);
-                r.spawn(label(fonts, format!("{shown} · {:.0} др.", brewing::mass(name).unwrap_or(0.0)), 14.0, TEXT, false));
+                let m = brewing::mass(name).unwrap_or(0.0);
+                let measure = if weighs { format!("{m:.0} др.") } else { by_eye(name, m).to_string() };
+                r.spawn(label(fonts, format!("{shown} · {measure}"), 14.0, TEXT, false));
             });
         }
         if vessel.takes_water() {
             row(p).with_children(|r| {
                 button(r, fonts, "−", BrewAction::WaterDown, false);
-                r.spawn(label(fonts, format!("Вода: {} кот. ({:.0} др.)", state.water, water), 14.0, TEXT, true));
+                let w = if weighs { format!("Вода: {} кот. ({:.0} др.)", state.water, water) } else { format!("Вода: {} кружк.", state.water) };
+                r.spawn(label(fonts, w, 14.0, TEXT, true));
                 button(r, fonts, "+", BrewAction::WaterUp, false);
             });
         }
@@ -288,22 +305,37 @@ fn rebuild_brew_panel(
                 }
             });
         }
+        // Водяная баня Марии: горшок в котле с водой.
+        if vessel.takes_water() && state.heat != Heat::None {
+            row(p).with_children(|r| {
+                button(r, fonts, if state.bath { "Водяная баня: да" } else { "Водяная баня: нет" }, BrewAction::Bath, state.bath);
+                let note = if pots >= 2 { "не пригорит, жар не выше кипения" } else { "нужен второй горшок или котелок" };
+                r.spawn(label(fonts, note, 13.0, DIM, false));
+            });
+        }
         row(p).with_children(|r| {
             button(r, fonts, "−", BrewAction::TimeDown, false);
             let t = if state.hours >= 24.0 { format!("{:.0} сут.", state.hours / 24.0) } else if state.hours < 1.0 { format!("{:.0} мин", state.hours * 60.0) } else { format!("{} ч", state.hours) };
             r.spawn(label(fonts, format!("Время: {t}"), 14.0, TEXT, true));
             button(r, fonts, "+", BrewAction::TimeUp, false);
         });
-        let ratio = if dry > 0.0 && water > 0.0 { format!(" · воды к смеси {:.1} : 1", water / dry) } else { String::new() };
-        p.spawn(label(fonts, format!("Смесь: {dry:.0} др.{ratio}"), 13.0, DIM, false));
+        if weighs {
+            let ratio = if dry > 0.0 && water > 0.0 { format!(" · воды к смеси {:.1} : 1", water / dry) } else { String::new() };
+            p.spawn(label(fonts, format!("Смесь: {dry:.0} др.{ratio}"), 13.0, DIM, false));
+        } else {
+            p.spawn(label(fonts, "Сыплете на глаз: без весов драхм не узнать", 13.0, DIM, false));
+        }
         // Доли по весу — чтобы отмерить по книге.
-        if state.counts.len() > 1 {
+        if weighs && state.counts.len() > 1 {
             let parts: Vec<String> = state.counts.iter().map(|(n, c)| format!("{} {:.0}%", n.to_lowercase(), brewing::mass(n).unwrap_or(0.0) * *c as f32 / dry * 100.0)).collect();
             p.spawn(label(fonts, parts.join(", "), 13.0, DIM, false));
         }
         p.spawn(label(fonts, format!("Пустых флаконов: {flasks} (жидкое разливают во флаконы)"), 13.0, DIM, false));
         if vessel.glass() {
-            p.spawn(label(fonts, "Стекло боится сильного огня: может лопнуть", 13.0, DIM, false));
+            p.spawn(label(fonts, "Стекло боится жара: остужайте купол мокрой тряпицей (3), иначе лопнет", 13.0, DIM, false));
+        }
+        if state.heat != Heat::None && vessel != Vessel::Mortar {
+            p.spawn(label(fonts, "Огонь гуляет: 1 — раздуть мехами, 2 — прикрыть заслонку", 13.0, DIM, false));
         }
         if state.heat != Heat::None && vessel != Vessel::Mortar && !crate::level::hearths().is_empty() {
             p.spawn(label(fonts, "На огне варят у очага или костра (в домах, мастерских, у костров за стенами)", 13.0, DIM, false));
@@ -311,13 +343,14 @@ fn rebuild_brew_panel(
         row(p).with_children(|r| {
             let verb = match vessel {
                 Vessel::Mortar => "Растереть",
+                Vessel::DryingTray => "Сушить",
                 Vessel::Crucible => "Обжигать",
                 v if v.still() => "Перегонять",
                 _ if state.heat == Heat::None => "Начать",
                 _ => "Варить",
             };
             button(r, fonts, verb, BrewAction::Start, !state.counts.is_empty());
-            r.spawn(label(fonts, format!("≈ {:.0} с", BrewSpec { items: vec![], water: 0, heat: state.heat, hours: state.hours }.real_secs()), 13.0, DIM, false));
+            r.spawn(label(fonts, format!("≈ {:.0} с", BrewSpec { items: vec![], water: 0, heat: state.heat, hours: state.hours, bath: false }.real_secs()), 13.0, DIM, false));
         });
         let hints = brewing::known_hints(&knowledge.0);
         if hints.is_empty() {
@@ -329,4 +362,23 @@ fn rebuild_brew_panel(
             }
         }
     });
+}
+
+/// Сколько это «на глаз».
+fn by_eye(name: &str, m: f32) -> &'static str {
+    if name.contains("Кувшин") || name.contains("Амфора") || name.contains("Горшок") {
+        return "сосуд";
+    }
+    match brewing::canonical(name).1 {
+        brewing::Form::Dried => return "пучок",
+        brewing::Form::Ground => return "горстка порошка",
+        brewing::Form::Raw => {}
+    }
+    match m {
+        m if m <= 2.0 => "щепоть",
+        m if m <= 6.0 => "кусочек",
+        m if m <= 10.0 => "горсть",
+        m if m <= 30.0 => "ком",
+        _ => "много",
+    }
 }

@@ -150,6 +150,7 @@ const VESSELS: &[&str] = &[
     "Стеклянная чаша",
     "Жаровня",
     "Алхимический стол",
+    "Сушильная решётка",
 ];
 const DYES: &[&str] = &[
     "Ярь-медянка",
@@ -175,7 +176,9 @@ const FOOD: &[&str] = &["Солёная рыба", "Мешок соли", "Во�
 pub fn category(base: ItemBaseId) -> Category {
     let info = base.base();
     let name = info.name;
-    let is = |list: &[&str]| list.contains(&name);
+    // Сушёное и толчёное — того же рода, что и сырьё.
+    let raw = crate::brewing::canonical(name).0;
+    let is = |list: &[&str]| list.contains(&name) || list.contains(&raw);
     if coin_value(base).is_some() {
         return Category::Coin;
     }
@@ -512,6 +515,7 @@ pub const MERCHANTS: &[MerchantDef] = &[
             s("Воск", 3, 8, 1.0),
             s("Горшок мёда", 1, 4, 1.0),
             s("Глиняный горшок", 2, 6, 1.0),
+            s("Сушильная решётка", 1, 3, 1.0),
             s("Пустой флакон", 2, 6, 1.1),
             s("Сосновая смола", 2, 6, 1.0),
             s("Древесная зола", 3, 10, 1.0),
@@ -1005,6 +1009,10 @@ pub const MERCHANTS: &[MerchantDef] = &[
             s("Подорожник", 3, 8, 1.0),
             s("Тысячелистник", 2, 5, 1.0),
             s("Полынь", 2, 5, 1.0),
+            s("Сушёный шалфей", 1, 4, 1.0),
+            s("Сушёная мята", 1, 4, 1.0),
+            s("Сушёный зверобой", 0, 3, 1.0),
+            s("Сушильная решётка", 1, 2, 1.0),
         ],
         buys: &[(Category::Herb, 0.8)],
         money: MoneyPolicy::Coins,

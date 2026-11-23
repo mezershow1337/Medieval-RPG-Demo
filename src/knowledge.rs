@@ -60,7 +60,7 @@ impl Plugin for KnowledgeServerPlugin {
             .add_observer(on_grant)
             .add_observer(on_trade_lesson)
             .add_systems(Startup, setup_world)
-            .add_systems(Update, (debug_kit, receive_lore_messages, tick_activities, regrow_patches).chain());
+            .add_systems(Update, (debug_kit, receive_lore_messages, tick_fires, tick_activities, regrow_patches).chain());
     }
 }
 
@@ -139,6 +139,99 @@ struct Activity {
     last_hp: f32,
     /// Сосуд на огне — его видят все (пар, дым, капли).
     work: Option<WorkView>,
+    /// Огонь под сосудом, за которым надо следить.
+    tend: Option<Tend>,
+}
+
+/// Огонь во время варки: угли прогорают, порыв ветра раздувает; купол перегонного
+/// прибора греется, пока его не остудят мокрой тряпицей.
+struct Tend {
+    fire: f32,
+    target: f32,
+    dome: Option<f32>,
+    bath: bool,
+    time: f32,
+    over: f32,
+    under: f32,
+    dome_peak: f32,
+    send_in: f32,
+    cool_ready: f32,
+    band: i32,
+}
+
+/// Жар по шкале 0..3.
+fn heat_level(h: brewing::Heat) -> f32 {
+    match h {
+        brewing::Heat::None => 0.0,
+        brewing::Heat::Low => 1.0,
+        brewing::Heat::Medium => 2.0,
+        brewing::Heat::High => 3.0,
+    }
+}
+
+fn heat_of_level(l: i32) -> brewing::Heat {
+    match l {
+        i32::MIN..=0 => brewing::Heat::None,
+        1 => brewing::Heat::Low,
+        2 => brewing::Heat::Medium,
+        _ => brewing::Heat::High,
+    }
+}
+
+/// Угли прогорают, жар падает.
+const FIRE_DECAY: f32 = 0.035;
+/// Насколько мехи раздувают и заслонка сбивает жар.
+const FIRE_STEP: f32 = 0.45;
+const FIRE_MAX: f32 = 3.6;
+
+impl Tend {
+    fn new(spec: &BrewSpec, still: bool) -> Self {
+        let target = heat_level(spec.heat);
+        Tend {
+            fire: target,
+            target,
+            dome: still.then_some(0.0),
+            bath: spec.bath,
+            time: 0.0,
+            over: 0.0,
+            under: 0.0,
+            dome_peak: 0.0,
+            send_in: 0.0,
+            cool_ready: 0.0,
+            band: target as i32,
+        }
+    }
+
+    fn tick(&mut self, dt: f32, rng: &mut Rng) {
+        self.fire -= FIRE_DECAY * dt;
+        // Порыв ветра или вспыхнувший уголь.
+        if rng.f32() < 0.05 * dt {
+            self.fire += 0.55;
+        }
+        self.fire = self.fire.clamp(0.0, FIRE_MAX);
+        self.time += dt;
+        if !self.bath && self.fire > self.target + 0.75 {
+            self.over += dt;
+        }
+        if self.fire < self.target - 0.75 {
+            self.under += dt;
+        }
+        if let Some(d) = self.dome.as_mut() {
+            *d = (*d + ((self.fire - 1.4).max(0.0) * 0.07 - 0.015) * dt).max(0.0);
+            self.dome_peak = self.dome_peak.max(*d);
+        }
+        self.cool_ready -= dt;
+        self.send_in -= dt;
+    }
+
+    fn view(&self) -> TendView {
+        TendView { fire: self.fire, target: self.target, dome: self.dome, bath: self.bath }
+    }
+
+    fn log(&self) -> brewing::FireLog {
+        let t = self.time.max(0.01);
+        brewing::FireLog { over: self.over / t, under: self.under / t, dome_peak: self.dome_peak }
+    }
 }
 
 #[derive(Resource)]
@@ -433,6 +526,60 @@ fn in_reach(feet: Vec3, target: Vec3) -> bool {
     Vec2::new(d.x, d.z).length() <= LORE_REACH + 0.4 && d.y.abs() < 2.0
 }
 
+/// Мехи, заслонка, мокрая тряпица.
+fn tend_action(server: &mut RenetServer, world: &mut KnowledgeWorld, loot: &LootWorld, pid: u64, action: TendAction) {
+    let has_cloth = loot.inventories.get(&pid).is_some_and(|inv| count_named(inv, brewing::CLOTH) > 0);
+    let Some(a) = world.activities.get_mut(&pid) else { return };
+    let at: Vec3 = a.work.map_or(a.start, |w| w.pos.into());
+    let Some(t) = a.tend.as_mut() else { return };
+    match action {
+        TendAction::Bellows => {
+            t.fire = (t.fire + FIRE_STEP).min(FIRE_MAX);
+            burst(server, at, BurstFx::Bellows);
+        }
+        TendAction::Damper => t.fire = (t.fire - FIRE_STEP).max(0.0),
+        TendAction::CoolDome => {
+            let Some(d) = t.dome.as_mut() else { return };
+            if !has_cloth {
+                notice(server, pid, "Нечем остудить купол: нужна мокрая тряпица (отрез льна)");
+                return;
+            }
+            if t.cool_ready > 0.0 {
+                return;
+            }
+            *d = (*d - 0.45).max(0.0);
+            t.cool_ready = 0.6;
+            burst(server, at + Vec3::Y * 0.25, BurstFx::Hiss);
+        }
+    }
+    let view = t.view();
+    send(server, pid, &LoreServerMessage::Tending(view));
+}
+
+/// Огонь под сосудами: прогорает, гуляет; игроку — как он идёт, всем — сила пламени.
+fn tick_fires(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMut<KnowledgeWorld>) {
+    let dt = time.delta_secs();
+    let KnowledgeWorld { activities, rng, .. } = &mut *world;
+    for (pid, a) in activities.iter_mut() {
+        let Some(t) = a.tend.as_mut() else { continue };
+        t.tick(dt, rng);
+        if t.send_in <= 0.0 {
+            t.send_in = 0.25;
+            send(&mut server, *pid, &LoreServerMessage::Tending(t.view()));
+        }
+        // Пламя под сосудом видно всем: сменилась сила — обновить.
+        let band = t.fire.round() as i32;
+        if band != t.band {
+            t.band = band;
+            if let Some(w) = a.work.as_mut() {
+                w.heat = if t.bath { brewing::Heat::Low } else { heat_of_level(band) };
+                let work = *w;
+                server.broadcast_message(CH_LORE, encode(&LoreServerMessage::Work { player: *pid, work: Some(work) }));
+            }
+        }
+    }
+}
+
 /// Работа у сосуда кончилась — убрать сосуд и пар у всех.
 fn end_work(server: &mut RenetServer, pid: u64, a: &Activity) {
     if a.work.is_some() {
@@ -467,7 +614,7 @@ fn work_view(world: &KnowledgeWorld, spec: &BrewSpec, vessel: Vessel, feet: Vec3
 }
 
 fn start(server: &mut RenetServer, world: &mut KnowledgeWorld, player: u64, task: Task, verb: String, done: f32, total: f32, feet: Vec3, hp: f32) {
-    world.activities.insert(player, Activity { task, elapsed: done, total, start: feet, last_hp: hp, work: None });
+    world.activities.insert(player, Activity { task, elapsed: done, total, start: feet, last_hp: hp, work: None, tend: None });
     send(server, player, &LoreServerMessage::Activity { verb, done, total });
 }
 
@@ -489,6 +636,10 @@ fn receive_lore_messages(
                     end_work(&mut server, pid, &a);
                     send(&mut server, pid, &LoreServerMessage::ActivityEnded);
                 }
+                continue;
+            }
+            if let LoreClientMessage::Tend(action) = msg {
+                tend_action(&mut server, &mut world, &loot, pid, action);
                 continue;
             }
             if world.activities.contains_key(&pid) {
@@ -588,16 +739,19 @@ fn receive_lore_messages(
                             let verb = format!("{}: {what}", v.name());
                             let secs = spec.real_secs();
                             let work = work_view(&world, &spec, v, feet, actor.pose.yaw);
+                            let (spec_heat, spec_copy) = (spec.heat, spec.clone());
                             start(&mut server, &mut world, pid, Task::Brew { vessel, spec }, verb, 0.0, secs, feet, hp);
+                            let tend = (spec_heat != brewing::Heat::None).then(|| Tend::new(&spec_copy, v.still()));
                             if let Some(a) = world.activities.get_mut(&pid) {
                                 a.work = Some(work);
+                                a.tend = tend;
                             }
                             server.broadcast_message(CH_LORE, encode(&LoreServerMessage::Work { player: pid, work: Some(work) }));
                         }
                         Err(e) => notice(&mut server, pid, e),
                     }
                 }
-                LoreClientMessage::Stop | LoreClientMessage::PlaceStation { .. } | LoreClientMessage::TakeStation { .. } | LoreClientMessage::UpgradeStation { .. } => {}
+                LoreClientMessage::Stop | LoreClientMessage::Tend(_) | LoreClientMessage::PlaceStation { .. } | LoreClientMessage::TakeStation { .. } | LoreClientMessage::UpgradeStation { .. } => {}
             }
         }
     }
@@ -752,7 +906,8 @@ fn tick_activities(
             Task::Brew { vessel, spec } => {
                 let feet = game.actors.get(&pid).map(|a| a.pose.feet).unwrap_or_default();
                 let at = a.work.map_or(feet, |w| w.pos.into());
-                finish_brewing(&mut server, &mut commands, &mut world, &mut loot, &mut bodies, pid, vessel, &spec, feet, at)
+                let fire = a.tend.as_ref().map(|t| t.log());
+                finish_brewing(&mut server, &mut commands, &mut world, &mut loot, &mut bodies, pid, vessel, &spec, feet, at, fire)
             }
             Task::Lesson { master, mode } => {
                 let Some(m) = world.masters.get(&master) else { continue };
@@ -1066,6 +1221,7 @@ fn finish_brewing(
     spec: &BrewSpec,
     feet: Vec3,
     at: Vec3,
+    fire_log: Option<brewing::FireLog>,
 ) {
     let Some(inv) = loot.inventories.get(&pid) else { return };
     let v = match check_brew(inv, vessel, spec) {
@@ -1088,7 +1244,9 @@ fn finish_brewing(
     };
     let flasks = count_named(inv, brewing::FLASK).min(u16::MAX as u32) as u16;
     let roll = bodies.rng.f32();
-    let result = brewing::brew(spec, v, k, flasks, roll, bench);
+    let pots = count_named(inv, "Глиняный горшок") + count_named(inv, "Медный котелок");
+    let wp = brewing::Workplace { table: bench, cloth: count_named(inv, brewing::CLOTH) > 0, outer_pot: pots >= 2, clay: count_named(inv, "Гончарная глина") > 0, fire: fire_log };
+    let result = brewing::brew(spec, v, k, flasks, roll, &wp);
     // Ничего не вышло (например, некуда разлить) — всё остаётся в сумке.
     if result.product.is_none() && !result.vessel_broken {
         notice(server, pid, result.text);
@@ -1101,6 +1259,9 @@ fn finish_brewing(
         take_named(inv, name, *n as u32);
     }
     take_named(inv, brewing::FLASK, result.flasks_used as u32);
+    if result.luted {
+        take_named(inv, "Гончарная глина", 1);
+    }
     if let Fire::Brazier { coal } = fire {
         take_named(inv, COAL, coal);
     }
@@ -1120,6 +1281,11 @@ fn finish_brewing(
     }
     if result.burn > 0.0 {
         bodies.body(pid).burn(result.burn);
+        bodies.touch(pid);
+    }
+    if result.cut > 0.0 {
+        // Порезы осколками: как удар ножом в треть здоровья при тяжести 1.
+        bodies.body(pid).hit(medicine::WoundKind::Cut, result.cut * 30.0, 100.0, false, 1.0);
         bodies.touch(pid);
     }
     if let Some((toxin, doses)) = result.poison {
@@ -1187,6 +1353,8 @@ fn debug_kit(mut server: ResMut<RenetServer>, mut loot: ResMut<LootWorld>, mut g
             ("Жаровня", 1),
             ("Древесный уголь", 6),
             ("Весы с гирями", 1),
+            ("Отрез льна", 1),
+            ("Сушильная решётка", 1),
         ];
         for (name, n) in kit {
             let Some(base) = ItemBaseId::find(name) else { continue };
@@ -1204,7 +1372,7 @@ mod tests {
     use super::*;
 
     fn spec(heat: brewing::Heat, hours: f32) -> BrewSpec {
-        BrewSpec { items: vec![("Шалфей".into(), 1)], water: 2, heat, hours }
+        BrewSpec { items: vec![("Шалфей".into(), 1)], water: 2, heat, hours, bath: false }
     }
 
     #[test]

@@ -318,8 +318,9 @@ impl Substance {
         ItemBaseId::find(self.info().item)
     }
 
+    /// Вещество предмета; сушёное и толчёное — то же растение или минерал.
     pub fn from_item(base: ItemBaseId) -> Option<Substance> {
-        let name = base.base().name;
+        let name = crate::brewing::canonical(base.base().name).0;
         Substance::ALL.into_iter().find(|s| s.info().item == name)
     }
 
@@ -1019,7 +1020,11 @@ impl Knowledge {
     /// Как предмет называется для этого персонажа.
     pub fn item_name(&self, base: ItemBaseId) -> String {
         match Substance::from_item(base) {
-            Some(s) if !self.identifies(s) => s.info().unknown.to_string(),
+            Some(s) if !self.identifies(s) => match crate::brewing::canonical(base.base().name).1 {
+                crate::brewing::Form::Dried => format!("{} (сушёное)", s.info().unknown),
+                crate::brewing::Form::Ground => format!("{} (толчёное)", s.info().unknown),
+                crate::brewing::Form::Raw => s.info().unknown.to_string(),
+            },
             _ => base.base().name.to_string(),
         }
     }
