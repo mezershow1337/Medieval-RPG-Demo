@@ -159,6 +159,7 @@ pub fn run(server_addr: SocketAddr) {
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))
         .add_plugins(crate::smithing_client::SmithingClientPlugin)
         .add_plugins(crate::ui_theme::UiThemePlugin)
+        .add_plugins((crate::skill_book::SkillBookPlugin, crate::hints::HintsPlugin))
         .add_systems(Update, hide_ui_for_shots.run_if(|| std::env::var("MRPG_CAM").is_ok()))
         .insert_resource(RenetClient::new(connection_config()))
         .insert_resource(transport)
