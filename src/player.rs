@@ -83,9 +83,10 @@ pub fn grab_cursor(
     keys: Res<ButtonInput<KeyCode>>,
     loot: Option<Res<crate::loot_client::LootState>>,
     trade: Option<Res<crate::trade_client::TradeState>>,
+    menu: Option<Res<crate::menu::MenuState>>,
 ) {
-    // Пока открыт инвентарь или окно торговли, клики принадлежат окну, а не бою.
-    if loot.is_some_and(|l| l.ui_open) || trade.is_some_and(|t| t.window_open()) {
+    // Пока открыт инвентарь, окно торговли или меню, клики принадлежат окну, а не бою.
+    if loot.is_some_and(|l| l.ui_open) || trade.is_some_and(|t| t.window_open()) || menu.is_some_and(|m| m.is_open()) {
         return;
     }
     if mouse.just_pressed(MouseButton::Left) {
@@ -100,15 +101,17 @@ pub fn grab_cursor(
 
 fn mouse_look(
     motion: Res<AccumulatedMouseMotion>,
+    settings: Option<Res<crate::settings::Settings>>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     mut player: Query<(&mut LocalPlayer, &mut Transform)>,
 ) {
     if !cursor_locked(&cursor) {
         return;
     }
+    let k = MOUSE_SENSITIVITY * settings.map_or(1.0, |s| s.sensitivity);
     for (mut p, mut transform) in &mut player {
-        p.yaw -= motion.delta.x * MOUSE_SENSITIVITY;
-        p.pitch = (p.pitch - motion.delta.y * MOUSE_SENSITIVITY).clamp(-1.5, 1.5);
+        p.yaw -= motion.delta.x * k;
+        p.pitch = (p.pitch - motion.delta.y * k).clamp(-1.5, 1.5);
         transform.rotation = Quat::from_rotation_y(p.yaw);
     }
 }

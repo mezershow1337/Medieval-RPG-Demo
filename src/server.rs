@@ -126,6 +126,7 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .insert_resource(transport)
         .insert_resource(level)
         .insert_resource(world)
+        .insert_resource(PlayerNames::default())
         .insert_resource(SnapshotTimer { timer: Timer::from_seconds((1.0 / SNAPSHOT_RATE_HZ) as f32, TimerMode::Repeating), tick: 0 })
         .add_observer(on_server_event)
         .add_plugins(crate::loot_server::LootServerPlugin)
@@ -164,14 +165,32 @@ fn spawn_npc(world: &mut GameWorld, level: &LevelColliders, spawn: NpcSpawn, now
     );
 }
 
-fn on_server_event(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, time: Res<Time>) {
+/// Ники игроков на сервере (из `user_data` подключения).
+#[derive(Resource, Default)]
+pub struct PlayerNames(pub HashMap<u64, String>);
+
+fn on_server_event(
+    event: On<RenetServerEvent>,
+    mut server: ResMut<RenetServer>,
+    mut world: ResMut<GameWorld>,
+    time: Res<Time>,
+    transport: Res<NetcodeServerTransport>,
+    mut names: ResMut<PlayerNames>,
+) {
     match &event.0 {
         ServerEvent::ClientConnected { client_id } => {
             let id = *client_id;
             let spawn = level::spawn_point(world.joined_count);
             world.joined_count += 1;
-            info!("Игрок {id} подключился");
+            let name = transport.user_data(id).map(|d| decode_name(&d)).filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Странник {}", id % 1000));
+            info!("Игрок «{name}» ({id}) подключился");
             server.send_message(id, CH_RELIABLE, encode(&ServerMessage::Welcome { your_id: id, spawn: spawn.into() }));
+            // Новичку — имена всех, кто уже в игре; всем — имя новичка.
+            for (other, n) in &names.0 {
+                server.send_message(id, CH_RELIABLE, encode(&ServerMessage::PlayerName { id: *other, name: n.clone() }));
+            }
+            server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::PlayerName { id, name: name.clone() }));
+            names.0.insert(id, name);
             for c in &world.corpses {
                 let msg = ServerMessage::CorpseSpawned { corpse_id: c.id, kind: c.kind, pos: c.pos.into(), yaw: c.yaw };
                 server.send_message(id, CH_RELIABLE, encode(&msg));
@@ -198,7 +217,8 @@ fn on_server_event(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>,
             );
         }
         ServerEvent::ClientDisconnected { client_id, reason } => {
-            info!("Игрок {client_id} отключился: {reason}");
+            let name = names.0.remove(client_id).unwrap_or_default();
+            info!("Игрок «{name}» ({client_id}) отключился: {reason}");
             world.actors.remove(client_id);
             server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::PlayerLeft { id: *client_id }));
         }

@@ -7,11 +7,10 @@ use crate::protocol::*;
 use crate::rig::{self, Blade, CharacterModels, NeedsRig, NeedsShield, NeedsWeapon, Outfit, PoseInput, RigPose, ShieldKind};
 use crate::{graphics, hud, level};
 use bevy::prelude::*;
-use bevy_renet::netcode::{ClientAuthentication, NetcodeClientPlugin, NetcodeClientTransport, NetcodeErrorEvent};
+use bevy_renet::netcode::{NetcodeClientPlugin, NetcodeErrorEvent};
 use bevy_renet::{RenetClient, RenetClientPlugin, client_connected};
 use std::collections::HashMap;
-use std::net::{SocketAddr, UdpSocket};
-use std::time::SystemTime;
+use std::net::SocketAddr;
 
 /// Состояние подключения для интерфейса.
 #[derive(Resource, Default)]
@@ -87,6 +86,17 @@ pub struct CorpseMarker {
     pub kind: ActorKind,
 }
 
+/// Ники игроков (присылает сервер). Для NPC имён нет — у них название по виду.
+#[derive(Resource, Default)]
+pub struct PlayerNames(pub HashMap<u64, String>);
+
+impl PlayerNames {
+    /// Ник игрока или запасное «Игрок 123», пока имя не пришло.
+    pub fn of(&self, id: u64) -> String {
+        self.0.get(&id).cloned().unwrap_or_else(|| format!("Игрок {}", id % 1000))
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct RemoteIndex(pub HashMap<u64, Entity>);
 
@@ -113,16 +123,10 @@ impl CharacterAssets {
     }
 }
 
-pub fn run(server_addr: SocketAddr) {
-    let client_id = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
-    let socket = UdpSocket::bind("0.0.0.0:0").expect("не удалось открыть сокет клиента");
-    let auth = ClientAuthentication::Unsecure { protocol_id: PROTOCOL_ID, client_id, server_addr, user_data: None };
-    let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
-    let transport = NetcodeClientTransport::new(current_time, auth, socket).expect("не удалось создать подключение");
-
+pub fn run(start: crate::menu::Start) {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window { title: "Medieval RPG — прототип".into(), ..default() }),
+            primary_window: Some(Window { title: "Херсонес, 510 — Medieval RPG".into(), present_mode: bevy::window::PresentMode::AutoVsync, ..default() }),
             ..default()
         }))
         .add_plugins((RenetClientPlugin, NetcodeClientPlugin, PlayerPlugin, fight::FightPlugin, hud::HudPlugin, graphics::GraphicsPlugin, crate::textures::TexturesPlugin))
@@ -134,11 +138,14 @@ pub fn run(server_addr: SocketAddr) {
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))
         .add_plugins(crate::smithing_client::SmithingClientPlugin)
         .add_systems(Update, hide_ui_for_shots.run_if(|| std::env::var("MRPG_CAM").is_ok()))
+        // Клиент без соединения: транспорт появится, когда игрок выберет в меню «Создать» или «Подключиться».
         .insert_resource(RenetClient::new(connection_config()))
-        .insert_resource(transport)
-        .insert_resource(NetState { server_addr: Some(server_addr), ..default() })
+        .insert_resource(NetState::default())
+        .insert_resource(start)
+        .add_plugins((crate::settings::SettingsPlugin, crate::menu::MenuPlugin))
         .insert_resource(level::level_colliders())
         .insert_resource(RemoteIndex::default())
+        .insert_resource(PlayerNames::default())
         .insert_resource(CorpseIndex::default())
         .insert_resource(ArrowIndex::default())
         .insert_resource(SendTimer(Timer::from_seconds(1.0 / 30.0, TimerMode::Repeating)))
@@ -162,7 +169,7 @@ fn on_netcode_error(event: On<NetcodeErrorEvent>, mut state: ResMut<NetState>) {
 
 /// Камера, пока сервер не прислал точку появления.
 #[derive(Component)]
-struct WaitingCamera;
+pub struct WaitingCamera;
 
 /// Снимки уровня (MRPG_CAM): прячем интерфейс.
 fn hide_ui_for_shots(mut roots: Query<&mut Visibility, (With<Node>, Without<ChildOf>)>) {
@@ -302,6 +309,7 @@ fn receive_reliable(
     mut feedback: MessageWriter<CombatFeedback>,
     mut local: Query<(&mut LocalPlayer, &mut Transform, Option<&mut LocalFighter>)>,
     waiting: Query<Entity, With<WaitingCamera>>,
+    mut names: ResMut<PlayerNames>,
     time: Res<Time>,
     mut welcomed_at: Local<Option<f32>>,
 ) {
@@ -327,6 +335,10 @@ fn receive_reliable(
                 }
             }
             ServerMessage::PlayerJoined { id } => info!("Игрок {id} вошёл в игру"),
+            ServerMessage::PlayerName { id, name } => {
+                info!("Игрок {id} — «{name}»");
+                names.0.insert(id, name);
+            }
             ServerMessage::PlayerLeft { id } => {
                 if let Some(e) = index.0.remove(&id) {
                     commands.entity(e).despawn();

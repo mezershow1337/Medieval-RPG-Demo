@@ -57,15 +57,18 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let p = wp.xz * sc;
 
     // Волны: вдали мелкие гасим (иначе мерцают) — их заменяет шероховатость блика.
-    let fade_small = 1.0 - smoothstep(25.0, 160.0, dist);
+    // Простая вода (настройка «Вода»): без мелкой ряби — только крупные волны.
+    let fade_small = (1.0 - smoothstep(25.0, 160.0, dist)) * (1.0 - water.params.w);
     let fade_mid = 1.0 - smoothstep(120.0, 700.0, dist);
     var g = vec2<f32>(0.0);
     g += wave_grad(p, normalize(vec2<f32>(0.8, 0.6)), 23.0, 0.10, t) * fade_mid;
     g += wave_grad(p, normalize(vec2<f32>(0.3, 0.95)), 11.0, 0.09, t) * fade_mid;
     g += wave_grad(p, normalize(vec2<f32>(0.95, -0.3)), 6.3, 0.08, t) * mix(0.3, 1.0, fade_small);
-    g += wave_grad(p, normalize(vec2<f32>(-0.4, 0.9)), 3.1, 0.07, t) * fade_small;
-    g += wave_grad(p, normalize(vec2<f32>(0.6, -0.8)), 1.7, 0.06, t) * fade_small;
-    g += ripples(p, t) * 0.045 * fade_small;
+    if water.params.w < 0.5 {
+        g += wave_grad(p, normalize(vec2<f32>(-0.4, 0.9)), 3.1, 0.07, t) * fade_small;
+        g += wave_grad(p, normalize(vec2<f32>(0.6, -0.8)), 1.7, 0.06, t) * fade_small;
+        g += ripples(p, t) * 0.045 * fade_small;
+    }
     let N = normalize(vec3<f32>(-g.x, 1.0, -g.y));
 
     // Толща воды под этой точкой: по глубине сцены из предварительного прохода.

@@ -1,9 +1,13 @@
 //! Medieval RPG — прототип.
 //!
 //! Запуск:
-//!   cargo run                     — хост: сервер + игра на этом компьютере
-//!   cargo run -- join 192.168.1.5 — подключиться к другу (порт по умолчанию 5000)
+//!   cargo run                     — главное меню в окне игры (Создать / Подключиться / Настройки)
+//!   cargo run -- host             — сразу хост: сервер + игра на этом компьютере
+//!   cargo run -- join 192.168.1.5 — сразу подключиться к другу (порт по умолчанию 5000)
 //!   cargo run -- server           — только сервер, без окна
+
+// Готовая сборка для Windows — без чёрного окна консоли (меню теперь в самой игре).
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod alchemy_fx;
 mod brewing;
@@ -25,6 +29,7 @@ mod items;
 mod knowledge;
 mod launcher;
 mod level;
+mod menu;
 mod loot_client;
 mod loot_net;
 mod loot_server;
@@ -43,6 +48,7 @@ mod protocol;
 mod residents;
 mod rig;
 mod server;
+mod settings;
 mod archery;
 mod arsenal;
 mod smithing;
@@ -68,16 +74,6 @@ fn parse_addr(s: &str) -> SocketAddr {
     launcher::resolve(s).unwrap_or_else(|e| panic!("не понимаю адрес сервера: {e}"))
 }
 
-/// Хост: сервер в отдельном потоке и окно игры, подключённое к нему же.
-fn host(port: u16) {
-    let socket = match server::bind_socket(port) {
-        Ok(s) => s,
-        Err(e) => panic!("порт {port} занят ({e}): возможно, игра или сервер уже запущены"),
-    };
-    std::thread::spawn(move || server::run(socket, false));
-    client::run(SocketAddr::from(([127, 0, 0, 1], port)));
-}
-
 fn main() {
     // Загрузка больших glTF (serde_json) в пуле ввода-вывода Bevy уходит глубоко в стек, и
     // стандартных 2 МБ на поток не хватает: игра падала с «stack overflow» при запуске.
@@ -86,14 +82,9 @@ fn main() {
         unsafe { std::env::set_var("RUST_MIN_STACK", (16 * 1024 * 1024).to_string()) };
     }
     let args: Vec<String> = std::env::args().skip(1).collect();
-    // Готовая сборка, запущенная двойным щелчком: меню «Создать игру / Подключиться».
-    if args.is_empty() && launcher::wanted() {
-        launcher::keep_console_on_panic();
-        match launcher::run_menu() {
-            launcher::Choice::Host => host(DEFAULT_PORT),
-            launcher::Choice::Join(addr) => client::run(addr),
-        }
-        return;
+    launcher::install_crash_report();
+    if !args.is_empty() {
+        launcher::attach_parent_console();
     }
     match args.first().map(String::as_str) {
         Some("server") => {
@@ -103,11 +94,10 @@ fn main() {
         }
         Some("join") => {
             let addr = parse_addr(args.get(1).map(String::as_str).unwrap_or("127.0.0.1"));
-            client::run(addr);
+            client::run(menu::Start::Join(addr));
         }
-        None | Some("host") => {
-            host(args.get(1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT));
-        }
+        Some("host") => client::run(menu::Start::Host(args.get(1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT))),
+        None => client::run(menu::Start::Menu),
         Some(other) => {
             eprintln!("Неизвестная команда «{other}». Используйте: host | join <адрес> | server");
             std::process::exit(2);

@@ -593,8 +593,10 @@ fn update_trade_hud(
     mut bar: Single<&mut Node, (With<LessonBar>, Without<LessonFill>)>,
     mut fill: Single<&mut Node, (With<LessonFill>, Without<LessonBar>)>,
     mut lesson_text: Single<&mut Text, (With<LessonText>, Without<TradePrompt>)>,
+    names: Option<Res<crate::client::PlayerNames>>,
 ) {
     let now = time.elapsed_secs();
+    let name_of = |id: u64| names.as_ref().map_or_else(|| format!("{id}"), |n| n.of(id));
     let mut lines = Vec::new();
     if loot.target.is_none() && !loot.ui_open && !state.window_open() {
         match state.aim {
@@ -609,7 +611,7 @@ fn update_trade_hud(
                     lines.push(format!("{} · {}", m.faction.name(), standing));
                 }
             }
-            Some(Aim::Player(id)) => lines.push(format!("[T] Предложить обмен игроку {id}")),
+            Some(Aim::Player(id)) => lines.push(format!("[T] Предложить обмен: {}", name_of(id))),
             None => {}
         }
     }
@@ -617,7 +619,8 @@ fn update_trade_hud(
         && now - at <= 30.0
     {
         lines.push(format!(
-            "Игрок {from} предлагает обмен: [Y] согласиться, [N] отказать"
+            "{} предлагает обмен: [Y] согласиться, [N] отказать",
+            name_of(from)
         ));
     }
     if state.fine > 0 && !state.window_open() {

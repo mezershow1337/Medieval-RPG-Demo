@@ -917,7 +917,9 @@ fn dev_shot(
         commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(path));
         *done = 2;
     }
-    if *done == 2 && t > delay + 2.0 {
+    // Выходим, когда снимок записан на диск (сохранение идёт в фоне).
+    let saved = std::env::var("MRPG_SHOT").is_ok_and(|p| std::path::Path::new(&p).exists());
+    if *done == 2 && t > delay + 2.0 && (saved || *frames > 2000) {
         exit.write(AppExit::Success);
     }
 }

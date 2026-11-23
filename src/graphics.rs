@@ -1,16 +1,14 @@
 //! Графика: собственные шейдеры (процедурный камень, витражи, огонь, небо),
 //! пост-обработка (HDR, блум, SSAO, TAA, объёмный туман с лучами солнца) и атмосфера.
 //!
-//! F9 — переключить «тяжёлые» эффекты (объёмный туман и SSAO), если игра тормозит.
+//! Что включено — решают настройки (`settings.rs`); F9 — быстро сбросить эффекты на низкие.
 
 use crate::level::Mat;
-use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::asset::{RenderAssetUsages, embedded_asset};
 use bevy::core_pipeline::tonemapping::Tonemapping;
-use bevy::light::{CascadeShadowConfigBuilder, FogVolume, NotShadowCaster, NotShadowReceiver, ShadowFilteringMethod, VolumetricFog, VolumetricLight};
+use bevy::light::{CascadeShadowConfigBuilder, FogVolume, NotShadowCaster, NotShadowReceiver, VolumetricLight};
 use bevy::mesh::Indices;
-use bevy::pbr::{DistanceFog, ExtendedMaterial, FogFalloff, MaterialExtension, ScreenSpaceAmbientOcclusion};
-use bevy::post_process::bloom::Bloom;
+use bevy::pbr::{DistanceFog, ExtendedMaterial, FogFalloff, MaterialExtension};
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, PrimitiveTopology};
 use bevy::camera::Hdr;
@@ -141,10 +139,9 @@ impl Plugin for GraphicsPlugin {
             MaterialPlugin::<crate::sky::WaterMaterial>::default(),
             MaterialPlugin::<crate::smoke::SmokeMaterial>::default(),
         ))
-        .insert_resource(GraphicsSettings { heavy: true })
         .add_observer(setup_camera)
         .add_systems(Startup, setup_environment)
-        .add_systems(Update, (billboard_flames, flicker_lights, cull_far_lights, follow_sky, toggle_heavy, attach_sky_light));
+        .add_systems(Update, (billboard_flames, flicker_lights, cull_far_lights, follow_sky, attach_sky_light));
     }
 
     fn finish(&self, app: &mut App) {
@@ -158,10 +155,6 @@ impl Plugin for GraphicsPlugin {
     }
 }
 
-#[derive(Resource)]
-pub struct GraphicsSettings {
-    pub heavy: bool,
-}
 
 // ---------- Камень, дерево, черепица и т. д. ----------
 
@@ -286,7 +279,7 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
     let layer = |l: u32| &crate::surface_layers::LAYERS[l as usize];
     let mean = |l: u32| Vec3::from_array(layer(l).mean);
     ExtendedMaterial {
-        base: StandardMaterial { base_color: a, perceptual_roughness: rough, metallic: metal, reflectance: 0.4, ..default() },
+        base: StandardMaterial { base_color: a, perceptual_roughness: rough, metallic: metal, reflectance: 0.4, depth_bias: depth_rank(mat), ..default() },
         extension: SurfaceExt {
             color_b: lin(b),
             params: Vec4::new(pattern, scale, var, bump),
@@ -299,6 +292,30 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
             nrm: tex.map(|t| t.1.clone()),
         },
     }
+}
+
+/// Порядок материалов на совпадающих гранях (штукатурка поверх кладки, ковёр поверх ткани,
+/// мостовая поверх бутового основания…). Уровень собран из коробок, и у многих
+/// разные материалы лежат в одной плоскости: без сдвига глубины они «дерутся» за пиксель,
+/// а с дрожанием кадра TAA это видно как мерцание. Сдвиг — в единицах точности буфера глубины,
+/// то есть доли миллиметра: на видимую геометрию он не влияет.
+pub fn depth_rank(mat: Mat) -> f32 {
+    let rank = match mat {
+        Mat::Rug | Mat::Banner => 12,
+        Mat::Felt | Mat::Canvas | Mat::Cloth => 11,
+        Mat::Water | Mat::Coals => 10,
+        Mat::Mosaic | Mat::Signinum => 9,
+        Mat::Ceramic | Mat::Bronze | Mat::Iron | Mat::Gold => 8,
+        Mat::Paving | Mat::Floor | Mat::Cobble => 7,
+        Mat::Plaster | Mat::Trim => 6,
+        Mat::Wood => 5,
+        Mat::Marble => 4,
+        Mat::OpusMixtum | Mat::Brick | Mat::Tile | Mat::Roof => 3,
+        Mat::Limestone | Mat::Stone | Mat::DarkStone => 2,
+        Mat::Rubble => 1,
+        _ => 0,
+    };
+    rank as f32 * 8.0
 }
 
 /// Какие фотослои берёт материал: (горизонтальные грани, вертикальные, перекраска 0..1, сила нормалей).
@@ -356,6 +373,7 @@ fn load_surface_textures(images: &mut Assets<Image>) -> Option<(Handle<Image>, H
                         let bytes = std::fs::read(&path).map_err(|e| warn!("нет текстуры {}: {e}", path.display())).ok()?;
                         let mut img = Image::from_buffer(&bytes, ImageType::Extension("jpg"), CompressedImageFormats::NONE, srgb, ImageSampler::Default, RenderAssetUsages::default()).ok()?;
                         crate::textures::generate_mips(&mut img, suffix == "nrm");
+                        crate::textures::cap_size(&mut img, crate::settings::startup().texture_cap());
                         Some(img)
                     })
                 })
@@ -467,7 +485,7 @@ fn flicker_lights(time: Res<Time>, mut lights: Query<(&mut PointLight, &Flicker)
 }
 
 /// Далёкие факелы и светильники выключаем: в городе их сотни, а освещают они лишь пару комнат.
-fn cull_far_lights(time: Res<Time>, mut next: Local<f32>, cameras: Query<&GlobalTransform, With<Camera3d>>, mut lights: Query<(&GlobalTransform, &PointLight, &mut Visibility), With<Flicker>>) {
+fn cull_far_lights(time: Res<Time>, settings: Res<crate::settings::Settings>, mut next: Local<f32>, cameras: Query<&GlobalTransform, With<Camera3d>>, mut lights: Query<(&GlobalTransform, &PointLight, &mut Visibility), With<Flicker>>) {
     let now = time.elapsed_secs();
     if now < *next {
         return;
@@ -476,7 +494,7 @@ fn cull_far_lights(time: Res<Time>, mut next: Local<f32>, cameras: Query<&Global
     let Some(cam) = cameras.iter().next() else { return };
     let c = cam.translation();
     for (t, light, mut vis) in &mut lights {
-        let far = 35.0 + light.range * 2.0;
+        let far = settings.light_distance() + light.range * if settings.effects == 0 { 1.2 } else { 2.0 };
         let want = if t.translation().distance_squared(c) < far * far { Visibility::Inherited } else { Visibility::Hidden };
         if *vis != want {
             *vis = want;
@@ -528,13 +546,13 @@ fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
     let (diffuse, specular) = crate::sky::sky_environment(&m.sky_uniform());
     info!("Карта окружения неба за {:.2} с", started.elapsed().as_secs_f32());
     commands.insert_resource(crate::sky::SkyEnvironment { diffuse: images.add(diffuse), specular: images.add(specular) });
-    // Тени в 4096² на каскад: края теней от карнизов и колонн не «лесенкой».
-    commands.insert_resource(bevy::light::DirectionalLightShadowMap { size: 4096 });
+    // Размер карты теней и каскады — по настройкам (`settings::apply_sun`).
+    commands.insert_resource(bevy::light::DirectionalLightShadowMap { size: 2048 });
     commands.insert_resource(GlobalAmbientLight { color: m.ambient.0, brightness: m.ambient.1, ..default() });
 
     let sun = m.sun.normalize();
     commands.spawn((
-        Mesh3d(meshes.add(sky_mesh(900.0))),
+        Mesh3d(meshes.add(sky_mesh(SKY_RADIUS))),
         MeshMaterial3d(skies.add(SkyMaterial { sky: m.sky_uniform() })),
         Transform::IDENTITY,
         SkyDome,
@@ -568,39 +586,43 @@ fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
     }
 }
 
-fn follow_sky(cameras: Query<&GlobalTransform, With<Camera3d>>, mut sky: Query<&mut Transform, With<SkyDome>>) {
+const SKY_RADIUS: f32 = 900.0;
+
+fn follow_sky(cameras: Query<&GlobalTransform, With<Camera3d>>, settings: Res<crate::settings::Settings>, mut sky: Query<&mut Transform, With<SkyDome>>) {
     let Some(cam) = cameras.iter().next() else { return };
+    // Сфера неба — внутри дальности прорисовки, иначе камера её обрежет.
+    let scale = (crate::settings::sky_radius(&settings) / SKY_RADIUS).min(1.0);
     for mut t in &mut sky {
         t.translation = cam.translation();
+        t.scale = Vec3::splat(scale);
     }
 }
 
 // ---------- Камера и пост-обработка ----------
 
-fn setup_camera(event: On<Add<Camera3d>>, mut commands: Commands, settings: Res<GraphicsSettings>) {
+fn setup_camera(event: On<Add<Camera3d>>, mut commands: Commands) {
+    // Сглаживание, блум, SSAO, объёмный туман, дымка и дальность — по настройкам
+    // (см. `settings::apply_cameras`).
     let m = mood();
-    let mut e = commands.entity(event.entity);
-    e.insert((
+    commands.entity(event.entity).insert((
         Hdr,
         Tonemapping::TonyMcMapface,
-        Bloom { intensity: if m.day { 0.16 } else { 0.2 }, ..Bloom::NATURAL },
         color_grading(&m),
         // Лёгкое затемнение углов кадра, как у объектива.
         Vignette { intensity: 0.32, radius: 0.85, smoothness: 3.0, ..default() },
-        // Дальняя дымка того же цвета, что горизонт неба (см. `Mood`).
-        DistanceFog {
-            color: m.fog(),
-            // Свечение дымки к солнцу — слабее, чем у неба: иначе город против солнца тонет в оранжевом.
-            directional_light_color: Color::linear_rgba(m.horizon_sun.0.x * 0.55, m.horizon_sun.0.y * 0.55, m.horizon_sun.0.z * 0.55, 1.0),
-            directional_light_exponent: m.horizon_sun.1,
-            falloff: FogFalloff::from_visibility_colors(m.visibility, m.fog_far.0, m.fog_far.1),
-        },
         Msaa::Off,
-        TemporalAntiAliasing::default(),
-        ShadowFilteringMethod::Temporal,
     ));
-    if settings.heavy {
-        e.insert(heavy_effects());
+}
+
+/// Дальняя дымка того же цвета, что горизонт неба (см. `Mood`). Не дальше дальности
+/// прорисовки: край, где камера перестаёт рисовать, тонет в дымке.
+pub fn distance_fog(m: &Mood, draw_distance: f32) -> DistanceFog {
+    DistanceFog {
+        color: m.fog(),
+        // Свечение дымки к солнцу — слабее, чем у неба: иначе город против солнца тонет в оранжевом.
+        directional_light_color: Color::linear_rgba(m.horizon_sun.0.x * 0.55, m.horizon_sun.0.y * 0.55, m.horizon_sun.0.z * 0.55, 1.0),
+        directional_light_exponent: m.horizon_sun.1,
+        falloff: FogFalloff::from_visibility_colors(m.visibility.min(draw_distance), m.fog_far.0, m.fog_far.1),
     }
 }
 
@@ -622,25 +644,6 @@ fn attach_sky_light(mut commands: Commands, env: Option<Res<crate::sky::SkyEnvir
     let m = mood();
     for e in &cameras {
         commands.entity(e).insert(crate::sky::sky_environment_light(&env, &m));
-    }
-}
-
-fn heavy_effects() -> impl Bundle {
-    (ScreenSpaceAmbientOcclusion::default(), VolumetricFog { ambient_intensity: 0.0, step_count: 48, jitter: 0.5, ..default() })
-}
-
-fn toggle_heavy(keys: Res<ButtonInput<KeyCode>>, mut settings: ResMut<GraphicsSettings>, cameras: Query<Entity, With<Camera3d>>, mut commands: Commands) {
-    if !keys.just_pressed(KeyCode::F9) {
-        return;
-    }
-    settings.heavy = !settings.heavy;
-    info!("Тяжёлые эффекты (SSAO, объёмный туман): {}", if settings.heavy { "вкл" } else { "выкл" });
-    for e in &cameras {
-        if settings.heavy {
-            commands.entity(e).insert(heavy_effects());
-        } else {
-            commands.entity(e).remove::<(ScreenSpaceAmbientOcclusion, VolumetricFog)>();
-        }
     }
 }
 

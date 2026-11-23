@@ -6,7 +6,7 @@ use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendTyp
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_0010;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_0011;
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -154,6 +154,31 @@ pub enum ServerMessage {
     /// На земле появилось тело (его можно будет обыскать).
     CorpseSpawned { corpse_id: u64, kind: ActorKind, pos: NetPos, yaw: f32 },
     CorpseRemoved { corpse_id: u64 },
+    /// Имя игрока (ник из главного меню). Приходит всем при входе игрока и новичку — про всех.
+    PlayerName { id: u64, name: String },
+}
+
+/// Ник игрока: не длиннее 24 символов, без управляющих символов.
+pub fn clean_name(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).take(24).collect::<String>().trim().to_string()
+}
+
+/// Ник едет на сервер в `user_data` подключения (256 байт): длина и UTF-8.
+pub fn encode_name(name: &str) -> [u8; 256] {
+    let name = clean_name(name);
+    let mut out = [0u8; 256];
+    let bytes = name.as_bytes();
+    let n = bytes.len().min(250);
+    // Не режем букву посередине.
+    let n = (0..=n).rev().find(|&i| name.is_char_boundary(i)).unwrap_or(0);
+    out[0] = n as u8;
+    out[1..1 + n].copy_from_slice(&bytes[..n]);
+    out
+}
+
+pub fn decode_name(data: &[u8; 256]) -> String {
+    let n = (data[0] as usize).min(255);
+    clean_name(&String::from_utf8_lossy(&data[1..1 + n]))
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -202,4 +227,18 @@ pub fn encode<T: Serialize>(value: &T) -> Vec<u8> {
 
 pub fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Option<T> {
     postcard::from_bytes(bytes).ok()
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    #[test]
+    fn names_survive_user_data() {
+        assert_eq!(decode_name(&encode_name("  Феодор Херсонит ")), "Феодор Херсонит");
+        assert_eq!(decode_name(&encode_name("")), "");
+        let long = "Ж".repeat(100);
+        assert_eq!(decode_name(&encode_name(&long)).chars().count(), 24);
+        assert_eq!(clean_name("a\nb\tc"), "abc");
+    }
 }
