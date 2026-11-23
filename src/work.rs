@@ -200,12 +200,14 @@ pub enum Dir {
 }
 
 impl Dir {
+    /// Как назвать движение (в шрифте игры нет стрелок).
+    /// Как назвать движение (в шрифте игры нет стрелок).
     pub fn arrow(self) -> &'static str {
         match self {
-            Dir::Up => "↑",
-            Dir::Down => "↓",
-            Dir::Left => "←",
-            Dir::Right => "→",
+            Dir::Up => "вверх",
+            Dir::Down => "вниз",
+            Dir::Left => "влево",
+            Dir::Right => "вправо",
         }
     }
 

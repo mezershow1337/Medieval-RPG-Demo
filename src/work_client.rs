@@ -242,7 +242,7 @@ fn setup_work_hud(mut commands: Commands, fonts: Res<UiFonts>) {
                     g.spawn((Part::Ring, Node { border: UiRect::all(px(2)), border_radius: BorderRadius::MAX, ..abs() }, BorderColor::all(Color::srgba(0.75, 0.65, 0.45, 0.7))));
                     g.spawn((Part::Ghost, Node { border_radius: BorderRadius::MAX, ..abs() }, BackgroundColor(Color::srgba(0.6, 0.85, 0.5, 0.55))));
                     g.spawn((Part::Dot, Node { border_radius: BorderRadius::MAX, ..abs() }, BackgroundColor(Color::srgb(1.0, 0.93, 0.75))));
-                    g.spawn((Part::Arrows, text(&fonts, 34.0, true), Node { position_type: PositionType::Absolute, width: percent(100), top: px(38), justify_content: JustifyContent::Center, ..default() }, TextLayout::justify(Justify::Center)));
+                    g.spawn((Part::Arrows, text(&fonts, 20.0, true), Node { position_type: PositionType::Absolute, width: percent(100), top: px(50), justify_content: JustifyContent::Center, ..default() }, TextLayout::justify(Justify::Center)));
                 });
             p.spawn((Part::Hint, text(&fonts, 13.0, false)));
             p.spawn((Part::Note, text(&fonts, 15.0, true)));
@@ -332,11 +332,11 @@ fn update_work_hud(
                     continue;
                 }
                 let line = match m.shown() {
-                    Some(i) => m.seq.iter().enumerate().map(|(k, d)| if k == i { format!("[{}]", d.arrow()) } else if k < i { d.arrow().to_string() } else { "·".into() }).collect::<Vec<_>>().join(" "),
+                    Some(i) => m.seq.iter().enumerate().map(|(k, d)| if k == i { d.arrow().to_uppercase() } else if k < i { d.arrow().to_string() } else { "·".into() }).collect::<Vec<_>>().join(" "),
                     None if m.showing => m.seq.iter().map(|d| d.arrow()).collect::<Vec<_>>().join(" "),
                     None => m.seq.iter().enumerate().map(|(k, _)| match m.seq_ok.get(k) {
-                        Some(true) => "✓".to_string(),
-                        Some(false) => "✗".to_string(),
+                        Some(true) => "+".to_string(),
+                        Some(false) => "×".to_string(),
                         None => "?".to_string(),
                     }).collect::<Vec<_>>().join(" "),
                 };
