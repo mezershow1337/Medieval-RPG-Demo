@@ -47,11 +47,12 @@ struct Gait {
     fresh: bool,
 }
 
+/// Пустышка в правой руке жителя; предмет — её дочерняя сущность (`ShownProp` — какой).
 #[derive(Component)]
-struct PropSlot;
+pub struct PropSlot;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum Prop {
+pub enum Prop {
     Hammer,
     Tongs,
     Spoon,
@@ -556,9 +557,10 @@ fn fallback_act(role: Role) -> Act {
     }
 }
 
-/// Меняет предмет в руке, когда меняется занятие.
+/// Какой предмет сейчас в руке (на сущности с `PropSlot`); меняется вместе с занятием.
+/// Тред графики вешает свет на `Prop::Torch`.
 #[derive(Component)]
-struct ShownProp(Option<Prop>);
+pub struct ShownProp(pub Option<Prop>);
 
 fn update_props(mut commands: Commands, kit: Option<Res<PropKit>>, gaits: Query<&Gait>, shown: Query<Option<&ShownProp>, With<PropSlot>>) {
     let Some(kit) = kit else { return };
