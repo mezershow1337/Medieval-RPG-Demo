@@ -105,21 +105,28 @@ const VIEW_SHOULDER: Vec3 = Vec3::new(0.24, -0.3, 0.12);
 const VIEW_LIFT: f32 = 0.36;
 
 pub fn spawn_view_sword(parent: &mut ChildSpawnerCommands, _assets: &CharacterAssets) {
-    parent.spawn((ViewSword, ShownViewWeapon(combat::WeaponKind::Spatha), crate::rig::NeedsWeapon(combat::WeaponKind::Spatha), Transform::default(), Visibility::default()));
+    parent.spawn((ViewSword, ShownViewWeapon(combat::WeaponKind::Spatha, None), crate::rig::NeedsWeapon(combat::WeaponKind::Spatha), Transform::default(), Visibility::default()));
     parent.spawn((ViewArmRoot, crate::rig::NeedsViewArm(None), Transform::default(), Visibility::default()));
 }
 
 /// Какое оружие показано от первого лица.
 #[derive(Component)]
-struct ShownViewWeapon(combat::WeaponKind);
+struct ShownViewWeapon(combat::WeaponKind, Option<u16>);
 
-/// Сменили оружие в инвентаре — меняем модель в руке.
-fn refresh_view_weapon(mut commands: Commands, local: Query<&LocalFighter>, mut shown: Query<(Entity, &mut ShownViewWeapon)>) {
+/// Сменили оружие в инвентаре — меняем модель в руке (модель именно этого предмета).
+fn refresh_view_weapon(
+    mut commands: Commands,
+    local: Query<&LocalFighter>,
+    mut shown: Query<(Entity, &mut ShownViewWeapon)>,
+    models: Option<Res<crate::icons::ItemModels>>,
+) {
     let Ok(f) = local.single() else { return };
+    let kind = f.fighter.weapon;
+    let held = f.gear.main_hand.filter(|_| !f.gear.holstered && kind != combat::WeaponKind::Fists);
     for (e, mut w) in &mut shown {
-        if w.0 != f.fighter.weapon {
-            w.0 = f.fighter.weapon;
-            commands.entity(e).despawn_related::<Children>().insert(crate::rig::NeedsWeapon(w.0));
+        if (w.0, w.1) != (kind, held) {
+            (w.0, w.1) = (kind, held);
+            crate::worn::set_weapon_model(&mut commands, e, kind, held.map(crate::items::ItemBaseId), f.finish, models.as_deref());
         }
     }
 }

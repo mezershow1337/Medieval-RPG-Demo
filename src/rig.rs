@@ -669,6 +669,13 @@ fn apply_poses(rigs: Query<(&Rig, &RigPose), Changed<RigPose>>, mut joints: Quer
     }
 }
 
+impl Rig {
+    /// Сущность сустава: к ней можно прицепить вещь (ножны к тазу, крест к груди).
+    pub fn joint(&self, bone: Bone) -> Entity {
+        self.joints[bone as usize]
+    }
+}
+
 impl ViewArm {
     pub fn joints(&self) -> [Entity; 3] {
         self.joints
@@ -814,9 +821,13 @@ pub fn solve_pose(inp: &PoseInput) -> Solved {
 
     // Торс и голова.
     let breathe = (inp.time * 1.7).sin() * 0.012;
-    local[1] = Quat::from_rotation_y(inp.twist * 0.7) * Quat::from_rotation_x(inp.lean - 0.35 * crouch + breathe);
+    // Взгляд вниз/вверх частью уходит в торс: у скелета одна кость на шею и голову, и при сильном
+    // наклоне одной головы шея рвётся из ворота.
+    let look = (inp.pitch * 0.8).clamp(-1.1, 1.0);
+    let chest = inp.lean - 0.35 * crouch + 0.3 * look;
+    local[1] = Quat::from_rotation_y(inp.twist * 0.7) * Quat::from_rotation_x(chest + breathe);
     world[1] = world[0] * local[1];
-    let head_pitch = (inp.pitch * 0.8 - (inp.lean - 0.35 * crouch)).clamp(-0.8, 0.7);
+    let head_pitch = (look - chest).clamp(-0.5, 0.5);
     local[2] = Quat::from_rotation_y(-inp.twist * 0.6) * Quat::from_rotation_x(head_pitch);
     world[2] = world[1] * local[2];
 

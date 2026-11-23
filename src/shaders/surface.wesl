@@ -515,6 +515,11 @@ fn fragment(
         @if(VERTEX_UVS_A) {
             uv = in.uv;
         }
+        // Производные развёртки — для касательных по UV (черепица: зеркальные скаты, коньки).
+        let dp_x = dpdx(wp);
+        let dp_y = dpdy(wp);
+        let duv_x = dpdx(uv);
+        let duv_y = dpdy(uv);
         switch kind {
             case 5: {
                 // Знамя: ткань, золотая кайма, геральдический крест.
@@ -553,11 +558,43 @@ fn fragment(
             case 12: {
                 if surface.photo.x >= 0.0 {
                     // Фото черепицы по развёртке ската: u — вдоль карниза, v — вниз по скату.
-                    let tt = normalize(cross(n, vec3<f32>(0.0, 1.0, 0.0)) + vec3<f32>(1e-4, 0.0, 0.0));
-                    let bb = cross(tt, n);
-                    let ph = photo_plane(i32(surface.photo.x + 0.5), uv * surface.photo.y, tt, bb, n, surface.photo_mean_b.w);
+                    // Касательные — по самой развёртке (t вдоль u, b к коньку, против v): на двух
+                    // скатах одной крыши u идёт в одну сторону, а нормаль — в разные, и по одному
+                    // лишь `cross(n, Y)` свет на калиптерах падал бы на половине крыш не с той стороны.
+                    var tt = normalize(cross(n, vec3<f32>(0.0, 1.0, 0.0)) + vec3<f32>(1e-4, 0.0, 0.0));
+                    var bb = cross(tt, n);
+                    let det = duv_x.x * duv_y.y - duv_x.y * duv_y.x;
+                    if abs(det) > 1e-12 {
+                        let tu = (dp_x * duv_y.y - dp_y * duv_x.y) / det;
+                        let tv = (dp_y * duv_x.x - dp_x * duv_y.x) / det;
+                        let t2 = tu - n * dot(n, tu);
+                        let b2 = tv - n * dot(n, tv);
+                        if dot(t2, t2) > 1e-10 && dot(b2, b2) > 1e-10 {
+                            tt = normalize(t2);
+                            bb = -normalize(b2);
+                        }
+                    }
+                    // Каждая черепица своя (шаг колонн и рядов в текстуре — 0.5 м): тегулы и
+                    // калиптеры из разных обжигов, часть заменена новыми, часть старая и тёмная.
+                    // Ряды кладут руками — каждый чуть сдвинут поперёк ската.
+                    let row = floor(uv.y / 0.5);
+                    let uvr = uv + vec2<f32>((hash21(vec2<f32>(row, 5.3)) - 0.5) * 0.035, 0.0);
+                    let dk = abs(fract(uvr.x / 0.5 + 0.5) - 0.5) * 0.5;
+                    let on_k = 1.0 - smoothstep(0.085, 0.105, dk);
+                    let teg = floor(vec2<f32>(uvr.x / 0.5, (uvr.y - 0.03) / 0.5));
+                    let kal = floor(vec2<f32>(uvr.x / 0.5 + 0.5, uvr.y / 0.5));
+                    let cell = select(teg, kal + vec2<f32>(311.0, 97.0), on_k > 0.5);
+                    let id = hash21(cell);
+                    let kiln = hash21(cell * 1.37 + vec2<f32>(3.1, 7.7));
+                    let ph = photo_plane(i32(surface.photo.x + 0.5), uvr * surface.photo.y, tt, bb, n, surface.photo_mean_b.w * 0.85);
                     color = retint(ph.albedo, surface.photo_mean.rgb, base_a, surface.photo_mean.w);
+                    color *= (0.88 + id * 0.22) * vec3<f32>(1.0 + (kiln - 0.5) * 0.1, 1.0, 1.0 - (kiln - 0.5) * 0.14);
+                    // Новые (краснее и светлее) и старые (бурые, серые) черепицы вперемешку.
+                    color *= mix(vec3<f32>(1.0), vec3<f32>(1.16, 0.95, 0.86), step(0.94, kiln));
+                    color *= mix(vec3<f32>(1.0), vec3<f32>(0.72, 0.7, 0.69), step(kiln, 0.06));
                     color *= 1.0 + (fbm(wp.xz * 0.2) - 0.5) * variation * 1.5;
+                    // Пятна перекладки: участки в несколько метров светлее или темнее соседних.
+                    color *= 1.0 + (fbm(wp.xz * 0.09 + vec2<f32>(wp.y * 0.1, 4.2)) - 0.5) * 0.35;
                     // Издалека: у одних домов черепица новее и краснее, у других — старая,
                     // бурая и серая от копоти очагов и лишайника; пятнами, а не ровной заливкой.
                     let age = smoothstep(0.38, 0.62, fbm(wp.xz * 0.035 + vec2<f32>(3.7, 9.1)));

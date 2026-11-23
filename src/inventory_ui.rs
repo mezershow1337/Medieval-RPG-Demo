@@ -340,7 +340,7 @@ fn rebuild_ui(
                     &fonts,
                     {
                         let load = crate::weight::inventory_weight(inv);
-                        let cap = crate::weight::carry_capacity(inv.equipped_stats().get(crate::items::Stat::Strength));
+                        let cap = crate::weight::carry_capacity(inv.equipped_stats().get(crate::items::Stat::Strength)) + crate::skill_tree::Mods::of(k).carry;
                         let slow = crate::weight::encumbrance(load, cap);
                         let burden = if slow < 1.0 { format!(" — перегруз, шаг медленнее на {:.0}%", (1.0 - slow) * 100.0) } else { String::new() };
                         format!(

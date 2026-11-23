@@ -41,6 +41,28 @@ pub fn install_crash_report() {
     }));
 }
 
+/// Привести имя к виду, годному для карты и подписей: без управляющих символов, не длиннее 20 знаков.
+pub fn clean_name(s: &str) -> String {
+    let s: String = s.chars().filter(|c| !c.is_control()).collect();
+    let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    s.chars().take(20).collect()
+}
+
+/// Имя игрока, которое видят товарищи на карте и над головой:
+/// `MRPG_NAME`, затем ник из меню (settings.txt), затем name.txt прежних сборок, затем имя пользователя системы.
+pub fn player_name() -> String {
+    let from_env = std::env::var("MRPG_NAME").ok();
+    let from_settings = Some(crate::settings::Settings::load().nickname);
+    let from_file = std::env::current_exe().ok().and_then(|e| std::fs::read_to_string(e.parent()?.join("name.txt")).ok());
+    let from_os = std::env::var("USERNAME").or_else(|_| std::env::var("USER")).ok();
+    [from_env, from_settings, from_file, from_os]
+        .into_iter()
+        .flatten()
+        .map(|s| clean_name(&s))
+        .find(|s| !s.is_empty())
+        .unwrap_or_else(|| "Странник".to_string())
+}
+
 /// В Windows готовый exe — «оконное» приложение без консоли. Если его запустили из
 /// терминала с параметрами (`server`, `join …`), подключаемся к консоли родителя, чтобы был виден журнал.
 pub fn attach_parent_console() {

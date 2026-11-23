@@ -61,9 +61,9 @@ fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
         .with_children(|p| {
             p.spawn((BannerText, theme.title_colored("", 40.0, Color::WHITE)));
         });
-    // Цель (враг перед вами).
+    // Цель (враг перед вами) — под компасом (см. map.rs).
     commands
-        .spawn((HudRoot, Node { width: percent(100), position_type: PositionType::Absolute, top: px(14), justify_content: JustifyContent::Center, ..default() }))
+        .spawn((HudRoot, Node { width: percent(100), position_type: PositionType::Absolute, top: px(70), justify_content: JustifyContent::Center, ..default() }))
         .with_children(|p| {
             p.spawn((TargetText, text("", 18.0, Color::srgb(1.0, 0.9, 0.8))));
         });

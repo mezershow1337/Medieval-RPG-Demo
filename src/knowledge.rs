@@ -54,7 +54,7 @@ pub struct KnowledgeServerPlugin;
 
 impl Plugin for KnowledgeServerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::medicine_server::MedicineServerPlugin)
+        app.add_plugins((crate::medicine_server::MedicineServerPlugin, crate::skills_server::SkillsServerPlugin))
             .insert_resource(KnowledgeWorld::default())
             .add_observer(on_connection)
             .add_observer(on_lesson)
@@ -316,11 +316,11 @@ fn send(server: &mut RenetServer, player: u64, msg: &LoreServerMessage) {
     server.send_message(player, CH_LORE, encode(msg));
 }
 
-fn notice(server: &mut RenetServer, player: u64, text: impl Into<String>) {
+pub(crate) fn notice(server: &mut RenetServer, player: u64, text: impl Into<String>) {
     send(server, player, &LoreServerMessage::Notice(text.into()));
 }
 
-fn sync_knowledge(server: &mut RenetServer, world: &KnowledgeWorld, player: u64) {
+pub(crate) fn sync_knowledge(server: &mut RenetServer, world: &KnowledgeWorld, player: u64) {
     if let Some(k) = world.players.get(&player) {
         send(server, player, &LoreServerMessage::Knowledge(k.clone()));
     }
@@ -719,7 +719,8 @@ fn receive_lore_messages(
                         notice(&mut server, pid, "Вы это уже прочли");
                         continue;
                     }
-                    let total = text.info().read_secs;
+                    // Книжный человек читает быстрее.
+                    let total = text.info().read_secs / crate::skill_tree::Mods::of(k).reading;
                     start(&mut server, &mut world, pid, Task::Read { uid, text }, "Чтение".into(), done * total, total, feet, hp, Some(Drill::Track), 30.0);
                 }
                 LoreClientMessage::Gather { patch } => {
@@ -979,6 +980,8 @@ fn tick_activities(
         if let Some(k) = world.players.get_mut(&pid) {
             let r = k.read.entry(text).or_insert(0.0);
             *r = r.max(frac);
+            // Чтение само по себе учит читать.
+            k.practice(Skill::Letters, dt / 60.0 * crate::skill_tree::PRACTICE_READ_PER_MIN);
         }
     }
 

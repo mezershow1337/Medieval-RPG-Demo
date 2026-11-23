@@ -17,7 +17,7 @@ pub mod places;
 mod terrain;
 
 pub use places::*;
-pub use terrain::{WATER_Y, ground_y, inside_city};
+pub use terrain::{WATER_Y, ground_y, height_at, inside_city};
 
 use crate::collision::{Aabb, HeightField, LevelColliders};
 use bevy::light::NotShadowCaster;
@@ -711,6 +711,12 @@ pub fn layout() -> Layout {
 }
 
 /// Коллизии из раскладки.
+/// Коллайдеры Херсонеса (для тестов других модулей: торговцы, лотки).
+#[cfg(test)]
+pub fn city_colliders() -> LevelColliders {
+    colliders(city::city_layout())
+}
+
 pub fn colliders(layout: Layout) -> LevelColliders {
     let mut boxes: Vec<Aabb> = layout.blocks.iter().filter(|b| b.solid).map(|b| b.aabb).collect();
     boxes.extend(layout.invisible);
