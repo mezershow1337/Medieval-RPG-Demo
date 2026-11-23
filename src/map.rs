@@ -12,6 +12,7 @@ use crate::client::{NetState, RemoteActor};
 use crate::map_render::{self, MapBounds, MapRaster};
 use crate::player::{LocalPlayer, PlayerCamera};
 use crate::protocol::{ActorKind, decode, encode};
+use crate::ui_theme::{AppearChildren, Skin, UiTheme, ink};
 use bevy::asset::RenderAssetUsages;
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
@@ -178,11 +179,13 @@ pub struct MapView {
     side: f32,
     /// Где на карте стоят значки игроков и меток с подписями: подписи мест их не перекрывают.
     occupied: Vec<Rect>,
+    /// Центр листа на экране (логические пиксели) — по прошлому кадру раскладки.
+    screen_center: Vec2,
 }
 
 impl Default for MapView {
     fn default() -> Self {
-        Self { open: false, zoom: 2.4, center: Vec2::splat(0.5), drag: None, side: 600.0, occupied: Vec::new() }
+        Self { open: false, zoom: 2.4, center: Vec2::splat(0.5), drag: None, side: 600.0, occupied: Vec::new(), screen_center: Vec2::ZERO }
     }
 }
 
@@ -342,11 +345,10 @@ fn setup_marker_art(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 // Окно карты
 // ---------------------------------------------------------------------------
 
-const INK: Color = Color::srgb(0.20, 0.13, 0.07);
-const WOOD_DARK: Color = Color::srgb(0.20, 0.12, 0.06);
-const WOOD: Color = Color::srgb(0.36, 0.23, 0.12);
-const BRONZE: Color = Color::srgb(0.66, 0.50, 0.26);
-const PARCHMENT_TEXT: Color = Color::srgb(0.93, 0.86, 0.70);
+const INK: Color = ink::INK;
+/// Тонкая тёмная кромка листа внутри рамы.
+const WOOD_DARK: Color = Color::srgb(0.16, 0.10, 0.05);
+const MAP_BORDER: f32 = 3.0;
 
 #[derive(Component)]
 struct MapRoot;
@@ -381,31 +383,29 @@ fn text(fonts: &crate::inventory_ui::UiFonts, s: &str, size: f32, color: Color, 
     (Text::new(s), TextFont { font: if bold { fonts.bold.clone() } else { fonts.regular.clone() }.into(), font_size: FontSize::Px(size), ..default() }, TextColor(color))
 }
 
-fn setup_map_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>) {
+fn setup_map_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>, theme: Res<UiTheme>) {
     let root = commands
         .spawn((
             MapRoot,
             Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
-            BackgroundColor(Color::srgba(0.02, 0.01, 0.0, 0.55)),
+            theme.backdrop(),
             GlobalZIndex(40),
             Visibility::Hidden,
         ))
         .id();
-    // Рама: тёмное дерево с бронзовой окантовкой.
+    // Рама — тёмная доска в бронзе (общая тема окон), внутри — сам лист карты.
     let frame = commands
         .spawn((
-            Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, padding: UiRect::all(px(10)), border: UiRect::all(px(3)), row_gap: px(6), ..default() },
-            BackgroundColor(WOOD),
-            BorderColor::all(BRONZE),
-            BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.7), px(0), px(6), px(4), px(24)),
+            Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, padding: Skin::Wood.padding(), row_gap: px(8), ..default() },
+            theme.skin(Skin::Wood),
             ChildOf(root),
         ))
         .id();
-    commands.spawn((text(&fonts, "Херсон и окрестности", 26.0, PARCHMENT_TEXT, true), ChildOf(frame)));
+    commands.spawn((theme.title("Херсон и окрестности", 28.0), ChildOf(frame)));
     let viewport = commands
         .spawn((
             MapViewport,
-            Node { width: px(600), height: px(600), overflow: Overflow::clip(), border: UiRect::all(px(4)), ..default() },
+            Node { width: px(600), height: px(600), overflow: Overflow::clip(), border: UiRect::all(px(MAP_BORDER)), ..default() },
             BorderColor::all(WOOD_DARK),
             BackgroundColor(Color::srgb(0.80, 0.71, 0.53)),
             ChildOf(frame),
@@ -447,7 +447,7 @@ fn setup_map_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
         ));
     }
     commands.spawn((
-        text(&fonts, "Колесо — масштаб  ·  ЛКМ — двигать  ·  ПКМ — метка для товарищей  ·  Пробел — к себе  ·  M — закрыть", 15.0, PARCHMENT_TEXT, false),
+        theme.text("Колесо — масштаб  ·  ЛКМ — двигать  ·  ПКМ — метка для товарищей  ·  Пробел — к себе  ·  M — закрыть", 15.0, ink::DIM),
         ChildOf(frame),
     ));
 }
@@ -457,6 +457,8 @@ fn any_other_window_open(loot: &Option<Res<crate::loot_client::LootState>>, trad
 }
 
 fn toggle_map(
+    mut commands: Commands,
+    root: Single<Entity, With<MapRoot>>,
     keys: Res<ButtonInput<KeyCode>>,
     mut view: ResMut<MapView>,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
@@ -487,6 +489,7 @@ fn toggle_map(
         }
     } else if m && !any_other_window_open(&loot, &trade) {
         view.open = true;
+        commands.entity(*root).insert(AppearChildren);
         // Открываем на себе.
         if let (Some(b), Ok(t)) = (sheet.bounds, player.single()) {
             view.center = b.to_uv(t.translation.x, t.translation.z);
@@ -504,16 +507,13 @@ fn free_cursor_while_open(view: Res<MapView>, mut cursor: Single<&mut CursorOpti
 /// Курсор в окне карты: доля листа под ним (или `None`, если мимо карты).
 fn cursor_uv(window: &Window, view: &MapView) -> Option<Vec2> {
     let c = window.cursor_position()?;
-    let center = Vec2::new(window.width(), window.height()) / 2.0 + MAP_OFFSET;
-    let local = c - center;
+    let local = c - view.screen_center;
     if local.x.abs() > view.side / 2.0 || local.y.abs() > view.side / 2.0 {
         return None;
     }
     Some(view.center + local / (view.side * view.zoom))
 }
 
-/// Окно карты чуть ниже центра экрана (над ним заголовок, под ним подсказка — разной высоты).
-const MAP_OFFSET: Vec2 = Vec2::new(0.0, 4.0);
 
 #[allow(clippy::too_many_arguments)]
 fn map_input(
@@ -581,7 +581,7 @@ fn layout_map(
     window: Single<&Window, With<PrimaryWindow>>,
     sheet: Res<MapSheet>,
     mut root: Single<&mut Visibility, (With<MapRoot>, Without<MapImage>, Without<MapLabel>, Without<MapLoading>)>,
-    mut viewport: Single<&mut Node, (With<MapViewport>, Without<MapImage>, Without<MapLabel>, Without<MapLoading>)>,
+    mut viewport: Single<(&mut Node, &ComputedNode, &UiGlobalTransform), (With<MapViewport>, Without<MapImage>, Without<MapLabel>, Without<MapLoading>)>,
     mut image: Single<(&mut Node, &mut ImageNode, &mut Visibility), (With<MapImage>, Without<MapViewport>, Without<MapLabel>, Without<MapLoading>)>,
     mut loading: Single<&mut Visibility, (With<MapLoading>, Without<MapRoot>, Without<MapImage>, Without<MapLabel>)>,
     mut labels: Query<(&MapLabel, &mut Node, &mut Visibility), (Without<MapViewport>, Without<MapImage>, Without<MapRoot>, Without<MapLoading>)>,
@@ -591,10 +591,12 @@ fn layout_map(
         return;
     }
     // Окно карты — квадрат, сколько позволяет экран (место под заголовок и подсказку).
-    let side = (window.width() * 0.9).min(window.height() - 130.0).max(240.0).floor();
+    let side = (window.width() * 0.9 - 70.0).min(window.height() - 190.0).max(240.0).floor();
     view.side = side;
-    viewport.width = px(side);
-    viewport.height = px(side);
+    let (vp_node, vp_computed, vp_tf) = &mut *viewport;
+    vp_node.width = px(side + 2.0 * MAP_BORDER);
+    vp_node.height = px(side + 2.0 * MAP_BORDER);
+    view.screen_center = vp_tf.translation * vp_computed.inverse_scale_factor();
     let (Some(handle), Some(bounds)) = (&sheet.image, sheet.bounds) else {
         **loading = Visibility::Inherited;
         return;
@@ -792,40 +794,36 @@ struct CompassTick {
     half_w: f32,
 }
 
-const COMPASS_W: f32 = 460.0;
-const COMPASS_H: f32 = 34.0;
+const COMPASS_W: f32 = 440.0;
+const COMPASS_H: f32 = 30.0;
 /// Сколько градусов видно от центра до края.
 const COMPASS_SPAN: f32 = 95.0;
 
-fn setup_compass(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>) {
+fn setup_compass(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>, theme: Res<UiTheme>) {
     let root = commands
-        .spawn((CompassRoot, Node { position_type: PositionType::Absolute, top: px(8), width: percent(100), justify_content: JustifyContent::Center, ..default() }, Visibility::Hidden))
+        .spawn((CompassRoot, Node { position_type: PositionType::Absolute, top: px(6), width: percent(100), justify_content: JustifyContent::Center, ..default() }, Visibility::Hidden))
         .id();
+    // Кожаная плашка темы, внутри — полоса с делениями.
+    let plaque = commands.spawn((Node { padding: Skin::Leather.padding(), ..default() }, theme.skin(Skin::Leather), ChildOf(root))).id();
     let strip = commands
-        .spawn((
-            CompassStrip,
-            Node { width: px(COMPASS_W), height: px(COMPASS_H), overflow: Overflow::clip(), border: UiRect::all(px(2)), ..default() },
-            BackgroundColor(Color::srgba(0.16, 0.10, 0.05, 0.78)),
-            BorderColor::all(BRONZE.with_alpha(0.85)),
-            ChildOf(root),
-        ))
+        .spawn((CompassStrip, Node { width: px(COMPASS_W), height: px(COMPASS_H), overflow: Overflow::clip(), ..default() }, ChildOf(plaque)))
         .id();
-    // Центральная риска.
+    // Центральная риска (бронза).
     commands.spawn((
-        Node { position_type: PositionType::Absolute, left: px(COMPASS_W / 2.0 - 3.0), top: px(0), width: px(2), height: px(7), ..default() },
-        BackgroundColor(BRONZE),
+        Node { position_type: PositionType::Absolute, left: px(COMPASS_W / 2.0 - 1.0), top: px(0), width: px(2), height: px(6), ..default() },
+        BackgroundColor(ink::GOLD),
         ChildOf(strip),
     ));
     let names = [(0.0, "С"), (45.0, "СВ"), (90.0, "В"), (135.0, "ЮВ"), (180.0, "Ю"), (225.0, "ЮЗ"), (270.0, "З"), (315.0, "СЗ")];
     for (deg, name) in names {
         let main = (deg as i32) % 90 == 0;
         let half_w = 20.0;
-        let color = if deg == 0.0 { Color::srgb(0.88, 0.32, 0.2) } else { PARCHMENT_TEXT.with_alpha(if main { 1.0 } else { 0.75 }) };
+        let color = if deg == 0.0 { ink::BAD } else if main { ink::TITLE } else { ink::DIM };
         commands.spawn((
             CompassTick { deg, half_w },
             text(&fonts, name, if main { 19.0 } else { 14.0 }, color, main),
             TextLayout::justify(Justify::Center),
-            Node { position_type: PositionType::Absolute, width: px(half_w * 2.0), top: px(if main { 5.0 } else { 8.0 }), ..default() },
+            Node { position_type: PositionType::Absolute, width: px(half_w * 2.0), top: px(if main { 3.0 } else { 6.0 }), ..default() },
             ChildOf(strip),
         ));
     }
@@ -837,7 +835,7 @@ fn setup_compass(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts
         commands.spawn((
             CompassTick { deg, half_w: 0.5 },
             Node { position_type: PositionType::Absolute, width: px(1), height: px(8), top: px(COMPASS_H - 14.0), ..default() },
-            BackgroundColor(PARCHMENT_TEXT.with_alpha(0.55)),
+            BackgroundColor(ink::DIM.with_alpha(0.7)),
             ChildOf(strip),
         ));
     }
@@ -925,7 +923,7 @@ fn update_compass(
                 if t.0 != s {
                     t.0 = s;
                 }
-                c.0 = PARCHMENT_TEXT;
+                c.0 = ink::TEXT;
             }
         }
     }

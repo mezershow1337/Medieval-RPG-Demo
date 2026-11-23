@@ -25,6 +25,12 @@ pub fn run(server_addr: SocketAddr, name: String) {
     let level: LevelColliders = crate::level::level_colliders();
     let mark = std::env::var("MRPG_MARK").ok().map(|s| s.split(',').filter_map(|t| t.trim().parse::<f32>().ok()).collect::<Vec<_>>()).filter(|v| v.len() == 2);
 
+    // `MRPG_BOT_WALK="dx,dz"` — куда и насколько ходить от точки появления.
+    let walk = std::env::var("MRPG_BOT_WALK")
+        .ok()
+        .map(|s| s.split(',').filter_map(|t| t.trim().parse::<f32>().ok()).collect::<Vec<_>>())
+        .filter(|v| v.len() == 2)
+        .map_or(Vec3::new(-30.0, 0.0, 0.0), |v| Vec3::new(v[0], 0.0, v[1]));
     let tick = Duration::from_secs_f64(1.0 / 30.0);
     let mut last = Instant::now();
     let mut feet: Option<Vec3> = None;
@@ -65,16 +71,18 @@ pub fn run(server_addr: SocketAddr, name: String) {
                 while client.receive_message(*ch).is_some() {}
             }
             if let Some(f) = feet.as_mut() {
-                // Ходит по главной улице на 30 м на запад и обратно (шаг человека ~1,4 м/с).
+                // Ходит туда и обратно (шаг человека ~1,4 м/с): по умолчанию 30 м на запад по главной улице.
                 t += dt.as_secs_f32();
-                let phase = (t * 1.4 / 30.0) % 2.0;
-                let target = home + Vec3::new(-30.0 * if phase < 1.0 { phase } else { 2.0 - phase }, 0.0, 0.0);
+                let len = walk.length().max(1.0);
+                let phase = (t * 1.4 / len) % 2.0;
+                let target = home + walk * if phase < 1.0 { phase } else { 2.0 - phase };
                 let mut d = target - *f;
                 d.y = 0.0;
                 let step = d.clamp_length_max(1.4 * dt.as_secs_f32());
                 let r = level.move_body(&Body::STANDING, f, step + Vec3::Y * -4.0 * dt.as_secs_f32(), grounded);
                 grounded = r.grounded;
-                let yaw = if phase < 1.0 { std::f32::consts::FRAC_PI_2 } else { -std::f32::consts::FRAC_PI_2 };
+                let dir = if phase < 1.0 { walk } else { -walk };
+                let yaw = (-dir.x).atan2(-dir.z);
                 let msg = ClientMessage::PlayerState { pos: (*f).into(), yaw, pitch: 0.0, crouching: false, sprinting: false };
                 client.send_message(CH_UNRELIABLE, encode(&msg));
             }
