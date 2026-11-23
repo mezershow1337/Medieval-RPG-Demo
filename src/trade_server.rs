@@ -325,6 +325,22 @@ fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
             m
         })
         .collect::<Vec<MerchantState>>();
+    // Торговцы на одном месте стоят тесно: боковой столик не должен залезать на соседний прилавок.
+    let mut merchants = merchants;
+    for i in 0..merchants.len() {
+        if merchants[i].stall.len() < 2 {
+            continue;
+        }
+        let side = stall_obbs(merchants[i].pos, merchants[i].yaw, &merchants[i].stall[1..])[0].aabb();
+        let crowded = merchants.iter().enumerate().any(|(j, o)| {
+            j != i
+                && (side.overlaps(&crate::collision::Body::STANDING.aabb_at(o.pos))
+                    || stall_obbs(o.pos, o.yaw, &o.stall).iter().any(|t| t.aabb().overlaps(&side)))
+        });
+        if crowded {
+            merchants[i].stall.truncate(1);
+        }
+    }
     let statics = merchants.iter().flat_map(|m| stall_obbs(m.pos, m.yaw, &m.stall)).collect();
     commands.insert_resource(crate::props_server::PropStatics(statics));
     commands.insert_resource(TradeWorld {
