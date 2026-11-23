@@ -6,7 +6,7 @@ use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendTyp
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_001C;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_001D;
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -195,6 +195,13 @@ pub enum ServerMessage {
     Law(crate::civilians::LawMessage),
     /// Часы мира: игровые секунды от полуночи первого дня (см. `world_clock.rs`).
     Clock { game: f64 },
+    /// Имя игрока (ник из главного меню). Приходит всем при входе игрока и новичку — про всех.
+    PlayerName { id: u64, name: String },
+}
+
+/// Ник игрока: не длиннее 24 символов, без управляющих символов.
+pub fn clean_name(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).take(24).collect::<String>().trim().to_string()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -245,4 +252,16 @@ pub fn encode<T: Serialize>(value: &T) -> Vec<u8> {
 
 pub fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Option<T> {
     postcard::from_bytes(bytes).ok()
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    #[test]
+    fn names_are_cleaned() {
+        assert_eq!(clean_name("  Феодор Херсонит "), "Феодор Херсонит");
+        assert_eq!(clean_name(&"Ж".repeat(100)).chars().count(), 24);
+        assert_eq!(clean_name("a\nb\tc"), "abc");
+    }
 }

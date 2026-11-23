@@ -11,6 +11,10 @@ use bevy::text::FontSize;
 
 pub struct HudPlugin;
 
+/// Корни интерфейса боя (прячутся, пока открыто главное меню).
+#[derive(Component)]
+pub struct HudRoot;
+
 #[derive(Component)]
 struct StatusText;
 #[derive(Component)]
@@ -51,10 +55,10 @@ const AIM_RADIUS: f32 = 26.0;
 
 fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
     // Красная вспышка при уроне (на весь экран).
-    commands.spawn((FlashOverlay, Node { width: percent(100), height: percent(100), position_type: PositionType::Absolute, ..default() }, BackgroundColor(Color::NONE)));
+    commands.spawn((HudRoot, FlashOverlay, Node { width: percent(100), height: percent(100), position_type: PositionType::Absolute, ..default() }, BackgroundColor(Color::NONE)));
     // Прицел.
     commands
-        .spawn(Node { width: percent(100), height: percent(100), position_type: PositionType::Absolute, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() })
+        .spawn((HudRoot, Node { width: percent(100), height: percent(100), position_type: PositionType::Absolute, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() }))
         .with_children(|p| {
             // Прицел, вокруг — восемь точек направлений удара и кольцо парирования.
             p.spawn(Node { width: px(AIM_BOX), height: px(AIM_BOX), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() }).with_children(|b| {
@@ -95,25 +99,25 @@ fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
         });
     // Надпись по центру (парирование, смерть).
     commands
-        .spawn(Node { width: percent(100), position_type: PositionType::Absolute, top: percent(30), justify_content: JustifyContent::Center, ..default() })
+        .spawn((HudRoot, Node { width: percent(100), position_type: PositionType::Absolute, top: percent(30), justify_content: JustifyContent::Center, ..default() }))
         .with_children(|p| {
             p.spawn((BannerText, theme.title_colored("", 40.0, Color::WHITE)));
         });
     // Цель (враг перед вами) — под компасом (см. map.rs).
     commands
-        .spawn(Node { width: percent(100), position_type: PositionType::Absolute, top: px(70), justify_content: JustifyContent::Center, ..default() })
+        .spawn((HudRoot, Node { width: percent(100), position_type: PositionType::Absolute, top: px(70), justify_content: JustifyContent::Center, ..default() }))
         .with_children(|p| {
             p.spawn((TargetText, text("", 18.0, Color::srgb(1.0, 0.9, 0.8))));
         });
     // Здоровье внизу по центру.
     commands
-        .spawn(Node {
+        .spawn((HudRoot, Node {
             width: percent(100),
             position_type: PositionType::Absolute,
             bottom: px(96),
             justify_content: JustifyContent::Center,
             ..default()
-        })
+        }))
         .with_children(|p| {
             p.spawn((
                 Node {
@@ -153,13 +157,7 @@ fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
         });
     // Выносливость — тонкая полоска под здоровьем.
     commands
-        .spawn(Node {
-            width: percent(100),
-            position_type: PositionType::Absolute,
-            bottom: px(80),
-            justify_content: JustifyContent::Center,
-            ..default()
-        })
+        .spawn((HudRoot, Node { width: percent(100), position_type: PositionType::Absolute, bottom: px(80), justify_content: JustifyContent::Center, ..default() }))
         .with_children(|p| {
             p.spawn((
                 Node {
@@ -183,16 +181,17 @@ fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
                 ));
             });
         });
-    commands.spawn((
+    commands.spawn((HudRoot, 
         StatusText,
         text("Connecting...", 16.0, Color::WHITE),
         Node { position_type: PositionType::Absolute, left: px(12), top: px(10), ..default() },
     ));
     commands.spawn((
+        HudRoot,
         HelpText,
         theme.text(
 
-            "Клик — захватить мышь | Esc — отпустить\n\
+            "Esc — меню (пауза, настройки) | F9 — эффекты | F11 — полный экран\n\
              WASD — ходьба | Shift — бег | Пробел — прыжок | Ctrl/C — присесть\n\
              ЛКМ — удар оттуда, куда ведёте мышь (вправо, влево, вверх, наискось; вниз — укол), СКМ — укол\n\
              ПКМ вовремя — парирование и рипост (ЛКМ); держать — глухой блок (дорого, без рипоста)\n\
@@ -260,6 +259,7 @@ fn update_status(
     remotes: Query<&RemoteActor>,
     player: Query<&Transform, With<LocalPlayer>>,
     mut text: Single<&mut Text, With<StatusText>>,
+    settings: Option<Res<crate::settings::Settings>>,
 ) {
     let fps = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS).and_then(|d| d.smoothed()).unwrap_or(0.0);
     let addr = state.server_addr.map(|a| a.to_string()).unwrap_or_default();
@@ -275,7 +275,10 @@ fn update_status(
         _ => format!("Connecting to {addr}..."),
     };
     let pos = player.single().map(|t| format!(" | pos {:.1} {:.1} {:.1}", t.translation.x, t.translation.y, t.translation.z)).unwrap_or_default();
-    text.0 = format!("{status}\nFPS {fps:.0}{pos}");
+    // Без «Показывать FPS» строка видна, только пока что-то не так со связью.
+    let show = settings.is_none_or(|s| s.show_fps);
+    let connected = client.as_ref().is_some_and(|c| c.is_connected()) && state.error.is_none();
+    text.0 = if show { format!("{status}\nFPS {fps:.0}{pos}") } else if connected { String::new() } else { status };
 }
 
 fn update_health(
@@ -316,6 +319,7 @@ fn update_target(
     remotes: Query<(&RemoteActor, &Transform)>,
     mut label: Single<(&mut Text, &mut TextFont), With<TargetText>>,
     fonts: Option<Res<crate::inventory_ui::UiFonts>>,
+    names: Option<Res<crate::client::PlayerNames>>,
 ) {
     // Названия врагов по-русски — нужен шрифт с кириллицей.
     let (label, font) = &mut *label;
@@ -336,7 +340,7 @@ fn update_target(
         .min_by(|a, b| a.1.total_cmp(&b.1));
     label.0 = match best {
         Some((r, _)) => {
-            let name = r.kind.name_ru();
+            let name = if r.kind == ActorKind::Player { names.as_ref().map_or_else(|| r.kind.name_ru().to_string(), |n| n.of(r.id)) } else { r.kind.name_ru().to_string() };
             format!("{name}  {:.0} / {:.0}", r.fighter.hp, r.fighter.max_hp)
         }
         None => String::new(),

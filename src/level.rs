@@ -1061,7 +1061,19 @@ pub fn spawn_level(
             continue;
         }
         let handle = materials.entry(mat).or_insert_with(|| surfaces.add(crate::graphics::surface_material(mat))).clone();
-        let mut e = commands.spawn((Mesh3d(meshes.add(mb.build())), MeshMaterial3d(handle), Transform::IDENTITY));
+        // Геометрия уровня неизменна: после загрузки в видеокарту копию в памяти отпускаем,
+        // а рамку для отсечения считаем заранее (потом данных меша уже не будет).
+        let mut mesh = mb.build();
+        // Против мерцания: грани разных материалов, лежащие в одной плоскости, чуть
+        // разводим по нормали (ковёр над полом, штукатурка над камнем). Сдвиг в геометрии,
+        // а не `depth_bias` материала: тот плодит варианты конвейеров и тормозит прогрев шейдеров.
+        crate::graphics::push_along_normals(&mut mesh, crate::graphics::depth_rank(mat));
+        let aabb = bevy::camera::primitives::MeshAabb::get_aabb(&mesh);
+        mesh.asset_usage = bevy::asset::RenderAssetUsages::RENDER_WORLD;
+        let mut e = commands.spawn((Mesh3d(meshes.add(mesh)), MeshMaterial3d(handle), Transform::IDENTITY));
+        if let Some(aabb) = aabb {
+            e.insert(aabb);
+        }
         if matches!(mat, Mat::Coals | Mat::Water) {
             e.insert(NotShadowCaster);
         }
@@ -1145,4 +1157,5 @@ pub fn spawn_level(
         ));
     }
 }
+
 

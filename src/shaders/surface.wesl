@@ -721,7 +721,11 @@ fn fragment(
                 // Смешанная кладка (opus mixtum): камень, а через каждые 1,6 м — пояс плинфы.
                 ph = photo_triplanar(top, top, surface.photo.y, surface.photo.y, wp, n, relief);
                 let br = photo_triplanar(side, side, surface.photo.w, surface.photo.w, wp, n, relief);
-                let band = step(fract(wp.y / 1.6), 0.27) * (1.0 - step(0.7, n.y));
+                // Край пояса сглажен на ширину пикселя: жёсткий step вдали «дёргался» лесенкой.
+                let yb = wp.y / 1.6;
+                let edge = abs(fract(yb - 0.135 + 0.5) - 0.5);
+                let aa = max(fwidth(yb), 0.001);
+                let band = (1.0 - smoothstep(0.135 - aa, 0.135 + aa, edge)) * (1.0 - smoothstep(0.65, 0.75, n.y));
                 let stone_c = retint(ph.albedo, mean, base_a, tint);
                 let brick_c = retint(br.albedo, surface.photo_mean_b.rgb, vec3<f32>(0.42, 0.17, 0.09), 0.6);
                 color = mix(stone_c, brick_c, band);
