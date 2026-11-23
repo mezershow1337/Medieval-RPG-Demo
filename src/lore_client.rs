@@ -828,7 +828,8 @@ mod tests {
 /// `MRPG_SHOT_UI=brew` — открыть сумку и окно варки у горшка (нужен `MRPG_DEBUG_KIT=1`),
 /// `MRPG_SHOT_UI=fx` — сосуды на огне и вспышки перед камерой, `MRPG_SHOT_PITCH=градусы` — наклон,
 /// `MRPG_SHOT_UI=brazier|table` — поставить жаровню (и собрать стол), `MRPG_SHOT_YAW=градусы` —
-/// повернуть камеру.
+/// повернуть камеру. `MRPG_SHOT_UI=health` — открыть сумку с окном здоровья (с `MRPG_DEBUG_WOUNDS=1`
+/// игрок изранен), `MRPG_SHOT_UI=health_care` — ещё и наложить бинт на руку и лубок на ногу.
 pub struct DevShotPlugin;
 
 impl Plugin for DevShotPlugin {
@@ -930,7 +931,23 @@ fn dev_shot(
             *placed = 2;
         }
     }
+    if ui == "health_care"
+        && let Some(client) = client.as_mut()
+        && *placed < 2
+        && t > delay - 16.0 + 8.0 * *placed as f32
+    {
+        use crate::medicine::{BodyPart, CareTarget};
+        let (name, part) = if *placed == 0 { ("Лубок", BodyPart::RightLeg) } else { ("Бинт", BodyPart::LeftArm) };
+        if let Some(uid) = loot.inventory.as_ref().and_then(|inv| inv.all_items().find(|i| i.info().name == name).map(|i| i.uid)) {
+            send(client, &LoreClientMessage::TreatOn { uid, target: CareTarget::Part(part) });
+        }
+        *placed += 1;
+    }
     if *done == 0 && t > delay - 1.0 {
+        if ui.starts_with("health") {
+            loot.ui_open = true;
+            loot.rev += 1;
+        }
         if std::env::var("MRPG_SHOT_UI").as_deref() == Ok("brew") {
             loot.ui_open = true;
             loot.rev += 1;

@@ -1,7 +1,7 @@
 //! Окно инвентаря: сетка сумки, слоты экипировки, окно обыска тела, подсказки.
 //!
 //! Управление:
-//! - Tab или I — открыть/закрыть инвентарь; Esc — закрыть.
+//! - Tab, I или H — открыть/закрыть инвентарь (с окном здоровья, см. health_ui.rs); Esc — закрыть.
 //! - ЛКМ по предмету — взять; ЛКМ по клетке или слоту — положить; ЛКМ мимо окон — выбросить.
 //! - ПКМ или Shift+ЛКМ — быстро переложить (из тела в сумку, из сумки в тело или надеть/снять).
 //! - Q над предметом — выбросить на землю.
@@ -65,6 +65,8 @@ struct Built {
     /// Ширина пристыкованного слева окна (кузня, перегонка) и ширина экрана — от них раскладка.
     dock: u32,
     screen: u32,
+    /// Что видно в окне здоровья (`health_ui::signature`).
+    health: u64,
 }
 
 #[derive(Resource, Default)]
@@ -83,6 +85,8 @@ struct HeldGhost;
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Hit {
     Cell { owner: Owner, x: u8, y: u8 },
+    /// Рана, часть тела или рот в окне здоровья.
+    Care(crate::medicine::CareTarget),
     /// Слот хотбара внизу экрана.
     Hotbar { slot: usize },
     Equip { owner: Owner, slot: EquipSlot },
@@ -135,7 +139,7 @@ fn toggle_inventory(
     if state.inventory.is_none() {
         return;
     }
-    let toggle = keys.just_pressed(KeyCode::Tab) || keys.just_pressed(KeyCode::KeyI);
+    let toggle = keys.just_pressed(KeyCode::Tab) || keys.just_pressed(KeyCode::KeyI) || keys.just_pressed(KeyCode::KeyH);
     let close_with_e = state.ui_open && state.container.is_some() && keys.just_pressed(KeyCode::KeyE);
     let escape = state.ui_open && keys.just_pressed(KeyCode::Escape);
     if !(toggle || close_with_e || escape) {
@@ -185,16 +189,19 @@ fn rebuild_ui(
     mut tooltip_for: ResMut<TooltipFor>,
     dock: Res<crate::ui_theme::SideDock>,
     window: Single<&Window, With<PrimaryWindow>>,
+    body: Option<Res<crate::medicine_client::MyBody>>,
+    knowledge: Option<Res<crate::lore_client::MyKnowledge>>,
 ) {
     let dock_w = dock.width();
     let screen_w = window.width();
-    let want = Built {
-        rev: state.rev,
-        open: state.ui_open,
-        held: held.0.as_ref().map(|h| h.item.uid),
-        dock: dock_w as u32,
-        screen: screen_w as u32,
-    };
+    let healthy = crate::medicine::Body::default();
+    let body = body.as_deref().map_or(&healthy, |b| &b.0);
+    let unschooled = crate::lore::Knowledge::default();
+    let k = knowledge.as_deref().map_or(&unschooled, |k| &k.0);
+    // Окно здоровья показываем, когда не открыт чужой сундук или тело (иначе не влезет).
+    let show_body = state.ui_open && state.container.is_none();
+    let health = if show_body { crate::health_ui::signature(body, k) } else { 0 };
+    let want = Built { rev: state.rev, open: state.ui_open, held: held.0.as_ref().map(|h| h.item.uid), dock: dock_w as u32, screen: screen_w as u32, health };
     if *built == want && (roots.is_empty() != state.ui_open) {
         return;
     }
@@ -217,8 +224,10 @@ fn rebuild_ui(
         .as_ref()
         .map_or(0.0, |c| panel_w(c.inv.grid.w) + 14.0);
     let free = screen_w - dock_w - 24.0;
-    let show_equip =
-        body_w + equip_w + 14.0 + bag_w <= free || (dock_w == 0.0 && state.container.is_none());
+    let health_w = 380.0 + 14.0;
+    let show_body = show_body && body_w + health_w + bag_w <= free;
+    let used = body_w + bag_w + if show_body { health_w } else { 0.0 };
+    let show_equip = used + equip_w + 14.0 <= free;
     let held_uid = held.0.as_ref().map(|h| h.item.uid);
     let res = UiRes {
         fonts: fonts.clone(),
@@ -272,6 +281,10 @@ fn rebuild_ui(
                         p.spawn(text(&fonts, "Ничего не осталось", 15.0, DIM, false));
                     }
                 });
+            }
+
+            if show_body {
+                crate::health_ui::body_panel(root, &fonts, body, k);
             }
 
             // Экипировка и характеристики.
@@ -344,7 +357,7 @@ fn rebuild_ui(
                 ));
                 p.spawn(text(
                     &fonts,
-                    "ЛКМ — взять/положить, мимо окна — выбросить\nПКМ или Shift+ЛКМ — быстро переложить или надеть\nF — использовать: лечить, читать, варить, поставить жаровню; Q — выбросить, Tab — закрыть\n2–9 над вещью или вещь на слот внизу — на панель быстрого доступа (ПКМ по слоту — убрать)\nK — окно знаний",
+                    "ЛКМ — взять/положить, мимо окна — выбросить\nПКМ или Shift+ЛКМ — быстро переложить или надеть\nF — использовать: лечить, читать, варить, поставить жаровню; Q — выбросить, Tab — закрыть\n2–9 над вещью или вещь на слот внизу — на панель быстрого доступа (ПКМ по слоту — убрать)\nK — окно знаний; лечить — положите средство на рану в окне «Тело»",
                     13.0,
                     DIM,
                     false,
@@ -526,6 +539,9 @@ fn hovered(hits: &Query<(&Interaction, &Hit)>, holding: bool) -> Option<Hit> {
     let rank = |h: &Hit| match (h, holding) {
         (Hit::Hotbar { .. }, _) => 0,
         (Hit::Equip { .. }, true) => 0,
+        (Hit::Care(crate::medicine::CareTarget::Mouth), true) => 0,
+        (Hit::Care(_), true) => 1,
+        (Hit::Care(_), false) => 5,
         (Hit::Cell { .. }, true) => 1,
         (Hit::Item { .. }, false) => 0,
         (Hit::TakeAll, _) => 2,
@@ -602,6 +618,14 @@ fn handle_input(
             Some(Hit::Outside) => {
                 send(client, &LootClientMessage::Drop { uid, from: h.owner });
                 held.0 = None;
+            }
+            Some(Hit::Care(target)) => {
+                if h.owner == Owner::Me {
+                    crate::lore_client::send(client, &crate::lore_net::LoreClientMessage::TreatOn { uid, target });
+                    held.0 = None;
+                } else {
+                    state.notify("Сначала возьмите это себе в сумку", time.elapsed_secs());
+                }
             }
             // На слот хотбара: привязать (сама вещь остаётся на месте).
             Some(Hit::Hotbar { slot }) => {

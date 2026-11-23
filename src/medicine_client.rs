@@ -11,8 +11,9 @@ pub struct MedicineClientPlugin;
 impl Plugin for MedicineClientPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(MyBody::default())
+            .add_plugins(crate::health_ui::HealthUiPlugin)
             .add_systems(Startup, setup_body_panel.after(crate::inventory_ui::setup_fonts))
-            .add_systems(Update, update_body_panel);
+            .add_systems(Update, (update_body_panel, hide_panel_in_inventory));
     }
 }
 
@@ -85,4 +86,15 @@ fn update_body_panel(
         }
     });
     *shown = lines;
+}
+
+/// Пока открыта сумка с окном «Тело», строки на экране не нужны (и просвечивают сквозь окно).
+fn hide_panel_in_inventory(loot: Option<Res<crate::loot_client::LootState>>, mut panel: Query<&mut Visibility, With<BodyPanel>>) {
+    let open = loot.is_some_and(|l| l.ui_open);
+    for mut v in &mut panel {
+        let want = if open { Visibility::Hidden } else { Visibility::Inherited };
+        if *v != want {
+            *v = want;
+        }
+    }
 }
