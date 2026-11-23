@@ -783,6 +783,16 @@ fn update_tooltip(
         for (s, v) in &item.affixes {
             t.spawn(text(&fonts, format!("{} {}", s.format(*v), s.name()), 14.0, Color::srgb(0.55, 0.75, 1.0), false));
         }
+        if let Some(a) = crate::arsenal::of_base(item.base) {
+            t.spawn(text(&fonts, format!("Образец: {}", a.people), 13.0, Color::srgb(0.8, 0.72, 0.55), false));
+            t.spawn(text(&fonts, a.desc.to_string(), 13.0, Color::srgb(0.78, 0.74, 0.64), false));
+            if a.fam == crate::arsenal::Fam::Head {
+                t.spawn(text(&fonts, format!("Стрела: урон {:+.0}%, пробивание доспеха {:+.0}%", a.dmg, a.speed), 13.0, Color::srgb(0.55, 0.75, 1.0), false));
+            } else if a.speed != 0.0 {
+                let what = if a.speed > 0.0 { "лёгкое" } else { "тяжёлое" };
+                t.spawn(text(&fonts, format!("{what}: скорость ударов {:+.0}%", a.speed), 13.0, Color::srgb(0.55, 0.75, 1.0), false));
+            }
+        }
         if let Some(m) = item.make.as_ref() {
             for (line, color) in make_lines(&item, m) {
                 t.spawn(text(&fonts, line, 13.0, color, false));

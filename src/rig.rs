@@ -310,7 +310,8 @@ impl BladeTints {
         }
         let Some(mut m) = materials.get(base).cloned() else { return base.clone() };
         // 0 — бурая ржа и окалина, 4 — чуть тусклее модели.
-        let k = 1.0 - bucket as f32 / 5.0;
+        // Дерево и кожа рукояти не ржавеют — только темнеют от грязи.
+        let k = (1.0 - bucket as f32 / 5.0) * if m.metallic > 0.25 { 1.0 } else { 0.35 };
         let c = m.base_color.to_srgba();
         let rust = Srgba::new(0.36, 0.25, 0.18, c.alpha);
         m.base_color = Color::Srgba(Srgba::new(c.red + (rust.red - c.red) * k, c.green + (rust.green - c.green) * k, c.blue + (rust.blue - c.blue) * k, c.alpha));
@@ -319,6 +320,37 @@ impl BladeTints {
         let h = materials.add(m);
         self.0.insert((base.id(), bucket), h.clone());
         h
+    }
+}
+
+/// Модель вещи (на земле, на прилавке, в витрине) по выделке: `finish` как у `Item::look` × 255.
+/// Когда модель загрузится, её материалы подменяются на ржавые и тусклые.
+#[derive(Component, Clone, Copy)]
+pub struct LookTint(pub u8);
+
+#[derive(Component)]
+struct LookTinted;
+
+fn apply_look_tints(
+    mut commands: Commands,
+    roots: Query<(Entity, &LookTint), Without<LookTinted>>,
+    children: Query<&Children>,
+    mut mats: Query<&mut MeshMaterial3d<StandardMaterial>>,
+    mut tints: ResMut<BladeTints>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for (root, tint) in &roots {
+        let mut found = false;
+        for e in children.iter_descendants(root) {
+            if let Ok(mut m) = mats.get_mut(e) {
+                found = true;
+                m.0 = tints.get(&mut materials, &m.0, tint.0);
+            }
+        }
+        // Модель ещё грузится — попробуем в следующем кадре.
+        if found {
+            commands.entity(root).insert(LookTinted);
+        }
     }
 }
 
@@ -828,6 +860,7 @@ impl Plugin for RigPlugin {
         app.init_resource::<BladeTints>()
             .add_systems(Startup, load_models)
             .add_systems(Update, finish_models.run_if(resource_exists::<ModelsHandle>))
+            .add_systems(PostUpdate, apply_look_tints)
             .add_systems(Update, attach_rigs.run_if(resource_exists::<CharacterModels>).before(PoseSet))
             .add_systems(Update, apply_poses.after(PoseSet));
     }

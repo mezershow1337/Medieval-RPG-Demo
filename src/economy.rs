@@ -203,6 +203,9 @@ pub fn base_price(base: ItemBaseId) -> u32 {
         return v;
     }
     let info = base.base();
+    if let Some(a) = crate::arsenal::of_base(base) {
+        return a.price;
+    }
     if let Some(p) = PRICE_LIST
         .iter()
         .find(|(n, _)| *n == info.name)
@@ -502,6 +505,7 @@ pub fn unpriced_items() -> Vec<&'static str> {
         .iter()
         .filter(|b| {
             !PRICE_LIST.iter().any(|(n, _)| *n == b.name)
+                && crate::arsenal::find(b.name).is_none()
                 && !DENOMINATIONS.iter().any(|(n, _)| *n == b.name)
         })
         .map(|b| b.name)

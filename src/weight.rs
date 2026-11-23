@@ -180,6 +180,9 @@ pub const WEIGHTS: &[(&str, f32)] = &[
 /// Вес одной штуки (кг).
 pub fn unit_weight(base: ItemBaseId) -> f32 {
     let name = base.base().name;
+    if let Some(a) = crate::arsenal::of_base(base) {
+        return a.kg;
+    }
     WEIGHTS.iter().find(|(n, _)| *n == name).map(|(_, w)| *w).unwrap_or_else(|| estimate(base))
 }
 

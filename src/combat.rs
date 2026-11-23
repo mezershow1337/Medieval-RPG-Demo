@@ -76,6 +76,9 @@ impl WeaponKind {
 
     /// Какое оружие соответствует предмету (по названию предмета).
     pub fn from_item_name(name: &str) -> WeaponKind {
+        if let Some(a) = crate::arsenal::find(name) {
+            return a.fam.kind();
+        }
         let n = name.to_lowercase();
         let has = |w: &[&str]| w.iter().any(|k| n.contains(k));
         if has(&["топор", "секира"]) {

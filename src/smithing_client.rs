@@ -61,6 +61,8 @@ pub struct SmithState {
     ore: u8,
     charcoal: u8,
     rev: u64,
+    /// Раздел списка ковки.
+    fam: Option<crate::arsenal::Fam>,
     built: Option<(u64, u64, u64, bool)>,
     /// Искры, пар, звон — разбирает `smithing_fx`.
     pub(crate) fx_queue: Vec<(u32, u64, Fx)>,
@@ -88,6 +90,7 @@ impl Default for SmithState {
             ore: 6,
             charcoal: 10,
             rev: 1,
+            fam: Some(crate::arsenal::Fam::Sword),
             built: None,
             fx_queue: Vec::new(),
             others: Vec::new(),
@@ -245,6 +248,8 @@ fn smith_input(
 enum Act {
     Close,
     Tab(Tab),
+    /// Раздел списка ковки: None — заготовки и доспехи.
+    Fam(Option<crate::arsenal::Fam>),
     Steel,
     Begin(Plan),
     Fuel,
@@ -337,6 +342,10 @@ fn smith_buttons(
                 loot.rev += 1;
             }
             Act::Tab(t) => state.tab = t,
+            Act::Fam(f) => {
+                state.fam = f;
+                state.rev += 1;
+            }
             Act::Steel => state.steel = !state.steel,
             Act::Begin(plan) => send(client, &SmithClientMessage::Begin { station, plan }),
             Act::Fuel => send(client, &SmithClientMessage::AddFuel { station }),
@@ -617,7 +626,14 @@ fn begin_menu(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
                 r.spawn(label(fonts, format!("Железных полос: {}, стальных: {}, лома: {}, криц: {}", have(loot, IRON), have(loot, STEEL), have(loot, SCRAP), have(loot, BLOOM)), 13.0, DIM, false));
                 button(r, fonts, if st.steel { "Наварить сталь на лезвие: да" } else { "Наварить сталь: нет" }, Act::Steel, st.steel);
             });
-            for pat in Pattern::ALL {
+            // Разделы: заготовки и доспехи, затем семейства оружия.
+            row(p).with_children(|r| {
+                button(r, fonts, "Заготовки и доспехи", Act::Fam(None), st.fam.is_none());
+                for f in crate::arsenal::Fam::ALL {
+                    button(r, fonts, f.name(), Act::Fam(Some(f)), st.fam == Some(f));
+                }
+            });
+            for pat in Pattern::all().into_iter().filter(|p| p.fam() == st.fam) {
                 let info = pat.info();
                 let known = info.needs.is_none_or(|t| k.knows(Lore::Technique(t)));
                 let metal = match pat {
