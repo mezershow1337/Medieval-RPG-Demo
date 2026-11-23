@@ -49,8 +49,7 @@ fn text(s: &str, size: f32, color: Color) -> (Text, TextFont, TextColor) {
 const AIM_BOX: f32 = 76.0;
 const AIM_RADIUS: f32 = 26.0;
 
-fn setup_hud(mut commands: Commands, fonts: Option<Res<crate::inventory_ui::UiFonts>>) {
-    let font = |size: f32| TextFont { font: fonts.as_ref().map(|f| f.regular.clone()).unwrap_or_default().into(), font_size: FontSize::Px(size), ..default() };
+fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
     // Красная вспышка при уроне (на весь экран).
     commands.spawn((FlashOverlay, Node { width: percent(100), height: percent(100), position_type: PositionType::Absolute, ..default() }, BackgroundColor(Color::NONE)));
     // Прицел.
@@ -98,11 +97,11 @@ fn setup_hud(mut commands: Commands, fonts: Option<Res<crate::inventory_ui::UiFo
     commands
         .spawn(Node { width: percent(100), position_type: PositionType::Absolute, top: percent(30), justify_content: JustifyContent::Center, ..default() })
         .with_children(|p| {
-            p.spawn((BannerText, Text::new(""), font(34.0), TextColor(Color::WHITE)));
+            p.spawn((BannerText, theme.title_colored("", 40.0, Color::WHITE)));
         });
-    // Цель (враг перед вами).
+    // Цель (враг перед вами) — под компасом (см. map.rs).
     commands
-        .spawn(Node { width: percent(100), position_type: PositionType::Absolute, top: px(14), justify_content: JustifyContent::Center, ..default() })
+        .spawn(Node { width: percent(100), position_type: PositionType::Absolute, top: px(70), justify_content: JustifyContent::Center, ..default() })
         .with_children(|p| {
             p.spawn((TargetText, text("", 18.0, Color::srgb(1.0, 0.9, 0.8))));
         });
@@ -116,24 +115,73 @@ fn setup_hud(mut commands: Commands, fonts: Option<Res<crate::inventory_ui::UiFo
             ..default()
         })
         .with_children(|p| {
-            p.spawn((Node { width: px(300), height: px(18), border: UiRect::all(px(2)), ..default() }, BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.8)), BackgroundColor(Color::srgba(0.1, 0.0, 0.0, 0.6))))
-                .with_children(|bar| {
-                    bar.spawn((HealthFill, Node { width: percent(100), height: percent(100), ..default() }, BackgroundColor(Color::srgb(0.7, 0.08, 0.08))));
-                    bar.spawn((
-                        HealthText,
-                        text("100", 13.0, Color::WHITE),
-                        Node { position_type: PositionType::Absolute, left: px(6), ..default() },
-                    ));
-                });
+            p.spawn((
+                Node {
+                    width: px(320),
+                    height: px(24),
+                    padding: UiRect::axes(px(5), px(4)),
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                theme.bar_frame(),
+            ))
+            .with_children(|bar| {
+                bar.spawn((
+                    HealthFill,
+                    Node {
+                        width: percent(100),
+                        height: percent(100),
+                        border_radius: BorderRadius::all(px(2)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.62, 0.07, 0.06)),
+                ));
+                bar.spawn((
+                    HealthText,
+                    theme.bold("100", 13.0, crate::ui_theme::ink::TEXT),
+                    TextShadow {
+                        offset: Vec2::new(1.0, 1.0),
+                        color: Color::BLACK,
+                    },
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(10),
+                        ..default()
+                    },
+                ));
+            });
         });
     // Выносливость — тонкая полоска под здоровьем.
     commands
-        .spawn(Node { width: percent(100), position_type: PositionType::Absolute, bottom: px(84), justify_content: JustifyContent::Center, ..default() })
+        .spawn(Node {
+            width: percent(100),
+            position_type: PositionType::Absolute,
+            bottom: px(80),
+            justify_content: JustifyContent::Center,
+            ..default()
+        })
         .with_children(|p| {
-            p.spawn((Node { width: px(300), height: px(7), border: UiRect::all(px(1)), ..default() }, BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.8)), BackgroundColor(Color::srgba(0.05, 0.05, 0.0, 0.5))))
-                .with_children(|bar| {
-                    bar.spawn((StaminaFill, Node { width: percent(100), height: percent(100), ..default() }, BackgroundColor(Color::srgb(0.85, 0.75, 0.25))));
-                });
+            p.spawn((
+                Node {
+                    width: px(320),
+                    height: px(14),
+                    padding: UiRect::axes(px(5), px(4)),
+                    ..default()
+                },
+                theme.bar_frame(),
+            ))
+            .with_children(|bar| {
+                bar.spawn((
+                    StaminaFill,
+                    Node {
+                        width: percent(100),
+                        height: percent(100),
+                        border_radius: BorderRadius::all(px(1)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.85, 0.75, 0.25)),
+                ));
+            });
         });
     commands.spawn((
         StatusText,
@@ -142,16 +190,17 @@ fn setup_hud(mut commands: Commands, fonts: Option<Res<crate::inventory_ui::UiFo
     ));
     commands.spawn((
         HelpText,
-        Text::new(
+        theme.text(
+
             "Клик — захватить мышь | Esc — отпустить\n\
              WASD — ходьба | Shift — бег | Пробел — прыжок | Ctrl/C — присесть\n\
              ЛКМ — удар оттуда, куда ведёте мышь (вправо, влево, вверх, наискось; вниз — укол), СКМ — укол\n\
              ПКМ вовремя — парирование и рипост (ЛКМ); держать — глухой блок (дорого, без рипоста)\n\
              Q или ПКМ на замахе — финт | другой удар на замахе — морф | встречный зеркальный удар — чембер\n\
              1 — кулаки | 2–9 / колесо — хотбар",
+            14.0,
+            Color::srgba(1.0, 1.0, 1.0, 0.8),
         ),
-        font(14.0),
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.75)),
         // Сверху слева под строкой статуса: низ экрана занят хотбаром.
         Node { position_type: PositionType::Absolute, left: px(12), top: px(64), ..default() },
     ));

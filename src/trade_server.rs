@@ -132,8 +132,18 @@ struct Order {
 struct ActiveLesson {
     merchant: MerchantId,
     index: usize,
-    ends_at: f64,
+    /// Урок идёт, пока ученик работает руками (см. work.rs).
+    effort: crate::work::Effort,
     fee: u32,
+    send_in: f32,
+}
+
+/// Каким движением идёт урок или смена у мастера-торговца.
+fn lesson_drill(l: &crate::trade::LessonDef) -> crate::work::Drill {
+    match l.mode {
+        LessonMode::Paid => crate::work::Drill::Mimic,
+        LessonMode::Apprentice => crate::work::chore_drill(crate::knowledge::teacher_from_trade(l.teacher)),
+    }
 }
 
 struct Stolen {
@@ -267,29 +277,78 @@ fn fallback_pos(place_index: usize, places: usize) -> Vec3 {
     center + Vec3::new(a.cos() * r, 0.0, -a.sin() * r)
 }
 
-/// Куда повернуть торговца: в сторону, где больше всего свободного места (на улицу, а не в стену),
-/// чтобы прилавок встал перед ним. При равенстве — к точке появления.
-fn open_yaw(level: &LevelColliders, pos: Vec3) -> f32 {
+/// Куда можно повернуть торговца: четыре стороны света (прилавок встаёт ровно, вдоль стен
+/// и улиц), от самой просторной к самой тесной; второе число — сколько метров свободно впереди.
+/// При равенстве — к точке появления.
+fn open_yaws(level: &LevelColliders, pos: Vec3) -> Vec<(f32, f32)> {
     let to_spawn = (crate::level::spawn_point(0) - pos).with_y(0.0).normalize_or_zero();
-    let mut best = (f32::MIN, Vec3::NEG_Z);
-    for i in 0..16 {
-        let a = i as f32 / 16.0 * std::f32::consts::TAU;
-        let dir = Vec3::new(a.cos(), 0.0, a.sin());
-        let mut free = 0.0;
-        let mut d = 0.5;
-        while d <= 6.0 && level.body_is_free(&crate::collision::Body::STANDING, pos + dir * d + Vec3::Y * 0.1) {
-            free = d;
-            d += 0.5;
-        }
-        let score = free + dir.dot(to_spawn) * 0.25;
-        if score > best.0 {
-            best = (score, dir);
-        }
-    }
-    f32::atan2(-best.1.x, -best.1.z)
+    let mut v: Vec<(f32, f32, f32)> = [Vec3::NEG_Z, Vec3::X, Vec3::Z, Vec3::NEG_X]
+        .into_iter()
+        .map(|dir| {
+            let mut free = 0.0;
+            let mut d = 0.5;
+            while d <= 6.0 && level.body_is_free(&crate::collision::Body::STANDING, pos + dir * d + Vec3::Y * 0.1) {
+                free = d;
+                d += 0.5;
+            }
+            (free + dir.dot(to_spawn) * 0.25, yaw_towards(dir), free)
+        })
+        .collect();
+    v.sort_by(|a, b| b.0.total_cmp(&a.0));
+    v.into_iter().map(|(_, yaw, free)| (yaw, free)).collect()
 }
 
-fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
+/// Поворот, при котором торговец смотрит вдоль `dir` (он смотрит в свою −Z).
+fn yaw_towards(dir: Vec3) -> f32 {
+    f32::atan2(-dir.x, -dir.z)
+}
+
+/// Свободны ли столешницы прилавка, поставленного у торговца в `pos` с поворотом `yaw`.
+fn stall_fits(level: &LevelColliders, pos: Vec3, yaw: f32, boxes: &[StallBox]) -> bool {
+    let probe = crate::collision::Body { half_width: 0.12, height: 0.8 };
+    stall_obbs(pos, yaw, boxes).iter().all(|t| {
+        [-1.0f32, 0.0, 1.0].iter().flat_map(|&u| [-1.0f32, 1.0].map(move |v| (u, v))).all(|(u, v)| {
+            let p = t.center + t.rot * Vec3::new(t.half.x * u * 0.9, 0.0, t.half.z * v * 0.8);
+            level.body_is_free(&probe, p.with_y(pos.y + 0.1))
+        })
+    })
+}
+
+/// Место на полу рядом с `anchor`, где торговец и его прилавок помещаются: человек не залезает
+/// на столы и крыши (в отличие от `find_free_spot`) и не встаёт над ямой или цистерной.
+fn ground_spot(level: &LevelColliders, anchor: Vec3, boxes: &[StallBox]) -> Option<(Vec3, f32)> {
+    for radius in [0.0f32, 0.75, 1.5, 2.25, 3.0, 4.0, 5.0] {
+        let n = if radius == 0.0 { 1 } else { 16 };
+        for i in 0..n {
+            let a = i as f32 / n as f32 * std::f32::consts::TAU;
+            let p = anchor + Vec3::new(a.cos() * radius, 0.1, a.sin() * radius);
+            let ground = level.ground_height(p.x, p.z);
+            // Пол города — коллайдеры на y≈0, за стенами — рельеф; над дырой рельефа не стоим.
+            if ground.is_finite() && (ground - anchor.y).abs() > 0.6 {
+                continue;
+            }
+            if ground == f32::NEG_INFINITY && level.ground_height(anchor.x, anchor.z).is_finite() {
+                continue;
+            }
+            if !level.body_is_free(&crate::collision::Body::STANDING, p) {
+                continue;
+            }
+            // Перед прилавком должно оставаться место покупателю.
+            for (yaw, free) in open_yaws(level, p) {
+                if free >= 2.5 && stall_fits(level, p, yaw, boxes) {
+                    return Some((p, yaw));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Где стоят торговцы: точка, поворот (лицом к прилавку) и прилавок.
+///
+/// У мест с готовыми лотками (`stall_slots`: агора, портовый торг, лавки) торговец встаёт за
+/// своим лотком; остальные — на полу возле точки места, лицом туда, где просторнее.
+pub fn merchant_spots(level: &LevelColliders) -> Vec<(Vec3, f32, Vec<StallBox>)> {
     let mut places: Vec<&str> = Vec::new();
     for def in MERCHANTS {
         if !places.contains(&def.place) {
@@ -297,33 +356,60 @@ fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
         }
     }
     let mut used: HashMap<&str, usize> = HashMap::new();
-    let mut rng = Rng::from_time();
-    let mut uids = UidGen(4_000_000_000);
-    let merchants = MERCHANTS
+    let mut spots = MERCHANTS
         .iter()
-        .enumerate()
-        .map(|(i, def)| {
+        .map(|def| {
             let slot = used.entry(def.place).or_default();
+            let k = *slot;
+            *slot += 1;
+            let outside = def.faction.outside_walls();
+            if let Some(s) = crate::level::stall_slots(def.place).get(k) {
+                return (s.pos + Vec3::Y * 0.1, yaw_towards(s.facing), stall_layout(outside, false));
+            }
             let place_index = places.iter().position(|p| *p == def.place).unwrap();
             let anchor =
                 place_pos(def.place).unwrap_or_else(|| fallback_pos(place_index, places.len()));
             // Несколько торговцев на одном месте — рядом друг с другом.
-            let side = Vec3::new(
-                ((*slot as f32) * 2.4) * if *slot % 2 == 0 { 1.0 } else { -1.0 },
-                0.0,
-                0.0,
-            );
-            *slot += 1;
-            let pos = crate::npc::find_free_spot(&level, anchor + side);
-            let yaw = open_yaw(&level, pos);
+            let side = Vec3::new((k as f32 * 2.8) * if k % 2 == 0 { 1.0 } else { -1.0 }, 0.0, 0.0);
+            let one = stall_layout(outside, false);
+            let (pos, yaw) = ground_spot(level, anchor + side, &one)
+                .or_else(|| ground_spot(level, anchor, &one))
+                .unwrap_or_else(|| {
+                    let p = crate::npc::find_free_spot(level, anchor + side);
+                    (p, open_yaws(level, p)[0].0)
+                });
             // Боковой столик — только если справа от торговца свободно.
-            let side = {
-                let rot = Quat::from_rotation_y(yaw);
-                [Vec3::new(1.3, 0.1, -0.25), Vec3::new(2.05, 0.1, -0.25), Vec3::new(1.3, 0.1, -0.95), Vec3::new(2.05, 0.1, -0.95)]
-                    .iter()
-                    .all(|p| level.body_is_free(&crate::collision::Body { half_width: 0.12, height: 0.8 }, pos + rot * *p))
-            };
-            let stall = stall_layout(def.faction.outside_walls(), side);
+            let with_side = stall_layout(outside, true);
+            let side_ok = !outside && stall_fits(level, pos, yaw, &with_side);
+            (pos, yaw, stall_layout(outside, side_ok))
+        })
+        .collect::<Vec<_>>();
+    // Торговцы на одном месте стоят тесно: боковой столик не должен залезать на соседний прилавок.
+    for i in 0..spots.len() {
+        if spots[i].2.len() < 2 {
+            continue;
+        }
+        let side = stall_obbs(spots[i].0, spots[i].1, &spots[i].2[1..])[0].aabb();
+        let crowded = spots.iter().enumerate().any(|(j, o)| {
+            j != i
+                && (side.overlaps(&crate::collision::Body::STANDING.aabb_at(o.0))
+                    || stall_obbs(o.0, o.1, &o.2).iter().any(|t| t.aabb().overlaps(&side)))
+        });
+        if crowded {
+            spots[i].2.truncate(1);
+        }
+    }
+    spots
+}
+
+fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
+    let mut rng = Rng::from_time();
+    let mut uids = UidGen(4_000_000_000);
+    let merchants = merchant_spots(&level)
+        .into_iter()
+        .enumerate()
+        .map(|(i, (pos, yaw, stall))| {
+            let def = &MERCHANTS[i];
             let mut m = MerchantState {
                 id: MerchantId(i as u16),
                 pos,
@@ -342,22 +428,6 @@ fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
             m
         })
         .collect::<Vec<MerchantState>>();
-    // Торговцы на одном месте стоят тесно: боковой столик не должен залезать на соседний прилавок.
-    let mut merchants = merchants;
-    for i in 0..merchants.len() {
-        if merchants[i].stall.len() < 2 {
-            continue;
-        }
-        let side = stall_obbs(merchants[i].pos, merchants[i].yaw, &merchants[i].stall[1..])[0].aabb();
-        let crowded = merchants.iter().enumerate().any(|(j, o)| {
-            j != i
-                && (side.overlaps(&crate::collision::Body::STANDING.aabb_at(o.pos))
-                    || stall_obbs(o.pos, o.yaw, &o.stall).iter().any(|t| t.aabb().overlaps(&side)))
-        });
-        if crowded {
-            merchants[i].stall.truncate(1);
-        }
-    }
     let statics = merchants.iter().flat_map(|m| stall_obbs(m.pos, m.yaw, &m.stall)).collect();
     commands.insert_resource(crate::props_server::PropStatics(statics));
     commands.insert_resource(TradeWorld {
@@ -1247,6 +1317,7 @@ fn receive_trade_messages(
     time: Res<Time>,
     mut loot: ResMut<LootWorld>,
     tw: Option<ResMut<TradeWorld>>,
+    knowledge: Option<Res<crate::knowledge::KnowledgeWorld>>,
 ) {
     let Some(mut tw) = tw else { return };
     let tw = &mut *tw;
@@ -1435,8 +1506,9 @@ fn receive_trade_messages(
                             ActiveLesson {
                                 merchant: id,
                                 index: index as usize,
-                                ends_at: now + l.secs as f64,
+                                effort: crate::work::Effort::new(lesson_drill(l), l.secs),
                                 fee,
+                                send_in: 0.0,
                             },
                         );
                         Ok(())
@@ -1448,11 +1520,26 @@ fn receive_trade_messages(
                             &TradeServerMessage::LessonStarted {
                                 title: l.title.to_string(),
                                 secs: l.secs,
+                                drill: Some(lesson_drill(l)),
+                                skill: crate::knowledge::teacher_from_trade(l.teacher)
+                                    .skill()
+                                    .and_then(|sk| {
+                                        knowledge
+                                            .as_ref()
+                                            .and_then(|k| k.players.get(&pid))
+                                            .map(|k| k.skill(sk) / 100.0)
+                                    })
+                                    .unwrap_or(0.0),
                             },
                         ),
                         Err(r) => send(&mut server, pid, &TradeServerMessage::Say(r)),
                     }
                     send_inventory(&mut server, &loot, pid);
+                }
+                TradeClientMessage::Stroke { q } => {
+                    if let Some(l) = tw.lessons.get_mut(&pid) {
+                        l.effort.stroke(q);
+                    }
                 }
                 TradeClientMessage::StopLesson => {
                     if tw.lessons.remove(&pid).is_some() {
@@ -1752,7 +1839,6 @@ fn tick_lessons(
     tw: Option<ResMut<TradeWorld>>,
 ) {
     let Some(mut tw) = tw else { return };
-    let now = time.elapsed_secs_f64();
     let players: Vec<u64> = tw.lessons.keys().copied().collect();
     for pid in players {
         let l = &tw.lessons[&pid];
@@ -1771,31 +1857,48 @@ fn tick_lessons(
             notice(&mut server, pid, "Урок прерван: вы ушли от мастера");
             continue;
         }
-        if now < l.ends_at {
+        let dt = time.delta_secs();
+        let l = tw.lessons.get_mut(&pid).unwrap();
+        l.effort.tick(dt);
+        l.send_in -= dt;
+        if l.send_in <= 0.0 {
+            l.send_in = 0.2;
+            let p = l.effort.frac();
+            send(&mut server, pid, &TradeServerMessage::LessonProgress(p));
+        }
+        if !l.effort.finished() {
             continue;
         }
         let l = tw.lessons.remove(&pid).unwrap();
+        let q = l.effort.quality();
         let def = l.merchant.def();
         let lesson = &def.lessons[l.index];
         if lesson.mode == LessonMode::Apprentice {
             let mut uids = loot.uids.clone();
+            // Платят по работе: кто работал рывками, получает меньше.
+            let pay = ((lesson.money as f32 * crate::work::wage_mult(q)).round() as u32).max(1);
             if let Some(inv) = loot.inventories.get_mut(&pid)
-                && give_money(inv, lesson.money, &mut uids).is_ok()
+                && give_money(inv, pay, &mut uids).is_ok()
             {
                 loot.uids = uids;
                 notice(
                     &mut server,
                     pid,
                     format!(
-                        "Смена окончена. {} платит вам {}",
+                        "Смена окончена: работали {}. {} платит вам {}",
+                        crate::work::quality_word(q),
                         def.name,
-                        format_money(lesson.money)
+                        format_money(pay)
                     ),
                 );
             }
             send_inventory(&mut server, &loot, pid);
         } else {
-            notice(&mut server, pid, format!("Урок у {} окончен", def.name));
+            notice(
+                &mut server,
+                pid,
+                format!("Урок у {} окончен: повторяли {}", def.name, crate::work::quality_word(q)),
+            );
         }
         tw.change_rep(pid, def.faction, 1.0);
         send(
@@ -1806,7 +1909,8 @@ fn tick_lessons(
         commands.trigger(LessonRequested {
             player: pid,
             teacher: lesson.teacher,
-            hours: lesson.hours,
+            // Прилежный ученик берёт с урока больше.
+            hours: lesson.hours * crate::work::lesson_mult(q),
             mode: lesson.mode,
             fee: l.fee,
         });
@@ -1889,6 +1993,54 @@ fn send_standing(mut server: ResMut<RenetServer>, tw: Option<ResMut<TradeWorld>>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore]
+    fn dump_merchant_spots() {
+        let level = crate::level::city_colliders();
+        for (i, (p, yaw, st)) in merchant_spots(&level).iter().enumerate() {
+            let d = &MERCHANTS[i];
+            let a = crate::level::place(d.place).map(|x| x.pos).unwrap_or(Vec3::ZERO);
+            println!("{:12} {:16} anchor ({:7.1},{:5.1},{:7.1}) pos ({:7.1},{:5.2},{:7.1}) moved {:4.1} yaw {:5.2} tables {} ground {:.2}", d.key, d.place, a.x, a.y, a.z, p.x, p.y, p.z, p.xz().distance(a.xz()), yaw, st.len(), level.ground_height(p.x, p.z));
+        }
+    }
+
+    /// Торговцы стоят на полу у своих мест, за свободными прилавками, не друг на друге.
+    #[test]
+    fn merchants_stand_at_their_places() {
+        let level = crate::level::city_colliders();
+        let spots = merchant_spots(&level);
+        let mut slot_used: HashMap<&str, usize> = HashMap::new();
+        for (i, (p, yaw, st)) in spots.iter().enumerate() {
+            let d = &MERCHANTS[i];
+            let place = crate::level::place(d.place).unwrap_or_else(|| panic!("{}: нет места {}", d.key, d.place));
+            let k = slot_used.entry(d.place).or_default();
+            if let Some(s) = crate::level::stall_slots(d.place).get(*k) {
+                assert!(p.xz().distance(s.pos.xz()) < 0.01, "{} не за своим лотком", d.key);
+            } else {
+                assert!(p.xz().distance(place.pos.xz()) < 6.0, "{} ушёл от {} на {:.1} м", d.key, d.place, p.xz().distance(place.pos.xz()));
+            }
+            *k += 1;
+            assert!((p.y - place.pos.y).abs() < 0.3, "{} стоит не на полу: y {:.2} при полу {:.2}", d.key, p.y, place.pos.y);
+            assert!(level.body_is_free(&crate::collision::Body::STANDING, *p), "{} в стене или предмете", d.key);
+            assert!(level.ground_height(p.x, p.z) > f32::NEG_INFINITY || level.ground_height(place.pos.x, place.pos.z) == f32::NEG_INFINITY, "{} над ямой", d.key);
+            assert!(stall_fits(&level, *p, *yaw, st), "прилавок {} упирается в стену", d.key);
+            for (j, (q, qyaw, qst)) in spots.iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+                let me = stall_obbs(*p, *yaw, st);
+                let other = stall_obbs(*q, *qyaw, qst);
+                let body = crate::collision::Body::STANDING.aabb_at(*q);
+                assert!(
+                    me.iter().all(|t| !t.aabb().overlaps(&body) && other.iter().all(|o| !o.aabb().overlaps(&t.aabb()))),
+                    "прилавок {} налезает на {}",
+                    d.key,
+                    MERCHANTS[j].key
+                );
+            }
+        }
+    }
 
     fn world() -> (TradeWorld, LootWorld) {
         let mut rng = Rng::new(5);

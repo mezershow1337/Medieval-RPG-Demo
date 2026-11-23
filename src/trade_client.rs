@@ -218,6 +218,7 @@ fn receive_trade(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     npcs: Query<Entity, With<MerchantNpc>>,
+    mut work: ResMut<crate::work_client::MyWork>,
 ) {
     let now = time.elapsed_secs();
     while let Some(bytes) = client.receive_message(CH_TRADE) {
@@ -291,7 +292,8 @@ fn receive_trade(
                 state.fine = fine;
                 state.rev += 1;
             }
-            TradeServerMessage::LessonStarted { title, secs } => {
+            TradeServerMessage::LessonStarted { title, secs, drill, skill } => {
+                work.begin(drill, skill, crate::work_client::Via::Trade, &title, 0.0);
                 state.lesson = Some((title, now, secs));
                 // Урок идёт в мире: окно закрываем, чтобы можно было смотреть на мастера.
                 if state.view.take().is_some() {
@@ -299,7 +301,9 @@ fn receive_trade(
                 }
                 state.rev += 1;
             }
+            TradeServerMessage::LessonProgress(p) => work.progress = p,
             TradeServerMessage::LessonFinished { ok } => {
+                work.end(crate::work_client::Via::Trade);
                 if !ok && state.lesson.is_some() {
                     loot.notify("Урок прерван", now);
                 }
@@ -521,18 +525,21 @@ fn setup_trade_hud(mut commands: Commands, fonts: Res<UiFonts>) {
             ..default()
         })
         .with_children(|p| {
-            p.spawn((
-                TradePrompt,
-                Text::new(""),
-                TextFont {
-                    font: fonts.bold.clone().into(),
-                    font_size: bevy::text::FontSize::Px(19.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(0.95, 0.88, 0.7)),
-                TextLayout::justify(Justify::Center),
-                TextShadow::default(),
-            ));
+            crate::ui_theme::theme().plaque(p).with_children(|p| {
+                p.spawn((
+                    TradePrompt,
+                    Text::new(""),
+                    TextFont {
+                        font: fonts.bold.clone().into(),
+                        font_size: bevy::text::FontSize::Px(19.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.95, 0.88, 0.7)),
+                    TextLayout::justify(Justify::Center),
+                    TextShadow::default(),
+                    crate::ui_theme::Plaque,
+                ));
+            });
         });
     commands
         .spawn((
@@ -563,12 +570,11 @@ fn setup_trade_hud(mut commands: Commands, fonts: Res<UiFonts>) {
             p.spawn((
                 Node {
                     width: px(320),
-                    height: px(10),
-                    border: UiRect::all(px(1)),
+                    height: px(16),
+                    padding: UiRect::axes(px(5), px(4)),
                     ..default()
                 },
-                BorderColor::all(Color::srgb(0.45, 0.36, 0.22)),
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+                crate::ui_theme::theme().bar_frame(),
             ))
             .with_children(|b| {
                 b.spawn((
@@ -589,10 +595,12 @@ fn update_trade_hud(
     time: Res<Time>,
     state: Res<TradeState>,
     loot: Res<LootState>,
+    party: Option<Res<crate::map::Party>>,
     mut prompt: Single<&mut Text, (With<TradePrompt>, Without<LessonText>)>,
     mut bar: Single<&mut Node, (With<LessonBar>, Without<LessonFill>)>,
     mut fill: Single<&mut Node, (With<LessonFill>, Without<LessonBar>)>,
     mut lesson_text: Single<&mut Text, (With<LessonText>, Without<TradePrompt>)>,
+    work: Res<crate::work_client::MyWork>,
 ) {
     let now = time.elapsed_secs();
     let mut lines = Vec::new();
@@ -609,7 +617,7 @@ fn update_trade_hud(
                     lines.push(format!("{} · {}", m.faction.name(), standing));
                 }
             }
-            Some(Aim::Player(id)) => lines.push(format!("[T] Предложить обмен игроку {id}")),
+            Some(Aim::Player(id)) => lines.push(format!("[T] Предложить обмен: {}", crate::trade_ui::partner_name(party.as_deref(), id))),
             None => {}
         }
     }
@@ -617,7 +625,8 @@ fn update_trade_hud(
         && now - at <= 30.0
     {
         lines.push(format!(
-            "Игрок {from} предлагает обмен: [Y] согласиться, [N] отказать"
+            "{} предлагает обмен: [Y] согласиться, [N] отказать",
+            crate::trade_ui::partner_name(party.as_deref(), from)
         ));
     }
     if state.fine > 0 && !state.window_open() {
@@ -632,7 +641,11 @@ fn update_trade_hud(
     }
     match &state.lesson {
         Some((title, start, secs)) => {
-            let k = ((now - start) / secs.max(0.1)).clamp(0.0, 1.0);
+            let k = if work.busy() && work.via == crate::work_client::Via::Trade {
+                work.progress
+            } else {
+                ((now - start) / secs.max(0.1)).clamp(0.0, 1.0)
+            };
             bar.display = Display::Flex;
             fill.width = percent(k * 100.0);
             let t = format!("{title}… не отходите от мастера · X — бросить");
