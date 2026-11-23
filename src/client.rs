@@ -6,7 +6,7 @@ use crate::player::{LocalPlayer, PlayerPlugin, spawn_local_player};
 use crate::protocol::*;
 use crate::gear_look::{Gear, ShieldLook};
 use crate::rig::{self, Blade, CharacterModels, NeedsRig, NeedsShield, NeedsWeapon, Outfit, PoseInput, RigPose, ShieldKind};
-use crate::{graphics, hud, level};
+use crate::{graphics, hud, level, worn};
 use bevy::prelude::*;
 use bevy_renet::netcode::{ClientAuthentication, ConnectToken, NETCODE_KEY_BYTES, NetcodeClientPlugin, NetcodeClientTransport, NetcodeErrorEvent};
 use bevy_renet::{RenetClient, RenetClientPlugin, client_connected};
@@ -63,9 +63,14 @@ struct RemoteSword;
 #[derive(Component)]
 struct RemoteShield;
 
-/// Какое оружие сейчас показано (лучник меняет лук на нож).
+/// Какое оружие сейчас показано (лучник меняет лук на нож): вид и предмет со своей моделью.
 #[derive(Component)]
-struct ShownWeapon(WeaponKind);
+struct ShownWeapon(WeaponKind, Option<u16>);
+
+/// Какой предмет у бойца в руке (у игроков; у врагов — общая модель по виду оружия).
+fn held_item(r: &RemoteActor) -> Option<u16> {
+    r.gear.main_hand.filter(|_| !r.gear.holstered && r.fighter.weapon != WeaponKind::Fists)
+}
 
 /// Летящая стрела: двигаем её сами между снимками.
 #[derive(Component)]
@@ -180,8 +185,9 @@ pub fn run(server_addr: SocketAddr) {
             ((receive_reliable, receive_snapshots).chain(), send_state, animate_remote).run_if(client_connected).before(fight::FightSet).in_set(rig::PoseSet),
         )
         .add_systems(Update, animate_corpses.in_set(rig::PoseSet))
-        .add_systems(Update, (fly_arrows, refresh_remote_weapons, refresh_remote_gear))
+        .add_systems(Update, (fly_arrows, refresh_remote_weapons, refresh_remote_gear, worn::attach_worn))
         .add_systems(Update, gear_showcase.run_if(|| std::env::var("MRPG_GEAR_SHOWCASE").is_ok()))
+        .add_systems(Update, pose_showcase.in_set(rig::PoseSet).run_if(|| std::env::var("MRPG_GEAR_SHOWCASE").is_ok()))
         .run();
 }
 
@@ -337,8 +343,8 @@ fn spawn_remote(commands: &mut Commands, index: &mut RemoteIndex, snap: &ActorSn
             Visibility::default(),
         ))
         .with_children(|p| {
-            p.spawn((BodyRig, NeedsRig(outfit_of(snap.kind, snap.id, &snap.gear)), Transform::default(), Visibility::default()));
-            p.spawn((RemoteSword, ShownWeapon(snap.weapon), NeedsWeapon(snap.weapon), Transform::from_xyz(0.3, 1.0, -0.4), Visibility::default()));
+            p.spawn((BodyRig, worn::Worn::new(worn::Extras::of(&snap.gear)), NeedsRig(outfit_of(snap.kind, snap.id, &snap.gear)), Transform::default(), Visibility::default()));
+            p.spawn((RemoteSword, ShownWeapon(snap.weapon, None), NeedsWeapon(snap.weapon), Transform::from_xyz(0.3, 1.0, -0.4), Visibility::default()));
             if let Some(kind) = shield_of(snap.kind, snap.shield, &snap.gear) {
                 spawn_remote_shield(p, kind);
             }
@@ -358,7 +364,7 @@ fn spawn_corpse(commands: &mut Commands, index: &mut CorpseIndex, corpse_id: u64
         .with_children(|c| {
             // Лежит на спине; упавшее оружие и щит — рядом.
             let t = if animate { 0.0 } else { 1.0 };
-            c.spawn((BodyRig, CorpseFall { t, seed: corpse_id }, NeedsRig(outfit_of(kind, corpse_id, gear)), rig::fall_transform(t), Visibility::default()));
+            c.spawn((BodyRig, worn::Worn::new(worn::Extras::of(gear)), CorpseFall { t, seed: corpse_id }, NeedsRig(outfit_of(kind, corpse_id, gear)), rig::fall_transform(t), Visibility::default()));
             c.spawn((
                 NeedsWeapon(weapon),
                 Transform::from_xyz(0.5, 0.025, 0.35).with_rotation(Quat::from_rotation_y(0.35) * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
@@ -615,22 +621,29 @@ fn fly_arrows(time: Res<Time>, mut arrows: Query<(&mut ArrowVisual, &mut Transfo
 }
 
 /// Если боец сменил оружие (лучник взялся за нож), меняем модель в руке.
-fn refresh_remote_weapons(mut commands: Commands, remotes: Query<(&RemoteActor, &Children)>, mut shown: Query<(Entity, &mut ShownWeapon)>) {
+/// У игрока — модель именно того предмета, что у него в руке.
+fn refresh_remote_weapons(
+    mut commands: Commands,
+    remotes: Query<(&RemoteActor, &Children)>,
+    mut shown: Query<(Entity, &mut ShownWeapon)>,
+    models: Option<Res<crate::icons::ItemModels>>,
+) {
     for (r, children) in &remotes {
+        let want = (r.fighter.weapon, held_item(r));
         for child in children.iter() {
             if let Ok((e, mut w)) = shown.get_mut(child)
-                && w.0 != r.fighter.weapon
+                && (w.0, w.1) != want
             {
-                w.0 = r.fighter.weapon;
-                commands.entity(e).despawn_related::<Children>().insert(NeedsWeapon(w.0));
+                (w.0, w.1) = want;
+                worn::set_weapon_model(&mut commands, e, want.0, want.1.map(crate::items::ItemBaseId), r.finish, models.as_deref());
             }
         }
     }
 }
 
-/// `MRPG_GEAR_SHOWCASE=x,y,z` (или пусто — у агоры): для снимков ряд игроков в разных доспехах,
-/// лицом к +Z; камера ожидания смотрит на них (если не задана `MRPG_CAM`).
-fn gear_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<WaitingCamera>>, mut done: Local<bool>) {
+/// `MRPG_GEAR_SHOWCASE=x,y,z` (или пусто — у агоры): для снимков ряд игроков в разных доспехах
+/// и с разными вещами на теле, лицом к +Z; камера ожидания смотрит на них (если не задана `MRPG_CAM`).
+fn gear_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<WaitingCamera>>, models: Option<Res<crate::icons::ItemModels>>, mut done: Local<bool>) {
     if *done {
         return;
     }
@@ -639,12 +652,14 @@ fn gear_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<Wa
     let v: Vec<f32> = std::env::var("MRPG_GEAR_SHOWCASE").unwrap_or_default().split(',').filter_map(|s| s.trim().parse().ok()).collect();
     let o = if v.len() == 3 { Vec3::new(v[0], v[1], v[2]) } else { crate::level::place_pos("agora").unwrap_or_default() + Vec3::new(4.0, 0.0, 4.0) };
     let id = |n: &str| crate::items::ItemBaseId::find(n).map(|b| b.0);
+    // Слоты: 0 голова, 1 торс, 2 руки, 3 ноги, 4 ступни, 5 щит, 6 оружие в руке, 7 оружие убрано,
+    // 8 шея, 9 перстень, 10 стрелы (колчан).
     let sets: [&[(&str, u8)]; 5] = [
-        &[],
-        &[("Стёганая туника", 1), ("Кожаные перчатки", 2), ("Кожаные сапоги", 4)],
-        &[("Спангенхельм", 0), ("Кольчуга", 1), ("Кожаные перчатки", 2), ("Железные поножи", 3), ("Кожаные сапоги", 4), ("Круглый щит", 5)],
-        &[("Гребенчатый шлем", 0), ("Ламеллярный панцирь", 1), ("Ламеллярные наручи", 2), ("Железные поножи", 3), ("Кожаные сапоги", 4)],
-        &[("Гребенчатый шлем", 0), ("Стёганая туника", 1), ("Ламеллярные наручи", 2), ("Кожаные сапоги", 4), ("Овальный щит", 5)],
+        &[("Спата", 7), ("Нательный крест", 8), ("Серебряный перстень", 9)],
+        &[("Стёганая туника", 1), ("Кожаные перчатки", 2), ("Кожаные сапоги", 4), ("Гуннский составной лук", 7), ("Стрелы", 10)],
+        &[("Спангенхельм", 0), ("Кольчуга", 1), ("Кожаные перчатки", 2), ("Железные поножи", 3), ("Кожаные сапоги", 4), ("Круглый щит", 5), ("Готская узорчатая спата", 6)],
+        &[("Гребенчатый шлем", 0), ("Ламеллярный панцирь", 1), ("Ламеллярные наручи", 2), ("Железные поножи", 3), ("Кожаные сапоги", 4), ("Контос", 7), ("Франциска", 6)],
+        &[("Гребенчатый шлем", 0), ("Стёганая туника", 1), ("Ламеллярные наручи", 2), ("Кожаные сапоги", 4), ("Овальный щит", 5), ("Шипастая булава", 6)],
     ];
     info!("Витрина доспехов у {o}");
     if std::env::var("MRPG_CAM").is_err() {
@@ -656,6 +671,7 @@ fn gear_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<Wa
     }
     for (i, set) in sets.iter().enumerate() {
         let mut g = Gear::default();
+        let mut in_hand = None;
         for (name, slot) in set.iter() {
             let b = id(name);
             match slot {
@@ -664,18 +680,80 @@ fn gear_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<Wa
                 2 => g.hands = b,
                 3 => g.legs = b,
                 4 => g.feet = b,
-                _ => g.off_hand = b,
+                5 => g.off_hand = b,
+                6 => in_hand = b,
+                7 => {
+                    g.main_hand = b;
+                    g.holstered = true;
+                }
+                8 => g.neck = b,
+                9 => g.ring = b,
+                _ => g.quiver = b,
             }
         }
+        if in_hand.is_some() {
+            (g.main_hand, g.holstered) = (in_hand, false);
+        }
+        let kind = in_hand.map_or(WeaponKind::Fists, |b| WeaponKind::from_item_name(crate::items::ItemBaseId(b).base().name));
         let p = o + Vec3::X * (i as f32 * 0.95);
         commands
             .spawn((Transform::from_translation(p).with_rotation(Quat::from_rotation_y(std::f32::consts::PI)), Visibility::default()))
             .with_children(|c| {
-                c.spawn((BodyRig, NeedsRig(outfit_of(ActorKind::Player, 7 + i as u64, &g)), Transform::default(), Visibility::default()));
+                c.spawn((BodyRig, ShowcasePose(kind), worn::Worn::new(worn::Extras::of(&g)), NeedsRig(outfit_of(ActorKind::Player, 7 + i as u64, &g)), Transform::default(), Visibility::default()));
                 if let Some(kind) = shield_of(ActorKind::Player, false, &g) {
                     c.spawn((NeedsShield(kind), Transform::from_xyz(-0.36, 1.0, -0.12).with_rotation(Quat::from_rotation_y(1.2)), Visibility::default()));
                 }
+                let weapon = c.spawn((ShowcaseWeapon, Transform::default(), Visibility::default())).id();
+                let mut cmds = c.commands();
+                worn::set_weapon_model(&mut cmds, weapon, kind, in_hand.map(crate::items::ItemBaseId), 200, models.as_deref());
             });
+    }
+}
+
+/// Фигура витрины и вид оружия у неё в руке. `MRPG_GEAR_POSE=присед,взгляд,наклон` — поза
+/// (для проверки одежды на изгибах).
+#[derive(Component)]
+struct ShowcasePose(WeaponKind);
+
+#[derive(Component)]
+struct ShowcaseWeapon;
+
+fn pose_showcase(
+    time: Res<Time>,
+    figures: Query<&Children>,
+    mut rigs: Query<(&ShowcasePose, &mut RigPose, &ChildOf)>,
+    mut weapons: Query<&mut Transform, With<ShowcaseWeapon>>,
+) {
+    let v: Vec<f32> = std::env::var("MRPG_GEAR_POSE").unwrap_or_default().split(',').filter_map(|s| s.trim().parse().ok()).collect();
+    let get = |i: usize| v.get(i).copied().unwrap_or(0.0);
+    let now = time.elapsed_secs();
+    for (fig, mut pose, parent) in &mut rigs {
+        let (crouch, pitch) = (get(0), get(1));
+        let eye = 1.65 - 0.6 * crouch;
+        let aim = Quat::from_rotation_x(pitch * 0.6);
+        let (hilt, dir) = combat::weapon_pose(&Action::Idle, fig.0, now);
+        let sword = Transform::from_translation(Vec3::Y * (eye - 0.25) + aim * hilt).with_rotation(Quat::from_rotation_arc(Vec3::Y, aim * dir));
+        let (right, left) = weapon_grips(fig.0);
+        let armed = fig.0 != WeaponKind::Fists;
+        let input = PoseInput {
+            crouch,
+            pitch,
+            lean: get(2),
+            time: now,
+            right_grip: armed.then(|| sword.transform_point(right)),
+            left_grip: left.filter(|_| armed).map(|l| sword.transform_point(l)),
+            right_axis: armed.then(|| sword.rotation * Vec3::Y),
+            left_axis: left.filter(|_| armed).map(|_| sword.rotation * Vec3::Y),
+            ..Default::default()
+        };
+        *pose = rig::solve_pose(&input).pose;
+        if let Ok(children) = figures.get(parent.parent()) {
+            for c in children.iter() {
+                if let Ok(mut t) = weapons.get_mut(c) {
+                    *t = sword;
+                }
+            }
+        }
     }
 }
 
@@ -683,7 +761,7 @@ fn gear_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<Wa
 fn refresh_remote_gear(
     mut commands: Commands,
     mut remotes: Query<(Entity, &mut RemoteActor, &Children)>,
-    bodies: Query<(), With<BodyRig>>,
+    mut bodies: Query<&mut worn::Worn, With<BodyRig>>,
     shields: Query<(), With<RemoteShield>>,
     models: Option<Res<CharacterModels>>,
 ) {
@@ -698,8 +776,13 @@ fn refresh_remote_gear(
         let (old, new) = (r.shown_gear, r.gear);
         r.shown_gear = new;
         let outfit = outfit_of(r.kind, r.id, &new);
-        if outfit != outfit_of(r.kind, r.id, &old) {
-            for child in children.iter().filter(|c| bodies.contains(*c)) {
+        let rebuild = outfit != outfit_of(r.kind, r.id, &old);
+        for child in children.iter() {
+            let Ok(mut worn) = bodies.get_mut(child) else { continue };
+            worn.want = worn::Extras::of(&new);
+            if rebuild {
+                // Вещи висят на суставах и уходят вместе со скелетом.
+                worn.reset();
                 commands.entity(child).despawn_related::<Children>().remove::<rig::Rig>().insert(NeedsRig(outfit));
             }
         }

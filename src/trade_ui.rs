@@ -245,6 +245,7 @@ fn rebuild(
     fonts: Res<UiFonts>,
     icons: Res<crate::icons::ItemIcons>,
     time: Res<Time>,
+    party: Option<Res<crate::map::Party>>,
     mut built: ResMut<BuiltRev>,
     roots: Query<Entity, With<TradeRoot>>,
 ) {
@@ -281,7 +282,7 @@ fn rebuild(
             if let Some(view) = &state.view {
                 merchant_window(root, &fonts, &icons, &state, &loot, view, elapsed);
             } else if let Some(p2p) = &state.p2p {
-                p2p_window(root, &fonts, &icons, &loot, p2p);
+                p2p_window(root, &fonts, &icons, &loot, p2p, &partner_name(party.as_deref(), p2p.partner));
             } else if state.rep_open {
                 reputation_window(root, &fonts, &state);
             }
@@ -799,18 +800,24 @@ fn merchant_window(
     });
 }
 
+/// Имя другого игрока (его вводят в меню; сервер раздаёт их для карты).
+pub fn partner_name(party: Option<&crate::map::Party>, id: u64) -> String {
+    party.map_or_else(|| "Странник".to_string(), |p| p.name(id))
+}
+
 fn p2p_window(
     root: &mut ChildSpawnerCommands,
     fonts: &UiFonts,
     icons: &crate::icons::ItemIcons,
     loot: &LootState,
     p2p: &P2pState,
+    partner: &str,
 ) {
     let inv = loot.inventory.as_ref();
     panel(root, 380.0).with_children(|p| {
         p.spawn(text(
             fonts,
-            format!("Обмен с игроком {}", p2p.partner),
+            format!("Обмен: {partner}"),
             22.0,
             TITLE,
             true,

@@ -76,6 +76,7 @@ mod ui_theme;
 mod weight;
 mod work;
 mod work_client;
+mod worn;
 
 use protocol::DEFAULT_PORT;
 use std::net::SocketAddr;

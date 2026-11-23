@@ -401,6 +401,7 @@ fn sync_equipment(world: &mut GameWorld, loot: Option<&LootWorld>) {
             }
         }
         actor.gear = inv.map(crate::gear_look::Gear::from_inventory).unwrap_or_default();
+        actor.gear.holstered = actor.holstered;
         let e = gear_effects(&stats);
         let m = actor.body_mods;
         actor.fighter.action_speed = e.action_speed * m.action_speed;
@@ -821,7 +822,9 @@ pub(crate) fn kill(server: &mut RenetServer, world: &mut GameWorld, id: u64, kil
     let Some(actor) = world.actors.get_mut(&id) else { return };
     actor.alive = false;
     actor.fighter.action = combat::Action::Dead;
-    let (kind, pos, yaw, gear) = (actor.kind, actor.pose.feet, actor.pose.yaw, actor.gear);
+    let (kind, pos, yaw, mut gear) = (actor.kind, actor.pose.feet, actor.pose.yaw, actor.gear);
+    // Оружие убитого остаётся при теле (в ножнах), пока его не заберут при обыске.
+    gear.holstered = true;
     if kind == ActorKind::Player {
         actor.respawn_at = Some(now + PLAYER_RESPAWN_SECS);
     } else if let Some(spawn) = actor.spawn {
