@@ -15,7 +15,7 @@ use bevy::text::{EditableText, FontSize, TextCursorStyle};
 use bevy::ui_widgets::TextInput;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use bevy_renet::RenetClient;
-use bevy_renet::netcode::{ClientAuthentication, NetcodeClientTransport};
+use bevy_renet::netcode::{ClientAuthentication, ConnectToken, NETCODE_KEY_BYTES, NetcodeClientTransport};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -132,15 +132,32 @@ fn host(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time:
     connect(commands, menu, net, time, SocketAddr::from(([127, 0, 0, 1], port)), name);
 }
 
+/// Сколько секунд тишины от другой стороны терпим, прежде чем считать связь потерянной.
+const CONNECTION_TIMEOUT_SECS: i32 = 60;
+/// Срок жизни билета: с запасом, чтобы часы хоста и друга могли расходиться до часа.
+const CONNECT_TOKEN_EXPIRE_SECS: u64 = 3600;
+
 fn connect(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time: &Time, addr: SocketAddr, name: &str) {
     let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
     let client_id = now.as_nanos() as u64;
-    let transport = UdpSocket::bind("0.0.0.0:0")
-        .map_err(|e| e.to_string())
-        .and_then(|socket| {
-            let auth = ClientAuthentication::Unsecure { protocol_id: PROTOCOL_ID, client_id, server_addr: addr, user_data: Some(crate::protocol::encode_name(name)) };
-            NetcodeClientTransport::new(now, auth, socket).map_err(|e| e.to_string())
-        });
+    let transport = UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string()).and_then(|socket| {
+        // Билет подключения собираем сами, а не через ClientAuthentication::Unsecure: там таймаут
+        // жёстко 15 с, и если игра у друга замирает дольше (первая загрузка уровня, компиляция
+        // шейдеров, перетаскивание окна), сервер выкидывал его. Сервер работает в режиме
+        // Unsecure — его ключ из нулей, тот же, что здесь. Ник едет в user_data.
+        let token = ConnectToken::generate(
+            now,
+            PROTOCOL_ID,
+            CONNECT_TOKEN_EXPIRE_SECS,
+            client_id,
+            CONNECTION_TIMEOUT_SECS,
+            vec![addr],
+            Some(&crate::protocol::encode_name(name)),
+            &[0; NETCODE_KEY_BYTES],
+        )
+        .map_err(|e| e.to_string())?;
+        NetcodeClientTransport::new(now, ClientAuthentication::Secure { connect_token: token }, socket).map_err(|e| e.to_string())
+    });
     match transport {
         Ok(t) => {
             commands.insert_resource(RenetClient::new(connection_config()));
@@ -214,9 +231,9 @@ fn watch_connection(
         }
         let failed = transport.as_ref().and_then(|t| t.disconnect_reason()).map(|r| format!("{r:?}"));
         let failed = failed.or_else(|| net.error.clone()).or_else(|| client.as_ref().filter(|c| c.is_disconnected()).map(|_| "соединение закрыто".to_string()));
-        let timeout = time.elapsed_secs() - menu.connect_started > 20.0;
+        let timeout = time.elapsed_secs() - menu.connect_started > 45.0;
         if failed.is_some() || timeout {
-            let why = failed.unwrap_or_else(|| "сервер не отвечает 20 секунд".into());
+            let why = failed.unwrap_or_else(|| "сервер не отвечает 45 секунд".into());
             let addr = net.server_addr.map(|a| a.to_string()).unwrap_or_default();
             menu.error = Some(format!(
                 "Не удалось подключиться к {addr}: {why}.\nПроверьте адрес, что хост запустил игру и туннель playit.gg, и что версии игры одинаковые."

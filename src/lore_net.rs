@@ -125,6 +125,8 @@ pub enum LoreClientMessage {
     Apprentice { master: u32 },
     /// Приложить к ране или выпить (лекарство, а то и яд).
     Treat { uid: ItemUid },
+    /// Приложить к выбранной ране или части тела, или в рот (окно здоровья).
+    TreatOn { uid: ItemUid, target: crate::medicine::CareTarget },
     /// Варить в сосуде из своей сумки.
     Brew { vessel: ItemUid, spec: BrewSpec },
     /// Поставить жаровню или стол из сумки перед собой.

@@ -406,9 +406,13 @@ pub struct SceneTarget {
     node: Option<Entity>,
 }
 
+#[derive(Component)]
+struct UiCamera;
+
 /// Камера интерфейса: интерфейс рисуется поверх сцены в полном разрешении окна.
 fn spawn_ui_camera(mut commands: Commands) {
     commands.spawn((
+        UiCamera,
         Camera2d,
         Camera { order: 10, clear_color: ClearColorConfig::None, ..default() },
         Msaa::Off,
@@ -423,9 +427,18 @@ fn apply_render_scale(
     mut target: ResMut<SceneTarget>,
     mut images: ResMut<Assets<Image>>,
     cams: Query<(Entity, Option<&RenderTarget>), With<Camera3d>>,
+    mut ui_cam: Query<&mut Camera, With<UiCamera>>,
 ) {
     let full = window.physical_size();
     let scale = settings.render_scale as f32 / 100.0;
+    // Когда 3D-сцена рисуется в картинку, окно очищает сама камера интерфейса.
+    let scaled = settings.render_scale < 100;
+    for mut cam in &mut ui_cam {
+        let want = if scaled { ClearColorConfig::Custom(Color::BLACK) } else { ClearColorConfig::None };
+        if !matches!((&cam.clear_color, &want), (ClearColorConfig::None, ClearColorConfig::None) | (ClearColorConfig::Custom(_), ClearColorConfig::Custom(_))) {
+            cam.clear_color = want;
+        }
+    }
     if settings.render_scale >= 100 || full.x == 0 || full.y == 0 {
         // Полное разрешение: камеры рисуют прямо в окно.
         if let Some(node) = target.node.take() {
