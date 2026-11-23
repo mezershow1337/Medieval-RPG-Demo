@@ -271,7 +271,6 @@ impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(startup().clone())
             .insert_resource(SceneTarget::default())
-            .add_systems(Startup, spawn_ui_camera)
             .add_systems(
                 PostUpdate,
                 (apply_window, apply_audio, apply_sun, apply_cameras, apply_render_scale, apply_smoke, apply_water, detail_ranges, toggle_effects_f9, toggle_fullscreen_f11)
@@ -409,17 +408,6 @@ pub struct SceneTarget {
 #[derive(Component)]
 struct UiCamera;
 
-/// Камера интерфейса: интерфейс рисуется поверх сцены в полном разрешении окна.
-fn spawn_ui_camera(mut commands: Commands) {
-    commands.spawn((
-        UiCamera,
-        Camera2d,
-        Camera { order: 10, clear_color: ClearColorConfig::None, ..default() },
-        Msaa::Off,
-        IsDefaultUiCamera,
-    ));
-}
-
 fn apply_render_scale(
     mut commands: Commands,
     settings: Res<Settings>,
@@ -427,17 +415,28 @@ fn apply_render_scale(
     mut target: ResMut<SceneTarget>,
     mut images: ResMut<Assets<Image>>,
     cams: Query<(Entity, Option<&RenderTarget>), With<Camera3d>>,
-    mut ui_cam: Query<&mut Camera, With<UiCamera>>,
+    ui_cam: Query<Entity, With<UiCamera>>,
 ) {
     let full = window.physical_size();
     let scale = settings.render_scale as f32 / 100.0;
-    // Когда 3D-сцена рисуется в картинку, окно очищает сама камера интерфейса.
+    // При 100 % интерфейс рисует сама 3D-камера (как раньше), отдельная камера интерфейса
+    // выключена. Когда 3D-сцена рисуется в картинку меньшего размера, окно целиком —
+    // за камерой интерфейса: она очищает его, кладёт картинку сцены и рисует интерфейс.
     let scaled = settings.render_scale < 100;
-    for mut cam in &mut ui_cam {
-        let want = if scaled { ClearColorConfig::Custom(Color::BLACK) } else { ClearColorConfig::None };
-        if !matches!((&cam.clear_color, &want), (ClearColorConfig::None, ClearColorConfig::None) | (ClearColorConfig::Custom(_), ClearColorConfig::Custom(_))) {
-            cam.clear_color = want;
+    // Камера интерфейса существует только в этом режиме: иначе Bevy отдал бы интерфейс ей,
+    // даже выключенной, и интерфейс пропал бы.
+    match (scaled, ui_cam.iter().next()) {
+        (true, None) => {
+            commands.spawn((
+                UiCamera,
+                IsDefaultUiCamera,
+                Camera2d,
+                Camera { order: 10, clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() },
+                Msaa::Off,
+            ));
         }
+        (false, Some(e)) => commands.entity(e).despawn(),
+        _ => {}
     }
     if settings.render_scale >= 100 || full.x == 0 || full.y == 0 {
         // Полное разрешение: камеры рисуют прямо в окно.
@@ -618,3 +617,4 @@ mod tests {
         assert_eq!(Settings::default().preset(), Some(Preset::Medium));
     }
 }
+

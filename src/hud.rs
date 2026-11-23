@@ -34,8 +34,11 @@ struct StaminaFill;
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FrameTimeDiagnosticsPlugin::default())
-            .add_systems(Startup, setup_hud)
-            .add_systems(Update, (update_status, update_health, update_banner, update_target));
+            .add_systems(Startup, setup_hud.after(crate::inventory_ui::setup_fonts))
+            .add_systems(
+                Update,
+                (update_status, update_health, update_banner, update_target),
+            );
     }
 }
 
@@ -43,7 +46,7 @@ fn text(s: &str, size: f32, color: Color) -> (Text, TextFont, TextColor) {
     (Text::new(s), TextFont { font_size: FontSize::Px(size), ..default() }, TextColor(color))
 }
 
-fn setup_hud(mut commands: Commands) {
+fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
     // Красная вспышка при уроне (на весь экран).
     commands.spawn((HudRoot, FlashOverlay, Node { width: percent(100), height: percent(100), position_type: PositionType::Absolute, ..default() }, BackgroundColor(Color::NONE)));
     // Прицел.
@@ -56,7 +59,7 @@ fn setup_hud(mut commands: Commands) {
     commands
         .spawn((HudRoot, Node { width: percent(100), position_type: PositionType::Absolute, top: percent(30), justify_content: JustifyContent::Center, ..default() }))
         .with_children(|p| {
-            p.spawn((BannerText, text("", 34.0, Color::WHITE)));
+            p.spawn((BannerText, theme.title_colored("", 40.0, Color::WHITE)));
         });
     // Цель (враг перед вами).
     commands
@@ -74,24 +77,67 @@ fn setup_hud(mut commands: Commands) {
             ..default()
         }))
         .with_children(|p| {
-            p.spawn((Node { width: px(300), height: px(18), border: UiRect::all(px(2)), ..default() }, BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.8)), BackgroundColor(Color::srgba(0.1, 0.0, 0.0, 0.6))))
-                .with_children(|bar| {
-                    bar.spawn((HealthFill, Node { width: percent(100), height: percent(100), ..default() }, BackgroundColor(Color::srgb(0.7, 0.08, 0.08))));
-                    bar.spawn((
-                        HealthText,
-                        text("100", 13.0, Color::WHITE),
-                        Node { position_type: PositionType::Absolute, left: px(6), ..default() },
-                    ));
-                });
+            p.spawn((
+                Node {
+                    width: px(320),
+                    height: px(24),
+                    padding: UiRect::axes(px(5), px(4)),
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                theme.bar_frame(),
+            ))
+            .with_children(|bar| {
+                bar.spawn((
+                    HealthFill,
+                    Node {
+                        width: percent(100),
+                        height: percent(100),
+                        border_radius: BorderRadius::all(px(2)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.62, 0.07, 0.06)),
+                ));
+                bar.spawn((
+                    HealthText,
+                    theme.bold("100", 13.0, crate::ui_theme::ink::TEXT),
+                    TextShadow {
+                        offset: Vec2::new(1.0, 1.0),
+                        color: Color::BLACK,
+                    },
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(10),
+                        ..default()
+                    },
+                ));
+            });
         });
     // Выносливость — тонкая полоска под здоровьем.
     commands
-        .spawn((HudRoot, Node { width: percent(100), position_type: PositionType::Absolute, bottom: px(84), justify_content: JustifyContent::Center, ..default() }))
+        .spawn((HudRoot, Node { width: percent(100), position_type: PositionType::Absolute, bottom: px(80), justify_content: JustifyContent::Center, ..default() }))
         .with_children(|p| {
-            p.spawn((Node { width: px(300), height: px(7), border: UiRect::all(px(1)), ..default() }, BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.8)), BackgroundColor(Color::srgba(0.05, 0.05, 0.0, 0.5))))
-                .with_children(|bar| {
-                    bar.spawn((StaminaFill, Node { width: percent(100), height: percent(100), ..default() }, BackgroundColor(Color::srgb(0.85, 0.75, 0.25))));
-                });
+            p.spawn((
+                Node {
+                    width: px(320),
+                    height: px(14),
+                    padding: UiRect::axes(px(5), px(4)),
+                    ..default()
+                },
+                theme.bar_frame(),
+            ))
+            .with_children(|bar| {
+                bar.spawn((
+                    StaminaFill,
+                    Node {
+                        width: percent(100),
+                        height: percent(100),
+                        border_radius: BorderRadius::all(px(1)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.85, 0.75, 0.25)),
+                ));
+            });
         });
     commands.spawn((HudRoot, 
         StatusText,

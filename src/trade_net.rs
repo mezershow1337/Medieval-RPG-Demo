@@ -50,6 +50,10 @@ pub enum TradeClientMessage {
     },
     /// Бросить урок.
     StopLesson,
+    /// Движение руками на уроке или смене закончено (см. work.rs): качество 0..1.
+    Stroke {
+        q: f32,
+    },
     /// Уплатить штраф (у казначея гарнизона).
     PayFine,
     /// Отдать вещь кузнецу в правку.
@@ -205,11 +209,16 @@ pub enum TradeServerMessage {
         rep: Reputation,
         fine: u32,
     },
-    /// Начался урок/смена: подпись и длительность.
+    /// Начался урок/смена: подпись, длительность у умелого, каким движением работать
+    /// и насколько привычны руки (0..1).
     LessonStarted {
         title: String,
         secs: f32,
+        drill: Option<crate::work::Drill>,
+        skill: f32,
     },
+    /// Сколько урока или смены сделано (0..1).
+    LessonProgress(f32),
     LessonFinished {
         ok: bool,
     },

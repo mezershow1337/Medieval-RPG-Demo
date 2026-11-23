@@ -105,7 +105,7 @@ impl PlayerNames {
 pub struct RemoteIndex(pub HashMap<u64, Entity>);
 
 #[derive(Resource, Default)]
-struct CorpseIndex(HashMap<u64, Entity>);
+pub struct CorpseIndex(pub HashMap<u64, Entity>);
 
 #[derive(Resource)]
 struct SendTimer(Timer);
@@ -138,9 +138,13 @@ pub fn run(start: crate::menu::Start) {
         .add_plugins(crate::loot_client::LootClientPlugin)
         .add_plugins(crate::doors::DoorClientPlugin)
         .add_plugins(crate::residents::ResidentsPlugin)
+        .add_plugins(crate::civil_client::CivilClientPlugin)
         .add_plugins(crate::trade_client::TradeClientPlugin)
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))
         .add_plugins(crate::smithing_client::SmithingClientPlugin)
+        .add_plugins(crate::ui_theme::UiThemePlugin)
+        .add_plugins(crate::work_client::WorkClientPlugin)
+        .add_plugins(crate::console::ConsolePlugin)
         .add_systems(Update, hide_ui_for_shots.run_if(|| std::env::var("MRPG_CAM").is_ok()))
         // Клиент без соединения: транспорт появится, когда игрок выберет в меню «Создать» или «Подключиться».
         .insert_resource(RenetClient::new(connection_config()))
@@ -316,6 +320,22 @@ fn spawn_corpse(commands: &mut Commands, index: &mut CorpseIndex, corpse_id: u64
     index.0.insert(corpse_id, entity);
 }
 
+/// Тело мирного человека (в своей одежде, без оружия).
+pub fn spawn_civ_corpse(commands: &mut Commands, index: &mut CorpseIndex, corpse_id: u64, outfit: Outfit, scale: f32, pos: Vec3, yaw: f32, animate: bool) {
+    let entity = commands
+        .spawn((
+            CorpseMarker { corpse_id, kind: ActorKind::Player },
+            Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)).with_scale(Vec3::splat(scale)),
+            Visibility::default(),
+        ))
+        .with_children(|c| {
+            let t = if animate { 0.0 } else { 1.0 };
+            c.spawn((BodyRig, CorpseFall { t, seed: corpse_id }, NeedsRig(outfit), rig::fall_transform(t), Visibility::default()));
+        })
+        .id();
+    index.0.insert(corpse_id, entity);
+}
+
 /// Падение тела: поза из стойки в лежачую, корень скелета заваливается назад.
 fn animate_corpses(time: Res<Time>, mut corpses: Query<(&mut CorpseFall, &mut Transform, Option<&mut RigPose>)>) {
     const FALL_TIME: f32 = 0.8;
@@ -346,6 +366,7 @@ fn receive_reliable(
     mut names: ResMut<PlayerNames>,
     time: Res<Time>,
     mut welcomed_at: Local<Option<f32>>,
+    mut civil: MessageWriter<crate::civil_client::CivilNet>,
 ) {
     while let Some(bytes) = client.receive_message(CH_RELIABLE) {
         let Some(msg) = decode::<ServerMessage>(&bytes) else { continue };
@@ -409,6 +430,21 @@ fn receive_reliable(
                     let fresh = welcomed_at.is_some_and(|t| time.elapsed_secs() - t > 1.5);
                     spawn_corpse(&mut commands, &mut corpses, corpse_id, kind, pos.into(), yaw, &gear, fresh);
                 }
+            }
+            ServerMessage::CivilianHit { civ, at, amount, head } => {
+                feedback.write(CombatFeedback::Hit { attacker: 0, target: u64::MAX, outcome: combat::HitOutcome::Damage { amount, killed: false, head }, at: at.into() });
+                let _ = civ;
+                civil.write(crate::civil_client::CivilNet::Hit);
+            }
+            ServerMessage::CivilianDead { civ, corpse } => {
+                let fresh = welcomed_at.is_some_and(|t| time.elapsed_secs() - t > 1.5);
+                civil.write(crate::civil_client::CivilNet::Dead { civ, corpse: corpse.map(|(id, p, y)| (id, p.into(), y)), fresh });
+            }
+            ServerMessage::CivilianBack { civ } => {
+                civil.write(crate::civil_client::CivilNet::Back(civ));
+            }
+            ServerMessage::Law(msg) => {
+                civil.write(crate::civil_client::CivilNet::Law(msg));
             }
             ServerMessage::CorpseRemoved { corpse_id } => {
                 if let Some(e) = corpses.0.remove(&corpse_id) {

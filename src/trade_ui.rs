@@ -19,17 +19,14 @@ use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
 use bevy_renet::RenetClient;
 
-const PANEL_BG: Color = Color::srgba(0.11, 0.09, 0.07, 0.97);
-const PANEL_BORDER: Color = Color::srgb(0.45, 0.36, 0.22);
-const TITLE: Color = Color::srgb(0.93, 0.83, 0.6);
-const TEXT: Color = Color::srgb(0.86, 0.82, 0.75);
-const DIM: Color = Color::srgb(0.6, 0.56, 0.5);
-const GOOD: Color = Color::srgb(0.5, 0.85, 0.45);
-const BAD: Color = Color::srgb(0.95, 0.4, 0.32);
-const GOLD: Color = Color::srgb(0.92, 0.76, 0.36);
-const BTN: Color = Color::srgba(0.3, 0.22, 0.12, 0.95);
-const BTN_HOVER: Color = Color::srgba(0.45, 0.33, 0.17, 1.0);
-const BTN_OFF: Color = Color::srgba(0.18, 0.16, 0.14, 0.9);
+use crate::ui_theme::{AppearChildren, Skin, ink, theme};
+
+const TITLE: Color = ink::TITLE;
+const TEXT: Color = ink::TEXT;
+const DIM: Color = ink::DIM;
+const GOOD: Color = ink::GOOD;
+const BAD: Color = ink::BAD;
+const GOLD: Color = ink::GOLD;
 
 pub struct TradeUiPlugin;
 
@@ -37,14 +34,7 @@ impl Plugin for TradeUiPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(BuiltRev::default()).add_systems(
             Update,
-            (
-                rebuild,
-                click_buttons,
-                hover_buttons,
-                scroll_lists,
-                tick_order_timers,
-            )
-                .chain(),
+            (rebuild, click_buttons, scroll_lists, tick_order_timers).chain(),
         );
     }
 }
@@ -123,15 +113,14 @@ fn panel<'a>(root: &'a mut ChildSpawnerCommands, width: f32) -> EntityCommands<'
     root.spawn((
         Node {
             flex_direction: FlexDirection::Column,
-            padding: UiRect::all(px(12)),
+            padding: Skin::Wood.padding(),
             row_gap: px(6),
-            border: UiRect::all(px(2)),
-            width: px(width),
-            max_height: percent(92),
+            // Рама толще прежней рамки — расширяем окно, чтобы содержимому хватило места.
+            width: px(width + 36.0),
+            max_height: percent(94),
             ..default()
         },
-        BorderColor::all(PANEL_BORDER),
-        BackgroundColor(PANEL_BG),
+        theme().skin(Skin::Wood),
         Interaction::default(),
         FocusPolicy::Pass,
     ))
@@ -155,29 +144,13 @@ fn scroll_list<'a>(p: &'a mut ChildSpawnerCommands, max_h: f32) -> EntityCommand
 }
 
 fn button(p: &mut ChildSpawnerCommands, fonts: &UiFonts, label: &str, act: Act, enabled: bool) {
-    p.spawn((
-        act,
-        Enabled(enabled),
-        Interaction::default(),
-        FocusPolicy::Pass,
-        Node {
-            padding: UiRect::axes(px(8), px(3)),
-            border: UiRect::all(px(1)),
-            flex_shrink: 0.0,
-            ..default()
-        },
-        BorderColor::all(PANEL_BORDER),
-        BackgroundColor(if enabled { BTN } else { BTN_OFF }),
-    ))
-    .with_children(|b| {
-        b.spawn(text(
-            fonts,
-            label,
-            13.0,
-            if enabled { TITLE } else { DIM },
-            true,
-        ));
-    });
+    let _ = fonts;
+    theme().small_button(
+        p,
+        label,
+        (act, Enabled(enabled), FocusPolicy::Pass),
+        enabled,
+    );
 }
 
 /// Строка товара: иконка, название (цвет качества), правее — подпись и кнопки.
@@ -206,11 +179,9 @@ fn item_row(
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 flex_shrink: 0.0,
-                border: UiRect::all(px(1)),
                 ..default()
             },
-            BorderColor::all(quality_color(item.quality).with_alpha(0.7)),
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+            theme().slot_image(false),
         ))
         .with_children(|i| {
             i.spawn((
@@ -244,8 +215,9 @@ fn item_row(
 }
 
 fn section(p: &mut ChildSpawnerCommands, fonts: &UiFonts, title: &str) {
+    let _ = fonts;
     p.spawn((
-        text(fonts, title, 15.0, TITLE, true),
+        theme().title(title, 19.0),
         Node {
             margin: UiRect::top(px(6)),
             ..default()
@@ -280,6 +252,7 @@ fn rebuild(
     if *built == want {
         return;
     }
+    let opening = !built.2 && want.2;
     *built = want;
     for e in &roots {
         commands.entity(e).despawn();
@@ -300,9 +273,10 @@ fn rebuild(
                 column_gap: px(12),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.45)),
+            theme().backdrop(),
             GlobalZIndex(12),
         ))
+        .insert_if(AppearChildren, || opening)
         .with_children(|root| {
             if let Some(view) = &state.view {
                 merchant_window(root, &fonts, &icons, &state, &loot, view, elapsed);
@@ -331,7 +305,8 @@ fn merchant_window(
 
     // --- Прилавок ---
     panel(root, 430.0).with_children(|p| {
-        p.spawn(text(fonts, &view.name, 22.0, TITLE, true));
+        p.spawn(theme().title(&view.name, 28.0));
+        theme().divider(p);
         p.spawn(text(fonts, &view.title, 14.0, DIM, false));
         p.spawn(text(
             fonts,
@@ -595,7 +570,8 @@ fn merchant_window(
 
     // --- Сделка ---
     panel(root, 320.0).with_children(|p| {
-        p.spawn(text(fonts, "Сделка", 22.0, TITLE, true));
+        p.spawn(theme().title("Сделка", 28.0));
+        theme().divider(p);
         let shelf_price = |uid: ItemUid| {
             view.shelf
                 .iter()
@@ -771,7 +747,8 @@ fn merchant_window(
 
     // --- Своя сумка ---
     panel(root, 360.0).with_children(|p| {
-        p.spawn(text(fonts, "Ваша сумка", 22.0, TITLE, true));
+        p.spawn(theme().title("Ваша сумка", 28.0));
+        theme().divider(p);
         p.spawn(text(
             fonts,
             "Надетое не продаётся — сначала снимите в инвентаре (Tab).",
@@ -910,7 +887,8 @@ fn p2p_window(
         });
     });
     panel(root, 360.0).with_children(|p| {
-        p.spawn(text(fonts, "Ваша сумка", 22.0, TITLE, true));
+        p.spawn(theme().title("Ваша сумка", 28.0));
+        theme().divider(p);
         scroll_list(p, 560.0).with_children(|list| {
             let Some(inv) = inv else { return };
             for pl in &inv.grid.items {
@@ -940,7 +918,8 @@ fn p2p_window(
 
 fn reputation_window(root: &mut ChildSpawnerCommands, fonts: &UiFonts, state: &TradeState) {
     panel(root, 620.0).with_children(|p| {
-        p.spawn(text(fonts, "Херсон и округа, 510 год · Отношения", 22.0, TITLE, true));
+        p.spawn(theme().title("Херсон и округа, 510 год · Отношения", 28.0));
+        theme().divider(p);
         if state.fine > 0 {
             p.spawn(text(fonts, format!("Вы в розыске: штраф {}. Уплатите казначею гарнизона, иначе горожане торговать не будут.", format_money(state.fine)), 14.0, BAD, true));
         }
@@ -960,10 +939,7 @@ fn reputation_window(root: &mut ChildSpawnerCommands, fonts: &UiFonts, state: &T
                         r.spawn(text(fonts, where_, 12.0, DIM, false));
                     });
                     // Полоска −100..100.
-                    b.spawn((Node { width: px(560), height: px(6), ..default() }, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)))).with_children(|bar| {
-                        let k = (v + 100.0) / 200.0;
-                        bar.spawn((Node { width: percent(k * 100.0), height: percent(100), ..default() }, BackgroundColor(standing_color(s))));
-                    });
+                    theme().bar(b, Node { width: px(560), height: px(14), ..default() }, (v + 100.0) / 200.0, standing_color(s), ());
                     b.spawn(text(fonts, f.description(), 12.0, DIM, false));
                 });
             }
@@ -1111,21 +1087,6 @@ fn bump(lines: &mut Vec<Line>, uid: ItemUid, delta: i32, max: u16) {
     lines.retain(|(u, _)| *u != uid);
     if new > 0 {
         lines.push((uid, new));
-    }
-}
-
-fn hover_buttons(
-    mut buttons: Query<
-        (&Interaction, &Enabled, &mut BackgroundColor),
-        (With<Act>, Changed<Interaction>),
-    >,
-) {
-    for (i, enabled, mut bg) in &mut buttons {
-        bg.0 = match (i, enabled.0) {
-            (_, false) => BTN_OFF,
-            (Interaction::Hovered | Interaction::Pressed, true) => BTN_HOVER,
-            _ => BTN,
-        };
     }
 }
 

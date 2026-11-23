@@ -23,7 +23,7 @@ impl Plugin for ResidentsPlugin {
 pub struct ResidentView {
     pub role: Role,
     phase: f32,
-    index: usize,
+    pub index: usize,
 }
 
 /// На кого из жителей смотрит игрок (номер в списке уровня).
@@ -174,7 +174,7 @@ fn idle_residents(time: Res<Time>, people: Query<(&ResidentView, &Children, &Vis
 }
 
 /// Дальних жителей не рисуем (их сотни, а видно — десяток).
-fn cull_residents(camera: Query<&GlobalTransform, With<crate::player::PlayerCamera>>, mut people: Query<(&Transform, &mut Visibility), With<ResidentView>>) {
+fn cull_residents(camera: Query<&GlobalTransform, With<crate::player::PlayerCamera>>, mut people: Query<(&Transform, &mut Visibility), (With<ResidentView>, Without<crate::civil_client::Fallen>)>) {
     let Ok(cam) = camera.single() else { return };
     let c = cam.translation();
     for (t, mut vis) in &mut people {
@@ -190,7 +190,7 @@ fn aim_resident(
     loot: Res<crate::loot_client::LootState>,
     trade: Res<crate::trade_client::TradeState>,
     camera: Query<&GlobalTransform, With<crate::player::PlayerCamera>>,
-    people: Query<(&ResidentView, &Transform)>,
+    people: Query<(&ResidentView, &Transform), Without<crate::civil_client::Fallen>>,
 ) {
     aim.0 = None;
     if loot.ui_open || loot.target.is_some() || trade.window_open() || trade.aim.is_some() {
@@ -231,14 +231,21 @@ fn setup_speech(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
     commands
         .spawn(Node { position_type: PositionType::Absolute, width: percent(100), top: percent(60), justify_content: JustifyContent::Center, ..default() })
         .with_children(|p| {
-            p.spawn((
-                SpeechText,
-                Text::new(""),
-                TextFont { font: fonts.regular.clone().into(), font_size: bevy::text::FontSize::Px(19.0), ..default() },
-                TextColor(Color::srgb(0.95, 0.9, 0.78)),
-                TextLayout::justify(Justify::Center),
-                TextShadow::default(),
-            ));
+            crate::ui_theme::theme().plaque(p).with_children(|p| {
+                p.spawn((
+                    SpeechText,
+                    Text::new(""),
+                    TextFont {
+                        font: fonts.regular.clone().into(),
+                        font_size: bevy::text::FontSize::Px(19.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.95, 0.9, 0.78)),
+                    TextLayout::justify(Justify::Center),
+                    TextShadow::default(),
+                    crate::ui_theme::Plaque,
+                ));
+            });
         });
 }
 

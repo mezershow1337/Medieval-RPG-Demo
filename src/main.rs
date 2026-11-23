@@ -12,9 +12,15 @@
 mod alchemy_fx;
 mod brewing;
 mod brewing_client;
+mod civil_client;
+mod civil_server;
+mod civilians;
 mod client;
 mod collision;
 mod combat;
+mod console;
+mod console_net;
+mod console_server;
 mod consumables;
 mod doors;
 mod economy;
@@ -68,7 +74,10 @@ mod trade_client;
 mod trade_net;
 mod trade_server;
 mod trade_ui;
+mod ui_theme;
 mod weight;
+mod work;
+mod work_client;
 
 use protocol::DEFAULT_PORT;
 use std::net::SocketAddr;

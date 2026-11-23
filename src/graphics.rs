@@ -279,7 +279,7 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
     let layer = |l: u32| &crate::surface_layers::LAYERS[l as usize];
     let mean = |l: u32| Vec3::from_array(layer(l).mean);
     ExtendedMaterial {
-        base: StandardMaterial { base_color: a, perceptual_roughness: rough, metallic: metal, reflectance: 0.4, depth_bias: depth_rank(mat), ..default() },
+        base: StandardMaterial { base_color: a, perceptual_roughness: rough, metallic: metal, reflectance: 0.4, ..default() },
         extension: SurfaceExt {
             color_b: lin(b),
             params: Vec4::new(pattern, scale, var, bump),
@@ -297,8 +297,7 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
 /// Порядок материалов на совпадающих гранях (штукатурка поверх кладки, ковёр поверх ткани,
 /// мостовая поверх бутового основания…). Уровень собран из коробок, и у многих
 /// разные материалы лежат в одной плоскости: без сдвига глубины они «дерутся» за пиксель,
-/// а с дрожанием кадра TAA это видно как мерцание. Сдвиг — в единицах точности буфера глубины,
-/// то есть доли миллиметра: на видимую геометрию он не влияет.
+/// а с дрожанием кадра TAA это видно как мерцание. Возвращает сдвиг грани по нормали в метрах.
 pub fn depth_rank(mat: Mat) -> f32 {
     let rank = match mat {
         Mat::Rug | Mat::Banner => 12,
@@ -315,7 +314,24 @@ pub fn depth_rank(mat: Mat) -> f32 {
         Mat::Rubble => 1,
         _ => 0,
     };
-    rank as f32 * 8.0
+    // Полтора миллиметра на ступень: незаметно глазу, но глубины уже не совпадают.
+    rank as f32 * 0.0015
+}
+
+/// Сдвигает вершины меша по их нормалям на `dist` метров.
+pub fn push_along_normals(mesh: &mut Mesh, dist: f32) {
+    use bevy::mesh::VertexAttributeValues as V;
+    if dist == 0.0 {
+        return;
+    }
+    let Some(V::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL).cloned() else { return };
+    if let Some(V::Float32x3(pos)) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
+        for (p, n) in pos.iter_mut().zip(&normals) {
+            for i in 0..3 {
+                p[i] += n[i] * dist;
+            }
+        }
+    }
 }
 
 /// Какие фотослои берёт материал: (горизонтальные грани, вертикальные, перекраска 0..1, сила нормалей).

@@ -7,6 +7,7 @@
 
 use crate::client::NetState;
 use crate::inventory_ui::UiFonts;
+use crate::ui_theme::{Appear, Skin, ink, theme};
 use crate::protocol::{DEFAULT_PORT, PROTOCOL_ID, connection_config};
 use crate::settings::{DRAW_DISTANCES, Preset, RENDER_SCALES, Settings};
 use bevy::input_focus::AutoFocus;
@@ -82,7 +83,7 @@ impl Plugin for MenuPlugin {
         })
         .add_systems(Startup, begin.after(crate::inventory_ui::setup_fonts))
         .add_systems(PreUpdate, escape_key.after(bevy::input::InputSystems))
-        .add_systems(Update, (sync_name, handle_buttons, submit_on_enter, poll_resolve, watch_connection, rebuild, style_buttons, orbit_camera, hud_visibility, cursor_in_menu).chain());
+        .add_systems(Update, (sync_name, handle_buttons, submit_on_enter, poll_resolve, watch_connection, rebuild, orbit_camera, hud_visibility, cursor_in_menu).chain());
     }
 }
 
@@ -114,6 +115,8 @@ fn host(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time:
     if !menu.hosting {
         match crate::server::bind_socket(port) {
             Ok(socket) => {
+                // Секрет хозяина: консоль разработчика даёт читы только этому окну (см. console_net.rs).
+                crate::console_net::make_host_token();
                 std::thread::Builder::new()
                     .name("server".into())
                     .stack_size(16 * 1024 * 1024)
@@ -472,15 +475,11 @@ fn value_text(s: &Settings, f: Field) -> String {
 // Оформление
 // ---------------------------------------------------------------------------
 
-const GOLD: Color = Color::srgb(0.83, 0.67, 0.36);
+const GOLD: Color = ink::GOLD;
 const GOLD_DIM: Color = Color::srgba(0.72, 0.56, 0.30, 0.55);
-const PARCHMENT: Color = Color::srgb(0.94, 0.88, 0.74);
-const INK_SOFT: Color = Color::srgb(0.78, 0.72, 0.62);
-const PORPHYRY: Color = Color::srgba(0.13, 0.05, 0.08, 0.92);
-const BUTTON: Color = Color::srgba(0.22, 0.10, 0.11, 0.92);
-const BUTTON_HOVER: Color = Color::srgba(0.38, 0.17, 0.14, 0.96);
-const BUTTON_PRESSED: Color = Color::srgba(0.50, 0.28, 0.16, 0.98);
-const ERROR: Color = Color::srgb(0.95, 0.55, 0.45);
+const PARCHMENT: Color = ink::TEXT;
+const INK_SOFT: Color = ink::DIM;
+const ERROR: Color = ink::BAD;
 
 fn font(fonts: &UiFonts, bold: bool, size: f32) -> TextFont {
     TextFont { font: if bold { fonts.bold.clone() } else { fonts.regular.clone() }.into(), font_size: FontSize::Px(size), ..default() }
@@ -490,60 +489,41 @@ fn label(p: &mut ChildSpawnerCommands, fonts: &UiFonts, s: &str, size: f32, colo
     p.spawn((Text::new(s), font(fonts, false, size), TextColor(color)));
 }
 
-/// Золотая черта с ромбиком посередине (как разделитель в рукописи).
+/// Разделитель с крестом (общая тема интерфейса).
 fn ornament(p: &mut ChildSpawnerCommands) {
-    p.spawn(Node { width: percent(100), height: px(14), align_items: AlignItems::Center, column_gap: px(10), margin: UiRect::vertical(px(6)), ..default() }).with_children(|r| {
-        r.spawn((Node { flex_grow: 1.0, height: px(1), ..default() }, BackgroundColor(GOLD_DIM)));
-        r.spawn((Node { width: px(8), height: px(8), border: UiRect::all(px(1)), ..default() }, BorderColor::all(GOLD), BackgroundColor(Color::srgba(0.5, 0.2, 0.15, 0.9)), UiTransform::from_rotation(Rot2::degrees(45.0))));
-        r.spawn((Node { flex_grow: 1.0, height: px(1), ..default() }, BackgroundColor(GOLD_DIM)));
+    theme().divider(p);
+}
+
+fn button(p: &mut ChildSpawnerCommands, _fonts: &UiFonts, text: &str, act: Act) {
+    theme().button_sized(p, text, 20.0, act, true).insert(Node {
+        width: percent(100),
+        min_height: px(48),
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::Center,
+        ..default()
     });
 }
 
-fn button(p: &mut ChildSpawnerCommands, fonts: &UiFonts, text: &str, act: Act) {
-    p.spawn((
-        Interaction::default(),
-        act,
-        Node {
-            width: percent(100),
-            height: px(50),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            border: UiRect::all(px(1)),
-            ..default()
-        },
-        BorderColor::all(GOLD_DIM),
-        BackgroundColor(BUTTON),
-    ))
-    .with_children(|b| {
-        b.spawn((Text::new(text), font(fonts, true, 21.0), TextColor(PARCHMENT)));
+fn small_button(p: &mut ChildSpawnerCommands, _fonts: &UiFonts, text: &str, act: Act, width: f32) {
+    theme().button_sized(p, text, 16.0, act, true).insert(Node {
+        width: px(width),
+        min_height: px(30),
+        flex_shrink: 0.0,
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::Center,
+        ..default()
     });
 }
 
-fn small_button(p: &mut ChildSpawnerCommands, fonts: &UiFonts, text: &str, act: Act, width: f32) {
-    p.spawn((
-        Interaction::default(),
-        act,
-        Node { width: px(width), height: px(32), justify_content: JustifyContent::Center, align_items: AlignItems::Center, border: UiRect::all(px(1)), ..default() },
-        BorderColor::all(GOLD_DIM),
-        BackgroundColor(BUTTON),
-    ))
-    .with_children(|b| {
-        b.spawn((Text::new(text), font(fonts, true, 17.0), TextColor(PARCHMENT)));
+/// Кнопка набора графики: выбранный набор «вдавлен».
+fn preset_button(p: &mut ChildSpawnerCommands, preset: Preset, on: bool) {
+    theme().toggle_button(p, preset.name(), Act::Preset(preset), on).insert(Node {
+        width: px(118),
+        min_height: px(30),
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::Center,
+        ..default()
     });
-}
-
-fn style_buttons(mut q: Query<(&Interaction, &mut BackgroundColor, &mut BorderColor, Option<&Act>), (Changed<Interaction>, With<Act>)>, settings: Res<Settings>) {
-    let current = settings.preset();
-    for (i, mut bg, mut border, act) in &mut q {
-        let selected = matches!(act, Some(Act::Preset(p)) if Some(*p) == current);
-        bg.0 = match i {
-            Interaction::Pressed => BUTTON_PRESSED,
-            Interaction::Hovered => BUTTON_HOVER,
-            Interaction::None if selected => BUTTON_PRESSED,
-            Interaction::None => BUTTON,
-        };
-        *border = BorderColor::all(if *i == Interaction::None && !selected { GOLD_DIM } else { GOLD });
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -661,16 +641,15 @@ fn side_panel(commands: &mut Commands, fonts: &UiFonts, body: impl FnOnce(&mut C
         .with_children(|root| {
             root.spawn((
                 Node {
-                    width: px(470),
+                    width: px(480),
                     height: percent(100),
-                    padding: UiRect::axes(px(44), px(52)),
+                    padding: UiRect::axes(px(48), px(52)),
                     flex_direction: FlexDirection::Column,
                     row_gap: px(14),
-                    border: UiRect::right(px(2)),
                     ..default()
                 },
-                BackgroundColor(PORPHYRY),
-                BorderColor::all(GOLD),
+                theme().skin(Skin::Wood),
+                Appear::default(),
             ))
             .with_children(|p| {
                 title_block(p, fonts);
@@ -680,7 +659,7 @@ fn side_panel(commands: &mut Commands, fonts: &UiFonts, body: impl FnOnce(&mut C
 }
 
 fn title_block(p: &mut ChildSpawnerCommands, fonts: &UiFonts) {
-    p.spawn((Text::new("ХЕРСОНЕС"), font(fonts, true, 58.0), TextColor(GOLD)));
+    p.spawn(theme().title("Херсонес", 56.0));
     p.spawn((Text::new("Лето 510 года. Царствование Анастасия"), font(fonts, false, 18.0), TextColor(PARCHMENT)));
     ornament(p);
 }
@@ -691,17 +670,18 @@ fn center_panel(commands: &mut Commands, fonts: &UiFonts, title: &str, width: f3
         .spawn((
             MenuRoot,
             Node { width: percent(100), height: percent(100), position_type: PositionType::Absolute, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
+            theme().backdrop(),
             GlobalZIndex(100),
         ))
         .with_children(|root| {
             root.spawn((
-                Node { width: px(width), max_width: percent(98), max_height: percent(96), padding: UiRect::axes(px(34), px(26)), flex_direction: FlexDirection::Column, row_gap: px(10), border: UiRect::all(px(2)), ..default() },
-                BackgroundColor(PORPHYRY),
-                BorderColor::all(GOLD),
+                Node { width: px(width), max_width: percent(98), max_height: percent(96), padding: UiRect::axes(px(40), px(30)), flex_direction: FlexDirection::Column, row_gap: px(10), ..default() },
+                theme().skin(Skin::Wood),
+                Appear::default(),
             ))
             .with_children(|p| {
-                p.spawn((Text::new(title), font(fonts, true, 34.0), TextColor(GOLD)));
+                p.spawn(theme().title(title, 34.0));
+                let _ = fonts;
                 ornament(p);
                 body(p);
             });
@@ -712,8 +692,9 @@ fn settings_body(p: &mut ChildSpawnerCommands, fonts: &UiFonts, s: &Settings) {
     // Наборы.
     p.spawn(Node { width: percent(100), column_gap: px(8), align_items: AlignItems::Center, ..default() }).with_children(|r| {
         r.spawn((Text::new("Набор графики"), font(fonts, false, 17.0), TextColor(INK_SOFT), Node { width: px(170), ..default() }));
+        let current = s.preset();
         for preset in Preset::ALL {
-            small_button(r, fonts, preset.name(), Act::Preset(preset), 118.0);
+            preset_button(r, preset, current == Some(preset));
         }
     });
     // Две колонки: графика слева, экран, управление и звук справа — чтобы всё влезало и в 720p.
