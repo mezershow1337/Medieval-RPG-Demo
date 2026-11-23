@@ -42,7 +42,9 @@ def srgb(*c):
 def run_shader(shader, P, N, hit):
     """Считает шейдер только в покрытых текселях (их обычно половина) и раскладывает обратно."""
     idx = np.nonzero(hit)
+    photo.set_normals(N[idx][:, None, :])
     out = shader(P[idx][:, None, :], N[idx][:, None, :], hit[idx][:, None])
+    photo.set_normals(None)
     res = {}
     for k, val in out.items():
         val = np.asarray(val, float)

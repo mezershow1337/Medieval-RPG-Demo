@@ -6,7 +6,7 @@
 import bevy_pbr::render::{
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::alpha_discard,
-    mesh_view_bindings::globals,
+    mesh_view_bindings::{globals, view},
 };
 
 @if(PREPASS_PIPELINE)
@@ -507,6 +507,7 @@ fn fragment(
     var rough = pbr_input.material.perceptual_roughness;
     var N = pbr_input.N;
     var emissive = vec3<f32>(0.0);
+    var water = false;
 
     if kind == 5 || kind == 6 || kind == 7 || kind == 8 || kind == 9 || kind == 12 {
         // Узоры, завязанные на UV или особые.
@@ -604,9 +605,33 @@ fn fragment(
                     0.0,
                     cos(p.y * 6.3 - t * 1.3) + sin(p.y * 2.7 + p.x * 5.1 + t * 0.9),
                 );
-                N = normalize(N + g * 0.035);
+                // Крупная зыбь + мелкая рябь.
+                let g2 = vec3<f32>(
+                    sin(p.x * 0.9 + p.y * 0.4 + t * 0.6) + 0.5 * sin(p.x * 1.7 - p.y * 1.1 + t * 0.8),
+                    0.0,
+                    cos(p.y * 0.8 - p.x * 0.3 + t * 0.5) + 0.5 * cos(p.y * 2.1 + p.x * 0.7 - t * 0.7),
+                );
+                N = normalize(N + g * 0.03 + g2 * 0.045);
                 color = mix(base_a, base_b, fbm(p * 2.0 + t * 0.1));
                 rough = 0.04;
+                // Отражение неба по Френелю и солнечная дорожка (небо — не карта окружения,
+                // поэтому считаем его здесь тем же градиентом, что и купол неба).
+                let v = normalize(view.world_position - wp);
+                let r = reflect(-v, N);
+                let sun = normalize(surface.photo_mean.xyz);
+                let fres = 0.02 + 0.98 * pow(1.0 - max(dot(N, v), 0.0), 5.0);
+                let h = clamp(r.y, 0.0, 1.0);
+                let toward = pow(max(dot(normalize(r.xz + vec2<f32>(1e-5)), normalize(sun.xz + vec2<f32>(1e-5))), 0.0), 3.0);
+                var skyc: vec3<f32>;
+                if surface.photo_mean_b.x > 0.5 {
+                    skyc = mix(vec3<f32>(0.62, 0.74, 0.9), vec3<f32>(0.2, 0.4, 0.8), smoothstep(0.0, 0.5, h));
+                } else {
+                    let hor = mix(vec3<f32>(0.62, 0.48, 0.55), vec3<f32>(1.25, 0.55, 0.28), toward);
+                    skyc = mix(hor, vec3<f32>(0.12, 0.13, 0.3), smoothstep(0.0, 0.6, h));
+                }
+                let glint = pow(max(dot(r, sun), 0.0), 900.0) * 40.0 + pow(max(dot(r, sun), 0.0), 60.0) * 1.2;
+                emissive = (skyc * fres + vec3<f32>(1.0, 0.78, 0.5) * glint) * 0.9;
+                water = true;
             }
             default: {
                 // Угли: тёмная корка и пульсирующий жар в трещинах.
@@ -752,7 +777,8 @@ fn fragment(
     pbr_input.material.base_color = vec4<f32>(max(color, vec3<f32>(0.0)), 1.0);
     pbr_input.material.perceptual_roughness = rough;
     pbr_input.N = N;
-    pbr_input.material.emissive = vec4<f32>(emissive, 1.0);
+    // Отражение неба у воды — в тех же единицах, что и купол неба (без экспозиции камеры).
+    pbr_input.material.emissive = vec4<f32>(emissive, select(1.0, 0.0, water));
 
     pbr_input.material.base_color = alpha_discard(
         pbr_input.material.flags,

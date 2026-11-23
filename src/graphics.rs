@@ -50,7 +50,8 @@ fn mood() -> Mood {
             shadow_distance: 160.0,
             day: false,
         },
-        crate::level::LevelKind::Chersonesus => Mood {
+        // Днём (MRPG_TIME=day) — ясное летнее небо у моря.
+        crate::level::LevelKind::Chersonesus if std::env::var("MRPG_TIME").is_ok_and(|t| t == "day") => Mood {
             sun: Vec3::new(-0.72, 0.62, 0.22),
             sun_color: Color::srgb(1.0, 0.93, 0.8),
             lux: 15_000.0,
@@ -60,6 +61,19 @@ fn mood() -> Mood {
             visibility: 1100.0,
             shadow_distance: 220.0,
             day: true,
+        },
+        // По умолчанию — золотой час: солнце садится в море на северо-западе (−X, −Z),
+        // длинные тёплые тени, дорожка солнца на воде, облака подсвечены снизу.
+        crate::level::LevelKind::Chersonesus => Mood {
+            sun: Vec3::new(-0.80, 0.19, -0.42),
+            sun_color: Color::srgb(1.0, 0.74, 0.48),
+            lux: 10_500.0,
+            ambient: (Color::srgb(0.58, 0.58, 0.82), 360.0),
+            fog: Color::srgb(0.58, 0.50, 0.52),
+            fog_far: (Color::srgb(0.42, 0.40, 0.52), Color::srgb(1.0, 0.66, 0.42)),
+            visibility: 900.0,
+            shadow_distance: 220.0,
+            day: false,
         },
     }
 }
@@ -229,8 +243,9 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
             params: Vec4::new(pattern, scale, var, bump),
             params2: Vec4::new(moss, grime, glow, 0.0),
             photo: if has_photo { Vec4::new(top as f32, 1.0 / layer(top).meters, side as f32, 1.0 / layer(side).meters) } else { Vec4::new(-1.0, 1.0, -1.0, 1.0) },
-            photo_mean: mean(top).extend(tint),
-            photo_mean_b: mean(side).extend(relief),
+            // Воде вместо фото передаём солнце (для отражений неба и солнечной дорожки) и «день».
+            photo_mean: if mat == Mat::Water { mood().sun.normalize().extend(0.0) } else { mean(top).extend(tint) },
+            photo_mean_b: if mat == Mat::Water { Vec4::new(if mood().day { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0) } else { mean(side).extend(relief) },
             albedo: tex.map(|t| t.0.clone()),
             nrm: tex.map(|t| t.1.clone()),
         },

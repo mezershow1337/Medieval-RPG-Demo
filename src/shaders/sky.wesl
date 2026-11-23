@@ -132,8 +132,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     col = mix(col, haze, (1.0 - smoothstep(ridge - 0.003, ridge + 0.003, e)) * 0.85);
     col = mix(col, haze * 0.55, 1.0 - smoothstep(near_ridge - 0.003, near_ridge + 0.003, e));
     if e < 0.0 {
-        // Ниже горизонта — цвет тумана, чтобы земля плавно уходила в дымку.
-        col = vec3<f32>(0.133, 0.119, 0.181);
+        // Ниже горизонта — дымка, чтобы земля и море плавно уходили в неё.
+        col = mix(haze * 0.55, horizon * 0.5, 0.5);
     }
     return vec4<f32>(col, 1.0);
 }
