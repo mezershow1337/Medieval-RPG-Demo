@@ -47,6 +47,10 @@ pub struct Actor {
     shoot: bool,
     /// Как раны, боль и яды меняют бойца (ведёт medicine_server.rs).
     pub body_mods: crate::medicine::BodyMods,
+    /// Игрок убрал оружие (хотбар, слот «Руки»): дерётся кулаками.
+    holstered: bool,
+    /// Что на нём видно (для снимков, чтобы другие видели доспех).
+    gear: crate::gear_look::Gear,
 }
 
 /// Тело на земле. Предметы для обыска добавит система лута.
@@ -58,6 +62,8 @@ pub struct Corpse {
     pub kind: ActorKind,
     pub pos: Vec3,
     pub yaw: f32,
+    /// Во что был одет (тело лежит в своих доспехах).
+    pub gear: crate::gear_look::Gear,
 }
 
 #[derive(Resource)]
@@ -160,6 +166,8 @@ fn spawn_npc(world: &mut GameWorld, level: &LevelColliders, spawn: NpcSpawn, now
             finish: 200,
             shoot: false,
             body_mods: Default::default(),
+            holstered: false,
+            gear: Default::default(),
         },
     );
 }
@@ -173,7 +181,7 @@ fn on_server_event(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>,
             info!("Игрок {id} подключился");
             server.send_message(id, CH_RELIABLE, encode(&ServerMessage::Welcome { your_id: id, spawn: spawn.into() }));
             for c in &world.corpses {
-                let msg = ServerMessage::CorpseSpawned { corpse_id: c.id, kind: c.kind, pos: c.pos.into(), yaw: c.yaw };
+                let msg = ServerMessage::CorpseSpawned { corpse_id: c.id, kind: c.kind, pos: c.pos.into(), yaw: c.yaw, gear: c.gear };
                 server.send_message(id, CH_RELIABLE, encode(&msg));
             }
             server.broadcast_message_except(id, CH_RELIABLE, encode(&ServerMessage::PlayerJoined { id }));
@@ -194,6 +202,8 @@ fn on_server_event(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>,
                     finish: 200,
                     shoot: false,
                     body_mods: Default::default(),
+                    holstered: false,
+                    gear: Default::default(),
                 },
             );
         }
@@ -226,6 +236,7 @@ fn receive_client_messages(mut server: ResMut<RenetServer>, mut world: ResMut<Ga
                     actor.pose.pitch = pitch.clamp(-1.6, 1.6);
                     actor.fighter.set_guard(on);
                 }
+                ClientMessage::Holster { on } => actor.holstered = on,
                 ClientMessage::PlayerState { .. } => {}
             }
         }
@@ -337,16 +348,19 @@ fn sync_equipment(world: &mut GameWorld, loot: Option<&LootWorld>) {
         actor.fighter.has_shield = inv.and_then(|inv| inv.equipped(EquipSlot::OffHand)).is_some_and(|item| item.info().shape == ItemShape::Shield);
         // Оружие в руке определяет темп, длину и силу ударов. Менять можно только вне удара.
         actor.finish = inv.and_then(|inv| inv.equipped(EquipSlot::MainHand)).map_or(200, |item| (item.look() * 255.0) as u8);
+        // Пустая правая рука или оружие убрано — кулаки.
         let weapon = inv
             .and_then(|inv| inv.equipped(EquipSlot::MainHand))
+            .filter(|_| !actor.holstered)
             .map(|item| combat::WeaponKind::from_item_name(item.info().name))
-            .unwrap_or(combat::WeaponKind::Spatha);
+            .unwrap_or(combat::WeaponKind::Fists);
         if weapon != actor.fighter.weapon && matches!(actor.fighter.action, combat::Action::Idle | combat::Action::Guard { .. }) {
             actor.fighter.weapon = weapon;
-            if !weapon.can_guard() {
+            if !weapon.can_guard_with(actor.fighter.has_shield) {
                 actor.fighter.set_guard(false);
             }
         }
+        actor.gear = inv.map(crate::gear_look::Gear::from_inventory).unwrap_or_default();
         let e = gear_effects(&stats);
         let m = actor.body_mods;
         actor.fighter.action_speed = e.action_speed * m.action_speed;
@@ -388,6 +402,10 @@ fn base_damage(world: &GameWorld, loot: Option<&LootWorld>, attacker: u64) -> f3
     let Some(a) = world.actors.get(&attacker) else { return 0.0 };
     if a.kind == ActorKind::Player {
         let stats = loot.map(|l| l.equipped_stats(attacker)).unwrap_or_default();
+        if a.fighter.weapon == combat::WeaponKind::Fists {
+            // Кулак: урон от силы, а не от оружия в сумке.
+            return combat::FIST_DAMAGE + stats.get(Stat::Strength).max(0.0) * 0.4 + stats.get(Stat::BonusDamage) * 0.5;
+        }
         let weapon = stats.get(Stat::WeaponDamage);
         let weapon = if weapon > 0.0 { weapon * PLAYER_WEAPON_DAMAGE_SCALE } else { a.fighter.weapon.stats().damage };
         weapon + stats.get(Stat::BonusDamage)
@@ -691,7 +709,7 @@ fn kill(server: &mut RenetServer, world: &mut GameWorld, id: u64, killer: Option
     let Some(actor) = world.actors.get_mut(&id) else { return };
     actor.alive = false;
     actor.fighter.action = combat::Action::Dead;
-    let (kind, pos, yaw) = (actor.kind, actor.pose.feet, actor.pose.yaw);
+    let (kind, pos, yaw, gear) = (actor.kind, actor.pose.feet, actor.pose.yaw, actor.gear);
     if kind == ActorKind::Player {
         actor.respawn_at = Some(now + PLAYER_RESPAWN_SECS);
     } else if let Some(spawn) = actor.spawn {
@@ -703,8 +721,8 @@ fn kill(server: &mut RenetServer, world: &mut GameWorld, id: u64, killer: Option
 
     let corpse_id = world.next_corpse_id;
     world.next_corpse_id += 1;
-    world.corpses.push(Corpse { id: corpse_id, actor: id, killer, kind, pos, yaw });
-    server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::CorpseSpawned { corpse_id, kind, pos: pos.into(), yaw }));
+    world.corpses.push(Corpse { id: corpse_id, actor: id, killer, kind, pos, yaw, gear });
+    server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::CorpseSpawned { corpse_id, kind, pos: pos.into(), yaw, gear }));
     if world.corpses.len() > MAX_CORPSES {
         let old = world.corpses.remove(0);
         server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::CorpseRemoved { corpse_id: old.id }));
@@ -761,6 +779,7 @@ fn send_snapshots(mut server: ResMut<RenetServer>, world: Res<GameWorld>, mut ti
                 action_speed: a.fighter.action_speed,
                 move_mult: a.move_mult,
                 finish: a.finish,
+                gear: a.gear,
             })
             .collect(),
         arrows: world.arrows.iter().map(|a| ArrowSnapshot { id: a.id, pos: a.pos.into(), vel: a.vel.into() }).collect(),

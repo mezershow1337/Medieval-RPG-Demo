@@ -106,10 +106,11 @@ fn take_hits(mut game: ResMut<GameWorld>, mut bodies: ResMut<Bodies>, mut seeded
     }
     for hit in std::mem::take(&mut game.hits_taken) {
         let Some(actor) = game.actors.get(&hit.target).filter(|a| a.alive) else { continue };
+        let Some(kind) = hit.wound_kind() else { continue };
         let max_hp = actor.fighter.max_hp;
         let roll = bodies.rng.f32();
         let bone_roll = bodies.rng.f32();
-        if bodies.body(hit.target).hit_on(hit.wound_kind(), hit.amount, max_hp, hit.part, roll, hit.bone_chance(), bone_roll).is_some() {
+        if bodies.body(hit.target).hit_on(kind, hit.amount, max_hp, hit.part, roll, hit.bone_chance(), bone_roll).is_some() {
             bodies.touch(hit.target);
         } else if bodies.bodies.get(&hit.target).is_some_and(Body::is_healthy) {
             bodies.bodies.remove(&hit.target);

@@ -100,11 +100,18 @@ pub(crate) enum Hit {
     Cell { owner: Owner, x: u8, y: u8 },
     /// Рана, часть тела или рот в окне здоровья.
     Care(crate::medicine::CareTarget),
+    /// Слот хотбара внизу экрана.
+    Hotbar { slot: usize },
     Equip { owner: Owner, slot: EquipSlot },
     Item { owner: Owner, uid: ItemUid },
     TakeAll,
     Panel,
     Outside,
+}
+
+/// Метка слота хотбара для окна инвентаря (на него можно положить вещь).
+pub(crate) fn hotbar_hit(slot: usize) -> Hit {
+    Hit::Hotbar { slot }
 }
 
 fn text(fonts: &UiFonts, s: impl Into<String>, size: f32, color: Color, bold: bool) -> impl Bundle {
@@ -335,7 +342,7 @@ fn rebuild_ui(
                 ));
                 p.spawn(text(
                     &fonts,
-                    "ЛКМ — взять/положить, мимо окна — выбросить\nПКМ или Shift+ЛКМ — быстро переложить или надеть\nF — использовать: лечить, читать, варить, поставить жаровню; Q — выбросить, Tab — закрыть\nK — окно знаний; лечить — положите средство на рану в окне «Тело»",
+                    "ЛКМ — взять/положить, мимо окна — выбросить\nПКМ или Shift+ЛКМ — быстро переложить или надеть\nF — использовать: лечить, читать, варить, поставить жаровню; Q — выбросить, Tab — закрыть\n2–9 над вещью или вещь на слот внизу — на панель быстрого доступа (ПКМ по слоту — убрать)\nK — окно знаний; лечить — положите средство на рану в окне «Тело»",
                     13.0,
                     DIM,
                     false,
@@ -501,6 +508,7 @@ fn equip_slot(p: &mut ChildSpawnerCommands, fonts: &UiRes, owner: Owner, slot: E
 /// Что под мышью, с приоритетом: при переноске важнее клетки и слоты, иначе — предметы.
 fn hovered(hits: &Query<(&Interaction, &Hit)>, holding: bool) -> Option<Hit> {
     let rank = |h: &Hit| match (h, holding) {
+        (Hit::Hotbar { .. }, _) => 0,
         (Hit::Equip { .. }, true) => 0,
         (Hit::Care(crate::medicine::CareTarget::Mouth), true) => 0,
         (Hit::Care(_), true) => 1,
@@ -539,6 +547,7 @@ fn handle_input(
     time: Res<Time>,
     body: Option<Res<crate::medicine_client::MyBody>>,
     mut brew: Option<ResMut<crate::brewing_client::BrewState>>,
+    mut hotbar: ResMut<crate::hotbar::Hotbar>,
 ) {
     if !state.ui_open {
         return;
@@ -589,7 +598,26 @@ fn handle_input(
                     state.notify("Сначала возьмите это себе в сумку", time.elapsed_secs());
                 }
             }
+            // На слот хотбара: привязать (сама вещь остаётся на месте).
+            Some(Hit::Hotbar { slot }) => {
+                if slot == 0 {
+                    state.notify("Слот 1 — пустые руки", time.elapsed_secs());
+                } else if h.owner == Owner::Me {
+                    hotbar.bind(slot, &h.item);
+                    held.0 = None;
+                } else {
+                    state.notify("Сначала положите вещь в свою сумку", time.elapsed_secs());
+                }
+            }
             _ => {}
+        }
+        return;
+    }
+
+    // ПКМ по слоту хотбара — очистить.
+    if let Some(Hit::Hotbar { slot }) = hit {
+        if mouse.just_pressed(MouseButton::Right) {
+            hotbar.clear(slot);
         }
         return;
     }
@@ -608,6 +636,20 @@ fn handle_input(
 
     if keys.just_pressed(KeyCode::KeyQ) {
         send(client, &LootClientMessage::Drop { uid, from: owner });
+        return;
+    }
+    // Цифра над своей вещью — на панель быстрого доступа.
+    if let Some(slot) = crate::hotbar::KEYS.iter().position(|k| keys.just_pressed(*k)) {
+        let item = owner_inv(&state, owner).and_then(|i| i.find(uid)).map(|(_, it)| it.clone());
+        match item {
+            _ if slot == 0 => state.notify("Слот 1 — пустые руки, выберите 2–9", time.elapsed_secs()),
+            Some(item) if owner == Owner::Me => {
+                let name = item.info().name;
+                state.notify(format!("{name} — на клавишу {}", slot + 1), time.elapsed_secs());
+                hotbar.bind(slot, &item);
+            }
+            _ => state.notify("Сначала положите вещь в свою сумку", time.elapsed_secs()),
+        }
         return;
     }
     // F — использовать (бинт, зелье). Также ПКМ по расходнику в своей сумке, если тело не открыто.

@@ -17,7 +17,7 @@ pub struct LootClientPlugin;
 
 impl Plugin for LootClientPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(InventoryUiPlugin)
+        app.add_plugins((InventoryUiPlugin, crate::hotbar::HotbarPlugin))
             .insert_resource(LootState::default())
             .insert_resource(LootIndex::default())
             .insert_resource(PendingCorpses::default())
@@ -378,25 +378,14 @@ fn aim_target(
     state.target = best.map(|(_, id)| id);
 }
 
-fn interact_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, mut state: ResMut<LootState>, time: Res<Time>, ground: Query<&GroundView>) {
+fn interact_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, state: Res<LootState>, ground: Query<&GroundView>) {
     if state.ui_open {
         return;
     }
-    let mut notices = Vec::new();
     if keys.just_pressed(KeyCode::KeyE)
         && let Some(id) = state.target
     {
         send(&mut client, &LootClientMessage::Interact { id });
-    }
-    // Быстрое лечение: 4 — бинт, 5 — зелье (первый найденный в сумке).
-    for (key, name) in [(KeyCode::Digit4, "Бинт"), (KeyCode::Digit5, "Целебное зелье")] {
-        if keys.just_pressed(key) {
-            let base = ItemBaseId::by_name(name);
-            match state.inventory.as_ref().and_then(|inv| inv.all_items().find(|i| i.base == base)) {
-                Some(item) => send(&mut client, &LootClientMessage::Use { uid: item.uid }),
-                None => notices.push(format!("Нет предмета: {name}")),
-            }
-        }
     }
     // «G» на товаре прилавка — стащить в сумку.
     if keys.just_pressed(KeyCode::KeyG)
@@ -407,9 +396,6 @@ fn interact_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClien
     }
     if keys.just_pressed(KeyCode::F8) {
         send(&mut client, &LootClientMessage::DebugSpawnCorpse);
-    }
-    for n in notices {
-        state.notify(n, time.elapsed_secs());
     }
 }
 
