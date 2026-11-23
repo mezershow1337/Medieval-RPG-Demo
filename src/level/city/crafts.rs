@@ -103,9 +103,10 @@ pub fn fish_salting(b: &mut Builder, r: Rect, variant: u32) {
     extras(b, r.inset(1.0), L::Storehouse, &["Корзина с рыбой"], &[(Role::Craftsman, r.center(0.0) + Vec3::new(-3.0, 0.0, 2.0), r.center(0.0)), (Role::Craftsman, r.center(0.0) + Vec3::new(4.0, 0.0, -2.0), r.center(0.0))], &mut rng);
 }
 
+/// Хозяйка цистерн стоит у северных ворот ограды (с улицы), рядом с вешалами, а не среди них.
 pub fn fish_salting_point() -> Vec3 {
     let r = block(18, -3).union(&block(19, -3));
-    Vec3::new(r.cx(), 0.0, r.z0 + 5.0)
+    Vec3::new(r.cx() + 2.0, 0.0, r.z0 + 3.0)
 }
 
 // ---------------- стекольная мастерская ----------------
