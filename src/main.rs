@@ -14,6 +14,9 @@ mod civilians;
 mod client;
 mod collision;
 mod combat;
+mod console;
+mod console_net;
+mod console_server;
 mod consumables;
 mod doors;
 mod economy;
@@ -76,6 +79,8 @@ fn parse_addr(s: &str) -> SocketAddr {
 
 /// Хост: сервер в отдельном потоке и окно игры, подключённое к нему же.
 fn host(port: u16) {
+    // Секрет хозяина: консоль разработчика даёт читы только этому окну (см. console_net.rs).
+    console_net::make_host_token();
     let socket = match server::bind_socket(port) {
         Ok(s) => s,
         Err(e) => panic!("порт {port} занят ({e}): возможно, игра или сервер уже запущены"),
