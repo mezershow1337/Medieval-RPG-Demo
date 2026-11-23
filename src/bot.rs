@@ -19,7 +19,9 @@ pub fn run(server_addr: SocketAddr, name: String) {
     let auth = ClientAuthentication::Unsecure { protocol_id: PROTOCOL_ID, client_id, server_addr, user_data: None };
     let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
     let mut transport = NetcodeClientTransport::new(now, auth, socket).expect("подключение бота");
-    let mut client = RenetClient::new(connection_config());
+    let config = connection_config();
+    let channels: Vec<u8> = config.server_channels_config.iter().map(|c| c.channel_id).filter(|c| *c != CH_RELIABLE as u8).collect();
+    let mut client = RenetClient::new(config);
     let level: LevelColliders = crate::level::level_colliders();
     let mark = std::env::var("MRPG_MARK").ok().map(|s| s.split(',').filter_map(|t| t.trim().parse::<f32>().ok()).collect::<Vec<_>>()).filter(|v| v.len() == 2);
 
@@ -58,8 +60,9 @@ pub fn run(server_addr: SocketAddr, name: String) {
                     _ => {}
                 }
             }
-            for ch in [CH_UNRELIABLE as u8, crate::loot_net::CH_LOOT, crate::trade_net::CH_TRADE, crate::lore_net::CH_LORE, crate::doors::CH_DOOR, crate::loot_net::CH_PROPS, crate::smithing_net::CH_SMITH, CH_MAP] {
-                while client.receive_message(ch).is_some() {}
+            // Остальное (снимки мира, добыча, торговля…) боту не нужно — просто вычитываем.
+            for ch in &channels {
+                while client.receive_message(*ch).is_some() {}
             }
             if let Some(f) = feet.as_mut() {
                 // Ходит по главной улице на 30 м на запад и обратно (шаг человека ~1,4 м/с).

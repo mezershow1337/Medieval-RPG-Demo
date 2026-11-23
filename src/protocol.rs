@@ -6,7 +6,7 @@ use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendTyp
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_0012;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_0017;
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -68,7 +68,15 @@ pub fn connection_config() -> ConnectionConfig {
     };
     config.server_channels_config.push(smith.clone());
     config.client_channels_config.push(smith);
-    // Канал 11 — карта: имена игроков и метки (см. map.rs).
+    // Канал 11 — консоль разработчика (см. console_net.rs).
+    let console = ChannelConfig {
+        channel_id: crate::console_net::CH_CONSOLE,
+        max_memory_usage_bytes: 1024 * 1024,
+        send_type: SendType::ReliableOrdered { resend_time: std::time::Duration::from_millis(300) },
+    };
+    config.server_channels_config.push(console.clone());
+    config.client_channels_config.push(console);
+    // Канал 12 — карта: имена игроков и метки (см. map.rs).
     let map = ChannelConfig {
         channel_id: crate::map::CH_MAP,
         max_memory_usage_bytes: 512 * 1024,
@@ -103,6 +111,10 @@ pub enum ClientMessage {
     Attack { yaw: f32, pitch: f32 },
     /// Зажать / отпустить защиту (надёжный канал).
     Guard { on: bool, yaw: f32, pitch: f32 },
+    /// Убрать оружие и драться кулаками / снова взять оружие (хотбар).
+    Holster { on: bool },
+    /// Ответ стражнику, который вас остановил.
+    Law(crate::civilians::LawAnswer),
 }
 
 /// Кто это: игрок или враг какого типа. Люди Херсонеса и его округи около 510 г.
@@ -160,8 +172,16 @@ pub enum ServerMessage {
     /// Ваш персонаж возрождён в этой точке.
     Respawned { pos: NetPos },
     /// На земле появилось тело (его можно будет обыскать).
-    CorpseSpawned { corpse_id: u64, kind: ActorKind, pos: NetPos, yaw: f32 },
+    CorpseSpawned { corpse_id: u64, kind: ActorKind, pos: NetPos, yaw: f32, gear: crate::gear_look::Gear },
     CorpseRemoved { corpse_id: u64 },
+    /// Ранили мирного человека.
+    CivilianHit { civ: crate::civilians::Civ, at: NetPos, amount: f32, head: bool },
+    /// Мирный человек погиб; тело (если ещё лежит): id для обыска, точка и поворот.
+    CivilianDead { civ: crate::civilians::Civ, corpse: Option<(u64, NetPos, f32)> },
+    /// На место погибшего пришёл другой человек (наследник лавки, новый жилец).
+    CivilianBack { civ: crate::civilians::Civ },
+    /// Закон: свидетели, стража, карцер.
+    Law(crate::civilians::LawMessage),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -186,6 +206,8 @@ pub struct ActorSnapshot {
     pub move_mult: f32,
     /// Вид клинка в руке: 0 — ржавый и грубый, 255 — полированный (см. `Item::look`).
     pub finish: u8,
+    /// Видимые доспехи и щит (у игроков), чтобы модель была одета как в инвентаре.
+    pub gear: crate::gear_look::Gear,
 }
 
 /// Летящая стрела.

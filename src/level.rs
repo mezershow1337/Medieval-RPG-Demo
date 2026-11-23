@@ -203,6 +203,13 @@ pub struct Resident {
     pub role: Role,
 }
 
+impl Resident {
+    /// Тело — невидимая коробка, чтобы сквозь жителя не ходили (номер тела = номер жителя).
+    pub fn body(&self) -> Aabb {
+        Aabb::new(self.pos - Vec3::new(0.25, 0.0, 0.25), self.pos + Vec3::new(0.25, 1.75, 0.25))
+    }
+}
+
 pub struct Layout {
     pub doors: Vec<DoorSpec>,
     pub containers: Vec<ContainerSpec>,
@@ -384,7 +391,6 @@ impl Builder {
     /// Житель стоит в точке `pos` лицом по `yaw` (тело — невидимая коробка, чтобы сквозь него не ходили).
     fn resident(&mut self, pos: Vec3, yaw: f32, role: Role) {
         self.residents.push(Resident { pos, yaw, role });
-        self.invisible.push(Aabb::new(pos - Vec3::new(0.25, 0.0, 0.25), pos + Vec3::new(0.25, 1.75, 0.25)));
     }
 
     /// Дальнейшие декоративные меши относятся к участку карты вокруг точки (x, z).
@@ -709,7 +715,8 @@ pub fn colliders(layout: Layout) -> LevelColliders {
     let mut boxes: Vec<Aabb> = layout.blocks.iter().filter(|b| b.solid).map(|b| b.aabb).collect();
     boxes.extend(layout.invisible);
     let doors = layout.doors.iter().map(|d| (d.closed_box(), d.open)).collect();
-    LevelColliders::with_doors(boxes, layout.ground, doors)
+    let bodies = layout.residents.iter().map(Resident::body).collect();
+    LevelColliders::with_bodies(boxes, layout.ground, doors, bodies)
 }
 
 pub fn level_colliders() -> LevelColliders {

@@ -24,7 +24,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
 /// Канал renet для карты (надёжный, по порядку). Настроен в `protocol::connection_config`.
-pub const CH_MAP: u8 = 11;
+pub const CH_MAP: u8 = 12;
 
 /// Сторона растра карты в пикселях.
 const MAP_PX: usize = 2048;
@@ -176,11 +176,13 @@ pub struct MapView {
     drag: Option<(Vec2, Vec2)>,
     /// Сторона окна карты в логических пикселях (считается от размера окна игры).
     side: f32,
+    /// Где на карте стоят значки игроков и меток с подписями: подписи мест их не перекрывают.
+    occupied: Vec<Rect>,
 }
 
 impl Default for MapView {
     fn default() -> Self {
-        Self { open: false, zoom: 2.4, center: Vec2::splat(0.5), drag: None, side: 600.0 }
+        Self { open: false, zoom: 2.4, center: Vec2::splat(0.5), drag: None, side: 600.0, occupied: Vec::new() }
     }
 }
 
@@ -200,7 +202,7 @@ impl Plugin for MapClientPlugin {
             .add_systems(Startup, (start_drawing_map, (setup_marker_art, setup_map_ui, setup_compass).chain().after(crate::inventory_ui::setup_fonts)))
             .add_systems(Update, (say_hello, receive_map).run_if(bevy_renet::client_connected))
             .add_systems(Update, finish_map_sheet)
-            .add_systems(Update, (toggle_map, free_cursor_while_open, map_input, layout_map, update_map_markers).chain())
+            .add_systems(Update, (toggle_map, free_cursor_while_open, map_input, update_map_markers, layout_map).chain())
             .add_systems(Update, (update_compass, update_name_tags));
     }
 }
@@ -360,6 +362,10 @@ struct MapLabel {
     uv: Vec2,
     min_zoom: f32,
     half_w: f32,
+    /// Примерный размер надписи (для того, чтобы подписи не налезали друг на друга).
+    est: Vec2,
+    /// Порядок важности: важные места подписываются первыми.
+    rank: u32,
 }
 
 fn label_tier(kind: crate::level::PlaceKind) -> f32 {
@@ -367,7 +373,7 @@ fn label_tier(kind: crate::level::PlaceKind) -> f32 {
     match kind {
         SteppeCamp | GothVillage | AlanCamp | Necropolis | Vineyard | Spring => 0.0,
         Agora | Basilica | Gate | PortMarket | Theatre | Garrison | Praetorium | Thermae | Quay | Cistern => 1.8,
-        _ => 3.4,
+        _ => 3.0,
     }
 }
 
@@ -418,18 +424,21 @@ fn setup_map_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
         if p.kind == crate::level::PlaceKind::Hearth {
             continue;
         }
-        labels.push((p.name.to_string(), p.pos, label_tier(p.kind), 14.0, false));
+        labels.push((p.name.to_string(), p.pos, label_tier(p.kind), 15.0, false));
     }
     if crate::level::active() == crate::level::LevelKind::Chersonesus {
         labels.push(("Х Е Р С О Н".into(), Vec3::new(0.0, 0.0, 30.0), 0.0, 26.0, true));
         labels.push(("П о н т   Э в к с и н с к и й".into(), Vec3::new(60.0, 0.0, -330.0), 0.0, 24.0, true));
         labels.push(("Гераклейский полуостров".into(), Vec3::new(-40.0, 0.0, 420.0), 0.0, 18.0, true));
     }
-    for (name, pos, min_zoom, size, big) in labels {
+    // Крупные надписи — первыми, затем по важности места.
+    labels.sort_by(|a, b| (!a.4).cmp(&!b.4).then(a.2.total_cmp(&b.2)));
+    for (rank, (name, pos, min_zoom, size, big)) in labels.into_iter().enumerate() {
         let half_w = 160.0;
+        let est = Vec2::new(name.chars().count() as f32 * size * 0.5, size * 1.2);
         commands.spawn((
-            MapLabel { uv: Vec2::new(pos.x, pos.z), min_zoom, half_w },
-            text(&fonts, &name, size, if big { Color::srgba(0.24, 0.15, 0.08, 0.8) } else { INK }, big),
+            MapLabel { uv: Vec2::new(pos.x, pos.z), min_zoom, half_w, est, rank: rank as u32 },
+            text(&fonts, &name, size, if big { Color::srgba(0.24, 0.15, 0.08, 0.75) } else { INK }, true),
             TextLayout::justify(Justify::Center),
             TextShadow { offset: Vec2::splat(1.0), color: Color::srgba(0.95, 0.89, 0.74, 0.8) },
             Node { position_type: PositionType::Absolute, width: px(half_w * 2.0), ..default() },
@@ -601,10 +610,19 @@ fn layout_map(
     node.height = px(full);
     node.left = px(side / 2.0 - view.center.x * full);
     node.top = px(side / 2.0 - view.center.y * full);
-    for (label, mut node, mut vis) in &mut labels {
+    // Подписи по важности; та, что налезла бы на уже поставленную, прячется (до приближения).
+    let mut placed: Vec<Rect> = view.occupied.clone();
+    let mut sorted: Vec<_> = labels.iter_mut().collect();
+    sorted.sort_by_key(|(l, ..)| l.rank);
+    for (label, mut node, mut vis) in sorted {
         let uv = bounds.to_uv(label.uv.x, label.uv.y);
         let p = (uv - view.center) * full + side / 2.0;
-        let show = view.zoom >= label.min_zoom && p.x > -40.0 && p.y > -10.0 && p.x < side + 40.0 && p.y < side + 10.0;
+        let rect = Rect::from_center_size(p + Vec2::new(0.0, 6.0 + label.est.y / 2.0), label.est + Vec2::new(8.0, 0.0));
+        let free = !placed.iter().any(|r| !r.intersect(rect).is_empty());
+        let show = free && view.zoom >= label.min_zoom && p.x > -40.0 && p.y > -10.0 && p.x < side + 40.0 && p.y < side + 10.0;
+        if show {
+            placed.push(rect);
+        }
         *vis = if show { Visibility::Inherited } else { Visibility::Hidden };
         node.left = px(p.x - label.half_w);
         node.top = px(p.y + 6.0);
@@ -679,7 +697,7 @@ fn spawn_marker(commands: &mut Commands, fonts: &crate::inventory_ui::UiFonts, p
 #[allow(clippy::too_many_arguments)]
 fn update_map_markers(
     mut commands: Commands,
-    view: Res<MapView>,
+    mut view: ResMut<MapView>,
     sheet: Res<MapSheet>,
     net: Res<NetState>,
     party: Res<Party>,
@@ -703,6 +721,7 @@ fn update_map_markers(
     };
     let mates = gather(&net, &party, &local, &remotes, &level);
     let full = view.side * view.zoom;
+    let mut occupied: Vec<Rect> = Vec::new();
     pool.map.retain(|k, e| {
         let keep = mates.iter().any(|m| m.key == *k);
         if !keep {
@@ -734,15 +753,28 @@ fn update_map_markers(
             // Стрелка смотрит туда же, куда игрок: вперёд — (−sin yaw, −cos yaw) по X/Z, север вверху.
             tf.rotation = Rot2::radians(-m.yaw.unwrap_or(0.0));
         }
-        if let Some(&label) = kids.get(1)
-            && let Ok((mut t, mut c)) = texts.get_mut(label)
-        {
-            if t.0 != m.label {
-                t.0 = m.label.clone();
+        // Подпись справа от значка; если налезает на подпись соседа (стоят рядом) — ниже.
+        let est = Vec2::new(m.label.chars().count() as f32 * 15.0 * 0.55, 18.0);
+        let mut dy = 0.0;
+        let label_rect = |dy: f32| Rect::from_corners(p + Vec2::new(size / 2.0 + 2.0, -10.0 + dy), p + Vec2::new(size / 2.0 + 2.0 + est.x, -10.0 + dy + est.y));
+        while dy < 72.0 && occupied.iter().any(|r| !r.intersect(label_rect(dy)).is_empty()) {
+            dy += 17.0;
+        }
+        occupied.push(Rect::from_center_size(p, Vec2::splat(size)));
+        occupied.push(label_rect(dy));
+        if let Some(&label) = kids.get(1) {
+            if let Ok(mut n) = nodes.get_mut(label) {
+                n.top = px(size / 2.0 - 10.0 + dy);
             }
-            c.0 = m.color.mix(&INK, 0.35);
+            if let Ok((mut t, mut c)) = texts.get_mut(label) {
+                if t.0 != m.label {
+                    t.0 = m.label.clone();
+                }
+                c.0 = m.color.mix(&INK, 0.35);
+            }
         }
     }
+    view.occupied = occupied;
 }
 
 // ---------------------------------------------------------------------------

@@ -4,10 +4,11 @@ use crate::combat::{self, Action, Fighter, WeaponKind};
 use crate::fight::{self, CombatFeedback, LocalFighter};
 use crate::player::{LocalPlayer, PlayerPlugin, spawn_local_player};
 use crate::protocol::*;
+use crate::gear_look::{Gear, ShieldLook};
 use crate::rig::{self, Blade, CharacterModels, NeedsRig, NeedsShield, NeedsWeapon, Outfit, PoseInput, RigPose, ShieldKind};
 use crate::{graphics, hud, level};
 use bevy::prelude::*;
-use bevy_renet::netcode::{ClientAuthentication, NetcodeClientPlugin, NetcodeClientTransport, NetcodeErrorEvent};
+use bevy_renet::netcode::{ClientAuthentication, ConnectToken, NETCODE_KEY_BYTES, NetcodeClientPlugin, NetcodeClientTransport, NetcodeErrorEvent};
 use bevy_renet::{RenetClient, RenetClientPlugin, client_connected};
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
@@ -38,6 +39,9 @@ pub struct RemoteActor {
     last_pos: Vec3,
     /// Вид клинка (см. `ActorSnapshot::finish`).
     finish: u8,
+    /// Видимые доспехи и щит (у игроков) и то, во что модель одета сейчас.
+    gear: Gear,
+    shown_gear: Gear,
 }
 
 /// Скелет с телом (дочерняя сущность бойца или тела на земле).
@@ -90,7 +94,7 @@ pub struct CorpseMarker {
 pub struct RemoteIndex(pub HashMap<u64, Entity>);
 
 #[derive(Resource, Default)]
-struct CorpseIndex(HashMap<u64, Entity>);
+pub struct CorpseIndex(pub HashMap<u64, Entity>);
 
 #[derive(Resource)]
 struct SendTimer(Timer);
@@ -112,11 +116,31 @@ impl CharacterAssets {
     }
 }
 
+/// Сколько секунд тишины от другой стороны терпим, прежде чем считать связь потерянной.
+const CONNECTION_TIMEOUT_SECS: i32 = 60;
+/// Срок жизни билета: с запасом, чтобы часы хоста и друга могли расходиться до часа.
+const CONNECT_TOKEN_EXPIRE_SECS: u64 = 3600;
+
 pub fn run(server_addr: SocketAddr) {
     let client_id = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
     let socket = UdpSocket::bind("0.0.0.0:0").expect("не удалось открыть сокет клиента");
-    let auth = ClientAuthentication::Unsecure { protocol_id: PROTOCOL_ID, client_id, server_addr, user_data: None };
     let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+    // Билет подключения собираем сами, а не через ClientAuthentication::Unsecure: там таймаут
+    // жёстко 15 с, и если игра у друга замирает дольше (первая загрузка уровня, компиляция
+    // шейдеров, перетаскивание окна), сервер выкидывал его с «terminated by the transport layer».
+    // Сервер работает в режиме Unsecure — его ключ из нулей, тот же, что здесь.
+    let token = ConnectToken::generate(
+        current_time,
+        PROTOCOL_ID,
+        CONNECT_TOKEN_EXPIRE_SECS,
+        client_id,
+        CONNECTION_TIMEOUT_SECS,
+        vec![server_addr],
+        None,
+        &[0; NETCODE_KEY_BYTES],
+    )
+    .expect("не удалось создать билет подключения");
+    let auth = ClientAuthentication::Secure { connect_token: token };
     let transport = NetcodeClientTransport::new(current_time, auth, socket).expect("не удалось создать подключение");
 
     App::new()
@@ -130,9 +154,12 @@ pub fn run(server_addr: SocketAddr) {
         .add_plugins(crate::doors::DoorClientPlugin)
         .add_plugins(crate::map::MapClientPlugin)
         .add_plugins(crate::residents::ResidentsPlugin)
+        .add_plugins(crate::civil_client::CivilClientPlugin)
         .add_plugins(crate::trade_client::TradeClientPlugin)
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))
         .add_plugins(crate::smithing_client::SmithingClientPlugin)
+        .add_plugins(crate::work_client::WorkClientPlugin)
+        .add_plugins(crate::console::ConsolePlugin)
         .add_systems(Update, hide_ui_for_shots.run_if(|| std::env::var("MRPG_CAM").is_ok()))
         .insert_resource(RenetClient::new(connection_config()))
         .insert_resource(transport)
@@ -151,7 +178,8 @@ pub fn run(server_addr: SocketAddr) {
             ((receive_reliable, receive_snapshots).chain(), send_state, animate_remote).run_if(client_connected).before(fight::FightSet).in_set(rig::PoseSet),
         )
         .add_systems(Update, animate_corpses.in_set(rig::PoseSet))
-        .add_systems(Update, (fly_arrows, refresh_remote_weapons))
+        .add_systems(Update, (fly_arrows, refresh_remote_weapons, refresh_remote_gear))
+        .add_systems(Update, gear_showcase.run_if(|| std::env::var("MRPG_GEAR_SHOWCASE").is_ok()))
         .run();
 }
 
@@ -208,7 +236,31 @@ pub fn weapon_grips(weapon: WeaponKind) -> (Vec3, Option<Vec3>) {
         WeaponKind::Spear => (Vec3::new(0.0, -0.6, 0.0), Some(Vec3::ZERO)),
         // Лук держат за середину.
         WeaponKind::Bow => (Vec3::ZERO, None),
+        // Кулак: «оружие» и есть кулак.
+        WeaponKind::Fists => (Vec3::ZERO, None),
     }
+}
+
+/// Как одет боец: враги — по своему типу, игроки — по надетому в инвентаре.
+pub fn outfit_of(kind: ActorKind, id: u64, gear: &Gear) -> Outfit {
+    let base = Outfit::for_actor(kind, id);
+    if kind == ActorKind::Player { base.with_gear(gear) } else { base }
+}
+
+/// Какой щит в руке: у игроков — надетый, у врагов — по типу (если он у них есть).
+fn shield_of(kind: ActorKind, has_shield: bool, gear: &Gear) -> Option<ShieldKind> {
+    if kind == ActorKind::Player {
+        return gear.shield().map(|s| match s {
+            ShieldLook::Oval => ShieldKind::Oval,
+            ShieldLook::Round => ShieldKind::Round,
+        });
+    }
+    has_shield.then(|| ShieldKind::for_actor(kind))
+}
+
+/// Щит на руке другого бойца (место — как в `animate_remote`).
+fn spawn_remote_shield(p: &mut ChildSpawnerCommands, kind: ShieldKind) {
+    p.spawn((RemoteShield, NeedsShield(kind), Transform::from_xyz(-0.42, 1.05, -0.1), Visibility::default()));
 }
 
 /// Где левая рука держит щит (ремни на обратной стороне).
@@ -234,42 +286,63 @@ fn spawn_remote(commands: &mut Commands, index: &mut RemoteIndex, snap: &ActorSn
                 crouch: if snap.crouching { 1.0 } else { 0.0 },
                 last_pos: pos,
                 finish: snap.finish,
+                gear: snap.gear,
+                shown_gear: snap.gear,
             },
             Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(snap.yaw)),
             Visibility::default(),
         ))
         .with_children(|p| {
-            p.spawn((BodyRig, NeedsRig(Outfit::for_actor(snap.kind, snap.id)), Transform::default(), Visibility::default()));
+            p.spawn((BodyRig, NeedsRig(outfit_of(snap.kind, snap.id, &snap.gear)), Transform::default(), Visibility::default()));
             p.spawn((RemoteSword, ShownWeapon(snap.weapon), NeedsWeapon(snap.weapon), Transform::from_xyz(0.3, 1.0, -0.4), Visibility::default()));
-            if snap.shield {
-                p.spawn((RemoteShield, NeedsShield(ShieldKind::for_actor(snap.kind)), Transform::from_xyz(-0.42, 1.05, -0.1), Visibility::default()));
+            if let Some(kind) = shield_of(snap.kind, snap.shield, &snap.gear) {
+                spawn_remote_shield(p, kind);
             }
         })
         .id();
     index.0.insert(snap.id, entity);
 }
 
-fn spawn_corpse(commands: &mut Commands, index: &mut CorpseIndex, corpse_id: u64, kind: ActorKind, pos: Vec3, yaw: f32, animate: bool) {
+#[allow(clippy::too_many_arguments)]
+fn spawn_corpse(commands: &mut Commands, index: &mut CorpseIndex, corpse_id: u64, kind: ActorKind, pos: Vec3, yaw: f32, gear: &Gear, animate: bool) {
     let proto = crate::npc::fighter_for(kind);
-    let weapon = proto.weapon;
+    // Оружие и щит игрока остаются в его инвентаре (их забирают при обыске), рядом не кладём.
+    let weapon = if kind == ActorKind::Player { WeaponKind::Fists } else { proto.weapon };
+    let shield = if kind == ActorKind::Player { None } else { shield_of(kind, proto.has_shield, gear) };
     let entity = commands
         .spawn((CorpseMarker { corpse_id, kind }, Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)), Visibility::default()))
         .with_children(|c| {
             // Лежит на спине; упавшее оружие и щит — рядом.
             let t = if animate { 0.0 } else { 1.0 };
-            c.spawn((BodyRig, CorpseFall { t, seed: corpse_id }, NeedsRig(Outfit::for_actor(kind, corpse_id)), rig::fall_transform(t), Visibility::default()));
+            c.spawn((BodyRig, CorpseFall { t, seed: corpse_id }, NeedsRig(outfit_of(kind, corpse_id, gear)), rig::fall_transform(t), Visibility::default()));
             c.spawn((
                 NeedsWeapon(weapon),
                 Transform::from_xyz(0.5, 0.025, 0.35).with_rotation(Quat::from_rotation_y(0.35) * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
                 Visibility::default(),
             ));
-            if proto.has_shield {
+            if let Some(shield) = shield {
                 c.spawn((
-                    NeedsShield(ShieldKind::for_actor(kind)),
+                    NeedsShield(shield),
                     Transform::from_xyz(-0.6, 0.06, 0.55).with_rotation(Quat::from_rotation_y(-0.5) * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
                     Visibility::default(),
                 ));
             }
+        })
+        .id();
+    index.0.insert(corpse_id, entity);
+}
+
+/// Тело мирного человека (в своей одежде, без оружия).
+pub fn spawn_civ_corpse(commands: &mut Commands, index: &mut CorpseIndex, corpse_id: u64, outfit: Outfit, scale: f32, pos: Vec3, yaw: f32, animate: bool) {
+    let entity = commands
+        .spawn((
+            CorpseMarker { corpse_id, kind: ActorKind::Player },
+            Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)).with_scale(Vec3::splat(scale)),
+            Visibility::default(),
+        ))
+        .with_children(|c| {
+            let t = if animate { 0.0 } else { 1.0 };
+            c.spawn((BodyRig, CorpseFall { t, seed: corpse_id }, NeedsRig(outfit), rig::fall_transform(t), Visibility::default()));
         })
         .id();
     index.0.insert(corpse_id, entity);
@@ -304,6 +377,7 @@ fn receive_reliable(
     waiting: Query<Entity, With<WaitingCamera>>,
     time: Res<Time>,
     mut welcomed_at: Local<Option<f32>>,
+    mut civil: MessageWriter<crate::civil_client::CivilNet>,
 ) {
     while let Some(bytes) = client.receive_message(CH_RELIABLE) {
         let Some(msg) = decode::<ServerMessage>(&bytes) else { continue };
@@ -357,12 +431,27 @@ fn receive_reliable(
                     }
                 }
             }
-            ServerMessage::CorpseSpawned { corpse_id, kind, pos, yaw } => {
+            ServerMessage::CorpseSpawned { corpse_id, kind, pos, yaw, gear } => {
                 if !corpses.0.contains_key(&corpse_id) {
                     // Тела, которые уже лежали, когда мы вошли, не падают заново.
                     let fresh = welcomed_at.is_some_and(|t| time.elapsed_secs() - t > 1.5);
-                    spawn_corpse(&mut commands, &mut corpses, corpse_id, kind, pos.into(), yaw, fresh);
+                    spawn_corpse(&mut commands, &mut corpses, corpse_id, kind, pos.into(), yaw, &gear, fresh);
                 }
+            }
+            ServerMessage::CivilianHit { civ, at, amount, head } => {
+                feedback.write(CombatFeedback::Hit { attacker: 0, target: u64::MAX, outcome: combat::HitOutcome::Damage { amount, killed: false, head }, at: at.into() });
+                let _ = civ;
+                civil.write(crate::civil_client::CivilNet::Hit);
+            }
+            ServerMessage::CivilianDead { civ, corpse } => {
+                let fresh = welcomed_at.is_some_and(|t| time.elapsed_secs() - t > 1.5);
+                civil.write(crate::civil_client::CivilNet::Dead { civ, corpse: corpse.map(|(id, p, y)| (id, p.into(), y)), fresh });
+            }
+            ServerMessage::CivilianBack { civ } => {
+                civil.write(crate::civil_client::CivilNet::Back(civ));
+            }
+            ServerMessage::Law(msg) => {
+                civil.write(crate::civil_client::CivilNet::Law(msg));
             }
             ServerMessage::CorpseRemoved { corpse_id } => {
                 if let Some(e) = corpses.0.remove(&corpse_id) {
@@ -423,6 +512,7 @@ fn receive_snapshots(
                 r.fighter.max_stamina = a.max_stamina;
                 r.fighter.action_speed = a.action_speed;
                 r.finish = a.finish;
+                r.gear = a.gear;
             }
             None if !index.0.contains_key(&a.id) => spawn_remote(&mut commands, &mut index, a),
             None => {}
@@ -485,6 +575,93 @@ fn refresh_remote_weapons(mut commands: Commands, remotes: Query<(&RemoteActor, 
             {
                 w.0 = r.fighter.weapon;
                 commands.entity(e).despawn_related::<Children>().insert(NeedsWeapon(w.0));
+            }
+        }
+    }
+}
+
+/// `MRPG_GEAR_SHOWCASE=x,y,z` (или пусто — у агоры): для снимков ряд игроков в разных доспехах,
+/// лицом к +Z; камера ожидания смотрит на них (если не задана `MRPG_CAM`).
+fn gear_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<WaitingCamera>>, mut done: Local<bool>) {
+    if *done {
+        return;
+    }
+    let Ok(mut cam) = cams.single_mut() else { return };
+    *done = true;
+    let v: Vec<f32> = std::env::var("MRPG_GEAR_SHOWCASE").unwrap_or_default().split(',').filter_map(|s| s.trim().parse().ok()).collect();
+    let o = if v.len() == 3 { Vec3::new(v[0], v[1], v[2]) } else { crate::level::place_pos("agora").unwrap_or_default() + Vec3::new(4.0, 0.0, 4.0) };
+    let id = |n: &str| crate::items::ItemBaseId::find(n).map(|b| b.0);
+    let sets: [&[(&str, u8)]; 5] = [
+        &[],
+        &[("Стёганая туника", 1), ("Кожаные перчатки", 2), ("Кожаные сапоги", 4)],
+        &[("Спангенхельм", 0), ("Кольчуга", 1), ("Кожаные перчатки", 2), ("Железные поножи", 3), ("Кожаные сапоги", 4), ("Круглый щит", 5)],
+        &[("Гребенчатый шлем", 0), ("Ламеллярный панцирь", 1), ("Ламеллярные наручи", 2), ("Железные поножи", 3), ("Кожаные сапоги", 4)],
+        &[("Гребенчатый шлем", 0), ("Стёганая туника", 1), ("Ламеллярные наручи", 2), ("Кожаные сапоги", 4), ("Овальный щит", 5)],
+    ];
+    info!("Витрина доспехов у {o}");
+    if std::env::var("MRPG_CAM").is_err() {
+        // `MRPG_GEAR_FOCUS=x` — крупно между фигурами (x — номер фигуры, можно дробный).
+        *cam = match std::env::var("MRPG_GEAR_FOCUS").ok().and_then(|s| s.parse::<f32>().ok()) {
+            Some(f) => Transform::from_translation(o + Vec3::new(f * 0.95, 1.45, 1.7)).looking_at(o + Vec3::new(f * 0.95, 1.1, 0.0), Vec3::Y),
+            None => Transform::from_translation(o + Vec3::new(1.9, 1.35, 3.6)).looking_at(o + Vec3::new(1.9, 1.0, 0.0), Vec3::Y),
+        };
+    }
+    for (i, set) in sets.iter().enumerate() {
+        let mut g = Gear::default();
+        for (name, slot) in set.iter() {
+            let b = id(name);
+            match slot {
+                0 => g.head = b,
+                1 => g.chest = b,
+                2 => g.hands = b,
+                3 => g.legs = b,
+                4 => g.feet = b,
+                _ => g.off_hand = b,
+            }
+        }
+        let p = o + Vec3::X * (i as f32 * 0.95);
+        commands
+            .spawn((Transform::from_translation(p).with_rotation(Quat::from_rotation_y(std::f32::consts::PI)), Visibility::default()))
+            .with_children(|c| {
+                c.spawn((BodyRig, NeedsRig(outfit_of(ActorKind::Player, 7 + i as u64, &g)), Transform::default(), Visibility::default()));
+                if let Some(kind) = shield_of(ActorKind::Player, false, &g) {
+                    c.spawn((NeedsShield(kind), Transform::from_xyz(-0.36, 1.0, -0.12).with_rotation(Quat::from_rotation_y(1.2)), Visibility::default()));
+                }
+            });
+    }
+}
+
+/// Другой игрок надел или снял доспех, щит — переодеваем модель.
+fn refresh_remote_gear(
+    mut commands: Commands,
+    mut remotes: Query<(Entity, &mut RemoteActor, &Children)>,
+    bodies: Query<(), With<BodyRig>>,
+    shields: Query<(), With<RemoteShield>>,
+    models: Option<Res<CharacterModels>>,
+) {
+    // Пока модели не загрузились, тело всё равно ещё не собрано — подождём.
+    if models.is_none() {
+        return;
+    }
+    for (e, mut r, children) in &mut remotes {
+        if r.gear == r.shown_gear {
+            continue;
+        }
+        let (old, new) = (r.shown_gear, r.gear);
+        r.shown_gear = new;
+        let outfit = outfit_of(r.kind, r.id, &new);
+        if outfit != outfit_of(r.kind, r.id, &old) {
+            for child in children.iter().filter(|c| bodies.contains(*c)) {
+                commands.entity(child).despawn_related::<Children>().remove::<rig::Rig>().insert(NeedsRig(outfit));
+            }
+        }
+        let has = r.fighter.has_shield;
+        if shield_of(r.kind, has, &new) != shield_of(r.kind, has, &old) {
+            for child in children.iter().filter(|c| shields.contains(*c)) {
+                commands.entity(child).despawn();
+            }
+            if let Some(kind) = shield_of(r.kind, has, &new) {
+                commands.entity(e).with_children(|p| spawn_remote_shield(p, kind));
             }
         }
     }
@@ -586,6 +763,11 @@ fn animate_remote(
             shield_tf = Some(*shield);
         }
         let (right, left) = weapon_grips(r.fighter.weapon);
+        // Без оружия и без щита левый кулак тоже поднят (стойка кулачного бойца).
+        let fist_l = (r.fighter.weapon == WeaponKind::Fists && shield_tf.is_none()).then(|| {
+            let guard = matches!(r.fighter.action, Action::Windup { .. } | Action::Strike { .. } | Action::Recovery { .. });
+            Vec3::Y * (eye - 0.25) + aim * if guard { Vec3::new(-0.16, -0.08, -0.28) } else { Vec3::new(-0.2, -0.18, -0.3) }
+        });
         let mut input = PoseInput {
             crouch: r.crouch,
             walk_phase: r.walk_phase,
@@ -595,10 +777,10 @@ fn animate_remote(
             lean,
             time: now + r.id as f32,
             right_grip: Some(sword_tf.transform_point(right)),
-            left_grip: left.map(|l| sword_tf.transform_point(l)).or(shield_tf.map(|s| s.transform_point(SHIELD_GRIP))),
+            left_grip: left.map(|l| sword_tf.transform_point(l)).or(shield_tf.map(|s| s.transform_point(SHIELD_GRIP))).or(fist_l),
             // Кулак обхватывает рукоять/древко по оси оружия, щит — за горизонтальную ручку.
             right_axis: Some(sword_tf.rotation * Vec3::Y),
-            left_axis: if left.is_some() { Some(sword_tf.rotation * Vec3::Y) } else { shield_tf.map(|s| s.rotation * Vec3::NEG_X) },
+            left_axis: if left.is_some() { Some(sword_tf.rotation * Vec3::Y) } else { shield_tf.map(|s| s.rotation * Vec3::NEG_X).or(fist_l.map(|_| aim * Vec3::new(0.15, 0.25, -1.0).normalize())) },
         };
         let mut solved = rig::solve_pose(&input);
         // Если руки не дотягиваются до рукояти, меч придвигается к ним (только внешний вид,

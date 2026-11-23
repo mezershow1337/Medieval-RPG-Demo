@@ -31,6 +31,9 @@ pub enum WeaponKind {
     Spear,
     /// Составной лук степняков: удар — это натяжение и выстрел.
     Bow,
+    /// Пустые руки: короткие прямые удары кулаком. Слабо, медленно для боя с оружием,
+    /// парировать клинок голой рукой нельзя (защищает только щит, если он в левой руке).
+    Fists,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -59,11 +62,13 @@ impl WeaponKind {
             WeaponKind::Spear => WeaponStats { windup: 0.55, strike: 0.2, recovery: 0.6, damage: 24.0, reach: 2.1, impact_power: 4, guard_resist: 3, stamina_cost: 14.0 },
             // У лука «замах» — натяжение тетивы, «удар» — выстрел.
             WeaponKind::Bow => WeaponStats { windup: 1.1, strike: 0.05, recovery: 0.7, damage: 30.0, reach: 0.0, impact_power: 2, guard_resist: 0, stamina_cost: 10.0 },
+            // Кулак: «клинок» — от костяшек вперёд на длину выпада.
+            WeaponKind::Fists => WeaponStats { windup: 0.38, strike: 0.16, recovery: 0.42, damage: FIST_DAMAGE, reach: 0.4, impact_power: 0, guard_resist: 0, stamina_cost: 8.0 },
         }
     }
     /// Бьёт только уколом (копьё).
     pub fn thrust_only(self) -> bool {
-        matches!(self, WeaponKind::Spear)
+        matches!(self, WeaponKind::Spear | WeaponKind::Fists)
     }
     /// Стреляет, а не рубит.
     pub fn ranged(self) -> bool {
@@ -71,7 +76,11 @@ impl WeaponKind {
     }
     /// Можно ли этим оружием держать защиту.
     pub fn can_guard(self) -> bool {
-        !self.ranged()
+        !self.ranged() && self != WeaponKind::Fists
+    }
+    /// Можно ли держать защиту с этим оружием и (возможно) щитом в левой руке.
+    pub fn can_guard_with(self, shield: bool) -> bool {
+        self.can_guard() || (shield && self == WeaponKind::Fists)
     }
 
     /// Какое оружие соответствует предмету (по названию предмета).
@@ -94,6 +103,9 @@ impl WeaponKind {
         }
     }
 }
+
+/// Урон удара кулаком без доспеха (у игрока прибавляется сила, см. server.rs).
+pub const FIST_DAMAGE: f32 = 7.0;
 
 /// Полёт стрелы: скорость и гравитация.
 pub const ARROW_SPEED: f32 = 42.0;
@@ -389,7 +401,7 @@ impl Fighter {
 
     /// Зажать или отпустить защиту.
     pub fn set_guard(&mut self, on: bool) {
-        let on = on && self.weapon.can_guard();
+        let on = on && self.weapon.can_guard_with(self.has_shield);
         self.guard_held = on;
         match (on, self.action) {
             (true, Action::Idle) => self.action = Action::Guard { t: 0.0 },
@@ -612,6 +624,9 @@ pub fn weapon_pose(action: &Action, weapon: WeaponKind, time: f32) -> (Vec3, Vec
         };
         (hilt, (start + Vec3::Y * 0.6 + Vec3::Z * 0.4).normalize())
     };
+    if weapon == WeaponKind::Fists {
+        return fist_pose(action, time);
+    }
     if weapon.ranged() {
         // Лук: держим перед собой вертикально, пока натягиваем и стреляем.
         let aim = (Vec3::new(-0.05, 0.0, -0.55), Vec3::Y);
@@ -647,6 +662,32 @@ pub fn weapon_pose(action: &Action, weapon: WeaponKind, time: f32) -> (Vec3, Vec
             (Vec3::new(0.4, 0.15 + wobble, -0.05), Vec3::new(0.6, 0.8, 0.35 + wobble).normalize())
         }
         Action::Flinch { t } => mix((REST_HILT + Vec3::new(0.05, -0.1, 0.1), rest_dir()), rest, t / FLINCH_TIME),
+        Action::Idle | Action::Dead => rest,
+    }
+}
+
+/// Кулак (пустые руки): «рукоять» — центр кулака, направление — от костяшек вперёд.
+/// Стойка — кулак поднят у подбородка; удар — прямой выпад, как укол копья.
+fn fist_pose(action: &Action, time: f32) -> (Vec3, Vec3) {
+    let stats = WeaponKind::Fists.stats();
+    let fwd = Vec3::new(0.0, -0.06, -1.0).normalize();
+    let rest = (Vec3::new(0.2, -0.2, -0.3), Vec3::new(-0.15, 0.25, -1.0).normalize());
+    let cocked = (strike_hilt(Swing::Thrust, 0.0) + Vec3::new(0.0, 0.08, 0.0), fwd);
+    match *action {
+        Action::Windup { t, riposte, .. } => {
+            let dur = if riposte { RIPOSTE_WINDUP } else { stats.windup };
+            mix(rest, cocked, t / dur)
+        }
+        Action::Strike { t, .. } => (strike_hilt(Swing::Thrust, (t / stats.strike).clamp(0.0, 1.0)), fwd),
+        Action::Recovery { t, .. } => mix((strike_hilt(Swing::Thrust, 1.0), fwd), rest, t / stats.recovery),
+        Action::Stagger { t, dur } | Action::GuardStagger { t, dur } => {
+            let k = (1.0 - t / dur).max(0.0);
+            let wobble = (time * 30.0).sin() * 0.05 * k;
+            (rest.0 + Vec3::new(0.1, 0.05 + wobble, 0.15) * k, rest.1)
+        }
+        Action::Flinch { t } => mix((rest.0 + Vec3::new(0.05, -0.1, 0.1), rest.1), rest, t / FLINCH_TIME),
+        // Со щитом в стойке правый кулак прижат к груди.
+        Action::Guard { t } => mix(rest, (Vec3::new(0.15, -0.25, -0.2), rest.1), t / GUARD_RAISE_WEAPON),
         Action::Idle | Action::Dead => rest,
     }
 }
@@ -793,7 +834,8 @@ pub fn trace_blade(hilt: Vec3, tip: Vec3, attacker_pose: &Pose, defender: &Fight
 pub fn blade_hits_wall(level: &LevelColliders, hilt: Vec3, tip: Vec3, feet: Vec3) -> Option<Vec3> {
     for i in 3..=8 {
         let p = hilt.lerp(tip, i as f32 / 8.0);
-        let inside = level.boxes_near(p).any(|c| c.max.y > feet.y + 0.3);
+        // Живые люди — не стена: по ним клинок бьёт, а не отскакивает.
+        let inside = level.point_in_wall(p).is_some_and(|c| c.max.y > feet.y + 0.3);
         if inside {
             return Some(p);
         }
@@ -1227,4 +1269,19 @@ mod tests {
         assert!((armor_reduction(150.0) - 0.5).abs() < 1e-6);
         assert_eq!(armor_reduction(0.0), 0.0);
     }
+
+    #[test]
+    fn fists_punch_lands_but_cannot_parry() {
+        let mut a = Fighter::new(WeaponKind::Fists, 150.0, false);
+        let mut d = Fighter::new(WeaponKind::Spatha, 150.0, false);
+        assert!(matches!(duel(&mut a, &mut d, PI, None), Some(HitOutcome::Damage { .. })));
+        // Голой рукой клинок не отбить, а со щитом стойка есть.
+        let mut bare = Fighter::new(WeaponKind::Fists, 150.0, false);
+        bare.set_guard(true);
+        assert!(!bare.guard_held);
+        let mut shielded = Fighter::new(WeaponKind::Fists, 150.0, true);
+        shielded.set_guard(true);
+        assert!(shielded.guard_held);
+    }
+
 }

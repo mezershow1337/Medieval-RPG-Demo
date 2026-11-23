@@ -132,6 +132,9 @@ struct Accel {
 struct DoorFlags {
     first: usize,
     open: Vec<std::sync::atomic::AtomicBool>,
+    /// Тела жителей: коробки после дверей (с индекса `bodies_first`); погибший не мешает.
+    bodies_first: usize,
+    gone: Vec<std::sync::atomic::AtomicBool>,
 }
 
 /// Размеры тела персонажа. Позиция персонажа = точка у ног (центр по X/Z, низ по Y).
@@ -172,12 +175,34 @@ impl LevelColliders {
 
     /// Коробки уровня плюс двери (коробка закрытой створки и открыта ли она сначала).
     /// Номер двери — её индекс в `doors`.
-    pub fn with_doors(mut boxes: Vec<Aabb>, ground: Option<HeightField>, doors: Vec<(Aabb, bool)>) -> Self {
+    pub fn with_doors(boxes: Vec<Aabb>, ground: Option<HeightField>, doors: Vec<(Aabb, bool)>) -> Self {
+        Self::with_bodies(boxes, ground, doors, Vec::new())
+    }
+
+    /// То же плюс тела жителей (номер тела — индекс в `bodies`).
+    pub fn with_bodies(mut boxes: Vec<Aabb>, ground: Option<HeightField>, doors: Vec<(Aabb, bool)>, bodies: Vec<Aabb>) -> Self {
         let first = boxes.len();
         let open = doors.iter().map(|(_, o)| std::sync::atomic::AtomicBool::new(*o)).collect();
         boxes.extend(doors.iter().map(|(a, _)| *a));
+        let bodies_first = boxes.len();
+        let gone = bodies.iter().map(|_| std::sync::atomic::AtomicBool::new(false)).collect();
+        boxes.extend(bodies);
         let grid = Grid::build(&boxes);
-        LevelColliders(boxes, Accel { grid, ground: ground.map(std::sync::Arc::new), doors: std::sync::Arc::new(DoorFlags { first, open }) })
+        LevelColliders(boxes, Accel { grid, ground: ground.map(std::sync::Arc::new), doors: std::sync::Arc::new(DoorFlags { first, open, bodies_first, gone }) })
+    }
+
+    /// Житель погиб (его тело больше не загораживает проход) или на его место пришёл новый.
+    pub fn set_body_gone(&self, id: usize, gone: bool) {
+        if let Some(f) = self.1.doors.gone.get(id) {
+            f.store(gone, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// Точка внутри стены (не считая живых людей): для отскока клинка.
+    pub fn point_in_wall(&self, p: Vec3) -> Option<&Aabb> {
+        let a = Aabb { min: p, max: p };
+        let bodies_first = self.1.doors.bodies_first;
+        self.near_ids(a).filter(|&i| i < bodies_first).map(|i| &self.0[i]).find(|c| p.cmpgt(c.min).all() && p.cmplt(c.max).all())
     }
 
     pub fn door_count(&self) -> usize {
@@ -214,6 +239,11 @@ impl LevelColliders {
 
     /// Коробки, которые могут пересекаться с `a`.
     fn near<'a>(&'a self, a: Aabb) -> impl Iterator<Item = &'a Aabb> + 'a {
+        self.near_ids(a).map(move |i| &self.0[i])
+    }
+
+    /// Номера коробок, которые могут пересекаться с `a`.
+    fn near_ids<'a>(&'a self, a: Aabb) -> impl Iterator<Item = usize> + 'a {
         let g = &self.1.grid;
         let (x0, z0, x1, z1) = if g.cells.is_empty() { (0, 0, -1, -1) } else { g.range(&a) };
         let cells = (z0..=z1).flat_map(move |z| (x0..=x1).map(move |x| (z * g.nx + x) as usize));
@@ -223,9 +253,15 @@ impl LevelColliders {
             .chain(cells.flat_map(move |c| g.cells[c].iter()))
             .filter(move |&&i| {
                 let i = i as usize;
-                i < doors.first || !doors.open.get(i - doors.first).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+                if i < doors.first {
+                    true
+                } else if i < doors.bodies_first {
+                    !doors.open.get(i - doors.first).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+                } else {
+                    !doors.gone.get(i - doors.bodies_first).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+                }
             })
-            .map(move |&i| &self.0[i as usize])
+            .map(|&i| i as usize)
     }
 
     /// Коробки (с учётом дверей), которые пересекаются с `a` — для физики предметов.
@@ -234,6 +270,7 @@ impl LevelColliders {
     }
 
     /// Коробки, в которые может попасть точка (быстрее, чем перебор всего `.0`).
+    #[allow(dead_code)]
     pub fn boxes_near(&self, p: Vec3) -> impl Iterator<Item = &Aabb> + '_ {
         let a = Aabb { min: p, max: p };
         self.near(a).filter(move |c| p.cmpgt(c.min).all() && p.cmplt(c.max).all())

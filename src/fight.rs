@@ -22,11 +22,13 @@ pub struct LocalFighter {
     pub move_mult: f32,
     /// Вид своего клинка (присылает сервер).
     pub finish: u8,
+    /// Что надето (присылает сервер): рука от первого лица в перчатке, наруче, рукаве доспеха.
+    pub gear: crate::gear_look::Gear,
 }
 
 impl LocalFighter {
     pub fn new(fighter: Fighter) -> Self {
-        Self { fighter, move_mult: 1.0, finish: 200 }
+        Self { fighter, move_mult: 1.0, finish: 200, gear: Default::default() }
     }
 }
 
@@ -93,7 +95,7 @@ impl Plugin for FightPlugin {
                     .chain()
                     .in_set(FightSet),
             )
-            .add_systems(Update, refresh_view_weapon);
+            .add_systems(Update, (refresh_view_weapon, refresh_view_arm));
     }
 }
 
@@ -126,6 +128,26 @@ fn refresh_view_weapon(mut commands: Commands, local: Query<&LocalFighter>, mut 
 #[derive(Component)]
 struct ViewArmRoot;
 
+/// Надел перчатки, наручи или доспех — переодеваем руку от первого лица.
+fn refresh_view_arm(
+    mut commands: Commands,
+    local: Query<&LocalFighter>,
+    arms: Query<Entity, (With<ViewArmRoot>, With<crate::rig::ViewArm>)>,
+    net: Option<Res<NetState>>,
+    mut shown: Local<crate::gear_look::Gear>,
+) {
+    let Ok(f) = local.single() else { return };
+    if f.gear == *shown {
+        return;
+    }
+    // Ждём, пока рука соберётся (у неё уже есть суставы), иначе переодевать нечего.
+    let Ok(e) = arms.single() else { return };
+    *shown = f.gear;
+    let id = net.as_ref().and_then(|n| n.my_id).unwrap_or(0);
+    let outfit = crate::rig::Outfit::for_actor(ActorKind::Player, id).with_gear(&f.gear);
+    commands.entity(e).despawn_related::<Children>().remove::<crate::rig::ViewArm>().insert(crate::rig::NeedsViewArm(Some(outfit)));
+}
+
 fn setup_sparks(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
     let glow = |materials: &mut Assets<StandardMaterial>, c: Color, e: LinearRgba| materials.add(StandardMaterial { base_color: c, emissive: e, unlit: true, ..default() });
     commands.insert_resource(SparkAssets {
@@ -146,8 +168,10 @@ fn combat_input(
     client: Option<ResMut<RenetClient>>,
     mut local: Query<(&LocalPlayer, &mut LocalFighter)>,
     grab: Option<Res<crate::props_client::PropGrab>>,
+    work: Option<Res<crate::work_client::MyWork>>,
 ) {
-    if !cursor_locked(&cursor) {
+    // Во время работы руками ЛКМ — удар молотом по заготовке, а не мечом.
+    if !cursor_locked(&cursor) || crate::work_client::hands_busy(work.as_deref()) {
         return;
     }
     // ЛКМ по предмету — захват (props_client), ПКМ с предметом в руках — бросок.
@@ -189,6 +213,7 @@ pub fn reconcile(local: &mut LocalFighter, snap: &ActorSnapshot) {
     local.fighter.action_speed = snap.action_speed;
     local.move_mult = snap.move_mult;
     local.finish = snap.finish;
+    local.gear = snap.gear;
     // Оружие меняем только вне удара, чтобы не сбить анимацию.
     if snap.weapon != local.fighter.weapon && matches!(local.fighter.action, Action::Idle | Action::Guard { .. }) {
         local.fighter.weapon = snap.weapon;
@@ -215,6 +240,7 @@ fn animate_view_sword(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut arm: Query<(&crate::rig::ViewArm, &mut Visibility), (With<ViewArmRoot>, Without<ViewSword>)>,
     mut joints: Query<&mut Transform, (Without<ViewSword>, Without<PlayerCamera>, Without<ViewArmRoot>)>,
+    work: Option<Res<crate::work_client::MyWork>>,
 ) {
     let Ok((p, f)) = local.single() else { return };
     // Поворот камеры по вертикали и тряска.
@@ -224,7 +250,7 @@ fn animate_view_sword(
         cam.rotation = Quat::from_rotation_x(p.pitch + (t.sin() * s)) * Quat::from_rotation_z((t * 1.3).cos() * s);
     }
     let Ok((mut st, mut vis, children)) = sword.single_mut() else { return };
-    *vis = if f.fighter.is_dead() { Visibility::Hidden } else { Visibility::Inherited };
+    *vis = if f.fighter.is_dead() || crate::work_client::hands_busy(work.as_deref()) { Visibility::Hidden } else { Visibility::Inherited };
     let (hilt, dir) = combat::weapon_pose(&f.fighter.action, f.fighter.weapon, time.elapsed_secs());
     // Удар в мире наклонён на 0.6 от взгляда, а камера — на весь взгляд; компенсируем разницу.
     let fix = Quat::from_rotation_x(-p.pitch * 0.4);
