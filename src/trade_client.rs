@@ -218,6 +218,7 @@ fn receive_trade(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     npcs: Query<Entity, With<MerchantNpc>>,
+    mut work: ResMut<crate::work_client::MyWork>,
 ) {
     let now = time.elapsed_secs();
     while let Some(bytes) = client.receive_message(CH_TRADE) {
@@ -291,7 +292,8 @@ fn receive_trade(
                 state.fine = fine;
                 state.rev += 1;
             }
-            TradeServerMessage::LessonStarted { title, secs } => {
+            TradeServerMessage::LessonStarted { title, secs, drill, skill } => {
+                work.begin(drill, skill, crate::work_client::Via::Trade, &title, 0.0);
                 state.lesson = Some((title, now, secs));
                 // Урок идёт в мире: окно закрываем, чтобы можно было смотреть на мастера.
                 if state.view.take().is_some() {
@@ -299,7 +301,9 @@ fn receive_trade(
                 }
                 state.rev += 1;
             }
+            TradeServerMessage::LessonProgress(p) => work.progress = p,
             TradeServerMessage::LessonFinished { ok } => {
+                work.end(crate::work_client::Via::Trade);
                 if !ok && state.lesson.is_some() {
                     loot.notify("Урок прерван", now);
                 }
@@ -593,6 +597,7 @@ fn update_trade_hud(
     mut bar: Single<&mut Node, (With<LessonBar>, Without<LessonFill>)>,
     mut fill: Single<&mut Node, (With<LessonFill>, Without<LessonBar>)>,
     mut lesson_text: Single<&mut Text, (With<LessonText>, Without<TradePrompt>)>,
+    work: Res<crate::work_client::MyWork>,
 ) {
     let now = time.elapsed_secs();
     let mut lines = Vec::new();
@@ -632,7 +637,11 @@ fn update_trade_hud(
     }
     match &state.lesson {
         Some((title, start, secs)) => {
-            let k = ((now - start) / secs.max(0.1)).clamp(0.0, 1.0);
+            let k = if work.busy() && work.via == crate::work_client::Via::Trade {
+                work.progress
+            } else {
+                ((now - start) / secs.max(0.1)).clamp(0.0, 1.0)
+            };
             bar.display = Display::Flex;
             fill.width = percent(k * 100.0);
             let t = format!("{title}… не отходите от мастера · X — бросить");

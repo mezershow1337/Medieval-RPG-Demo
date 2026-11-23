@@ -971,6 +971,16 @@ pub fn plan(body: &Body, item: &str) -> Option<(&'static str, f32)> {
     }
 }
 
+/// Каким движением лечат: повязку, припарку, лубок накладывают и тянут, наконечник вынимают
+/// с ровным натяжением; выпить, полить или присыпать — без особого движения.
+pub fn plan_drill(body: &Body, item: &str, target: Option<CareTarget>) -> Option<crate::work::Drill> {
+    let target = target.unwrap_or_else(|| auto_target(body, item));
+    match decide(body, item, target) {
+        Act::Extract(_) | Act::Care(..) | Act::Splint(_) | Act::OverFracture(..) => Some(crate::work::Drill::Tension),
+        _ => None,
+    }
+}
+
 /// Что сделает применение на выбранное место. `Err` — не начинать (предмет цел), с причиной.
 pub fn plan_to(body: &Body, item: &str, target: CareTarget) -> Result<(String, f32), String> {
     match decide(body, item, target) {
