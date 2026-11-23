@@ -4,8 +4,10 @@
 //!   cargo run                     — хост: сервер + игра на этом компьютере
 //!   cargo run -- join 192.168.1.5 — подключиться к другу (порт по умолчанию 5000)
 //!   cargo run -- server           — только сервер, без окна
+//!   cargo run -- bot 127.0.0.1 Имя  — бот-товарищ (ходит и ставит метку) для проверки карты
 
 mod alchemy_fx;
+mod bot;
 mod brewing;
 mod brewing_client;
 mod civil_client;
@@ -23,6 +25,8 @@ mod economy;
 mod estates;
 mod factions;
 mod fight;
+mod guide;
+mod hints;
 mod gear_look;
 mod hotbar;
 mod graphics;
@@ -40,6 +44,8 @@ mod loot_server;
 mod lore;
 mod lore_client;
 mod lore_net;
+mod map;
+mod map_render;
 mod medicine;
 mod medicine_server;
 mod medicine_client;
@@ -53,6 +59,9 @@ mod protocol;
 mod residents;
 mod rig;
 mod server;
+mod skill_book;
+mod skill_tree;
+mod skills_server;
 mod archery;
 mod arsenal;
 mod smithing;
@@ -76,6 +85,10 @@ mod ui_theme;
 mod weight;
 mod work;
 mod work_client;
+mod worn;
+mod world_clock;
+mod daily_life;
+mod life_client;
 
 use protocol::DEFAULT_PORT;
 use std::net::SocketAddr;
@@ -118,6 +131,10 @@ fn main() {
             let port = args.get(1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
             let socket = server::bind_socket(port).expect("порт занят");
             server::run(socket, true);
+        }
+        Some("bot") => {
+            let addr = parse_addr(args.get(1).map(String::as_str).unwrap_or("127.0.0.1"));
+            bot::run(addr, args.get(2).cloned().unwrap_or_else(|| "Бот".to_string()));
         }
         Some("join") => {
             let addr = parse_addr(args.get(1).map(String::as_str).unwrap_or("127.0.0.1"));

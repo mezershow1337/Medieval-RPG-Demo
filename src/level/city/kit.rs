@@ -515,6 +515,8 @@ pub fn bench(b: &mut Builder, r: Rect) {
 pub fn bed(b: &mut Builder, r: Rect) {
     table(b, r, 0.45);
     b.mesh(Mat::Canvas).cuboid(Vec3::new(r.x0 + 0.05, 0.45, r.z0 + 0.05), Vec3::new(r.x1 - 0.05, 0.6, r.z1 - 0.05));
+    let along = if r.w() > r.d() { Vec3::X } else { Vec3::Z };
+    b.bed(r.center(0.62), along);
 }
 
 /// Сундук.

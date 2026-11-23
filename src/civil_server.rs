@@ -140,6 +140,8 @@ pub struct CivilWorld {
     law_provoked: HashSet<u64>,
     jail: Option<Vec3>,
     rng: Rng,
+    /// Где били людей за кадр: жители вокруг пугаются (см. `daily_life::Fright`).
+    pub alarms: Vec<Vec3>,
 }
 
 impl CivilWorld {
@@ -172,6 +174,7 @@ impl CivilWorld {
             law_provoked: HashSet::new(),
             jail: None,
             rng: Rng::new(0x5EED_C1F1),
+            alarms: Vec::new(),
         }
     }
 
@@ -244,6 +247,7 @@ pub fn hurt(
     p.hp = (p.hp - damage).max(0.0);
     let killed = p.hp <= 0.0;
     let (civ, pos, yaw, faction) = (p.civ, p.pos, p.yaw, p.faction);
+    civil.alarms.push(point);
     server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::CivilianHit { civ, at: point.into(), amount: damage, head }));
     civil.queue.push(Offense { player: attacker, victim: Victim::Civ(person), faction, killed });
     let mut trade = trade;
@@ -342,7 +346,7 @@ fn on_connect(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, civi
 }
 
 #[allow(clippy::too_many_arguments)]
-fn civil_tick(
+pub fn civil_tick(
     mut server: ResMut<RenetServer>,
     mut world: ResMut<GameWorld>,
     mut civil: ResMut<CivilWorld>,

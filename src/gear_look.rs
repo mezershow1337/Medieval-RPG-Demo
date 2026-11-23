@@ -18,6 +18,14 @@ pub struct Gear {
     pub legs: Option<u16>,
     pub feet: Option<u16>,
     pub off_hand: Option<u16>,
+    /// Оружие в правой руке (свой вид у каждого из 80 видов) и убрано ли оно (на поясе / за спиной).
+    pub main_hand: Option<u16>,
+    pub holstered: bool,
+    /// Шея (нательный крест) и перстень.
+    pub neck: Option<u16>,
+    pub ring: Option<u16>,
+    /// Стрелы в сумке — колчан у пояса.
+    pub quiver: Option<u16>,
 }
 
 impl Gear {
@@ -30,6 +38,11 @@ impl Gear {
             legs: id(EquipSlot::Legs),
             feet: id(EquipSlot::Feet),
             off_hand: id(EquipSlot::OffHand),
+            main_hand: id(EquipSlot::MainHand),
+            holstered: false,
+            neck: id(EquipSlot::Necklace),
+            ring: id(EquipSlot::Ring),
+            quiver: inv.all_items().find(|i| crate::archery::arrow_type(i.info().name).is_some()).map(|i| i.base.0),
         }
     }
 
@@ -148,7 +161,7 @@ mod tests {
     fn every_wearable_has_a_look() {
         for (i, b) in ITEM_BASES.iter().enumerate() {
             let g = |slot| Some(i as u16).filter(|_| b.slot == Some(slot));
-            let gear = Gear { head: g(EquipSlot::Head), chest: g(EquipSlot::Chest), hands: g(EquipSlot::Hands), legs: g(EquipSlot::Legs), feet: g(EquipSlot::Feet), off_hand: g(EquipSlot::OffHand) };
+            let gear = Gear { head: g(EquipSlot::Head), chest: g(EquipSlot::Chest), hands: g(EquipSlot::Hands), legs: g(EquipSlot::Legs), feet: g(EquipSlot::Feet), off_hand: g(EquipSlot::OffHand), ..Default::default() };
             match b.slot {
                 Some(EquipSlot::Head) => assert!(gear.helmet().is_some(), "{}", b.name),
                 Some(EquipSlot::Chest) => assert!(gear.body().is_some(), "{}", b.name),

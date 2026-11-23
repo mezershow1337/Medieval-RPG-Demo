@@ -1,5 +1,5 @@
 //! Клиент городов и домов: подсказка у входа в усадьбу («U»), окно усадьбы (купить, снять,
-//! обставить, пустить друзей), окно «Вести» («M»: поселения, цены, стройки, дома на продажу)
+//! обставить, пустить друзей), окно «Вести» («O»: поселения, цены, стройки, дома на продажу)
 //! и глашатай с важными вестями. Стройки и обстановка включаются по сообщениям сервера.
 
 #![allow(deprecated)] // Interaction: в Bevy 0.20 помечен устаревшим, но работает и проще.
@@ -199,7 +199,7 @@ fn input(
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if ui.open() {
-        let close = keys.just_pressed(KeyCode::Escape) || (ui.window == Window::Estate && keys.just_pressed(KeyCode::KeyU)) || (ui.window == Window::News && keys.just_pressed(KeyCode::KeyM));
+        let close = keys.just_pressed(KeyCode::Escape) || (ui.window == Window::Estate && keys.just_pressed(KeyCode::KeyU)) || (ui.window == Window::News && keys.just_pressed(KeyCode::KeyO));
         if close || loot.ui_open || trade.window_open() {
             ui.window = Window::None;
             ui.rev += 1;
@@ -219,7 +219,7 @@ fn input(
         send(&mut client, &TownClientMessage::Open { estate: id });
         free_cursor(&mut cursor);
     }
-    if keys.just_pressed(KeyCode::KeyM) {
+    if keys.just_pressed(KeyCode::KeyO) {
         send(&mut client, &TownClientMessage::News);
         ui.window = Window::News;
         ui.rev += 1;
@@ -499,7 +499,7 @@ fn estate_window(root: &mut ChildSpawnerCommands, fonts: &UiFonts, d: &EstateDet
         p.spawn(Node { height: px(4), ..default() });
         p.spawn(row()).with_children(|r| {
             button(r, "Закрыть (Esc)", Act::Close, true, false);
-            txt(r, fonts, "Вести и дома на продажу — клавиша M", 13.0, DIM, false);
+            txt(r, fonts, "Вести и дома на продажу — клавиша O", 13.0, DIM, false);
         });
     });
 }

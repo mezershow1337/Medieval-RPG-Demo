@@ -476,7 +476,7 @@ fn aim_merchants(
     }
 }
 
-/// Торговцы дышат и чуть переминаются.
+/// Торговцы дышат, переминаются и время от времени поправляют товар.
 fn idle_merchants(
     time: Res<Time>,
     npcs: Query<(&MerchantNpc, &Children)>,
@@ -488,12 +488,7 @@ fn idle_merchants(
             let Ok(mut pose) = poses.get_mut(child) else {
                 continue;
             };
-            let sway = (t * 0.4 + npc.phase).sin();
-            let solved = crate::rig::solve_pose(&crate::rig::PoseInput {
-                twist: sway * 0.08,
-                time: t + npc.phase,
-                ..default()
-            });
+            let solved = crate::rig::solve_pose(&crate::life_client::merchant_pose(t, npc.phase));
             *pose = solved.pose;
         }
     }
@@ -595,6 +590,7 @@ fn update_trade_hud(
     time: Res<Time>,
     state: Res<TradeState>,
     loot: Res<LootState>,
+    party: Option<Res<crate::map::Party>>,
     mut prompt: Single<&mut Text, (With<TradePrompt>, Without<LessonText>)>,
     mut bar: Single<&mut Node, (With<LessonBar>, Without<LessonFill>)>,
     mut fill: Single<&mut Node, (With<LessonFill>, Without<LessonBar>)>,
@@ -616,7 +612,7 @@ fn update_trade_hud(
                     lines.push(format!("{} · {}", m.faction.name(), standing));
                 }
             }
-            Some(Aim::Player(id)) => lines.push(format!("[T] Предложить обмен игроку {id}")),
+            Some(Aim::Player(id)) => lines.push(format!("[T] Предложить обмен: {}", crate::trade_ui::partner_name(party.as_deref(), id))),
             None => {}
         }
     }
@@ -624,7 +620,8 @@ fn update_trade_hud(
         && now - at <= 30.0
     {
         lines.push(format!(
-            "Игрок {from} предлагает обмен: [Y] согласиться, [N] отказать"
+            "{} предлагает обмен: [Y] согласиться, [N] отказать",
+            crate::trade_ui::partner_name(party.as_deref(), from)
         ));
     }
     if state.fine > 0 && !state.window_open() {

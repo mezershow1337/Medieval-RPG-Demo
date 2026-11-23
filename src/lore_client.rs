@@ -28,7 +28,7 @@ impl Plugin for LoreClientPlugin {
             .insert_resource(LoreView::default())
             .add_systems(Startup, (setup_lore_assets, setup_lore_ui).after(crate::inventory_ui::setup_fonts))
             .add_systems(Update, (receive_lore, lore_input).chain().run_if(client_connected))
-            .add_systems(Update, (aim_lore_target, update_lore_prompt, update_patch_looks, update_knowledge_window, update_tending_hud).chain());
+            .add_systems(Update, (aim_lore_target, update_lore_prompt, update_patch_looks, update_tending_hud).chain());
     }
 }
 
@@ -59,10 +59,6 @@ pub struct LoreView {
     masters: HashMap<u32, (MasterView, Entity)>,
     stations: HashMap<u32, (StationView, Entity)>,
     pub target: Option<LoreTarget>,
-    window_open: bool,
-    /// Окно знаний перестраивается, когда это число меняется.
-    rev: u64,
-    built_rev: u64,
 }
 
 pub fn send(client: &mut RenetClient, msg: &LoreClientMessage) {
@@ -335,7 +331,6 @@ fn receive_lore(
         match msg {
             LoreServerMessage::Knowledge(k) => {
                 knowledge.0 = k;
-                view.rev += 1;
                 // Имена трав в сумке могли поменяться.
                 loot.rev += 1;
             }
@@ -407,7 +402,7 @@ fn receive_lore(
 
 fn aim_lore_target(mut view: ResMut<LoreView>, loot: Res<LootState>, camera: Query<&GlobalTransform, With<PlayerCamera>>) {
     let target = (|| {
-        if loot.ui_open || loot.target.is_some() || view.window_open {
+        if loot.ui_open || loot.target.is_some() {
             return None;
         }
         let cam = camera.single().ok()?;
@@ -451,7 +446,7 @@ fn aim_lore_target(mut view: ResMut<LoreView>, loot: Res<LootState>, camera: Que
     }
 }
 
-fn lore_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, mut view: ResMut<LoreView>, loot: Res<LootState>, tending: Res<MyTending>) {
+fn lore_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, view: Res<LoreView>, loot: Res<LootState>, tending: Res<MyTending>) {
     // Огонь под сосудом: 1 — мехи, 2 — заслонка, 3 — мокрая тряпица на купол.
     if loot.using.is_some() && tending.0.is_some() {
         for (key, action) in [(KeyCode::Digit1, TendAction::Bellows), (KeyCode::Digit2, TendAction::Damper), (KeyCode::Digit3, TendAction::CoolDome)] {
@@ -459,14 +454,6 @@ fn lore_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, 
                 send(&mut client, &LoreClientMessage::Tend(action));
             }
         }
-    }
-    if keys.just_pressed(KeyCode::KeyK) && !loot.ui_open {
-        view.window_open = !view.window_open;
-        view.rev += 1;
-    }
-    if view.window_open && keys.just_pressed(KeyCode::Escape) {
-        view.window_open = false;
-        view.rev += 1;
     }
     if loot.ui_open {
         return;
@@ -491,9 +478,6 @@ fn lore_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, 
 
 #[derive(Component)]
 struct LorePrompt;
-
-#[derive(Component)]
-struct KnowledgeWindow;
 
 /// Строка про огонь под сосудом.
 #[derive(Component)]
@@ -615,23 +599,6 @@ fn setup_lore_ui(mut commands: Commands, fonts: Res<UiFonts>) {
                 ));
             });
         });
-    commands.spawn((
-        KnowledgeWindow,
-        Node {
-            position_type: PositionType::Absolute,
-            display: Display::None,
-            left: percent(8),
-            top: percent(6),
-            width: percent(84),
-            max_height: percent(88),
-            padding: crate::ui_theme::Skin::Parchment.padding(),
-            column_gap: px(28),
-            overflow: Overflow::clip(),
-            ..default()
-        },
-        crate::ui_theme::theme().skin(crate::ui_theme::Skin::Parchment),
-        GlobalZIndex(20),
-    ));
 }
 
 fn update_lore_prompt(view: Res<LoreView>, knowledge: Res<MyKnowledge>, mut text: Single<&mut Text, With<LorePrompt>>) {
@@ -686,43 +653,12 @@ fn update_patch_looks(view: Res<LoreView>, mut patches: Query<(&PatchModel, &Chi
     }
 }
 
-fn column(p: &mut ChildSpawnerCommands, fonts: &UiFonts, title: &str, lines: &[String]) {
-    p.spawn(Node {
-        flex_direction: FlexDirection::Column,
-        row_gap: px(3),
-        flex_basis: percent(33),
-        flex_grow: 1.0,
-        ..default()
-    })
-    .with_children(|c| {
-        // Как в рукописи: заголовок киноварью, текст чернилами.
-        c.spawn((
-            Text::new(title),
-            TextFont {
-                font: fonts.title.clone().into(),
-                font_size: bevy::text::FontSize::Px(24.0),
-                ..default()
-            },
-            TextColor(crate::ui_theme::ink::RUBRIC),
-        ));
-        let body = if lines.is_empty() { "—".to_string() } else { lines.join("\n") };
-        c.spawn((
-            Text::new(body),
-            TextFont {
-                font: fonts.regular.clone().into(),
-                font_size: bevy::text::FontSize::Px(15.0),
-                ..default()
-            },
-            TextColor(crate::ui_theme::ink::INK),
-        ));
-    });
-}
-
 /// Строки окна знаний (отдельно — чтобы проверить тестом).
-fn knowledge_lines(k: &Knowledge) -> [Vec<String>; 3] {
+pub fn knowledge_lines(k: &Knowledge) -> [Vec<String>; 3] {
     let mut left = Vec::new();
     for s in Skill::ALL {
-        left.push(format!("{}: {:.0}", s.name(), k.skill(s)));
+        let (base, bonus) = (k.base_skill(s), k.skill(s) - k.base_skill(s));
+        left.push(if bonus > 0.05 { format!("{}: {base:.0} (+{bonus:.0} от умений)", s.name()) } else { format!("{}: {base:.0}", s.name()) });
     }
     left.push(String::new());
     for lang in [Language::Greek, Language::Latin] {
@@ -778,39 +714,6 @@ fn knowledge_lines(k: &Knowledge) -> [Vec<String>; 3] {
     [left, mid, right]
 }
 
-fn update_knowledge_window(
-    mut commands: Commands,
-    mut view: ResMut<LoreView>,
-    knowledge: Res<MyKnowledge>,
-    fonts: Res<UiFonts>,
-    mut window: Single<(Entity, &mut Node), With<KnowledgeWindow>>,
-) {
-    if view.built_rev == view.rev {
-        return;
-    }
-    view.built_rev = view.rev;
-    let (entity, ref mut node) = *window;
-    if view.window_open && node.display == Display::None {
-        commands
-            .entity(entity)
-            .insert(crate::ui_theme::Appear::default());
-    }
-    node.display = if view.window_open {
-        Display::Flex
-    } else {
-        Display::None
-    };
-    if !view.window_open {
-        return;
-    }
-    let [left, mid, right] = knowledge_lines(&knowledge.0);
-    commands.entity(entity).despawn_children().with_children(|p| {
-        column(p, &fonts, "Навыки и грамота", &left);
-        column(p, &fonts, "Травы и вещества", &mid);
-        column(p, &fonts, "Приёмы (K — закрыть)", &right);
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -856,13 +759,14 @@ impl Plugin for DevShotPlugin {
 fn dev_shot(
     mut commands: Commands,
     time: Res<Time>,
-    mut view: ResMut<LoreView>,
+    view: Res<LoreView>,
     mut player: Query<(&mut crate::player::LocalPlayer, &mut Transform)>,
     mut loot: ResMut<LootState>,
     mut brew: ResMut<crate::brewing_client::BrewState>,
     mut done: Local<u8>,
     mut placed: Local<u8>,
     mut frames: Local<u32>,
+    mut since_shot: Local<u32>,
     mut client: Option<ResMut<RenetClient>>,
     mut fx: ResMut<crate::alchemy_fx::FxQueue>,
     mut exit: MessageWriter<AppExit>,
@@ -973,10 +877,6 @@ fn dev_shot(
             loot.ui_open = true;
             loot.rev += 1;
         }
-        if std::env::var("MRPG_SHOT_UI").as_deref() == Ok("knowledge") {
-            view.window_open = true;
-            view.rev += 1;
-        }
         if let Some(yaw) = std::env::var("MRPG_SHOT_YAW").ok().and_then(|s| s.parse::<f32>().ok()) {
             for (mut p, mut tf) in &mut player {
                 if let Some(pitch) = std::env::var("MRPG_SHOT_PITCH").ok().and_then(|s| s.parse::<f32>().ok()) {
@@ -993,7 +893,12 @@ fn dev_shot(
         commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(path));
         *done = 2;
     }
-    if *done == 2 && t > delay + 2.0 {
+    if *done == 2 {
+        *since_shot += 1;
+    }
+    // Снимок сохраняется не сразу (кадр читается из видеокарты), даём ему несколько кадров.
+    let saved = std::env::var("MRPG_SHOT").is_ok_and(|p| std::path::Path::new(&p).exists());
+    if *done == 2 && t > delay + 2.0 && (saved && *since_shot > 4 || *since_shot > 120) {
         exit.write(AppExit::Success);
     }
 }
