@@ -22,6 +22,9 @@ mod dims;
 use dims::{ANKLE_HEIGHT, FOREARM, GRIP_AXIS_L, GRIP_AXIS_R, GRIP_L, GRIP_R, REST, SHIN, THIGH, UPPER_ARM};
 
 pub const MODEL_PATH: &str = "models/humans.glb";
+/// Доспехи игроков сверх тех, что носят враги (поддоспешник, перчатки, наручи, поножи,
+/// гребенчатый шлем): собирает `tools/models/build_armor.py` на том же скелете.
+pub const ARMOR_PATH: &str = "models/armor.glb";
 
 // ---------------------------------------------------------------------------------------------
 // Кости
@@ -57,12 +60,13 @@ const PELVIS_HEIGHT: f32 = REST[0].y;
 // ---------------------------------------------------------------------------------------------
 // Снаряжение по слотам (одежда эпохи: Херсонес, 510 г.)
 
-#[allow(dead_code)] // «с непокрытой головой» понадобится, когда экипировка из инвентаря будет видна
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeadGear {
     Bare,
     /// Спангенхельм: купол из сегментов на бронзовом каркасе, нащёчники, бармица сзади.
     Spangenhelm,
+    /// Позднеримский гребенчатый шлем: две половины купола на гребне, нащёчники, назатыльник.
+    Ridge,
     /// Высокий клёпаный конический шлем с наносником и бармицей кругом.
     Conical,
     /// Войлочная шапка кочевника с меховым отворотом.
@@ -79,14 +83,25 @@ pub enum Tunic {
     Kaftan,
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BodyArmor {
     None,
+    /// Стёганый поддоспешник из многих слоёв льна, простёган ромбами.
+    Gambeson,
     /// Кольчуга до середины бедра с короткими рукавами.
     Mail,
     /// Ламеллярный доспех из железных пластин на кожаных шнурах.
     Lamellar,
+}
+
+/// Что на руках.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArmGear {
+    Bare,
+    /// Кожаные перчатки с крагами.
+    Gloves,
+    /// Ламеллярные наручи на предплечьях.
+    Vambraces,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -124,7 +139,10 @@ pub struct Outfit {
     pub head: HeadGear,
     pub tunic: Tunic,
     pub armor: BodyArmor,
+    pub arms: ArmGear,
     pub legs: LegGear,
+    /// Железные поножи поверх обмоток.
+    pub greaves: bool,
     pub feet: FootGear,
     pub hair: Hair,
     pub beard: Beard,
@@ -152,7 +170,9 @@ impl Outfit {
             head: HeadGear::Bare,
             tunic: Tunic::Byzantine,
             armor: BodyArmor::None,
+            arms: ArmGear::Bare,
             legs: LegGear::Trousers,
+            greaves: false,
             feet: FootGear::Boots,
             hair: Hair::Short,
             beard: if j(1) < 0.5 { Beard::Short } else { Beard::Full },
@@ -221,6 +241,36 @@ impl Outfit {
         }
     }
 
+    /// Игрок, одетый в то, что надето у него в инвентаре.
+    pub fn with_gear(mut self, gear: &crate::gear_look::Gear) -> Self {
+        use crate::gear_look::{ArmPiece, BodyPiece, Helmet};
+        self.head = match gear.helmet() {
+            None => HeadGear::Bare,
+            Some(Helmet::Spangenhelm) => HeadGear::Spangenhelm,
+            Some(Helmet::Ridge) => HeadGear::Ridge,
+            Some(Helmet::Conical) => HeadGear::Conical,
+            Some(Helmet::Cap) => HeadGear::FeltCap,
+        };
+        self.armor = match gear.body() {
+            None => BodyArmor::None,
+            Some(BodyPiece::Gambeson) => BodyArmor::Gambeson,
+            Some(BodyPiece::Mail) => BodyArmor::Mail,
+            Some(BodyPiece::Lamellar) => BodyArmor::Lamellar,
+        };
+        self.arms = match gear.arms() {
+            None => ArmGear::Bare,
+            Some(ArmPiece::Gloves) => ArmGear::Gloves,
+            Some(ArmPiece::Vambraces) => ArmGear::Vambraces,
+        };
+        self.greaves = gear.greaves();
+        self.feet = if gear.boots() { FootGear::Boots } else { FootGear::Shoes };
+        // Высокие сапоги обуваются на штаны, обмотки под ними не наматывают.
+        if self.feet == FootGear::Boots {
+            self.legs = LegGear::Trousers;
+        }
+        self
+    }
+
     /// Детали glb (скинованные на весь скелет), из которых собран персонаж.
     pub fn layers(&self) -> Vec<&'static str> {
         let mut l = vec!["body.head", "body.hands", "eyes", "belt"];
@@ -231,6 +281,7 @@ impl Outfit {
         });
         match self.armor {
             BodyArmor::None => {}
+            BodyArmor::Gambeson => l.push("gambeson"),
             BodyArmor::Mail => l.push("mail"),
             BodyArmor::Lamellar => l.push("lamellar"),
         }
@@ -242,6 +293,14 @@ impl Outfit {
             FootGear::Shoes => "shoes",
             FootGear::Boots => "boots",
         });
+        if self.greaves {
+            l.push("greaves");
+        }
+        match self.arms {
+            ArmGear::Bare => {}
+            ArmGear::Gloves => l.push("gloves"),
+            ArmGear::Vambraces => l.push("vambraces"),
+        }
         // Под шлемом и шапкой волос не видно.
         if self.head == HeadGear::Bare {
             match self.hair {
@@ -258,6 +317,7 @@ impl Outfit {
         match self.head {
             HeadGear::Bare => {}
             HeadGear::Spangenhelm => l.push("helm.spangen"),
+            HeadGear::Ridge => l.push("helm.ridge"),
             HeadGear::Conical => l.push("helm.conical"),
             HeadGear::FeltCap => l.push("cap.felt"),
         }
@@ -281,7 +341,7 @@ impl Outfit {
 // Загрузка моделей
 
 #[derive(Resource)]
-struct ModelsHandle(Handle<Gltf>);
+struct ModelsHandle(Vec<Handle<Gltf>>);
 
 /// Примитив детали: меш, материал и имя материала из glb.
 type Primitive = (Handle<Mesh>, Handle<StandardMaterial>, String);
@@ -394,7 +454,7 @@ impl CharacterModels {
 }
 
 fn load_models(mut commands: Commands, server: Res<AssetServer>) {
-    commands.insert_resource(ModelsHandle(server.load(MODEL_PATH)));
+    commands.insert_resource(ModelsHandle(vec![server.load(MODEL_PATH), server.load(ARMOR_PATH)]));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -408,37 +468,41 @@ fn finish_models(
     gltf_skins: Res<Assets<GltfSkin>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    if !server.is_loaded_with_dependencies(&handle.0) {
+    // Файл доспехов необязателен: если его нет (не собран), загружаем только людей.
+    let failed = |h: &Handle<Gltf>| matches!(server.get_load_state(h), Some(bevy::asset::LoadState::Failed(_)));
+    if handle.0.iter().any(|h| !server.is_loaded_with_dependencies(h) && !failed(h)) {
         return;
     }
-    let Some(gltf) = gltfs.get(&handle.0) else { return };
+    let Some(gltf) = gltfs.get(&handle.0[0]) else { return };
     let Some(skin) = gltf.skins.first().and_then(|h| gltf_skins.get(h)) else {
         error!("в {MODEL_PATH} нет скелета");
         commands.remove_resource::<ModelsHandle>();
         return;
     };
     let mut by_handle: HashMap<AssetId<GltfMaterial>, (Handle<StandardMaterial>, String)> = HashMap::new();
-    for (name, h) in &gltf.named_materials {
-        if let Some(m) = gltf_materials.get(h) {
-            let mut sm = standard_material_from_gltf_material(m);
-            // Без карты окружения чистый металл выглядит почти чёрным — оставляем часть рассеянного света.
-            sm.metallic *= 0.6;
-            by_handle.insert(h.id(), (materials.add(sm), name.to_string()));
-        }
-    }
     let fallback = materials.add(Color::srgb(0.6, 0.6, 0.6));
     let mut parts = HashMap::new();
-    for (name, h) in &gltf.named_meshes {
-        let Some(mesh) = gltf_meshes.get(h) else { continue };
-        let prims = mesh
-            .primitives
-            .iter()
-            .map(|p| {
-                let (mat, mat_name) = p.material.as_ref().and_then(|m| by_handle.get(&m.id()).cloned()).unwrap_or((fallback.clone(), String::new()));
-                (p.mesh.clone(), mat, mat_name)
-            })
-            .collect();
-        parts.insert(name.to_string(), prims);
+    for gltf in handle.0.iter().filter_map(|h| gltfs.get(h)) {
+        for (name, h) in &gltf.named_materials {
+            if let Some(m) = gltf_materials.get(h) {
+                let mut sm = standard_material_from_gltf_material(m);
+                // Без карты окружения чистый металл выглядит почти чёрным — оставляем часть рассеянного света.
+                sm.metallic *= 0.6;
+                by_handle.insert(h.id(), (materials.add(sm), name.to_string()));
+            }
+        }
+        for (name, h) in &gltf.named_meshes {
+            let Some(mesh) = gltf_meshes.get(h) else { continue };
+            let prims = mesh
+                .primitives
+                .iter()
+                .map(|p| {
+                    let (mat, mat_name) = p.material.as_ref().and_then(|m| by_handle.get(&m.id()).cloned()).unwrap_or((fallback.clone(), String::new()));
+                    (p.mesh.clone(), mat, mat_name)
+                })
+                .collect();
+            parts.insert(name.to_string(), prims);
+        }
     }
     let blade = by_handle.values().find(|(_, n)| n == "blade").map(|(h, _)| h.clone()).unwrap_or(fallback);
     info!("Модели людей загружены: {} деталей", parts.len());
@@ -506,14 +570,16 @@ pub struct ViewArm {
     joints: [Entity; 3],
 }
 
-pub fn weapon_mesh(weapon: WeaponKind) -> &'static str {
-    match weapon {
+/// Имя модели оружия в glb (у кулаков модели нет).
+pub fn weapon_mesh(weapon: WeaponKind) -> Option<&'static str> {
+    Some(match weapon {
         WeaponKind::Spatha => "spatha",
         WeaponKind::Axe => "axe",
         WeaponKind::Seax => "seax",
         WeaponKind::Spear => "spear",
         WeaponKind::Bow => "bow",
-    }
+        WeaponKind::Fists => return None,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -544,7 +610,10 @@ fn attach_rigs(
         commands.entity(e).remove::<NeedsRig>().insert((Rig { joints }, RigPose::default()));
     }
     for (e, need) in &weapons {
-        let name = weapon_mesh(need.0);
+        let Some(name) = weapon_mesh(need.0) else {
+            commands.entity(e).remove::<NeedsWeapon>();
+            continue;
+        };
         commands.entity(e).remove::<NeedsWeapon>().with_children(|w| {
             models.spawn_part(w, &mut materials, &format!("{name}.blade"), None, None, true);
             models.spawn_part(w, &mut materials, &format!("{name}.hilt"), None, None, false);
@@ -580,7 +649,7 @@ fn attach_rigs(
         joints[Bone::HandR as usize] = arm[2];
         commands.entity(e).with_children(|p| {
             for layer in outfit.layers() {
-                if layer.starts_with("body.hands") || layer.starts_with("tunic") || layer == "mail" {
+                if layer.starts_with("body.hands") || layer.starts_with("tunic") || matches!(layer, "mail" | "lamellar" | "gambeson" | "gloves" | "vambraces") {
                     models.spawn_part(p, &mut materials, layer, Some(&outfit), Some(&joints), false);
                 }
             }
@@ -912,26 +981,35 @@ mod tests {
 
     #[test]
     fn every_outfit_part_exists_in_model() {
-        // Имена слоёв должны совпадать с build_humans.py — проверяем по самому glb.
-        let glb = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/", "models/humans.glb")).expect("нет humans.glb");
-        let len = u32::from_le_bytes(glb[12..16].try_into().unwrap()) as usize;
-        let json = String::from_utf8_lossy(&glb[20..20 + len]).to_string();
+        // Имена слоёв должны совпадать с build_humans.py / build_armor.py — проверяем по самим glb.
+        let json_of = |path: &str| {
+            let glb = std::fs::read(format!("{}/assets/{path}", env!("CARGO_MANIFEST_DIR"))).unwrap_or_else(|_| panic!("нет {path}"));
+            let len = u32::from_le_bytes(glb[12..16].try_into().unwrap()) as usize;
+            String::from_utf8_lossy(&glb[20..20 + len]).to_string()
+        };
+        let json = json_of(MODEL_PATH) + &json_of(ARMOR_PATH);
         let mut names: Vec<String> = Outfit::for_actor(ActorKind::Player, 1).layers().iter().map(|s| s.to_string()).collect();
         for kind in ActorKind::ENEMIES {
             for id in 0..8 {
                 names.extend(Outfit::for_actor(kind, id).layers().iter().map(|s| s.to_string()));
             }
         }
-        for w in [WeaponKind::Spatha, WeaponKind::Axe, WeaponKind::Seax, WeaponKind::Spear, WeaponKind::Bow] {
-            names.push(format!("{}.blade", weapon_mesh(w)));
-            names.push(format!("{}.hilt", weapon_mesh(w)));
-        }
-        for s in ["shield_oval", "shield_round"] {
-            names.push(format!("{s}.body"));
-            names.push(format!("{s}.boss"));
+        // Игрок в любой надеваемой вещи.
+        for (i, b) in crate::items::ITEM_BASES.iter().enumerate() {
+            use crate::items::EquipSlot as S;
+            let id = Some(i as u16);
+            let gear = match b.slot {
+                Some(S::Head) => crate::gear_look::Gear { head: id, ..default() },
+                Some(S::Chest) => crate::gear_look::Gear { chest: id, ..default() },
+                Some(S::Hands) => crate::gear_look::Gear { hands: id, ..default() },
+                Some(S::Legs) => crate::gear_look::Gear { legs: id, ..default() },
+                Some(S::Feet) => crate::gear_look::Gear { feet: id, ..default() },
+                _ => continue,
+            };
+            names.extend(Outfit::for_actor(ActorKind::Player, 1).with_gear(&gear).layers().iter().map(|s| s.to_string()));
         }
         for n in names {
-            assert!(json.contains(&format!("\"name\":\"{n}\"")), "в humans.glb нет детали {n}");
+            assert!(json.contains(&format!("\"name\":\"{n}\"")), "в humans.glb и armor.glb нет детали {n}");
         }
     }
 }

@@ -96,11 +96,12 @@ fn setup_hud(mut commands: Commands) {
     ));
     commands.spawn((
         text(
-            "Click - capture mouse | Esc - release\nWASD - move | Shift - sprint (uses stamina) | Space - jump | Ctrl/C - crouch\nLMB - attack | RMB (hold) - guard: parry with weapon / block with shield\nAfter a successful parry press LMB for a fast riposte",
+            "Click - capture mouse | Esc - release\nWASD - move | Shift - sprint (uses stamina) | Space - jump | Ctrl/C - crouch\nLMB - attack | RMB (hold) - guard: parry with weapon / block with shield\nAfter a successful parry press LMB for a fast riposte\n1 - bare fists | 2-9 / mouse wheel - hotbar (in inventory: hover an item and press 2-9)",
             14.0,
             Color::srgba(1.0, 1.0, 1.0, 0.75),
         ),
-        Node { position_type: PositionType::Absolute, left: px(12), bottom: px(10), ..default() },
+        // Сверху слева под строкой статуса: низ экрана занят хотбаром.
+        Node { position_type: PositionType::Absolute, left: px(12), top: px(64), ..default() },
     ));
 }
 
