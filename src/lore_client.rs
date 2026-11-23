@@ -861,7 +861,7 @@ fn dev_shot(
         *frames += 1;
         info!("снимок: кадр {} из {n}", *frames);
         // Сначала открыть окна (кадр n), снимок — через 4 кадра, когда интерфейс уже построен.
-        t = if *frames >= n + 8 { delay + 3.0 } else if *frames >= n + 4 { delay + 1.0 } else if *frames >= n { delay - 0.5 } else { 0.0 };
+        t = if *frames >= n + 12 { delay + 3.0 } else if *frames >= n + 4 { delay + 1.0 } else if *frames >= n { delay - 0.5 } else { 0.0 };
     }
     let ui = std::env::var("MRPG_SHOT_UI").unwrap_or_default();
     // `MRPG_SHOT_UI=fx` — выставить перед камерой сосуды на огне и показать вспышку и осколки.
