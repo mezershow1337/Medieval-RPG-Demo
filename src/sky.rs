@@ -237,9 +237,30 @@ fn frame(n: Vec3) -> (Vec3, Vec3) {
 }
 
 /// Отражение неба для шероховатости `rough` (GGX, выборка по значимости, N = V = R).
+#[cfg(test)]
 fn prefilter_specular(n: Vec3, rough: f32, s: &SkyUniform, samples: u32) -> Vec3 {
+    prefilter_with(n, rough, samples, |d| sky_radiance(d, s))
+}
+
+/// Что видно в отражениях: сверху небо, у горизонта — стены и крыши города (тёплый
+/// известняк в свете неба), снизу — мостовая. Голое небо во всех направлениях делало
+/// металл однотонно-синим: клинок отражал синеву даже «боком», где в жизни были бы дома.
+fn surround_radiance(dir: Vec3, s: &SkyUniform, stone: Vec3) -> Vec3 {
+    let e = dir.normalize().y;
+    let c = if e < 0.0 {
+        stone * 0.85
+    } else {
+        let walls = (1.0 - smoothstep(0.02, 0.3, e)) * 0.65;
+        sky_radiance(dir, s).lerp(stone, walls)
+    };
+    // Чуть приглушаем цвет: в отражениях смешано много всего.
+    let l = c.dot(Vec3::new(0.2126, 0.7152, 0.0722));
+    c.lerp(Vec3::splat(l), 0.25)
+}
+
+fn prefilter_with(n: Vec3, rough: f32, samples: u32, radiance: impl Fn(Vec3) -> Vec3) -> Vec3 {
     if rough < 1e-3 {
-        return sky_radiance(n, s);
+        return radiance(n);
     }
     let a = rough * rough;
     let (t, b) = frame(n);
@@ -253,7 +274,7 @@ fn prefilter_specular(n: Vec3, rough: f32, s: &SkyUniform, samples: u32) -> Vec3
         let l = 2.0 * n.dot(h) * h - n;
         let nl = n.dot(l);
         if nl > 0.0 {
-            sum += sky_radiance(l, s) * nl;
+            sum += radiance(l) * nl;
             w += nl;
         }
     }
@@ -315,9 +336,11 @@ fn cubemap(size: u32, mips: u32, texel: impl Fn(Vec3, u32) -> Vec3 + Sync) -> Im
 pub fn sky_environment(s: &SkyUniform) -> (Image, Image) {
     const SPEC: u32 = 128;
     let mips = SPEC.trailing_zeros() + 1;
+    // Освещённый небом и солнцем известняк города — для отражений у горизонта и снизу.
+    let stone = Vec3::new(0.62, 0.56, 0.46) * prefilter_diffuse(Vec3::Y, s, 128) * 1.5;
     let specular = cubemap(SPEC, mips, |d, mip| {
         let rough = mip as f32 / (mips - 1) as f32;
-        prefilter_specular(d, rough, s, if mip == 0 { 1 } else { 24 + mip * 8 })
+        prefilter_with(d, rough, if mip == 0 { 1 } else { 24 + mip * 8 }, |l| surround_radiance(l, s, stone))
     });
     let diffuse = cubemap(32, 1, |d, _| prefilter_diffuse(d, s, 96));
     (diffuse, specular)

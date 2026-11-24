@@ -92,7 +92,7 @@ def cavalry_spatha():
     """Длинная кавалерийская спата с золочёной гардой и гранатовыми вставками
     (как мечи из керченских погребений V–VI вв.)."""
     mats_common()
-    K.metal_mat("pattern_steel", (190, 192, 196), (120, 122, 128), rough=(0.2, 0.36), scratches=0.7, rust=0.08, dirt=0.4, polish_dir="Z")
+    K.metal_mat("pattern_steel", (190, 192, 196), (120, 122, 128), rough=(0.2, 0.36), scratches=0.7, rust=0.08, dirt=0.4, polish_dir="Z", bump=0.4, grind=True)
     spatha_blade(0.84, 0.027, 0.024, mat="pattern_steel", fuller_w=0.5)
     g = K.lathe([(-0.018, 0.0001), (-0.015, 0.048, 0.015), (0.0, 0.05, 0.016), (0.004, 0.047, 0.014), (0.006, 0.0001)], 28)
     K.mesh_obj("guard", g, "gilt", subsurf=1)
@@ -194,7 +194,7 @@ def axe():
     head = K.blade(st, 12, edge=0.0004)
     # blade(): ось Z — от проушины к лезвию, X — высота. Повернём: Z -> -X, X -> Z.
     K.deform(head, lambda v: (-v.z, v.y, v.x))
-    K.mesh_obj("head", head, "iron", subsurf=0, smooth_angle=50)
+    K.mesh_obj("head", head, "axe_iron", subsurf=0, smooth_angle=50)
     K.mesh_obj("butt", K.lathe([(-0.005, 0.0001), (0.0, 0.019, 0.014), (0.012, 0.018, 0.013)], 16), "iron", bevel=0.001)
 
 
