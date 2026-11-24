@@ -350,7 +350,7 @@ fn lumps(b: &mut Builder, p: Vec3, r: f32, h: f32, mat: Mat, rng: &mut Rng) {
         let c = Vec3::new(p.x + a.cos() * d, p.y + top * rng.range(0.55, 0.95), p.z + a.sin() * d);
         // Крупные глыбы пустой породы — сканы камней, мелочь — угловатые куски.
         if mat == Mat::Bedrock && k % 3 == 0 {
-            b.plant(PlantKind::Rock, c - Vec3::Y * s, s * 3.2, rng.range(0.0, TAU), rng.int(64) as u32);
+            b.plant(PlantKind::Rock, c - Vec3::Y * s * 0.2, s * 3.2, rng.range(0.0, TAU), rng.int(64) as u32);
             continue;
         }
         let s = if mat == Mat::Bedrock { s * 0.7 } else { s };
@@ -420,7 +420,11 @@ fn mine(b: &mut Builder) {
     for (x, n) in [(x0, Vec3::X), (x1, Vec3::NEG_X)] {
         let lo = |p: Vec2| ground_y(p.x, p.y).min(inner_y(p.x, p.y));
         let hi = |p: Vec2| ground_y(p.x, p.y).max(inner_y(p.x, p.y));
-        strip(b, Mat::Bedrock, Vec2::new(x, hole.z0), Vec2::new(x, hole.z1), lo, hi, n, 0.75);
+        // Две части — до уступа и за ним: иначе квадрат через линию уступа срезает угол (щель).
+        for (za, zb) in [(hole.z0, fz - 0.001), (fz + 0.001, hole.z1)] {
+            strip(b, Mat::Bedrock, Vec2::new(x, za), Vec2::new(x, zb), &lo, &hi, n, 0.75);
+            strip(b, Mat::Bedrock, Vec2::new(x, za), Vec2::new(x, zb), &lo, &hi, -n, 0.75);
+        }
         b.invisible.push(Aabb::new(Vec3::new(x - 0.05, y - 1.0, hole.z0), Vec3::new(x + 0.05, y, fz)));
     }
     strip(b, Mat::Earth, Vec2::new(x0, hole.z0), Vec2::new(x1, hole.z0), |_| y - 0.2, |p| ground_y(p.x, p.y).max(y - 0.2), Vec3::Z, 0.75);
@@ -438,16 +442,16 @@ fn mine(b: &mut Builder) {
             // Жилу (выходы руды) не заслоняем.
             let vein = ((x - mx).abs() - 6.0).abs() < 2.2;
             if !vein {
-                b.plant(PlantKind::Rock, Vec3::new(x, y - s * 0.35, fz + rng.range(0.1, 0.6)), s, rng.range(0.0, TAU), rng.int(64) as u32);
+                b.plant(PlantKind::Rock, Vec3::new(x, y - s * 0.06, fz + rng.range(-0.2, 0.3)), s * 1.3, rng.range(0.0, TAU), rng.int(64) as u32);
             }
             if top - y > 2.5 {
                 let s2 = rng.range(1.2, 2.0);
-                b.plant(PlantKind::Rock, Vec3::new(x + rng.range(-0.5, 0.5), top - s2 * 0.55, fz + rng.range(0.3, 0.9)), s2, rng.range(0.0, TAU), rng.int(64) as u32);
+                b.plant(PlantKind::Rock, Vec3::new(x + rng.range(-0.5, 0.5), top - s2 * 0.12, fz + rng.range(0.2, 0.8)), s2 * 1.2, rng.range(0.0, TAU), rng.int(64) as u32);
             }
         } else {
             // Над устьем — бровка из камней поменьше.
             let top = inner_y(x, fz + 0.01);
-            b.plant(PlantKind::Rock, Vec3::new(x, top - 0.45, fz + 0.7), rng.range(0.8, 1.1), rng.range(0.0, TAU), rng.int(64) as u32);
+            b.plant(PlantKind::Rock, Vec3::new(x, top - 0.1, fz + 0.7), rng.range(0.9, 1.3), rng.range(0.0, TAU), rng.int(64) as u32);
         }
         x += rng.range(1.6, 2.4);
     }
@@ -537,7 +541,7 @@ fn mine(b: &mut Builder) {
         let d = rng.range(1.0, 4.6);
         let c = Vec3::new(sp.x + a.cos() * d, 0.0, sp.z + a.sin() * d);
         let hh = (2.45 * (1.0 - d / 5.0)).max(0.0);
-        b.plant(PlantKind::Rock, Vec3::new(c.x, sp.y + hh - 0.5, c.z), rng.range(0.5, 0.9), rng.range(0.0, TAU), rng.int(64) as u32);
+        b.plant(PlantKind::Rock, Vec3::new(c.x, sp.y + hh - 0.25, c.z), rng.range(0.7, 1.3), rng.range(0.0, TAU), rng.int(64) as u32);
     }
     kit::hidden(b, sp - Vec3::new(3.0, 0.3, 3.0), sp + Vec3::new(3.0, 1.6, 3.0));
     // Разборка руды: плита, кучи руды и породы, корзины.
@@ -591,6 +595,114 @@ fn mine(b: &mut Builder) {
     campfire(b, g(mx - 15.0, fz - 4.5));
     // Шурф с воротом наверху горки.
     shaft(b, shaft_pos(), &mut rng);
+    knoll_dressing(b, &mut rng);
+}
+
+/// Натоптанная тропа по рельефу (лента шириной `w`).
+fn path_ribbon(b: &mut Builder, pts: &[Vec2], w: f32) {
+    let mut samples: Vec<(Vec2, Vec2)> = Vec::new();
+    for seg in pts.windows(2) {
+        let (a, c) = (seg[0], seg[1]);
+        let n = (a.distance(c) / 1.0).ceil().max(1.0) as usize;
+        let dir = (c - a).normalize_or_zero();
+        let side = Vec2::new(-dir.y, dir.x);
+        for k in 0..n {
+            samples.push((a + (c - a) * (k as f32 / n as f32), side));
+        }
+    }
+    if let (Some(&last), Some(&(_, side))) = (pts.last(), samples.last()) {
+        samples.push((last, side));
+    }
+    let m = b.mesh(Mat::Earth);
+    let at = |p: Vec2| Vec3::new(p.x, ground_y(p.x, p.y) + 0.05, p.y);
+    for (k, pair) in samples.windows(2).enumerate() {
+        // Край тропы не по линейке: ширина гуляет.
+        let (w0, w1) = (w * (0.8 + 0.3 * ((k as f32) * 1.7).sin().abs()), w * (0.8 + 0.3 * ((k as f32 + 1.0) * 1.7).sin().abs()));
+        let ((p0, s0), (p1, s1)) = (pair[0], pair[1]);
+        m.quad([at(p0 - s0 * w0 * 0.5), at(p1 - s1 * w1 * 0.5), at(p1 + s1 * w1 * 0.5), at(p0 + s0 * w0 * 0.5)], Vec3::Y);
+    }
+}
+
+/// Горка не голая: выходы породы и осыпи по склонам, тропа к шурфу, крепёжный лес у устья,
+/// корзины с рудой и инструмент — следы работы.
+fn knoll_dressing(b: &mut Builder, rng: &mut Rng) {
+    let (mx, fz) = MINE_FACE;
+    let hole = mine_hole().inset(-2.5);
+    let sh = shaft_pos();
+    let trail = [Vec2::new(mx + 7.5, fz - 5.0), Vec2::new(mx + 11.5, fz - 2.5), Vec2::new(mx + 14.0, fz + 3.0), Vec2::new(mx + 14.5, fz + 8.5), Vec2::new(sh.x - 0.5, sh.z - 2.0)];
+    let near_trail = |p: Vec2| trail.windows(2).any(|s| {
+        let (a, c) = (s[0], s[1]);
+        let t = ((p - a).dot(c - a) / (c - a).length_squared()).clamp(0.0, 1.0);
+        p.distance(a + (c - a) * t) < 2.2
+    });
+    // Выходы известняка с бурыми пятнами: кучками по склонам, где шум выше порога.
+    let mut z = fz - 20.0;
+    while z < fz + 56.0 {
+        let mut x = mx - 42.0;
+        while x < mx + 42.0 {
+            let p = Vec2::new(x + rng.range(-1.5, 1.5), z + rng.range(-1.5, 1.5));
+            x += 3.8;
+            let (_, inside) = terrain::knoll_shape(p.x, p.y);
+            if !(0.12..0.9).contains(&inside) || (p.x > hole.x0 && p.x < hole.x1 && p.y > hole.z0 && p.y < hole.z1) || near_trail(p) || p.distance(Vec2::new(sh.x, sh.z)) < 4.5 {
+                continue;
+            }
+            let n = terrain::fbm(p.x * 0.07, p.y * 0.07, 47);
+            if n < 0.43 {
+                continue;
+            }
+            b.at(p.x, p.y);
+            let big = rng.range(1.4, 2.6) + (n - 0.43) * 6.0;
+            let y = ground_y(p.x, p.y);
+            b.plant(PlantKind::Rock, Vec3::new(p.x, y - big * 0.06, p.y), big, rng.range(0.0, TAU), rng.int(64) as u32);
+            b.invisible.push(Aabb::new(Vec3::new(p.x - big * 0.4, y - 0.3, p.y - big * 0.4), Vec3::new(p.x + big * 0.4, y + big * 0.35, p.y + big * 0.4)));
+            // Осыпь ниже по склону (к северу и в стороны от центра горки).
+            let down = Vec2::new(p.x - mx, p.y - (fz + 16.0)).normalize_or(Vec2::NEG_Y);
+            for _ in 0..3 + rng.int(4) {
+                let q = p + down * rng.range(1.0, 3.5) + Vec2::new(rng.range(-1.2, 1.2), rng.range(-1.2, 1.2));
+                let s = rng.range(0.25, 0.6);
+                b.plant(PlantKind::Rock, Vec3::new(q.x, ground_y(q.x, q.y) - s * 0.04, q.y), s, rng.range(0.0, TAU), rng.int(64) as u32);
+            }
+        }
+        z += 3.8;
+    }
+    // Осыпи у подножия уступа по обе стороны выемки.
+    for side in [-1.0f32, 1.0] {
+        for _ in 0..12 {
+            let q = Vec2::new(mx + side * rng.range(9.8, 14.0), fz + rng.range(-5.0, 3.0));
+            let s = rng.range(0.3, 0.9);
+            b.plant(PlantKind::Rock, Vec3::new(q.x, ground_y(q.x, q.y) - s * 0.04, q.y), s, rng.range(0.0, TAU), rng.int(64) as u32);
+        }
+        ground_disc(b, Mat::Earth, g(mx + side * 11.5, fz - 1.5), 2.2, 0.03);
+    }
+    // Тропа к шурфу (по ней носят бадьи) и тропа от площадки к обжигу.
+    path_ribbon(b, &trail, 1.3);
+    let rp = roast_pits()[0];
+    path_ribbon(b, &[Vec2::new(mx - 5.0, fz - 6.5), Vec2::new(mx - 9.5, fz - 10.5), Vec2::new(rp.x + 2.0, rp.z + 2.0)], 1.2);
+    // Крепёжный лес у устья: штабель окоренных стоек на подкладках.
+    let ts = g(mx - 6.2, fz - 3.6);
+    b.at(ts.x, ts.z);
+    for sx in [-1.1f32, 1.1] {
+        b.mesh(Mat::Wood).beam(ts + Vec3::new(sx, 0.06, -0.7), ts + Vec3::new(sx, 0.06, 0.7), 0.07, 0.06, Vec3::Y);
+    }
+    for row in 0..3 {
+        for k in 0..(5 - row) {
+            let off = Vec3::new(0.0, 0.2 + row as f32 * 0.19, -0.42 + (k as f32 + row as f32 * 0.5) * 0.2);
+            let jit = rng.range(-0.15, 0.15);
+            b.mesh(Mat::Wood).ridge_pipe(ts + off + Vec3::new(-1.6 + jit, 0.0, 0.0), ts + off + Vec3::new(1.5 + jit, 0.0, 0.0), 0.095, 7);
+        }
+    }
+    kit::hidden(b, ts - Vec3::new(1.7, 0.0, 0.6), ts + Vec3::new(1.7, 0.7, 0.6));
+    // Корзины с рудой у устья, заступ и кайло, воткнутые в навал.
+    for (dx, dz, fill) in [(3.2f32, -1.4f32, Some(Mat::Limonite)), (3.8, -1.0, Some(Mat::Limonite)), (3.4, -0.5, None)] {
+        basket(b, Vec3::new(mx + dx, mine_floor(), fz + dz), 0.27, 0.52, fill);
+    }
+    lumps(b, Vec3::new(mx + 5.2, mine_floor(), fz - 2.2), 0.8, 0.45, Mat::Limonite, rng);
+    let tq = Vec3::new(mx + 5.4, mine_floor(), fz - 2.0);
+    spade_tool(b, tq + Vec3::new(0.0, 0.1, 0.0), tq + Vec3::new(0.15, 1.3, -0.25), Vec3::Z);
+    pick_tool(b, tq + Vec3::new(0.5, 0.0, 0.3), tq + Vec3::new(0.65, 0.95, 0.45), Vec3::Z);
+    // Бадьи и верёвка у шурфа, куча вынутой руды рядом.
+    lumps(b, sh + Vec3::new(-2.6, -0.05, -1.5), 0.9, 0.5, Mat::Limonite, rng);
+    lumps(b, sh + Vec3::new(2.3, -0.05, 1.8), 1.4, 0.7, Mat::Bedrock, rng);
 }
 
 /// Шурф: сруб-оклад над колодцем, ворот на двух рогатках, бадья на верёвке.
@@ -843,9 +955,42 @@ fn quarry(b: &mut Builder) {
     b.at(c.x, c.y);
     // Уступы забоя (к югу), верх — на уровне земли.
     let top = ground_y(c.x, c.y + 6.0).max(y + 2.4);
+    // Каждый уступ — из отрезков разной глубины и высоты: край рваный, как после клиньев.
     for (k, (z0, h)) in [(0.0f32, 1.2f32), (1.4, 2.2), (2.8, top - y)].into_iter().enumerate() {
         let w = 7.5 - k as f32 * 0.4;
-        b.solid([c.x - w, y - 0.5, c.y + z0], [c.x + w, y + h, c.y + 6.0], Mat::Bedrock);
+        let n = 6;
+        for i in 0..n {
+            let xa = c.x - w + 2.0 * w * i as f32 / n as f32;
+            let xb = c.x - w + 2.0 * w * (i + 1) as f32 / n as f32;
+            let dz = rng.range(-0.35, 0.35);
+            let dh = if k == 2 { 0.0 } else { rng.range(-0.3, 0.2) };
+            b.solid([xa, y - 0.5, c.y + z0 + dz], [xb, y + h + dh, c.y + 6.0], Mat::Bedrock);
+        }
+        // Отбитые глыбы на бровке и у подножия уступа.
+        let mut x = c.x - w + 0.6;
+        while x < c.x + w - 0.6 {
+            let s = rng.range(0.5, 1.1);
+            b.plant(PlantKind::Rock, Vec3::new(x, y + h - s * 0.1, c.y + z0 + 0.4), s, rng.range(0.0, TAU), rng.int(64) as u32);
+            if rng.chance(0.5) {
+                let s = rng.range(0.25, 0.55);
+                b.plant(PlantKind::Rock, Vec3::new(x + rng.range(-0.5, 0.5), y - s * 0.04 + if k == 0 { 0.0 } else { [0.0, 1.2, 2.2][k - 1] }, c.y + z0 - rng.range(0.3, 0.9)), s, rng.range(0.0, TAU), rng.int(64) as u32);
+            }
+            x += rng.range(1.2, 2.2);
+        }
+    }
+    // Углы уступов и бровку прячут крупные глыбы: край выработки рваный, не коробка.
+    for side in [-1.0f32, 1.0] {
+        for (dz, s) in [(0.3f32, 2.6f32), (2.0, 3.2), (4.2, 3.6), (6.5, 3.0)] {
+            let x = c.x + side * rng.range(6.6, 7.8);
+            let base = if dz < 1.4 { y } else if dz < 2.8 { y + 1.2 } else { y + 2.2 };
+            b.plant(PlantKind::Rock, Vec3::new(x, base - 0.15, c.y + dz), s, rng.range(0.0, TAU), 4 + 5 * rng.int(8) as u32);
+        }
+    }
+    let mut x = c.x - 6.5;
+    while x < c.x + 6.5 {
+        let s = rng.range(1.3, 2.4);
+        b.plant(PlantKind::Rock, Vec3::new(x, top - 0.2, c.y + 6.0 + rng.range(0.2, 1.2)), s, rng.range(0.0, TAU), rng.int(64) as u32);
+        x += rng.range(1.8, 2.8);
     }
     // Срезанный склон: за уступами — земля к рельефу, по краям — глыбы.
     let (gb, gl, gr) = (ground_y(c.x, c.y + 14.0), ground_y(c.x - 10.5, c.y + 3.0), ground_y(c.x + 10.5, c.y + 3.0));
@@ -869,7 +1014,8 @@ fn quarry(b: &mut Builder) {
         }
     }
     lumps(b, Vec3::new(c.x + 6.5, y - 0.05, c.y - 4.0), 2.0, 1.0, Mat::Bedrock, &mut rng);
-    ground_disc(b, Mat::Shingle, Vec3::new(c.x, y, c.y - 2.5), 6.0, 0.04);
+    ground_disc(b, Mat::Earth, Vec3::new(c.x, y, c.y - 2.5), 6.0, 0.04);
+    ground_disc(b, Mat::Shingle, Vec3::new(c.x - 1.0, y, c.y - 0.8), 3.2, 0.06);
     // Тренога для подъёма блоков.
     let t = Vec3::new(c.x + 3.0, y, c.y - 3.5);
     let apex = t + Vec3::Y * 3.6;

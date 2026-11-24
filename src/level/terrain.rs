@@ -131,13 +131,33 @@ pub fn balka_x(z: f32) -> f32 {
 /// в который ведут штольню (уступ — по линии `z`, середина — `x`).
 pub const MINE_FACE: (f32, f32) = (-249.0, 702.0);
 
-/// Насколько рудная горка поднимает землю (м).
+/// Насколько рудная горка поднимает землю (м): неровный округлый холм с центром к югу от уступа,
+/// с размытым краем и буграми; уступ со штольней — срез его северного склона.
 fn knoll(x: f32, z: f32) -> f32 {
+    knoll_shape(x, z).0
+}
+
+/// (подъём, «внутренность» 0..1) рудной горки — для рельефа и для выходов породы на склонах.
+pub fn knoll_shape(x: f32, z: f32) -> (f32, f32) {
     let (mx, fz) = MINE_FACE;
-    let side = 1.0 - smoothstep(16.0, 34.0, (x - mx).abs());
-    let north = smoothstep(fz - 2.0, fz + 7.0, z);
-    let south = 1.0 - smoothstep(fz + 22.0, fz + 46.0, z);
-    9.0 * side * north * south
+    let (dx, dz) = (x - mx, z - (fz + 16.0));
+    let dist = (dx * dx * 0.8 + dz * dz).sqrt();
+    if dist > 60.0 {
+        return (0.0, 0.0);
+    }
+    // Край холма не круглый: радиус гуляет от 26 до 37 м.
+    let r = 26.0 + fbm(x * 0.022 + 3.0, z * 0.022 - 7.0, 41) * 14.0;
+    let d = dist / r;
+    let inside = 1.0 - smoothstep(0.15, 1.0, d);
+    // Бугры и промоины по склонам; на вершине — пологая седловина.
+    let bumps = (fbm(x * 0.11, z * 0.11, 43) - 0.47) * 2.4 * inside * (1.0 - inside * 0.5);
+    let gully = (-(((dx + dz * 0.4 - 14.0) / 3.5).powi(2))).exp() * smoothstep(0.35, 0.8, d) * inside * 2.2;
+    // К северу (к площадке перед уступом) горка обрывается быстро: площадка — на исходной земле.
+    // Край обрыва вне выемки рваный.
+    let wob = (fbm(x * 0.06 + 11.0, z * 0.06, 57) - 0.47) * 12.0 * smoothstep(10.0, 16.0, dx.abs());
+    let north = smoothstep(fz - 7.0 + wob, fz + 3.0 + wob, z);
+    let inside = inside * north;
+    ((9.5 * inside + bumps * north - gully).max(0.0), inside)
 }
 
 /// Каменоломня у Карантинной бухты: известняковый взлобок, срезанный уступами с севера.
@@ -146,10 +166,17 @@ pub const QUARRY_FACE: (f32, f32) = (452.0, 300.0);
 /// Насколько взлобок каменоломни поднимает землю (м).
 fn quarry_rise(x: f32, z: f32) -> f32 {
     let (qx, qz) = QUARRY_FACE;
-    let side = 1.0 - smoothstep(11.0, 26.0, (x - qx).abs());
-    let north = smoothstep(qz - 1.0, qz + 6.0, z);
-    let south = 1.0 - smoothstep(qz + 14.0, qz + 34.0, z);
-    4.0 * side * north * south
+    if (x - qx).abs() > 50.0 || (z - qz).abs() > 60.0 {
+        return 0.0;
+    }
+    // Край взлобка неровный, кроме самого среза (|x - qx| < 9).
+    let wob = (fbm(x * 0.05, z * 0.05, 53) - 0.47) * 10.0;
+    let side = 1.0 - smoothstep(11.0 + wob, 27.0 + wob, (x - qx).abs());
+    let cut = smoothstep(9.0, 14.0, (x - qx).abs());
+    let north = smoothstep(qz - 1.0 - cut * 6.0, qz + 6.0, z);
+    let south = 1.0 - smoothstep(qz + 14.0 + wob, qz + 34.0 + wob, z);
+    let bumps = (fbm(x * 0.13, z * 0.13, 59) - 0.47) * 1.4;
+    ((4.0 + bumps * cut) * side * north * south).max(0.0)
 }
 
 /// Высота суши без учёта моря.
