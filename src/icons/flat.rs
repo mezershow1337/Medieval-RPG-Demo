@@ -7,11 +7,11 @@
 
 use crate::items::ItemBaseId;
 
+#[path = "../trade_icons.rs"]
+mod trade_icons;
 /// Травы, вещества, книги и посуда.
 #[path = "lore_icons.rs"]
 mod lore_icons;
-#[path = "../trade_icons.rs"]
-mod trade_icons;
 use bevy::asset::RenderAssetUsages;
 use bevy::image::Image;
 use bevy::prelude::*;
@@ -58,16 +58,8 @@ pub struct Canvas {
 impl Canvas {
     fn new(cells_w: u8, cells_h: u8) -> Self {
         let scale = (PX_PER_CELL * SUPERSAMPLE) as f32;
-        let (w, h) = (
-            cells_w as u32 * PX_PER_CELL * SUPERSAMPLE,
-            cells_h as u32 * PX_PER_CELL * SUPERSAMPLE,
-        );
-        Self {
-            w,
-            h,
-            scale,
-            px: vec![[0.0; 4]; (w * h) as usize],
-        }
+        let (w, h) = (cells_w as u32 * PX_PER_CELL * SUPERSAMPLE, cells_h as u32 * PX_PER_CELL * SUPERSAMPLE);
+        Self { w, h, scale, px: vec![[0.0; 4]; (w * h) as usize] }
     }
 
     fn blend(&mut self, x: u32, y: u32, c: Rgba) {
@@ -106,9 +98,7 @@ impl Canvas {
 
     fn ring(&mut self, cx: f32, cy: f32, r0: f32, r1: f32, c: Rgba) {
         let ctr = Vec2::new(cx, cy);
-        self.fill(ctr - r1, ctr + r1, c, |p| {
-            (r0..=r1).contains(&p.distance(ctr))
-        });
+        self.fill(ctr - r1, ctr + r1, c, |p| (r0..=r1).contains(&p.distance(ctr)));
     }
 
     fn poly(&mut self, pts: &[(f32, f32)], c: Rgba) {
@@ -121,8 +111,7 @@ impl Canvas {
             let mut j = pts.len() - 1;
             for i in 0..pts.len() {
                 let (a, b) = (pts[i], pts[j]);
-                if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x
-                {
+                if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
                     inside = !inside;
                 }
                 j = i;
@@ -156,12 +145,7 @@ impl Canvas {
                 'search: for dy in -thick..=thick {
                     for dx in -thick..=thick {
                         let (nx, ny) = (x + dx, y + dy);
-                        if nx >= 0
-                            && ny >= 0
-                            && nx < w
-                            && ny < h
-                            && src[(ny * w + nx) as usize][3] > 0.5
-                        {
+                        if nx >= 0 && ny >= 0 && nx < w && ny < h && src[(ny * w + nx) as usize][3] > 0.5 {
                             near = true;
                             break 'search;
                         }
@@ -227,18 +211,9 @@ pub fn render_icon(base: ItemBaseId) -> (u32, u32, Vec<u8>) {
     c.to_rgba8()
 }
 
+
 /// Готовая картинка для Bevy.
 pub fn image(base: ItemBaseId) -> Image {
     let (w, h, data) = render_icon(base);
-    Image::new(
-        Extent3d {
-            width: w,
-            height: h,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        data,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD,
-    )
+    Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, data, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD)
 }

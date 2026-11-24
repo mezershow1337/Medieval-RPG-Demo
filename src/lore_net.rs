@@ -1,8 +1,8 @@
 //! Сетевые сообщения знаний: чтение, сбор трав, уроки. Свой канал [`CH_LORE`].
 
-use crate::brewing::{BrewSpec, Heat, Vessel};
 use crate::items::ItemUid;
 use crate::lore::{Knowledge, Substance, Teacher};
+use crate::brewing::{BrewSpec, Heat, Vessel};
 use crate::medicine::Body;
 use crate::protocol::NetPos;
 use serde::{Deserialize, Serialize};
@@ -135,10 +135,7 @@ pub enum LoreClientMessage {
     /// Приложить к ране или выпить (лекарство, а то и яд).
     Treat { uid: ItemUid },
     /// Приложить к выбранной ране или части тела, или в рот (окно здоровья).
-    TreatOn {
-        uid: ItemUid,
-        target: crate::medicine::CareTarget,
-    },
+    TreatOn { uid: ItemUid, target: crate::medicine::CareTarget },
     /// Варить в сосуде из своей сумки.
     Brew { vessel: ItemUid, spec: BrewSpec },
     /// Поставить жаровню или стол из сумки перед собой.
@@ -154,10 +151,7 @@ pub enum LoreClientMessage {
     /// Движение руками закончено (см. work.rs): качество 0..1.
     Stroke { q: f32 },
     /// Платный урок выбранного предмета (окно школы).
-    Study {
-        master: u32,
-        lore: crate::lore::Lore,
-    },
+    Study { master: u32, lore: crate::lore::Lore },
     /// Переписать книгу из сумки (нужны письмо, калам, чернила и пергамент).
     Copy { uid: ItemUid },
     /// Упражняться в письме на своей восковой табличке.
@@ -194,41 +188,22 @@ pub enum LoreServerMessage {
     /// Всё, что знает персонаж (после каждого изменения).
     Knowledge(Knowledge),
     Patches(Vec<PatchView>),
-    PatchCharges {
-        id: u32,
-        charges: u8,
-    },
+    PatchCharges { id: u32, charges: u8 },
     /// Одиночный кустик вырос на новом месте (или его сорвали: charges 0).
-    PatchMoved {
-        id: u32,
-        pos: NetPos,
-        charges: u8,
-    },
+    PatchMoved { id: u32, pos: NetPos, charges: u8 },
     Masters(Vec<MasterView>),
     /// Все поставленные жаровни и столы (после каждого изменения).
     Stations(Vec<StationView>),
     /// Игрок начал (Some) или закончил (None) работу у сосуда.
-    Work {
-        player: u64,
-        work: Option<WorkView>,
-    },
+    Work { player: u64, work: Option<WorkView> },
     /// Разовый эффект в точке.
-    Burst {
-        pos: NetPos,
-        fx: BurstFx,
-    },
+    Burst { pos: NetPos, fx: BurstFx },
     /// Огонь под своим сосудом.
     Tending(TendView),
     /// Началось занятие: подпись, сколько уже прошло и сколько всего (секунды).
     /// `drill` — каким движением работать (None — просто подождать, например выпить настой);
     /// `skill` 0..1 — насколько привычны руки.
-    Activity {
-        verb: String,
-        done: f32,
-        total: f32,
-        drill: Option<crate::work::Drill>,
-        skill: f32,
-    },
+    Activity { verb: String, done: f32, total: f32, drill: Option<crate::work::Drill>, skill: f32 },
     /// Сколько дела сделано (0..1), пока работают руками.
     Progress(f32),
     ActivityEnded,

@@ -37,13 +37,10 @@ impl Surface {
     pub fn of(mat: Mat) -> Option<Surface> {
         use Mat::*;
         Some(match mat {
-            Cobble | Stone | DarkStone | Floor | Trim | Paving | Limestone | Rubble | Plaster
-            | Brick | OpusMixtum | Marble | Mosaic | Signinum | Gold | Iron | Bronze | Coals
-            | Ochre | Glass | Bedrock | Limonite | Shingle => Surface::Stone,
+            Cobble | Stone | DarkStone | Floor | Trim | Paving | Limestone | Rubble | Plaster | Brick | OpusMixtum | Marble | Mosaic | Signinum | Gold | Iron | Bronze | Coals | Ochre | Glass | Bedrock | Limonite | Shingle => Surface::Stone,
             Wood | Bread => Surface::Wood,
             Earth | Soot => Surface::Dirt,
-            Grass | Terrain | Leaves | Conifer | HerbGreen | HerbSilver | PetalYellow
-            | PetalPurple | PetalWhite | PetalRed | PetalPink | Thatch => Surface::Grass,
+            Grass | Terrain | Leaves | Conifer | HerbGreen | HerbSilver | PetalYellow | PetalPurple | PetalWhite | PetalRed | PetalPink | Thatch => Surface::Grass,
             Rug | Cloth | Felt | Canvas | Banner | Leather => Surface::Cloth,
             Tile | Roof | Ceramic => Surface::Tile,
             Water => Surface::Water,
@@ -91,35 +88,20 @@ impl SurfaceMap {
         let mut tops: HashMap<(i32, i32), Vec<Top>> = HashMap::new();
         let mut ceilings: HashMap<(i32, i32), Vec<Top>> = HashMap::new();
         for b in &layout.blocks {
-            let Some(surface) = Surface::of(b.mat) else {
-                continue;
-            };
-            let (min, max) = (
-                Vec2::new(b.aabb.min.x, b.aabb.min.z),
-                Vec2::new(b.aabb.max.x, b.aabb.max.z),
-            );
+            let Some(surface) = Surface::of(b.mat) else { continue };
+            let (min, max) = (Vec2::new(b.aabb.min.x, b.aabb.min.z), Vec2::new(b.aabb.max.x, b.aabb.max.z));
             let size = max - min;
             // Гигантские плиты (пол на весь мир) — в отдельные ячейки не кладём, их заменяет земля.
             if size.x > 200.0 || size.y > 200.0 {
                 continue;
             }
-            let top = Top {
-                min,
-                max,
-                y: b.aabb.max.y,
-                surface,
-            };
+            let top = Top { min, max, y: b.aabb.max.y, surface };
             for c in cells(min, max) {
                 tops.entry(c).or_default().push(top);
             }
             // Широкие плоские плиты — перекрытия и потолки.
             if b.solid && size.x > 1.5 && size.y > 1.5 && b.aabb.max.y - b.aabb.min.y < 1.0 {
-                let under = Top {
-                    min,
-                    max,
-                    y: b.aabb.min.y,
-                    surface,
-                };
+                let under = Top { min, max, y: b.aabb.min.y, surface };
                 for c in cells(min, max) {
                     ceilings.entry(c).or_default().push(under);
                 }
@@ -131,14 +113,8 @@ impl SurfaceMap {
                 continue;
             }
             for t in mb.triangles() {
-                let min = Vec2::new(
-                    t[0].x.min(t[1].x).min(t[2].x),
-                    t[0].z.min(t[1].z).min(t[2].z),
-                );
-                let max = Vec2::new(
-                    t[0].x.max(t[1].x).max(t[2].x),
-                    t[0].z.max(t[1].z).max(t[2].z),
-                );
+                let min = Vec2::new(t[0].x.min(t[1].x).min(t[2].x), t[0].z.min(t[1].z).min(t[2].z));
+                let max = Vec2::new(t[0].x.max(t[1].x).max(t[2].x), t[0].z.max(t[1].z).max(t[2].z));
                 if (max - min).max_element() > 80.0 {
                     continue;
                 }
@@ -149,14 +125,7 @@ impl SurfaceMap {
         }
         let mut fires = layout.hearths.clone();
         fires.extend(layout.forges.iter().map(|f| f.fire));
-        Self {
-            tops,
-            roofs,
-            ceilings,
-            ground: layout.ground.clone(),
-            water_y: layout.water_y,
-            fires,
-        }
+        Self { tops, roofs, ceilings, ground: layout.ground.clone(), water_y: layout.water_y, fires }
     }
 
     /// Высота земли (рельеф) в точке.
@@ -178,13 +147,7 @@ impl SurfaceMap {
         let mut best: Option<Top> = None;
         if let Some(list) = self.tops.get(&cell(feet.x, feet.z)) {
             for t in list {
-                if p.x >= t.min.x - 0.05
-                    && p.x <= t.max.x + 0.05
-                    && p.y >= t.min.y - 0.05
-                    && p.y <= t.max.y + 0.05
-                    && (t.y - feet.y).abs() < 0.3
-                    && best.is_none_or(|b| t.y > b.y)
-                {
+                if p.x >= t.min.x - 0.05 && p.x <= t.max.x + 0.05 && p.y >= t.min.y - 0.05 && p.y <= t.max.y + 0.05 && (t.y - feet.y).abs() < 0.3 && best.is_none_or(|b| t.y > b.y) {
                     best = Some(*t);
                 }
             }
@@ -197,11 +160,7 @@ impl SurfaceMap {
         {
             return Surface::Water;
         }
-        if crate::level::inside_city(feet.x, feet.z) {
-            Surface::Dirt
-        } else {
-            Surface::Grass
-        }
+        if crate::level::inside_city(feet.x, feet.z) { Surface::Dirt } else { Surface::Grass }
     }
 
     /// Есть ли над точкой крыша или перекрытие (в пределах 14 м).
@@ -209,14 +168,7 @@ impl SurfaceMap {
         let p = Vec2::new(head.x, head.z);
         let c = cell(head.x, head.z);
         if let Some(list) = self.ceilings.get(&c)
-            && list.iter().any(|t| {
-                p.x >= t.min.x
-                    && p.x <= t.max.x
-                    && p.y >= t.min.y
-                    && p.y <= t.max.y
-                    && t.y > head.y
-                    && t.y < head.y + 14.0
-            })
+            && list.iter().any(|t| p.x >= t.min.x && p.x <= t.max.x && p.y >= t.min.y && p.y <= t.max.y && t.y > head.y && t.y < head.y + 14.0)
         {
             return true;
         }
@@ -236,11 +188,7 @@ impl SurfaceMap {
 
 /// Высота треугольника над точкой плана (если точка внутри его проекции).
 fn tri_height(t: &[Vec3; 3], p: Vec2) -> Option<f32> {
-    let (a, b, c) = (
-        Vec2::new(t[0].x, t[0].z),
-        Vec2::new(t[1].x, t[1].z),
-        Vec2::new(t[2].x, t[2].z),
-    );
+    let (a, b, c) = (Vec2::new(t[0].x, t[0].z), Vec2::new(t[1].x, t[1].z), Vec2::new(t[2].x, t[2].z));
     let d = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
     if d.abs() < 1e-6 {
         return None;
@@ -287,20 +235,13 @@ mod tests {
         let s = map.surface_at(p);
         assert_ne!(s, Surface::Water, "у точки появления под ногами вода");
         // Где-то в городе есть крыши.
-        let roofed = crate::level::places::places()
-            .iter()
-            .filter(|pl| map.roofed(pl.pos + Vec3::Y * 1.7))
-            .count();
+        let roofed = crate::level::places::places().iter().filter(|pl| map.roofed(pl.pos + Vec3::Y * 1.7)).count();
         assert!(roofed > 0, "ни одно место не под крышей");
     }
 
     #[test]
     fn triangle_height() {
-        let t = [
-            Vec3::new(0.0, 5.0, 0.0),
-            Vec3::new(4.0, 5.0, 0.0),
-            Vec3::new(0.0, 9.0, 4.0),
-        ];
+        let t = [Vec3::new(0.0, 5.0, 0.0), Vec3::new(4.0, 5.0, 0.0), Vec3::new(0.0, 9.0, 4.0)];
         assert!((tri_height(&t, Vec2::new(1.0, 1.0)).unwrap() - 6.0).abs() < 1e-4);
         assert!(tri_height(&t, Vec2::new(5.0, 5.0)).is_none());
     }

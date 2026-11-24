@@ -15,24 +15,24 @@
 //! Уроки в лавках торговли приходят событием `trade_server::LessonRequested` и переводятся
 //! в [`Lesson`]; если платному ученику учить нечего — `trade_server::RefundLesson`.
 
-use crate::brewing::{self, BrewSpec, Vessel};
 use crate::collision::LevelColliders;
-use crate::combat::Action;
 use crate::economy::{NUMMI_PER_FOLLIS, format_money, give_money, take_money};
+use crate::combat::Action;
 use crate::inventory::{Inventory, Target};
 use crate::items::{ItemBaseId, ItemUid, Quality, Rng, roll_item};
 use crate::loot_net::{CH_LOOT, LootServerMessage};
 use crate::loot_server::LootWorld;
+use crate::brewing::{self, BrewSpec, Vessel};
 use crate::lore::*;
-use crate::lore_net::*;
 use crate::medicine::{self, Body, Treated};
 use crate::medicine_server::Bodies;
-use crate::mining_server::{self, MineTask, MineWorld, Outcome};
+use crate::lore_net::*;
 use crate::protocol::{decode, encode};
 use crate::server::GameWorld;
+use bevy::prelude::*;
 use crate::trade_server::{LessonRequested, RefundLesson};
 use crate::work::{Drill, Effort};
-use bevy::prelude::*;
+use crate::mining_server::{self, MineTask, MineWorld, Outcome};
 use bevy_renet::{RenetServer, RenetServerEvent, renet::ServerEvent};
 use std::collections::HashMap;
 
@@ -55,28 +55,14 @@ pub struct KnowledgeServerPlugin;
 
 impl Plugin for KnowledgeServerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            crate::medicine_server::MedicineServerPlugin,
-            crate::skills_server::SkillsServerPlugin,
-        ))
-        .insert_resource(KnowledgeWorld::default())
-        .add_observer(on_connection)
-        .add_observer(on_lesson)
-        .add_observer(on_grant)
-        .add_observer(on_trade_lesson)
-        .add_systems(Startup, setup_world)
-        .add_systems(
-            Update,
-            (
-                debug_kit,
-                update_masters,
-                receive_lore_messages,
-                tick_fires,
-                tick_activities,
-                regrow_patches,
-            )
-                .chain(),
-        );
+        app.add_plugins((crate::medicine_server::MedicineServerPlugin, crate::skills_server::SkillsServerPlugin))
+            .insert_resource(KnowledgeWorld::default())
+            .add_observer(on_connection)
+            .add_observer(on_lesson)
+            .add_observer(on_grant)
+            .add_observer(on_trade_lesson)
+            .add_systems(Startup, setup_world)
+            .add_systems(Update, (debug_kit, update_masters, receive_lore_messages, tick_fires, tick_activities, regrow_patches).chain());
     }
 }
 
@@ -147,33 +133,15 @@ pub struct Master {
 /// Чем занят игрок.
 #[derive(Clone, Debug)]
 enum Task {
-    Read {
-        uid: ItemUid,
-        text: Book,
-    },
-    Gather {
-        patch: u32,
-    },
-    Lesson {
-        master: u32,
-        mode: LessonMode,
-        subject: Option<Lore>,
-    },
+    Read { uid: ItemUid, text: Book },
+    Gather { patch: u32 },
+    Lesson { master: u32, mode: LessonMode, subject: Option<Lore> },
     /// Переписка книги: калам, чернила, пергамент.
-    Copy {
-        uid: ItemUid,
-        text: Book,
-    },
+    Copy { uid: ItemUid, text: Book },
     /// Упражнения на своей восковой табличке.
     Practice,
-    Treat {
-        uid: ItemUid,
-        target: Option<medicine::CareTarget>,
-    },
-    Brew {
-        vessel: ItemUid,
-        spec: BrewSpec,
-    },
+    Treat { uid: ItemUid, target: Option<medicine::CareTarget> },
+    Brew { vessel: ItemUid, spec: BrewSpec },
     /// Копать, колоть, класть кучу, ворошить руду (см. mining_server.rs).
     Mine(MineTask),
 }
@@ -283,21 +251,12 @@ impl Tend {
     }
 
     fn view(&self) -> TendView {
-        TendView {
-            fire: self.fire,
-            target: self.target,
-            dome: self.dome,
-            bath: self.bath,
-        }
+        TendView { fire: self.fire, target: self.target, dome: self.dome, bath: self.bath }
     }
 
     fn log(&self) -> brewing::FireLog {
         let t = self.time.max(0.01);
-        brewing::FireLog {
-            over: self.over / t,
-            under: self.under / t,
-            dome_peak: self.dome_peak,
-        }
+        brewing::FireLog { over: self.over / t, under: self.under / t, dome_peak: self.dome_peak }
     }
 }
 
@@ -314,15 +273,7 @@ pub struct KnowledgeWorld {
 
 impl Default for KnowledgeWorld {
     fn default() -> Self {
-        Self {
-            players: HashMap::new(),
-            patches: HashMap::new(),
-            masters: HashMap::new(),
-            stations: HashMap::new(),
-            next_station: 1,
-            activities: HashMap::new(),
-            rng: Rng::from_time(),
-        }
+        Self { players: HashMap::new(), patches: HashMap::new(), masters: HashMap::new(), stations: HashMap::new(), next_station: 1, activities: HashMap::new(), rng: Rng::from_time() }
     }
 }
 
@@ -333,39 +284,18 @@ impl KnowledgeWorld {
     }
 
     pub fn next_lesson(&self, player: u64, teacher: Teacher) -> Option<Lore> {
-        self.players
-            .get(&player)
-            .and_then(|k| k.next_lesson(teacher))
+        self.players.get(&player).and_then(|k| k.next_lesson(teacher))
     }
 
     fn patch_views(&self) -> Vec<PatchView> {
-        let mut v: Vec<PatchView> = self
-            .patches
-            .iter()
-            .map(|(id, p)| PatchView {
-                id: *id,
-                substance: p.substance,
-                pos: p.pos.into(),
-                charges: p.charges,
-                draw: p.draw,
-                radius: p.radius,
-            })
-            .collect();
+        let mut v: Vec<PatchView> =
+            self.patches.iter().map(|(id, p)| PatchView { id: *id, substance: p.substance, pos: p.pos.into(), charges: p.charges, draw: p.draw, radius: p.radius }).collect();
         v.sort_by_key(|p| p.id);
         v
     }
 
     fn station_views(&self) -> Vec<StationView> {
-        let mut v: Vec<StationView> = self
-            .stations
-            .iter()
-            .map(|(id, s)| StationView {
-                id: *id,
-                kind: s.kind,
-                pos: s.pos.into(),
-                yaw: s.yaw,
-            })
-            .collect();
+        let mut v: Vec<StationView> = self.stations.iter().map(|(id, s)| StationView { id: *id, kind: s.kind, pos: s.pos.into(), yaw: s.yaw }).collect();
         v.sort_by_key(|s| s.id);
         v
     }
@@ -374,13 +304,7 @@ impl KnowledgeWorld {
     fn station_near(&self, feet: Vec3, reach: f32) -> Option<(u32, &Station)> {
         self.stations
             .iter()
-            .map(|(id, s)| {
-                (
-                    Vec2::new(s.pos.x - feet.x, s.pos.z - feet.z).length(),
-                    *id,
-                    s,
-                )
-            })
+            .map(|(id, s)| (Vec2::new(s.pos.x - feet.x, s.pos.z - feet.z).length(), *id, s))
             .filter(|(d, _, s)| *d <= reach && (s.pos.y - feet.y).abs() < 2.0)
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, id, s)| (id, s))
@@ -388,11 +312,7 @@ impl KnowledgeWorld {
 
     /// Есть ли рядом алхимический стол (точные весы, подставка, ровный жар).
     fn bench_near(&self, feet: Vec3) -> bool {
-        self.stations.values().any(|s| {
-            s.kind == StationKind::Table
-                && Vec2::new(s.pos.x - feet.x, s.pos.z - feet.z).length() <= HEARTH_REACH
-                && (s.pos.y - feet.y).abs() < 2.0
-        })
+        self.stations.values().any(|s| s.kind == StationKind::Table && Vec2::new(s.pos.x - feet.x, s.pos.z - feet.z).length() <= HEARTH_REACH && (s.pos.y - feet.y).abs() < 2.0)
     }
 
     fn master_views(&self) -> Vec<MasterView> {
@@ -433,11 +353,7 @@ pub(crate) fn sync_knowledge(server: &mut RenetServer, world: &KnowledgeWorld, p
 
 fn sync_inventory(server: &mut RenetServer, loot: &LootWorld, player: u64) {
     if let Some(inv) = loot.inventories.get(&player) {
-        server.send_message(
-            player,
-            CH_LOOT,
-            encode(&LootServerMessage::Inventory(inv.clone())),
-        );
+        server.send_message(player, CH_LOOT, encode(&LootServerMessage::Inventory(inv.clone())));
     }
 }
 
@@ -454,66 +370,28 @@ fn give(inv: &mut Inventory, item: crate::items::Item) -> Option<crate::items::I
 // ---------------------------------------------------------------------------
 
 /// Заросли и мастера: в Херсонесе — по местам города, на других уровнях — у места появления.
-fn setup_world(
-    mut world: ResMut<KnowledgeWorld>,
-    level: Res<LevelColliders>,
-    civil: Option<Res<crate::civil_server::CivilWorld>>,
-) {
+fn setup_world(mut world: ResMut<KnowledgeWorld>, level: Res<LevelColliders>, civil: Option<Res<crate::civil_server::CivilWorld>>) {
     let origin = crate::level::spawn_point(0);
     let city = crate::level::herb_patches();
     for (i, h) in city.iter().enumerate() {
-        let Some(s) = Substance::from_latin(h.herb) else {
-            continue;
-        };
-        let max = (PATCH_CHARGES as f32 + h.radius * 0.8)
-            .round()
-            .clamp(3.0, 12.0) as u8;
-        world.patches.insert(
-            i as u32 + 1,
-            Patch {
-                substance: s,
-                pos: h.pos,
-                charges: max,
-                max_charges: max,
-                radius: h.radius,
-                regrow: 0.0,
-                draw: false,
-                home: None,
-                respawn: 0.0,
-            },
-        );
+        let Some(s) = Substance::from_latin(h.herb) else { continue };
+        let max = (PATCH_CHARGES as f32 + h.radius * 0.8).round().clamp(3.0, 12.0) as u8;
+        world.patches.insert(i as u32 + 1, Patch { substance: s, pos: h.pos, charges: max, max_charges: max, radius: h.radius, regrow: 0.0, draw: false, home: None, respawn: 0.0 });
     }
     // За стенами вокруг каждой заросли растут одиночные кустики: сорвёшь — вырастет другой
     // где-нибудь поблизости. Так травы попадаются по всей округе, а не только в зарослях.
     let mut rng = Rng::from_time();
     let mut id = WILD_PATCH_BASE;
     for h in city {
-        let Some(s) = Substance::from_latin(h.herb) else {
-            continue;
-        };
+        let Some(s) = Substance::from_latin(h.herb) else { continue };
         if crate::level::inside_city(h.pos.x, h.pos.z) {
             continue;
         }
         let n = if h.radius >= 7.0 { 3 } else { 2 };
         for _ in 0..n {
-            let Some(pos) = wild_spot(&mut rng, &level, h.pos, h.radius) else {
-                continue;
-            };
+            let Some(pos) = wild_spot(&mut rng, &level, h.pos, h.radius) else { continue };
             let respawn = rng.range_f32(WILD_RESPAWN_SECS.0, WILD_RESPAWN_SECS.1);
-            world.patches.insert(
-                id,
-                Patch {
-                    substance: s,
-                    pos,
-                    charges: 1,
-                    max_charges: 1,
-                    radius: 0.35,
-                    regrow: 0.0,
-                    draw: true,
-                    home: Some((h.pos, h.radius)),
-                    respawn,
-                },
-            );
+            world.patches.insert(id, Patch { substance: s, pos, charges: 1, max_charges: 1, radius: 0.35, regrow: 0.0, draw: true, home: Some((h.pos, h.radius)), respawn });
             id += 1;
         }
     }
@@ -523,81 +401,24 @@ fn setup_world(
     // Врача, ризотома, аптекаря и прочих ведёт торговля (лавки в trade.rs). Здесь — только те,
     // кого там нет: церковный писец (грамота) и деревенская знахарка. Цены в нуммиях.
     // Учителя грамоты (school.rs): школа в дидаскалионе — жители города, нотарий и сочинитель — на местах.
-    let masters = [
-        (
-            Teacher::Scribe,
-            2 * NUMMI_PER_FOLLIS,
-            10,
-            "church_west",
-            (6.0, 18.5),
-        ),
-        (
-            Teacher::Wisewoman,
-            NUMMI_PER_FOLLIS,
-            0,
-            "goth_village",
-            (0.0, 24.0),
-        ),
-    ];
+    let masters = [(Teacher::Scribe, 2 * NUMMI_PER_FOLLIS, 10, "church_west", (6.0, 18.5)), (Teacher::Wisewoman, NUMMI_PER_FOLLIS, 0, "goth_village", (0.0, 24.0))];
     let mut id = 1;
     for (i, (teacher, price, wage, place, hours)) in masters.into_iter().enumerate() {
-        let pos = crate::level::place_pos(place)
-            .unwrap_or(origin + Vec3::new(-2.0 + i as f32 * 4.0, 0.0, 5.0));
+        let pos = crate::level::place_pos(place).unwrap_or(origin + Vec3::new(-2.0 + i as f32 * 4.0, 0.0, 5.0));
         let pos = crate::npc::find_free_spot(&level, pos);
-        world.masters.insert(
-            id,
-            Master {
-                teacher,
-                pos,
-                yaw: 0.0,
-                price,
-                wage,
-                resident: None,
-                hours,
-                present: true,
-                place,
-            },
-        );
+        world.masters.insert(id, Master { teacher, pos, yaw: 0.0, price, wage, resident: None, hours, present: true, place });
         id += 1;
     }
-    let people: Vec<crate::school::Townsman> = civil
-        .as_ref()
-        .map(|c| {
-            c.people
-                .iter()
-                .map(|p| crate::school::Townsman {
-                    role: p.role,
-                    pos: p.pos,
-                    yaw: p.yaw,
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let people: Vec<crate::school::Townsman> =
+        civil.as_ref().map(|c| c.people.iter().map(|p| crate::school::Townsman { role: p.role, pos: p.pos, yaw: p.yaw }).collect()).unwrap_or_default();
     for t in crate::school::tutors(&people) {
-        let pos = if t.resident.is_some() {
-            t.pos
-        } else {
-            crate::npc::find_free_spot(&level, t.pos)
-        };
+        let pos = if t.resident.is_some() { t.pos } else { crate::npc::find_free_spot(&level, t.pos) };
         // Стоит лицом к середине места (к агоре, ко входу в преторию).
         let yaw = match (t.resident, crate::level::place_pos(t.place)) {
             (None, Some(c)) if (c - pos).length() > 0.5 => crate::daily_life::yaw_to(pos, c),
             _ => t.yaw,
         };
-        world.masters.insert(
-            id,
-            Master {
-                teacher: t.teacher,
-                pos,
-                yaw,
-                price: t.price,
-                wage: t.wage,
-                resident: t.resident,
-                hours: t.hours,
-                present: false,
-                place: t.place,
-            },
-        );
+        world.masters.insert(id, Master { teacher: t.teacher, pos, yaw, price: t.price, wage: t.wage, resident: t.resident, hours: t.hours, present: false, place: t.place });
         id += 1;
     }
 }
@@ -617,9 +438,7 @@ fn update_masters(
                 Some(p) => {
                     m.pos = p.pos;
                     m.yaw = p.yaw;
-                    p.dead_until.is_none()
-                        && p.rallied.is_none()
-                        && crate::school::on_duty(m.hours, hour, Some(p.act))
+                    p.dead_until.is_none() && p.rallied.is_none() && crate::school::on_duty(m.hours, hour, Some(p.act))
                 }
                 None => false,
             },
@@ -680,58 +499,22 @@ fn place_demo_patches(world: &mut KnowledgeWorld, level: &LevelColliders, origin
         let a = -1.2 + i as f32 * (2.4 / (herbs.len() - 1) as f32);
         let pos = origin + Vec3::new(a.sin() * 9.0, 0.0, -a.cos() * 9.0 + 2.0);
         let pos = crate::npc::find_free_spot(level, pos);
-        world.patches.insert(
-            i as u32 + 1,
-            Patch {
-                substance: s,
-                pos: Vec3::new(pos.x, pos.y.max(0.0), pos.z),
-                charges: PATCH_CHARGES,
-                max_charges: PATCH_CHARGES,
-                radius: 0.5,
-                regrow: 0.0,
-                draw: true,
-                home: None,
-                respawn: 0.0,
-            },
-        );
+        world.patches.insert(i as u32 + 1, Patch { substance: s, pos: Vec3::new(pos.x, pos.y.max(0.0), pos.z), charges: PATCH_CHARGES, max_charges: PATCH_CHARGES, radius: 0.5, regrow: 0.0, draw: true, home: None, respawn: 0.0 });
     }
 }
 
-fn on_connection(
-    event: On<RenetServerEvent>,
-    mut server: ResMut<RenetServer>,
-    mut world: ResMut<KnowledgeWorld>,
-) {
+fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, mut world: ResMut<KnowledgeWorld>) {
     match &event.0 {
         ServerEvent::ClientConnected { client_id } => {
             let id = *client_id;
             world.players.insert(id, Knowledge::default());
             sync_knowledge(&mut server, &world, id);
-            send(
-                &mut server,
-                id,
-                &LoreServerMessage::Patches(world.patch_views()),
-            );
-            send(
-                &mut server,
-                id,
-                &LoreServerMessage::Masters(world.master_views()),
-            );
-            send(
-                &mut server,
-                id,
-                &LoreServerMessage::Stations(world.station_views()),
-            );
+            send(&mut server, id, &LoreServerMessage::Patches(world.patch_views()));
+            send(&mut server, id, &LoreServerMessage::Masters(world.master_views()));
+            send(&mut server, id, &LoreServerMessage::Stations(world.station_views()));
             for (player, a) in &world.activities {
                 if let Some(work) = a.work {
-                    send(
-                        &mut server,
-                        id,
-                        &LoreServerMessage::Work {
-                            player: *player,
-                            work: Some(work),
-                        },
-                    );
+                    send(&mut server, id, &LoreServerMessage::Work { player: *player, work: Some(work) });
                 }
             }
         }
@@ -752,51 +535,27 @@ fn learned_message(learned: &[Lore]) -> Option<String> {
     Some(format!("Вы узнали: {}", names.join("; ")))
 }
 
-fn on_lesson(
-    event: On<Lesson>,
-    mut server: ResMut<RenetServer>,
-    mut world: ResMut<KnowledgeWorld>,
-) {
+fn on_lesson(event: On<Lesson>, mut server: ResMut<RenetServer>, mut world: ResMut<KnowledgeWorld>) {
     let ev = event.event().clone();
-    let Some(k) = world.players.get_mut(&ev.player) else {
-        return;
-    };
+    let Some(k) = world.players.get_mut(&ev.player) else { return };
     let before = k.next_lesson(ev.teacher);
     let learned = k.study(ev.teacher, ev.mode, ev.hours);
     match (learned_message(&learned), before) {
         (Some(msg), _) => notice(&mut server, ev.player, msg),
         (None, Some(lore)) => {
             let p = k.lessons.get(&lore).copied().unwrap_or(0.0);
-            notice(
-                &mut server,
-                ev.player,
-                format!("{}: выучено {:.0}%", lore.name(), p * 100.0),
-            );
+            notice(&mut server, ev.player, format!("{}: выучено {:.0}%", lore.name(), p * 100.0));
         }
-        (None, None) => notice(
-            &mut server,
-            ev.player,
-            format!("{} больше ничему не может вас научить", ev.teacher.name()),
-        ),
+        (None, None) => notice(&mut server, ev.player, format!("{} больше ничему не может вас научить", ev.teacher.name())),
     }
     sync_knowledge(&mut server, &world, ev.player);
 }
 
-fn on_grant(
-    event: On<GrantLore>,
-    mut server: ResMut<RenetServer>,
-    mut world: ResMut<KnowledgeWorld>,
-) {
+fn on_grant(event: On<GrantLore>, mut server: ResMut<RenetServer>, mut world: ResMut<KnowledgeWorld>) {
     let ev = event.event().clone();
-    let Some(k) = world.players.get_mut(&ev.player) else {
-        return;
-    };
+    let Some(k) = world.players.get_mut(&ev.player) else { return };
     if k.learn(ev.lore) {
-        notice(
-            &mut server,
-            ev.player,
-            format!("Вы узнали: {}", ev.lore.name()),
-        );
+        notice(&mut server, ev.player, format!("Вы узнали: {}", ev.lore.name()));
         sync_knowledge(&mut server, &world, ev.player);
     }
 }
@@ -820,12 +579,7 @@ fn on_trade_lesson(event: On<LessonRequested>, mut commands: Commands, world: Re
         return;
     }
     // Подмастерью смена засчитывается всегда: даже когда новых знаний нет, растёт навык.
-    commands.trigger(Lesson {
-        player: ev.player,
-        teacher,
-        hours: ev.hours,
-        mode,
-    });
+    commands.trigger(Lesson { player: ev.player, teacher, hours: ev.hours, mode });
 }
 
 /// Мастера торговли называются так же, как наши.
@@ -864,9 +618,7 @@ fn in_reach(feet: Vec3, target: Vec3) -> bool {
 /// Мехи, заслонка, мокрая тряпица.
 /// Игрок закончил движение руками.
 fn stroke(server: &mut RenetServer, world: &mut KnowledgeWorld, pid: u64, q: f32) {
-    let Some(a) = world.activities.get_mut(&pid) else {
-        return;
-    };
+    let Some(a) = world.activities.get_mut(&pid) else { return };
     let at: Vec3 = a.work.map_or(a.start, |w| w.pos.into());
     let Some(e) = a.effort.as_mut() else { return };
     if !e.stroke(q) {
@@ -885,20 +637,9 @@ fn stroke(server: &mut RenetServer, world: &mut KnowledgeWorld, pid: u64, q: f32
     }
 }
 
-fn tend_action(
-    server: &mut RenetServer,
-    world: &mut KnowledgeWorld,
-    loot: &LootWorld,
-    pid: u64,
-    action: TendAction,
-) {
-    let has_cloth = loot
-        .inventories
-        .get(&pid)
-        .is_some_and(|inv| count_named(inv, brewing::CLOTH) > 0);
-    let Some(a) = world.activities.get_mut(&pid) else {
-        return;
-    };
+fn tend_action(server: &mut RenetServer, world: &mut KnowledgeWorld, loot: &LootWorld, pid: u64, action: TendAction) {
+    let has_cloth = loot.inventories.get(&pid).is_some_and(|inv| count_named(inv, brewing::CLOTH) > 0);
+    let Some(a) = world.activities.get_mut(&pid) else { return };
     let at: Vec3 = a.work.map_or(a.start, |w| w.pos.into());
     let Some(t) = a.tend.as_mut() else { return };
     match action {
@@ -914,11 +655,7 @@ fn tend_action(
         TendAction::CoolDome => {
             let Some(d) = t.dome.as_mut() else { return };
             if !has_cloth {
-                notice(
-                    server,
-                    pid,
-                    "Нечем остудить купол: нужна мокрая тряпица (отрез льна)",
-                );
+                notice(server, pid, "Нечем остудить купол: нужна мокрая тряпица (отрез льна)");
                 return;
             }
             if t.cool_ready > 0.0 {
@@ -936,9 +673,7 @@ fn tend_action(
 /// Огонь под сосудами: прогорает, гуляет; игроку — как он идёт, всем — сила пламени.
 fn tick_fires(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMut<KnowledgeWorld>) {
     let dt = time.delta_secs();
-    let KnowledgeWorld {
-        activities, rng, ..
-    } = &mut *world;
+    let KnowledgeWorld { activities, rng, .. } = &mut *world;
     for (pid, a) in activities.iter_mut() {
         let Some(t) = a.tend.as_mut() else { continue };
         t.tick(dt, rng);
@@ -951,19 +686,9 @@ fn tick_fires(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMu
         if band != t.band {
             t.band = band;
             if let Some(w) = a.work.as_mut() {
-                w.heat = if t.bath {
-                    brewing::Heat::Low
-                } else {
-                    heat_of_level(band)
-                };
+                w.heat = if t.bath { brewing::Heat::Low } else { heat_of_level(band) };
                 let work = *w;
-                server.broadcast_message(
-                    CH_LORE,
-                    encode(&LoreServerMessage::Work {
-                        player: *pid,
-                        work: Some(work),
-                    }),
-                );
+                server.broadcast_message(CH_LORE, encode(&LoreServerMessage::Work { player: *pid, work: Some(work) }));
             }
         }
     }
@@ -972,51 +697,21 @@ fn tick_fires(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMu
 /// Работа у сосуда кончилась — убрать сосуд и пар у всех.
 fn end_work(server: &mut RenetServer, pid: u64, a: &Activity) {
     if a.work.is_some() {
-        server.broadcast_message(
-            CH_LORE,
-            encode(&LoreServerMessage::Work {
-                player: pid,
-                work: None,
-            }),
-        );
+        server.broadcast_message(CH_LORE, encode(&LoreServerMessage::Work { player: pid, work: None }));
     }
 }
 
 fn burst(server: &mut RenetServer, pos: Vec3, fx: BurstFx) {
-    server.broadcast_message(
-        CH_LORE,
-        encode(&LoreServerMessage::Burst {
-            pos: pos.into(),
-            fx,
-        }),
-    );
+    server.broadcast_message(CH_LORE, encode(&LoreServerMessage::Burst { pos: pos.into(), fx }));
 }
 
 /// Где стоит сосуд: на очаге, на жаровне, на столе или на земле перед игроком.
-fn work_view(
-    world: &KnowledgeWorld,
-    spec: &BrewSpec,
-    vessel: Vessel,
-    feet: Vec3,
-    yaw: f32,
-) -> WorkView {
+fn work_view(world: &KnowledgeWorld, spec: &BrewSpec, vessel: Vessel, feet: Vec3, yaw: f32) -> WorkView {
     let fire = spec.heat != brewing::Heat::None;
     let forward = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
-    let view = |pos: Vec3, yaw: f32, own_fire: bool| WorkView {
-        vessel,
-        heat: spec.heat,
-        pos: pos.into(),
-        yaw,
-        own_fire,
-    };
+    let view = |pos: Vec3, yaw: f32, own_fire: bool| WorkView { vessel, heat: spec.heat, pos: pos.into(), yaw, own_fire };
     if fire
-        && let Some(h) = crate::level::hearths()
-            .iter()
-            .filter(|h| {
-                Vec2::new(h.x - feet.x, h.z - feet.z).length() <= HEARTH_REACH
-                    && (h.y - feet.y).abs() < 2.5
-            })
-            .min_by(|a, b| a.distance(feet).total_cmp(&b.distance(feet)))
+        && let Some(h) = crate::level::hearths().iter().filter(|h| Vec2::new(h.x - feet.x, h.z - feet.z).length() <= HEARTH_REACH && (h.y - feet.y).abs() < 2.5).min_by(|a, b| a.distance(feet).total_cmp(&b.distance(feet)))
     {
         return view(*h + Vec3::Y * 0.3, yaw, false);
     }
@@ -1024,12 +719,8 @@ fn work_view(
         let rot = Quat::from_rotation_y(s.yaw);
         match (s.kind, fire) {
             (StationKind::Brazier, true) => return view(s.pos + Vec3::Y * 0.5, s.yaw, false),
-            (StationKind::Table, true) => {
-                return view(s.pos + rot * Vec3::new(0.45, 1.12, 0.0), s.yaw, false);
-            }
-            (StationKind::Table, false) => {
-                return view(s.pos + rot * Vec3::new(-0.02, 0.85, 0.14), s.yaw, false);
-            }
+            (StationKind::Table, true) => return view(s.pos + rot * Vec3::new(0.45, 1.12, 0.0), s.yaw, false),
+            (StationKind::Table, false) => return view(s.pos + rot * Vec3::new(-0.02, 0.85, 0.14), s.yaw, false),
             (StationKind::Brazier, false) => {}
         }
     }
@@ -1037,51 +728,16 @@ fn work_view(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn start(
-    server: &mut RenetServer,
-    world: &mut KnowledgeWorld,
-    player: u64,
-    task: Task,
-    verb: String,
-    done: f32,
-    total: f32,
-    feet: Vec3,
-    hp: f32,
-    drill: Option<Drill>,
-    skill: f32,
-) {
+fn start(server: &mut RenetServer, world: &mut KnowledgeWorld, player: u64, task: Task, verb: String, done: f32, total: f32, feet: Vec3, hp: f32, drill: Option<Drill>, skill: f32) {
     let effort = drill.map(|d| {
         let mut e = Effort::new(d, total);
         // Дочитывают с того места, где остановились.
         e.done = e.need * (done / total.max(0.01)).clamp(0.0, 1.0);
         e
     });
-    world.activities.insert(
-        player,
-        Activity {
-            task,
-            elapsed: done,
-            total,
-            start: feet,
-            last_hp: hp,
-            work: None,
-            tend: None,
-            effort,
-            send_in: 0.0,
-        },
-    );
+    world.activities.insert(player, Activity { task, elapsed: done, total, start: feet, last_hp: hp, work: None, tend: None, effort, send_in: 0.0 });
     let skill = (skill / 100.0).clamp(0.0, 1.0);
-    send(
-        server,
-        player,
-        &LoreServerMessage::Activity {
-            verb,
-            done,
-            total,
-            drill,
-            skill,
-        },
-    );
+    send(server, player, &LoreServerMessage::Activity { verb, done, total, drill, skill });
 }
 
 fn receive_lore_messages(
@@ -1096,16 +752,8 @@ fn receive_lore_messages(
 ) {
     for pid in server.clients_id() {
         while let Some(bytes) = server.receive_message(pid, CH_LORE) {
-            let Some(msg) = decode::<LoreClientMessage>(&bytes) else {
-                continue;
-            };
-            let Some(actor) = game
-                .actors
-                .get(&pid)
-                .filter(|a| a.alive && !a.fighter.is_dead())
-            else {
-                continue;
-            };
+            let Some(msg) = decode::<LoreClientMessage>(&bytes) else { continue };
+            let Some(actor) = game.actors.get(&pid).filter(|a| a.alive && !a.fighter.is_dead()) else { continue };
             let (feet, hp) = (actor.pose.feet, actor.fighter.hp);
             if let LoreClientMessage::Stop = msg {
                 if let Some(a) = world.activities.remove(&pid) {
@@ -1124,33 +772,15 @@ fn receive_lore_messages(
             }
             // Рудник и кучи: мгновенное (поджечь, отдушина) можно и посреди работы.
             if let LoreClientMessage::Mine(act) = msg {
-                let Some(mines) = mines.as_deref_mut() else {
-                    continue;
-                };
+                let Some(mines) = mines.as_deref_mut() else { continue };
                 if !matches!(actor.fighter.action, Action::Idle) {
                     continue;
                 }
                 let busy = world.activities.contains_key(&pid);
-                let (Some(k), Some(inv)) =
-                    (world.players.get(&pid), loot.inventories.get_mut(&pid))
-                else {
-                    continue;
-                };
+                let (Some(k), Some(inv)) = (world.players.get(&pid), loot.inventories.get_mut(&pid)) else { continue };
                 match mining_server::act(mines, k, inv, feet, pid, busy, act) {
                     Ok(Outcome::Start(task, verb, secs, drill, skill)) => {
-                        start(
-                            &mut server,
-                            &mut world,
-                            pid,
-                            Task::Mine(task),
-                            verb,
-                            0.0,
-                            secs,
-                            feet,
-                            hp,
-                            Some(drill),
-                            skill,
-                        );
+                        start(&mut server, &mut world, pid, Task::Mine(task), verb, 0.0, secs, feet, hp, Some(drill), skill);
                     }
                     Ok(Outcome::Done(text)) => notice(&mut server, pid, text),
                     Err(e) => notice(&mut server, pid, e),
@@ -1168,34 +798,14 @@ fn receive_lore_messages(
             if !matches!(actor.fighter.action, Action::Idle) {
                 continue;
             }
-            if let LoreClientMessage::PlaceStation { .. }
-            | LoreClientMessage::TakeStation { .. }
-            | LoreClientMessage::UpgradeStation { .. } = msg
-            {
-                station_message(
-                    &mut server,
-                    &mut world,
-                    &mut loot,
-                    &level,
-                    pid,
-                    &actor.pose,
-                    msg,
-                );
+            if let LoreClientMessage::PlaceStation { .. } | LoreClientMessage::TakeStation { .. } | LoreClientMessage::UpgradeStation { .. } = msg {
+                station_message(&mut server, &mut world, &mut loot, &level, pid, &actor.pose, msg);
                 continue;
             }
-            let Some(k) = world.players.get(&pid) else {
-                continue;
-            };
+            let Some(k) = world.players.get(&pid) else { continue };
             match msg {
                 LoreClientMessage::Read { uid } => {
-                    let Some(base) = loot
-                        .inventories
-                        .get(&pid)
-                        .and_then(|inv| inv.find(uid))
-                        .map(|(_, i)| i.base)
-                    else {
-                        continue;
-                    };
+                    let Some(base) = loot.inventories.get(&pid).and_then(|inv| inv.find(uid)).map(|(_, i)| i.base) else { continue };
                     let Some(text) = Book::from_item(base) else {
                         notice(&mut server, pid, "Это нельзя читать");
                         continue;
@@ -1211,27 +821,12 @@ fn receive_lore_messages(
                     }
                     // Книжный человек читает быстрее.
                     let total = text.info().read_secs / crate::skill_tree::Mods::of(k).reading;
-                    start(
-                        &mut server,
-                        &mut world,
-                        pid,
-                        Task::Read { uid, text },
-                        "Чтение".into(),
-                        done * total,
-                        total,
-                        feet,
-                        hp,
-                        Some(Drill::Track),
-                        30.0,
-                    );
+                    start(&mut server, &mut world, pid, Task::Read { uid, text }, "Чтение".into(), done * total, total, feet, hp, Some(Drill::Track), 30.0);
                 }
                 LoreClientMessage::Gather { patch } => {
-                    let Some(p) = world.patches.get(&patch) else {
-                        continue;
-                    };
+                    let Some(p) = world.patches.get(&patch) else { continue };
                     let d = p.pos - feet;
-                    if Vec2::new(d.x, d.z).length() > p.radius + LORE_REACH * 0.5 || d.y.abs() > 3.0
-                    {
+                    if Vec2::new(d.x, d.z).length() > p.radius + LORE_REACH * 0.5 || d.y.abs() > 3.0 {
                         notice(&mut server, pid, "Слишком далеко");
                         continue;
                     }
@@ -1240,53 +835,21 @@ fn receive_lore_messages(
                         continue;
                     }
                     let root = p.substance.info().unknown.contains("корень");
-                    let (verb, total, drill) = if root {
-                        ("Выкапываете корень", DIG_SECS, Drill::Pump)
-                    } else {
-                        (
-                            "Срываете осторожно, не губя куст",
-                            GATHER_SECS,
-                            Drill::Tension,
-                        )
-                    };
+                    let (verb, total, drill) = if root { ("Выкапываете корень", DIG_SECS, Drill::Pump) } else { ("Срываете осторожно, не губя куст", GATHER_SECS, Drill::Tension) };
                     let skill = k.skill(Skill::Herbalism);
-                    start(
-                        &mut server,
-                        &mut world,
-                        pid,
-                        Task::Gather { patch },
-                        verb.into(),
-                        0.0,
-                        total,
-                        feet,
-                        hp,
-                        Some(drill),
-                        skill,
-                    );
+                    start(&mut server, &mut world, pid, Task::Gather { patch }, verb.into(), 0.0, total, feet, hp, Some(drill), skill);
                 }
-                LoreClientMessage::PaidLesson { master }
-                | LoreClientMessage::Apprentice { master }
-                | LoreClientMessage::Study { master, .. } => {
+                LoreClientMessage::PaidLesson { master } | LoreClientMessage::Apprentice { master } | LoreClientMessage::Study { master, .. } => {
                     let paid = !matches!(msg, LoreClientMessage::Apprentice { .. });
-                    let subject = if let LoreClientMessage::Study { lore, .. } = msg {
-                        Some(lore)
-                    } else {
-                        None
-                    };
-                    let Some(m) = world.masters.get(&master) else {
-                        continue;
-                    };
+                    let subject = if let LoreClientMessage::Study { lore, .. } = msg { Some(lore) } else { None };
+                    let Some(m) = world.masters.get(&master) else { continue };
                     if !in_reach(feet, m.pos) {
                         notice(&mut server, pid, "Подойдите ближе");
                         continue;
                     }
                     if !m.present {
                         let hour = clock.as_ref().map_or(10.0, |c| c.hour());
-                        notice(
-                            &mut server,
-                            pid,
-                            crate::school::away_line(m.teacher, hour, m.hours),
-                        );
+                        notice(&mut server, pid, crate::school::away_line(m.teacher, hour, m.hours));
                         continue;
                     }
                     if let Some(lore) = subject
@@ -1295,11 +858,7 @@ fn receive_lore_messages(
                         let why = if k.knows(lore) {
                             "Это вы уже знаете".to_string()
                         } else if let Some(r) = lore.requires().into_iter().find(|r| !k.knows(*r)) {
-                            format!(
-                                "{}: «Сначала выучи: {}»",
-                                m.teacher.name(),
-                                r.subject().to_lowercase()
-                            )
+                            format!("{}: «Сначала выучи: {}»", m.teacher.name(), r.subject().to_lowercase())
                         } else {
                             format!("{} этому не учит", m.teacher.name())
                         };
@@ -1307,24 +866,14 @@ fn receive_lore_messages(
                         continue;
                     }
                     let Some(next) = subject.or_else(|| k.next_lesson(m.teacher)) else {
-                        notice(
-                            &mut server,
-                            pid,
-                            format!("{}: «Мне больше нечему тебя учить»", m.teacher.name()),
-                        );
+                        notice(&mut server, pid, format!("{}: «Мне больше нечему тебя учить»", m.teacher.name()));
                         continue;
                     };
                     if paid {
                         let loot = &mut *loot;
-                        let Some(inv) = loot.inventories.get_mut(&pid) else {
-                            continue;
-                        };
+                        let Some(inv) = loot.inventories.get_mut(&pid) else { continue };
                         if let Err(e) = take_money(inv, m.price, &mut loot.uids) {
-                            notice(
-                                &mut server,
-                                pid,
-                                format!("Урок стоит {}. {}", format_money(m.price), e.message()),
-                            );
+                            notice(&mut server, pid, format!("Урок стоит {}. {}", format_money(m.price), e.message()));
                             continue;
                         }
                         sync_inventory(&mut server, loot, pid);
@@ -1333,49 +882,19 @@ fn receive_lore_messages(
                     let (mode, verb, drill) = if paid {
                         let drill = crate::work::lesson_drill(next);
                         let verb = match drill {
-                            Drill::Mimic => format!(
-                                "Урок: {} — повторяйте за мастером",
-                                next.name().to_lowercase()
-                            ),
-                            _ => format!(
-                                "Урок: {} — {}",
-                                next.subject().to_lowercase(),
-                                lesson_verb(next)
-                            ),
+                            Drill::Mimic => format!("Урок: {} — повторяйте за мастером", next.name().to_lowercase()),
+                            _ => format!("Урок: {} — {}", next.subject().to_lowercase(), lesson_verb(next)),
                         };
                         (LessonMode::Paid, verb, drill)
                     } else {
-                        (
-                            LessonMode::Apprentice,
-                            apprentice_chore_for(m.teacher, can_write).to_string(),
-                            crate::work::chore_drill_for(m.teacher, can_write),
-                        )
+                        (LessonMode::Apprentice, apprentice_chore_for(m.teacher, can_write).to_string(), crate::work::chore_drill_for(m.teacher, can_write))
                     };
                     let skill = m.teacher.skill().map_or(0.0, |s| k.skill(s));
-                    start(
-                        &mut server,
-                        &mut world,
-                        pid,
-                        Task::Lesson {
-                            master,
-                            mode,
-                            subject,
-                        },
-                        verb,
-                        0.0,
-                        LESSON_SECS,
-                        feet,
-                        hp,
-                        Some(drill),
-                        skill,
-                    );
+                    start(&mut server, &mut world, pid, Task::Lesson { master, mode, subject }, verb, 0.0, LESSON_SECS, feet, hp, Some(drill), skill);
                 }
                 LoreClientMessage::Copy { uid } => {
-                    let Some(inv) = loot.inventories.get(&pid) else {
-                        continue;
-                    };
-                    let Some(text) = inv.find(uid).and_then(|(_, i)| Book::from_item(i.base))
-                    else {
+                    let Some(inv) = loot.inventories.get(&pid) else { continue };
+                    let Some(text) = inv.find(uid).and_then(|(_, i)| Book::from_item(i.base)) else {
                         notice(&mut server, pid, "Переписывают книги и свитки");
                         continue;
                     };
@@ -1385,136 +904,53 @@ fn receive_lore_messages(
                             let total = copy_secs(k, text);
                             let done = k.copied.get(&text).copied().unwrap_or(0.0).min(0.99);
                             let skill = k.skill(Skill::Letters);
-                            start(
-                                &mut server,
-                                &mut world,
-                                pid,
-                                Task::Copy { uid, text },
-                                format!("Переписываете «{}»", text.info().item),
-                                done * total,
-                                total,
-                                feet,
-                                hp,
-                                Some(Drill::Scribe),
-                                skill,
-                            );
+                            start(&mut server, &mut world, pid, Task::Copy { uid, text }, format!("Переписываете «{}»", text.info().item), done * total, total, feet, hp, Some(Drill::Scribe), skill);
                         }
                     }
                 }
                 LoreClientMessage::Practice { uid } => {
-                    let is_tablet = loot
-                        .inventories
-                        .get(&pid)
-                        .and_then(|inv| inv.find(uid))
-                        .is_some_and(|(_, i)| i.info().name == TABLET);
+                    let is_tablet = loot.inventories.get(&pid).and_then(|inv| inv.find(uid)).is_some_and(|(_, i)| i.info().name == TABLET);
                     if !is_tablet {
                         continue;
                     }
                     if !k.knows(Lore::Alphabet) && !k.lessons.contains_key(&Lore::Alphabet) {
-                        notice(
-                            &mut server,
-                            pid,
-                            "Вы не знаете ни одной буквы. Сначала — к учителю: в школу у дидаскалиона или к писцу.",
-                        );
+                        notice(&mut server, pid, "Вы не знаете ни одной буквы. Сначала — к учителю: в школу у дидаскалиона или к писцу.");
                         continue;
                     }
-                    let (drill, verb) = if k.knows(Lore::Read(Language::Greek)) {
-                        (Drill::Scribe, "Пишете слова на табличке")
-                    } else {
-                        (Drill::Trace, "Выводите буквы на табличке")
-                    };
+                    let (drill, verb) = if k.knows(Lore::Read(Language::Greek)) { (Drill::Scribe, "Пишете слова на табличке") } else { (Drill::Trace, "Выводите буквы на табличке") };
                     let skill = k.skill(Skill::Letters);
-                    start(
-                        &mut server,
-                        &mut world,
-                        pid,
-                        Task::Practice,
-                        verb.into(),
-                        0.0,
-                        25.0,
-                        feet,
-                        hp,
-                        Some(drill),
-                        skill,
-                    );
+                    start(&mut server, &mut world, pid, Task::Practice, verb.into(), 0.0, 25.0, feet, hp, Some(drill), skill);
                 }
                 LoreClientMessage::Treat { uid } => {
-                    let Some(base) = loot
-                        .inventories
-                        .get(&pid)
-                        .and_then(|inv| inv.find(uid))
-                        .map(|(_, i)| i.base)
-                    else {
-                        continue;
-                    };
+                    let Some(base) = loot.inventories.get(&pid).and_then(|inv| inv.find(uid)).map(|(_, i)| i.base) else { continue };
                     let healthy = Body::default();
                     let body = bodies.bodies.get(&pid).unwrap_or(&healthy);
                     match medicine::plan(body, base.base().name) {
                         Some((verb, secs)) => {
                             let drill = medicine::plan_drill(body, base.base().name, None);
                             let skill = k.skill(Skill::Medicine);
-                            start(
-                                &mut server,
-                                &mut world,
-                                pid,
-                                Task::Treat { uid, target: None },
-                                verb.into(),
-                                0.0,
-                                secs,
-                                feet,
-                                hp,
-                                drill,
-                                skill,
-                            )
+                            start(&mut server, &mut world, pid, Task::Treat { uid, target: None }, verb.into(), 0.0, secs, feet, hp, drill, skill)
                         }
-                        None if medicine::is_remedy(base.base().name) => {
-                            notice(&mut server, pid, "Нечего лечить")
-                        }
+                        None if medicine::is_remedy(base.base().name) => notice(&mut server, pid, "Нечего лечить"),
                         None => notice(&mut server, pid, "Это не лекарство"),
                     }
                 }
                 LoreClientMessage::TreatOn { uid, target } => {
-                    let Some(base) = loot
-                        .inventories
-                        .get(&pid)
-                        .and_then(|inv| inv.find(uid))
-                        .map(|(_, i)| i.base)
-                    else {
-                        continue;
-                    };
+                    let Some(base) = loot.inventories.get(&pid).and_then(|inv| inv.find(uid)).map(|(_, i)| i.base) else { continue };
                     let healthy = Body::default();
                     let body = bodies.bodies.get(&pid).unwrap_or(&healthy);
                     match medicine::plan_to(body, base.base().name, target) {
                         Ok((verb, secs)) => {
                             let drill = medicine::plan_drill(body, base.base().name, Some(target));
                             let skill = k.skill(Skill::Medicine);
-                            start(
-                                &mut server,
-                                &mut world,
-                                pid,
-                                Task::Treat {
-                                    uid,
-                                    target: Some(target),
-                                },
-                                verb,
-                                0.0,
-                                secs,
-                                feet,
-                                hp,
-                                drill,
-                                skill,
-                            )
+                            start(&mut server, &mut world, pid, Task::Treat { uid, target: Some(target) }, verb, 0.0, secs, feet, hp, drill, skill)
                         }
                         Err(why) => notice(&mut server, pid, why),
                     }
                 }
                 LoreClientMessage::Brew { vessel, spec } => {
-                    let Some(inv) = loot.inventories.get(&pid) else {
-                        continue;
-                    };
-                    match check_brew(inv, vessel, &spec)
-                        .and_then(|v| need_fire(&spec, feet, &world, inv).map(|_| v))
-                    {
+                    let Some(inv) = loot.inventories.get(&pid) else { continue };
+                    match check_brew(inv, vessel, &spec).and_then(|v| need_fire(&spec, feet, &world, inv).map(|_| v)) {
                         Ok(v) => {
                             let what = match v {
                                 Vessel::Mortar => "растираете",
@@ -1528,80 +964,33 @@ fn receive_lore_messages(
                             let work = work_view(&world, &spec, v, feet, actor.pose.yaw);
                             let (spec_heat, spec_copy) = (spec.heat, spec.clone());
                             let drill = crate::work::brew_drill(v, spec_heat);
-                            let skill =
-                                k.skill(Skill::Alchemy).max(k.skill(Skill::Herbalism) * 0.5);
-                            start(
-                                &mut server,
-                                &mut world,
-                                pid,
-                                Task::Brew { vessel, spec },
-                                verb,
-                                0.0,
-                                secs,
-                                feet,
-                                hp,
-                                Some(drill),
-                                skill,
-                            );
-                            let tend = (spec_heat != brewing::Heat::None)
-                                .then(|| Tend::new(&spec_copy, v.still()));
+                            let skill = k.skill(Skill::Alchemy).max(k.skill(Skill::Herbalism) * 0.5);
+                            start(&mut server, &mut world, pid, Task::Brew { vessel, spec }, verb, 0.0, secs, feet, hp, Some(drill), skill);
+                            let tend = (spec_heat != brewing::Heat::None).then(|| Tend::new(&spec_copy, v.still()));
                             if let Some(a) = world.activities.get_mut(&pid) {
                                 a.work = Some(work);
                                 a.tend = tend;
                             }
-                            server.broadcast_message(
-                                CH_LORE,
-                                encode(&LoreServerMessage::Work {
-                                    player: pid,
-                                    work: Some(work),
-                                }),
-                            );
+                            server.broadcast_message(CH_LORE, encode(&LoreServerMessage::Work { player: pid, work: Some(work) }));
                         }
                         Err(e) => notice(&mut server, pid, e),
                     }
                 }
-                LoreClientMessage::Stop
-                | LoreClientMessage::Stroke { .. }
-                | LoreClientMessage::Mine(_)
-                | LoreClientMessage::Tend(_)
-                | LoreClientMessage::PlaceStation { .. }
-                | LoreClientMessage::TakeStation { .. }
-                | LoreClientMessage::UpgradeStation { .. } => {}
+                LoreClientMessage::Stop | LoreClientMessage::Stroke { .. } | LoreClientMessage::Mine(_) | LoreClientMessage::Tend(_) | LoreClientMessage::PlaceStation { .. } | LoreClientMessage::TakeStation { .. } | LoreClientMessage::UpgradeStation { .. } => {}
             }
         }
     }
 }
 
 /// Поставить, забрать или достроить жаровню / стол.
-fn station_message(
-    server: &mut RenetServer,
-    world: &mut KnowledgeWorld,
-    loot: &mut LootWorld,
-    level: &LevelColliders,
-    pid: u64,
-    pose: &crate::combat::Pose,
-    msg: LoreClientMessage,
-) {
+fn station_message(server: &mut RenetServer, world: &mut KnowledgeWorld, loot: &mut LootWorld, level: &LevelColliders, pid: u64, pose: &crate::combat::Pose, msg: LoreClientMessage) {
     let feet = pose.feet;
-    let Some(inv) = loot.inventories.get_mut(&pid) else {
-        return;
-    };
+    let Some(inv) = loot.inventories.get_mut(&pid) else { return };
     match msg {
         LoreClientMessage::PlaceStation { uid } => {
-            let Some(kind) = inv
-                .find(uid)
-                .and_then(|(_, i)| StationKind::from_item(i.info().name))
-            else {
-                return;
-            };
+            let Some(kind) = inv.find(uid).and_then(|(_, i)| StationKind::from_item(i.info().name)) else { return };
             if world.stations.values().filter(|s| s.owner == pid).count() >= MAX_STATIONS {
-                notice(
-                    server,
-                    pid,
-                    format!(
-                        "Больше {MAX_STATIONS} жаровен и столов не уследить: заберите какую-нибудь"
-                    ),
-                );
+                notice(server, pid, format!("Больше {MAX_STATIONS} жаровен и столов не уследить: заберите какую-нибудь"));
                 return;
             }
             let want = feet + pose.forward_flat() * 1.3;
@@ -1614,33 +1003,18 @@ fn station_message(
                 notice(server, pid, "Здесь уже что-то стоит");
                 return;
             }
-            let Some((item, _)) = inv.take(uid) else {
-                return;
-            };
+            let Some((item, _)) = inv.take(uid) else { return };
             let id = world.next_station;
             world.next_station += 1;
-            world.stations.insert(
-                id,
-                Station {
-                    kind,
-                    pos: Vec3::new(want.x, feet.y, want.z),
-                    yaw: pose.yaw,
-                    owner: pid,
-                    item,
-                },
-            );
+            world.stations.insert(id, Station { kind, pos: Vec3::new(want.x, feet.y, want.z), yaw: pose.yaw, owner: pid, item });
             let text = match kind {
-                StationKind::Brazier => {
-                    "Жаровня поставлена. Варить на ней можно где угодно, но нужен древесный уголь"
-                }
+                StationKind::Brazier => "Жаровня поставлена. Варить на ней можно где угодно, но нужен древесный уголь",
                 StationKind::Table => "Стол поставлен: жаровня, весы и подставка под рукой",
             };
             notice(server, pid, text);
         }
         LoreClientMessage::TakeStation { id } => {
-            let Some(s) = world.stations.get(&id) else {
-                return;
-            };
+            let Some(s) = world.stations.get(&id) else { return };
             if !in_reach(feet, s.pos) {
                 notice(server, pid, "Подойдите ближе");
                 return;
@@ -1651,16 +1025,10 @@ fn station_message(
                 world.stations.insert(id, Station { item: rest, ..s });
                 return;
             }
-            notice(
-                server,
-                pid,
-                format!("Вы забрали: {}", s.kind.item().to_lowercase()),
-            );
+            notice(server, pid, format!("Вы забрали: {}", s.kind.item().to_lowercase()));
         }
         LoreClientMessage::UpgradeStation { id } => {
-            let Some(s) = world.stations.get(&id) else {
-                return;
-            };
+            let Some(s) = world.stations.get(&id) else { return };
             if !in_reach(feet, s.pos) {
                 notice(server, pid, "Подойдите ближе");
                 return;
@@ -1668,45 +1036,25 @@ fn station_message(
             if s.kind != StationKind::Brazier {
                 return;
             }
-            let missing: Vec<&str> = TABLE_PARTS
-                .iter()
-                .copied()
-                .filter(|n| count_named(inv, n) == 0)
-                .collect();
+            let missing: Vec<&str> = TABLE_PARTS.iter().copied().filter(|n| count_named(inv, n) == 0).collect();
             if !missing.is_empty() {
-                notice(
-                    server,
-                    pid,
-                    format!(
-                        "Для стола не хватает: {}",
-                        missing.join(", ").to_lowercase()
-                    ),
-                );
+                notice(server, pid, format!("Для стола не хватает: {}", missing.join(", ").to_lowercase()));
                 return;
             }
             for n in TABLE_PARTS {
                 take_named(inv, n, 1);
             }
-            let Some(base) = ItemBaseId::find(StationKind::Table.item()) else {
-                return;
-            };
+            let Some(base) = ItemBaseId::find(StationKind::Table.item()) else { return };
             let item = roll_item(base, Quality::Common, 1, &mut world.rng, &mut loot.uids);
             let s = world.stations.get_mut(&id).expect("есть");
             s.kind = StationKind::Table;
             s.item = item;
-            notice(
-                server,
-                pid,
-                "Вы собрали алхимический стол: весы точнее, сосуды не пляшут на огне",
-            );
+            notice(server, pid, "Вы собрали алхимический стол: весы точнее, сосуды не пляшут на огне");
         }
         _ => return,
     }
     sync_inventory(server, loot, pid);
-    server.broadcast_message(
-        CH_LORE,
-        encode(&LoreServerMessage::Stations(world.station_views())),
-    );
+    server.broadcast_message(CH_LORE, encode(&LoreServerMessage::Stations(world.station_views())));
 }
 
 /// Что нужно, кроме жаровни, чтобы собрать стол.
@@ -1726,12 +1074,8 @@ fn lesson_verb(lore: Lore) -> &'static str {
 /// Работа помощника у пишущего мастера: умеющему писать дают переписывать.
 fn apprentice_chore_for(teacher: Teacher, can_write: bool) -> &'static str {
     match teacher {
-        Teacher::Scribe | Teacher::Notary | Teacher::Copyist | Teacher::Logograph if can_write => {
-            "Переписываете грамоты набело"
-        }
-        Teacher::Grammatist | Teacher::Grammarian if can_write => {
-            "Показываете малышам буквы на табличке"
-        }
+        Teacher::Scribe | Teacher::Notary | Teacher::Copyist | Teacher::Logograph if can_write => "Переписываете грамоты набело",
+        Teacher::Grammatist | Teacher::Grammarian if can_write => "Показываете малышам буквы на табличке",
         Teacher::Grammatist => "Разглаживаете воск на табличках, точите стили",
         t => apprentice_chore(t),
     }
@@ -1741,23 +1085,13 @@ fn apprentice_chore_for(teacher: Teacher, can_write: bool) -> &'static str {
 fn apprentice_chore(teacher: Teacher) -> &'static str {
     match teacher {
         Teacher::Iatros => "Носите воду, стираете повязки, держите больных",
-        Teacher::Rhizotomos | Teacher::Wisewoman | Teacher::SteppeHealer => {
-            "Перебираете и сушите травы"
-        }
+        Teacher::Rhizotomos | Teacher::Wisewoman | Teacher::SteppeHealer => "Перебираете и сушите травы",
         Teacher::Apothecary => "Толчёте корни в ступке",
         Teacher::Alchemist => "Топите печь и моете сосуды",
         Teacher::Dyer => "Мешаете чан и полощете ткань",
         Teacher::Glassblower | Teacher::Potter => "Носите дрова к печи",
-        Teacher::Scribe
-        | Teacher::Grammarian
-        | Teacher::Grammatist
-        | Teacher::Notary
-        | Teacher::Copyist
-        | Teacher::Philosopher
-        | Teacher::Logograph => "Растираете чернила и чините перья",
-        Teacher::Smith | Teacher::Armourer | Teacher::GothSmith | Teacher::SteppeSmith => {
-            "Качаете меха, носите уголь, бьёте молотом-кувалдой"
-        }
+        Teacher::Scribe | Teacher::Grammarian | Teacher::Grammatist | Teacher::Notary | Teacher::Copyist | Teacher::Philosopher | Teacher::Logograph => "Растираете чернила и чините перья",
+        Teacher::Smith | Teacher::Armourer | Teacher::GothSmith | Teacher::SteppeSmith => "Качаете меха, носите уголь, бьёте молотом-кувалдой",
         Teacher::Miner => "Таскаете корзины с рудой из забоя в отвал",
         Teacher::CharcoalBurner => "Носите дёрн и землю на кучу, колете поленья",
     }
@@ -1777,11 +1111,7 @@ fn tick_activities(
     let dt = time.delta_secs();
     let mut ended: Vec<(u64, bool)> = Vec::new();
     // Учитель ушёл (кончились уроки, пошёл обедать) — урок кончается.
-    let masters: HashMap<u32, (bool, Vec3)> = world
-        .masters
-        .iter()
-        .map(|(id, m)| (*id, (m.present, m.pos)))
-        .collect();
+    let masters: HashMap<u32, (bool, Vec3)> = world.masters.iter().map(|(id, m)| (*id, (m.present, m.pos))).collect();
     let mut left: Vec<u64> = Vec::new();
     for (pid, a) in world.activities.iter_mut() {
         let Some(actor) = game.actors.get(pid) else {
@@ -1789,23 +1119,13 @@ fn tick_activities(
             continue;
         };
         let f = &actor.fighter;
-        let moved =
-            Vec2::new(actor.pose.feet.x - a.start.x, actor.pose.feet.z - a.start.z).length() > 0.6;
-        if !actor.alive
-            || f.is_dead()
-            || f.hp < a.last_hp - HIT_THRESHOLD
-            || !matches!(f.action, Action::Idle)
-            || moved
-        {
+        let moved = Vec2::new(actor.pose.feet.x - a.start.x, actor.pose.feet.z - a.start.z).length() > 0.6;
+        if !actor.alive || f.is_dead() || f.hp < a.last_hp - HIT_THRESHOLD || !matches!(f.action, Action::Idle) || moved {
             ended.push((*pid, false));
             continue;
         }
         if let Task::Lesson { master, .. } = a.task
-            && masters.get(&master).is_none_or(|(here, at)| {
-                !here
-                    || Vec2::new(at.x - actor.pose.feet.x, at.z - actor.pose.feet.z).length()
-                        > LORE_REACH + 2.5
-            })
+            && masters.get(&master).is_none_or(|(here, at)| !here || Vec2::new(at.x - actor.pose.feet.x, at.z - actor.pose.feet.z).length() > LORE_REACH + 2.5)
         {
             ended.push((*pid, false));
             left.push(*pid);
@@ -1816,8 +1136,7 @@ fn tick_activities(
             e.tick(dt);
         }
         // Пока руду ворошат, она не спекается.
-        if let (Task::Mine(t), Some(m), Some(e)) =
-            (&a.task, mines.as_deref_mut(), a.effort.as_ref())
+        if let (Task::Mine(t), Some(m), Some(e)) = (&a.task, mines.as_deref_mut(), a.effort.as_ref())
             && e.idle() < STIR_GRACE
         {
             m.touch(t);
@@ -1841,11 +1160,7 @@ fn tick_activities(
             a.send_in -= dt;
             if a.send_in <= 0.0 {
                 a.send_in = 0.2;
-                send(
-                    &mut server,
-                    *pid,
-                    &LoreServerMessage::Progress((a.elapsed / a.total.max(0.01)).min(1.0)),
-                );
+                send(&mut server, *pid, &LoreServerMessage::Progress((a.elapsed / a.total.max(0.01)).min(1.0)));
             }
         }
         if a.elapsed >= a.total {
@@ -1864,11 +1179,7 @@ fn tick_activities(
         .collect();
     for (pid, text, frac, copy) in reads {
         if let Some(k) = world.players.get_mut(&pid) {
-            let r = if copy {
-                k.copied.entry(text).or_insert(0.0)
-            } else {
-                k.read.entry(text).or_insert(0.0)
-            };
+            let r = if copy { k.copied.entry(text).or_insert(0.0) } else { k.read.entry(text).or_insert(0.0) };
             *r = r.max(frac);
             // Чтение само по себе учит читать, а письмо — ещё лучше.
             let per_min = crate::skill_tree::PRACTICE_READ_PER_MIN * if copy { 1.5 } else { 1.0 };
@@ -1877,9 +1188,7 @@ fn tick_activities(
     }
 
     for (pid, ok) in ended {
-        let Some(a) = world.activities.remove(&pid) else {
-            continue;
-        };
+        let Some(a) = world.activities.remove(&pid) else { continue };
         end_work(&mut server, pid, &a);
         send(&mut server, pid, &LoreServerMessage::ActivityEnded);
         if !ok {
@@ -1889,40 +1198,22 @@ fn tick_activities(
                     sync_knowledge(&mut server, &world, pid);
                 }
                 Task::Copy { .. } => {
-                    notice(
-                        &mut server,
-                        pid,
-                        "Переписка прервана — место отмечено, допишете потом",
-                    );
+                    notice(&mut server, pid, "Переписка прервана — место отмечено, допишете потом");
                     sync_knowledge(&mut server, &world, pid);
                 }
                 // Прерванный урок: что успели — то и выучили.
-                Task::Lesson {
-                    master,
-                    mode,
-                    subject,
-                } => {
+                Task::Lesson { master, mode, subject } => {
                     let frac = a.effort.as_ref().map_or(0.0, |e| e.frac());
-                    let Some(teacher) = world.masters.get(&master).map(|m| m.teacher) else {
-                        continue;
-                    };
-                    let why = if left.contains(&pid) {
-                        format!("{} ушёл — урок окончен", teacher.name())
-                    } else {
-                        "Урок прерван".to_string()
-                    };
+                    let Some(teacher) = world.masters.get(&master).map(|m| m.teacher) else { continue };
+                    let why = if left.contains(&pid) { format!("{} ушёл — урок окончен", teacher.name()) } else { "Урок прерван".to_string() };
                     if frac < 0.15 {
                         notice(&mut server, pid, why);
                         continue;
                     }
                     let q = a.effort.as_ref().map_or(0.5, |e| e.quality());
-                    let Some(k) = world.players.get_mut(&pid) else {
-                        continue;
-                    };
-                    let learned =
-                        k.study_subject(teacher, subject, mode, frac * crate::work::lesson_mult(q));
-                    let msg =
-                        learned_message(&learned).unwrap_or_else(|| "засчитана часть урока".into());
+                    let Some(k) = world.players.get_mut(&pid) else { continue };
+                    let learned = k.study_subject(teacher, subject, mode, frac * crate::work::lesson_mult(q));
+                    let msg = learned_message(&learned).unwrap_or_else(|| "засчитана часть урока".into());
                     notice(&mut server, pid, format!("{why}: {msg}"));
                     sync_knowledge(&mut server, &world, pid);
                 }
@@ -1932,37 +1223,13 @@ fn tick_activities(
         }
         let q = a.effort.as_ref().map(|e| e.quality());
         match a.task {
-            Task::Read { uid, text } => {
-                finish_reading(&mut server, &mut world, &mut loot, pid, uid, text)
-            }
-            Task::Gather { patch } => finish_gathering(
-                &mut server,
-                &mut world,
-                &mut loot,
-                pid,
-                patch,
-                a.start,
-                q.unwrap_or(0.5),
-            ),
+            Task::Read { uid, text } => finish_reading(&mut server, &mut world, &mut loot, pid, uid, text),
+            Task::Gather { patch } => finish_gathering(&mut server, &mut world, &mut loot, pid, patch, a.start, q.unwrap_or(0.5)),
             Task::Mine(task) => {
-                let Some(mines) = mines.as_deref_mut() else {
-                    continue;
-                };
+                let Some(mines) = mines.as_deref_mut() else { continue };
                 let loot = &mut *loot;
-                let (Some(k), Some(inv)) =
-                    (world.players.get_mut(&pid), loot.inventories.get_mut(&pid))
-                else {
-                    continue;
-                };
-                let f = mining_server::finish(
-                    mines,
-                    k,
-                    inv,
-                    &mut loot.uids,
-                    pid,
-                    &task,
-                    q.unwrap_or(0.5),
-                );
+                let (Some(k), Some(inv)) = (world.players.get_mut(&pid), loot.inventories.get_mut(&pid)) else { continue };
+                let f = mining_server::finish(mines, k, inv, &mut loot.uids, pid, &task, q.unwrap_or(0.5));
                 if !f.notice.is_empty() {
                     notice(&mut server, pid, f.notice);
                 }
@@ -1974,76 +1241,24 @@ fn tick_activities(
                     _ => {}
                 }
             }
-            Task::Treat { uid, target } => finish_treatment(
-                &mut server,
-                &mut world,
-                &mut loot,
-                &mut game,
-                &mut bodies,
-                pid,
-                uid,
-                target,
-                q,
-            ),
+            Task::Treat { uid, target } => finish_treatment(&mut server, &mut world, &mut loot, &mut game, &mut bodies, pid, uid, target, q),
             Task::Brew { vessel, spec } => {
-                let feet = game
-                    .actors
-                    .get(&pid)
-                    .map(|a| a.pose.feet)
-                    .unwrap_or_default();
+                let feet = game.actors.get(&pid).map(|a| a.pose.feet).unwrap_or_default();
                 let at = a.work.map_or(feet, |w| w.pos.into());
                 let fire = a.tend.as_ref().map(|t| t.log());
-                finish_brewing(
-                    &mut server,
-                    &mut commands,
-                    &mut world,
-                    &mut loot,
-                    &mut bodies,
-                    pid,
-                    vessel,
-                    &spec,
-                    feet,
-                    at,
-                    fire,
-                    q,
-                )
+                finish_brewing(&mut server, &mut commands, &mut world, &mut loot, &mut bodies, pid, vessel, &spec, feet, at, fire, q)
             }
             Task::Copy { uid, text } => {
-                let feet = game
-                    .actors
-                    .get(&pid)
-                    .map(|a| a.pose.feet)
-                    .unwrap_or_default();
-                finish_copy(
-                    &mut server,
-                    &mut commands,
-                    &mut world,
-                    &mut loot,
-                    pid,
-                    uid,
-                    text,
-                    feet,
-                    q.unwrap_or(0.5),
-                )
+                let feet = game.actors.get(&pid).map(|a| a.pose.feet).unwrap_or_default();
+                finish_copy(&mut server, &mut commands, &mut world, &mut loot, pid, uid, text, feet, q.unwrap_or(0.5))
             }
             Task::Practice => {
                 let q = q.unwrap_or(0.5);
-                let Some(k) = world.players.get_mut(&pid) else {
-                    continue;
-                };
+                let Some(k) = world.players.get_mut(&pid) else { continue };
                 // Сам с собой: рука набивается, а знание — понемногу, если начато у учителя.
                 k.practice_only(Skill::Letters, 0.8 * q);
-                let subject = [Lore::Alphabet, Lore::Write(Language::Greek)]
-                    .into_iter()
-                    .find(|l| {
-                        !k.knows(*l)
-                            && k.prerequisites_met(*l)
-                            && (k.lessons.contains_key(l) || *l == Lore::Write(Language::Greek))
-                    });
-                let mut msg = format!(
-                    "Исписали табличку {} и разгладили воск",
-                    crate::work::quality_word(q)
-                );
+                let subject = [Lore::Alphabet, Lore::Write(Language::Greek)].into_iter().find(|l| !k.knows(*l) && k.prerequisites_met(*l) && (k.lessons.contains_key(l) || *l == Lore::Write(Language::Greek)));
+                let mut msg = format!("Исписали табличку {} и разгладили воск", crate::work::quality_word(q));
                 if let Some(l) = subject {
                     let need = l.lesson_hours();
                     let p = k.lessons.get(&l).copied().unwrap_or(0.0) + 0.25 * q / need;
@@ -2058,14 +1273,8 @@ fn tick_activities(
                 notice(&mut server, pid, msg);
                 sync_knowledge(&mut server, &world, pid);
             }
-            Task::Lesson {
-                master,
-                mode,
-                subject,
-            } => {
-                let Some(m) = world.masters.get(&master) else {
-                    continue;
-                };
+            Task::Lesson { master, mode, subject } => {
+                let Some(m) = world.masters.get(&master) else { continue };
                 let (teacher, wage) = (m.teacher, m.wage);
                 let q = q.unwrap_or(0.5);
                 let wage = (wage as f32 * crate::work::wage_mult(q)).round() as u32;
@@ -2075,32 +1284,18 @@ fn tick_activities(
                     if let Some(inv) = loot.inventories.get_mut(&pid)
                         && give_money(inv, wage, &mut loot.uids).is_ok()
                     {
-                        notice(
-                            &mut server,
-                            pid,
-                            format!(
-                                "Работали {}. Вам дали {}",
-                                crate::work::quality_word(q),
-                                format_money(wage)
-                            ),
-                        );
+                        notice(&mut server, pid, format!("Работали {}. Вам дали {}", crate::work::quality_word(q), format_money(wage)));
                     }
                     sync_inventory(&mut server, loot, pid);
                 }
                 // Сам урок: то же, что событие Lesson.
-                let Some(k) = world.players.get_mut(&pid) else {
-                    continue;
-                };
+                let Some(k) = world.players.get_mut(&pid) else { continue };
                 let before = k.next_lesson(teacher);
                 // Прилежный ученик за тот же час берёт больше.
                 let learned = k.study_subject(teacher, subject, mode, crate::work::lesson_mult(q));
                 let msg = match (learned_message(&learned), before) {
                     (Some(m), _) => m,
-                    (None, Some(lore)) => format!(
-                        "{}: выучено {:.0}%",
-                        lore.name(),
-                        k.lessons.get(&lore).copied().unwrap_or(0.0) * 100.0
-                    ),
+                    (None, Some(lore)) => format!("{}: выучено {:.0}%", lore.name(), k.lessons.get(&lore).copied().unwrap_or(0.0) * 100.0),
                     (None, None) => "Вы хорошо поработали".into(),
                 };
                 notice(&mut server, pid, msg);
@@ -2110,36 +1305,17 @@ fn tick_activities(
     }
 }
 
-fn finish_reading(
-    server: &mut RenetServer,
-    world: &mut KnowledgeWorld,
-    loot: &mut LootWorld,
-    pid: u64,
-    uid: ItemUid,
-    text: Book,
-) {
+fn finish_reading(server: &mut RenetServer, world: &mut KnowledgeWorld, loot: &mut LootWorld, pid: u64, uid: ItemUid, text: Book) {
     // Книгу могли выбросить во время чтения.
-    if loot
-        .inventories
-        .get(&pid)
-        .and_then(|inv| inv.find(uid))
-        .is_none()
-    {
+    if loot.inventories.get(&pid).and_then(|inv| inv.find(uid)).is_none() {
         return;
     }
     let mut learned = Vec::new();
     if text == Book::HerbalFragment {
         // Одна случайная незнакомая трава; ветхий папирус рассыпается.
         let k = world.players.get(&pid).cloned().unwrap_or_default();
-        let unknown: Vec<Substance> = Substance::ALL
-            .into_iter()
-            .filter(|s| {
-                s.is_wild() && !(k.knows(Lore::Identify(*s)) && k.knows(Lore::Properties(*s)))
-            })
-            .collect();
-        if let Some(i) =
-            (!unknown.is_empty()).then(|| (world.rng.next_u64() % unknown.len() as u64) as usize)
-        {
+        let unknown: Vec<Substance> = Substance::ALL.into_iter().filter(|s| s.is_wild() && !(k.knows(Lore::Identify(*s)) && k.knows(Lore::Properties(*s)))).collect();
+        if let Some(i) = (!unknown.is_empty()).then(|| (world.rng.next_u64() % unknown.len() as u64) as usize) {
             let s = unknown[i];
             for lore in [Lore::Identify(s), Lore::Properties(s)] {
                 if let Some(k) = world.players.get_mut(&pid)
@@ -2159,14 +1335,7 @@ fn finish_reading(
         if learned.is_empty() {
             notice(server, pid, "Ничего нового. Ветхий папирус рассыпался.");
         } else {
-            notice(
-                server,
-                pid,
-                format!(
-                    "{} Ветхий папирус рассыпался.",
-                    learned_message(&learned).unwrap()
-                ),
-            );
+            notice(server, pid, format!("{} Ветхий папирус рассыпался.", learned_message(&learned).unwrap()));
         }
     } else if let Some(k) = world.players.get_mut(&pid) {
         k.read.insert(text, 1.0);
@@ -2181,11 +1350,7 @@ fn finish_reading(
         }
         let msg = match learned.len() {
             0 => format!("Вы дочитали «{}», но нового не узнали.", text.info().item),
-            n if n > 3 => format!(
-                "Вы дочитали «{}» и узнали {} новых вещей. Смотрите в окне знаний (K).",
-                text.info().item,
-                n
-            ),
+            n if n > 3 => format!("Вы дочитали «{}» и узнали {} новых вещей. Смотрите в окне знаний (K).", text.info().item, n),
             _ => learned_message(&learned).unwrap(),
         };
         notice(server, pid, msg);
@@ -2207,9 +1372,7 @@ fn copy_check(k: &Knowledge, inv: &Inventory, text: Book) -> Result<(), String> 
     let lang = text.info().language;
     if !k.knows(Lore::Write(lang)) {
         return Err(match lang {
-            Language::Greek => {
-                "Вы не умеете писать. Письму учат в школе, у писца, нотария и книгописца.".into()
-            }
+            Language::Greek => "Вы не умеете писать. Письму учат в школе, у писца, нотария и книгописца.".into(),
             Language::Latin => "Латинскому письму учит только грамматик.".into(),
         });
     }
@@ -2240,32 +1403,12 @@ fn copy_secs(k: &Knowledge, text: Book) -> f32 {
 
 /// Список готов: расходуется пергамент, чернила и калам; небрежный список никто не купит.
 #[allow(clippy::too_many_arguments)]
-fn finish_copy(
-    server: &mut RenetServer,
-    commands: &mut Commands,
-    world: &mut KnowledgeWorld,
-    loot: &mut LootWorld,
-    pid: u64,
-    uid: ItemUid,
-    text: Book,
-    feet: Vec3,
-    q: f32,
-) {
-    let Some(k) = world.players.get(&pid).cloned() else {
-        return;
-    };
-    let LootWorld {
-        inventories, uids, ..
-    } = loot;
-    let Some(inv) = inventories.get_mut(&pid) else {
-        return;
-    };
+fn finish_copy(server: &mut RenetServer, commands: &mut Commands, world: &mut KnowledgeWorld, loot: &mut LootWorld, pid: u64, uid: ItemUid, text: Book, feet: Vec3, q: f32) {
+    let Some(k) = world.players.get(&pid).cloned() else { return };
+    let LootWorld { inventories, uids, .. } = loot;
+    let Some(inv) = inventories.get_mut(&pid) else { return };
     if inv.find(uid).is_none() {
-        notice(
-            server,
-            pid,
-            "Книги, с которой переписывали, больше нет в сумке",
-        );
+        notice(server, pid, "Книги, с которой переписывали, больше нет в сумке");
         return;
     }
     if let Err(why) = copy_check(&k, inv, text) {
@@ -2280,32 +1423,14 @@ fn finish_copy(
         k.practice(Skill::Letters, 2.0 * q);
     }
     if q < 0.3 {
-        notice(
-            server,
-            pid,
-            "Список вышел с кляксами и пропущенными строками — такой никто не купит. Пергамент пропал.",
-        );
+        notice(server, pid, "Список вышел с кляксами и пропущенными строками — такой никто не купит. Пергамент пропал.");
     } else {
-        let Some(base) = ItemBaseId::find(text.info().item) else {
-            return;
-        };
+        let Some(base) = ItemBaseId::find(text.info().item) else { return };
         let item = roll_item(base, Quality::Common, 1, &mut world.rng, uids);
-        let msg = format!(
-            "Вы переписали «{}» ({}). Книжник купит список.",
-            text.info().item,
-            crate::work::quality_word(q)
-        );
+        let msg = format!("Вы переписали «{}» ({}). Книжник купит список.", text.info().item, crate::work::quality_word(q));
         if let Some(rest) = give(inv, item) {
-            commands.trigger(crate::loot_server::SpawnGroundItem {
-                pos: feet + Vec3::Y * 0.8,
-                vel: Vec3::new(0.0, 1.0, 0.0),
-                item: rest,
-            });
-            notice(
-                server,
-                pid,
-                format!("{msg} Не влез в сумку — положили на землю."),
-            );
+            commands.trigger(crate::loot_server::SpawnGroundItem { pos: feet + Vec3::Y * 0.8, vel: Vec3::new(0.0, 1.0, 0.0), item: rest });
+            notice(server, pid, format!("{msg} Не влез в сумку — положили на землю."));
         } else {
             notice(server, pid, msg);
         }
@@ -2315,18 +1440,8 @@ fn finish_copy(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn finish_gathering(
-    server: &mut RenetServer,
-    world: &mut KnowledgeWorld,
-    loot: &mut LootWorld,
-    pid: u64,
-    patch: u32,
-    feet: Vec3,
-    q: f32,
-) {
-    let Some(p) = world.patches.get(&patch) else {
-        return;
-    };
+fn finish_gathering(server: &mut RenetServer, world: &mut KnowledgeWorld, loot: &mut LootWorld, pid: u64, patch: u32, feet: Vec3, q: f32) {
+    let Some(p) = world.patches.get(&patch) else { return };
     if p.charges == 0 {
         return;
     }
@@ -2348,22 +1463,10 @@ fn finish_gathering(
     } else if q < 0.35 && amount > 1 {
         amount -= 1;
     }
-    let damage = if q < 0.3 || (!skilled && world.rng.f32() < 0.35 * (1.3 - q)) {
-        2
-    } else {
-        1
-    };
+    let damage = if q < 0.3 || (!skilled && world.rng.f32() < 0.35 * (1.3 - q)) { 2 } else { 1 };
     let Some(base) = substance.item() else { return };
-    let Some(inv) = loot.inventories.get_mut(&pid) else {
-        return;
-    };
-    let item = roll_item(
-        base,
-        Quality::Common,
-        amount,
-        &mut world.rng,
-        &mut loot.uids,
-    );
+    let Some(inv) = loot.inventories.get_mut(&pid) else { return };
+    let item = roll_item(base, Quality::Common, amount, &mut world.rng, &mut loot.uids);
     if let Some(rest) = give(inv, item) {
         if rest.count == amount {
             notice(server, pid, "Нет места в сумке");
@@ -2375,10 +1478,7 @@ fn finish_gathering(
     let at = if p.radius > 1.0 { feet } else { p.pos };
     burst(server, at, BurstFx::Gathered);
     let charges = p.charges;
-    server.broadcast_message(
-        CH_LORE,
-        encode(&LoreServerMessage::PatchCharges { id: patch, charges }),
-    );
+    server.broadcast_message(CH_LORE, encode(&LoreServerMessage::PatchCharges { id: patch, charges }));
     if let Some(k) = world.players.get_mut(&pid) {
         k.practice(Skill::Herbalism, 0.8);
     }
@@ -2392,12 +1492,7 @@ fn finish_gathering(
     sync_knowledge(server, world, pid);
 }
 
-fn regrow_patches(
-    time: Res<Time>,
-    mut server: ResMut<RenetServer>,
-    mut world: ResMut<KnowledgeWorld>,
-    level: Res<LevelColliders>,
-) {
+fn regrow_patches(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMut<KnowledgeWorld>, level: Res<LevelColliders>) {
     let dt = time.delta_secs();
     let KnowledgeWorld { patches, rng, .. } = &mut *world;
     for (id, p) in patches.iter_mut() {
@@ -2415,82 +1510,31 @@ fn regrow_patches(
                     p.pos = pos;
                 }
                 p.charges = 1;
-                server.broadcast_message(
-                    CH_LORE,
-                    encode(&LoreServerMessage::PatchMoved {
-                        id: *id,
-                        pos: p.pos.into(),
-                        charges: 1,
-                    }),
-                );
+                server.broadcast_message(CH_LORE, encode(&LoreServerMessage::PatchMoved { id: *id, pos: p.pos.into(), charges: 1 }));
             }
             continue;
         }
         if p.regrow >= REGROW_SECS {
             p.regrow = 0.0;
             p.charges += 1;
-            server.broadcast_message(
-                CH_LORE,
-                encode(&LoreServerMessage::PatchCharges {
-                    id: *id,
-                    charges: p.charges,
-                }),
-            );
+            server.broadcast_message(CH_LORE, encode(&LoreServerMessage::PatchCharges { id: *id, charges: p.charges }));
         }
     }
 }
 
 /// Лечение закончено: применить средство, списать предмет (и бинт к припарке).
 #[allow(clippy::too_many_arguments)]
-fn finish_treatment(
-    server: &mut RenetServer,
-    world: &mut KnowledgeWorld,
-    loot: &mut LootWorld,
-    game: &mut GameWorld,
-    bodies: &mut Bodies,
-    pid: u64,
-    uid: ItemUid,
-    target: Option<medicine::CareTarget>,
-    q: Option<f32>,
-) {
-    let Some(item) = loot
-        .inventories
-        .get(&pid)
-        .and_then(|inv| inv.find(uid))
-        .map(|(_, i)| i.clone())
-    else {
-        return;
-    };
-    let Some(k) = world.players.get_mut(&pid) else {
-        return;
-    };
+fn finish_treatment(server: &mut RenetServer, world: &mut KnowledgeWorld, loot: &mut LootWorld, game: &mut GameWorld, bodies: &mut Bodies, pid: u64, uid: ItemUid, target: Option<medicine::CareTarget>, q: Option<f32>) {
+    let Some(item) = loot.inventories.get(&pid).and_then(|inv| inv.find(uid)).map(|(_, i)| i.clone()) else { return };
+    let Some(k) = world.players.get_mut(&pid) else { return };
     let name = item.info().name;
     let bandage = ItemBaseId::find("Бинт");
-    let has_bandage = name != "Бинт"
-        && loot
-            .inventories
-            .get(&pid)
-            .is_some_and(|inv| inv.all_items().any(|i| Some(i.base) == bandage));
+    let has_bandage = name != "Бинт" && loot.inventories.get(&pid).is_some_and(|inv| inv.all_items().any(|i| Some(i.base) == bandage));
     // Твёрдая и ровная рука (наконечник тянут без рывков) повышает удачу.
     let roll = bodies.rng.f32() * q.map_or(1.0, |q| 1.25 - 0.5 * q.clamp(0.0, 1.0));
     let result = match target {
-        Some(t) => medicine::apply_to(
-            bodies.body(pid),
-            k,
-            name,
-            item.quality.index(),
-            has_bandage,
-            roll,
-            t,
-        ),
-        None => medicine::apply(
-            bodies.body(pid),
-            k,
-            name,
-            item.quality.index(),
-            has_bandage,
-            roll,
-        ),
+        Some(t) => medicine::apply_to(bodies.body(pid), k, name, item.quality.index(), has_bandage, roll, t),
+        None => medicine::apply(bodies.body(pid), k, name, item.quality.index(), has_bandage, roll),
     };
     bodies.touch(pid);
     let take_one = |loot: &mut LootWorld, uid: ItemUid| {
@@ -2505,13 +1549,7 @@ fn finish_treatment(
     let text = match &result {
         Treated::Wound { text, bandage_used } => {
             take_one(loot, uid);
-            if *bandage_used
-                && let Some(b) = loot.inventories.get(&pid).and_then(|inv| {
-                    inv.all_items()
-                        .find(|i| Some(i.base) == bandage)
-                        .map(|i| i.uid)
-                })
-            {
+            if *bandage_used && let Some(b) = loot.inventories.get(&pid).and_then(|inv| inv.all_items().find(|i| Some(i.base) == bandage).map(|i| i.uid)) {
                 take_one(loot, b);
             }
             // Перевязка даёт передышку и немного сил, как и раньше.
@@ -2545,26 +1583,17 @@ fn finish_treatment(
 
 /// Сколько штук предмета с таким именем в сумке.
 fn count_named(inv: &Inventory, name: &str) -> u32 {
-    inv.all_items()
-        .filter(|i| i.info().name == name)
-        .map(|i| i.count as u32)
-        .sum()
+    inv.all_items().filter(|i| i.info().name == name).map(|i| i.count as u32).sum()
 }
 
 /// Забрать столько-то штук по имени (из разных стопок).
 fn take_named(inv: &mut Inventory, name: &str, mut n: u32) {
-    let stacks: Vec<ItemUid> = inv
-        .all_items()
-        .filter(|i| i.info().name == name)
-        .map(|i| i.uid)
-        .collect();
+    let stacks: Vec<ItemUid> = inv.all_items().filter(|i| i.info().name == name).map(|i| i.uid).collect();
     for uid in stacks {
         if n == 0 {
             break;
         }
-        let Some((mut item, loc)) = inv.take(uid) else {
-            continue;
-        };
+        let Some((mut item, loc)) = inv.take(uid) else { continue };
         let used = (item.count as u32).min(n);
         n -= used;
         item.count -= used as u16;
@@ -2598,28 +1627,19 @@ pub fn coal_needed(spec: &BrewSpec) -> u32 {
     ((spec.hours * per_hour).ceil() as u32).clamp(1, 30)
 }
 
-fn need_fire(
-    spec: &BrewSpec,
-    feet: Vec3,
-    world: &KnowledgeWorld,
-    inv: &Inventory,
-) -> Result<Fire, String> {
+fn need_fire(spec: &BrewSpec, feet: Vec3, world: &KnowledgeWorld, inv: &Inventory) -> Result<Fire, String> {
     let hearths = crate::level::hearths();
     if spec.heat == brewing::Heat::None || (hearths.is_empty() && world.stations.is_empty()) {
         return Ok(Fire::Free);
     }
-    if hearths.iter().any(|h| {
-        Vec2::new(h.x - feet.x, h.z - feet.z).length() <= HEARTH_REACH && (h.y - feet.y).abs() < 2.5
-    }) {
+    if hearths.iter().any(|h| Vec2::new(h.x - feet.x, h.z - feet.z).length() <= HEARTH_REACH && (h.y - feet.y).abs() < 2.5) {
         return Ok(Fire::Free);
     }
     if world.station_near(feet, HEARTH_REACH).is_some() {
         let coal = coal_needed(spec);
         let have = count_named(inv, COAL);
         if have < coal {
-            return Err(format!(
-                "Жаровне нужен древесный уголь: {coal} шт., у вас {have}"
-            ));
+            return Err(format!("Жаровне нужен древесный уголь: {coal} шт., у вас {have}"));
         }
         return Ok(Fire::Brazier { coal });
     }
@@ -2631,10 +1651,7 @@ fn need_fire(
 
 /// Можно ли начать варку: сосуд и всё положенное есть в сумке.
 fn check_brew(inv: &Inventory, vessel: ItemUid, spec: &BrewSpec) -> Result<Vessel, String> {
-    let v = inv
-        .find(vessel)
-        .and_then(|(_, i)| Vessel::from_item(i.info().name))
-        .ok_or("Нет сосуда")?;
+    let v = inv.find(vessel).and_then(|(_, i)| Vessel::from_item(i.info().name)).ok_or("Нет сосуда")?;
     if spec.items.is_empty() {
         return Err("Сосуд пуст".into());
     }
@@ -2667,9 +1684,7 @@ fn finish_brewing(
     fire_log: Option<brewing::FireLog>,
     work: Option<f32>,
 ) {
-    let Some(inv) = loot.inventories.get(&pid) else {
-        return;
-    };
+    let Some(inv) = loot.inventories.get(&pid) else { return };
     let v = match check_brew(inv, vessel, spec) {
         Ok(v) => v,
         Err(e) => {
@@ -2679,12 +1694,8 @@ fn finish_brewing(
     };
     let fire = need_fire(spec, feet, world, inv);
     let bench = world.bench_near(feet);
-    let Some(k) = world.players.get_mut(&pid) else {
-        return;
-    };
-    let Some(inv) = loot.inventories.get_mut(&pid) else {
-        return;
-    };
+    let Some(k) = world.players.get_mut(&pid) else { return };
+    let Some(inv) = loot.inventories.get_mut(&pid) else { return };
     let fire = match fire {
         Ok(f) => f,
         Err(e) => {
@@ -2695,14 +1706,7 @@ fn finish_brewing(
     let flasks = count_named(inv, brewing::FLASK).min(u16::MAX as u32) as u16;
     let roll = bodies.rng.f32();
     let pots = count_named(inv, "Глиняный горшок") + count_named(inv, "Медный котелок");
-    let wp = brewing::Workplace {
-        table: bench,
-        cloth: count_named(inv, brewing::CLOTH) > 0,
-        outer_pot: pots >= 2,
-        clay: count_named(inv, "Гончарная глина") > 0,
-        fire: fire_log,
-        work,
-    };
+    let wp = brewing::Workplace { table: bench, cloth: count_named(inv, brewing::CLOTH) > 0, outer_pot: pots >= 2, clay: count_named(inv, "Гончарная глина") > 0, fire: fire_log, work };
     let result = brewing::brew(spec, v, k, flasks, roll, &wp);
     // Ничего не вышло (например, некуда разлить) — всё остаётся в сумке.
     if result.product.is_none() && !result.vessel_broken {
@@ -2728,19 +1732,11 @@ fn finish_brewing(
     if let Some((name, count, q)) = result.product
         && let Some(base) = ItemBaseId::find(name)
     {
-        let quality = if base.base().has_quality {
-            Quality::ALL[q.min(5)]
-        } else {
-            Quality::Common
-        };
+        let quality = if base.base().has_quality { Quality::ALL[q.min(5)] } else { Quality::Common };
         let item = roll_item(base, quality, count, &mut world.rng, &mut loot.uids);
         let inv = loot.inventories.get_mut(&pid).expect("есть");
         if let Some(rest) = give(inv, item) {
-            commands.trigger(crate::loot_server::SpawnGroundItem {
-                pos: feet + Vec3::Y * 0.8,
-                vel: Vec3::new(0.0, 1.0, 0.0),
-                item: rest,
-            });
+            commands.trigger(crate::loot_server::SpawnGroundItem { pos: feet + Vec3::Y * 0.8, vel: Vec3::new(0.0, 1.0, 0.0), item: rest });
             notice(server, pid, "Не влезло в сумку — поставили на землю");
         }
     }
@@ -2750,13 +1746,7 @@ fn finish_brewing(
     }
     if result.cut > 0.0 {
         // Порезы осколками: как удар ножом в треть здоровья при тяжести 1.
-        bodies.body(pid).hit(
-            medicine::WoundKind::Cut,
-            result.cut * 30.0,
-            100.0,
-            false,
-            1.0,
-        );
+        bodies.body(pid).hit(medicine::WoundKind::Cut, result.cut * 30.0, 100.0, false, 1.0);
         bodies.touch(pid);
     }
     if let Some((toxin, doses)) = result.poison {
@@ -2800,23 +1790,13 @@ fn brew_bursts(r: &brewing::BrewResult, v: Vessel) -> Vec<BurstFx> {
 }
 
 /// Для проверки: `MRPG_DEBUG_KIT=1` — каждый вошедший получает горшок, ступку, травы и флаконы.
-fn debug_kit(
-    mut server: ResMut<RenetServer>,
-    mut loot: ResMut<LootWorld>,
-    mut given: Local<std::collections::HashSet<u64>>,
-    mut rng: Local<Option<Rng>>,
-) {
+fn debug_kit(mut server: ResMut<RenetServer>, mut loot: ResMut<LootWorld>, mut given: Local<std::collections::HashSet<u64>>, mut rng: Local<Option<Rng>>) {
     if std::env::var("MRPG_DEBUG_KIT").is_err() {
         return;
     }
     let rng = rng.get_or_insert_with(Rng::from_time);
     let loot = &mut *loot;
-    let ids: Vec<u64> = loot
-        .inventories
-        .keys()
-        .copied()
-        .filter(|id| !given.contains(id))
-        .collect();
+    let ids: Vec<u64> = loot.inventories.keys().copied().filter(|id| !given.contains(id)).collect();
     for id in ids {
         given.insert(id);
         let kit = [
@@ -2840,9 +1820,7 @@ fn debug_kit(
             ("Отвар шалфея", 1),
         ];
         for (name, n) in kit {
-            let Some(base) = ItemBaseId::find(name) else {
-                continue;
-            };
+            let Some(base) = ItemBaseId::find(name) else { continue };
             let item = roll_item(base, Quality::Common, n, rng, &mut loot.uids);
             if let Some(inv) = loot.inventories.get_mut(&id) {
                 let _ = give(inv, item);
@@ -2857,23 +1835,14 @@ mod tests {
     use super::*;
 
     fn spec(heat: brewing::Heat, hours: f32) -> BrewSpec {
-        BrewSpec {
-            items: vec![("Шалфей".into(), 1)],
-            water: 2,
-            heat,
-            hours,
-            bath: false,
-        }
+        BrewSpec { items: vec![("Шалфей".into(), 1)], water: 2, heat, hours, bath: false }
     }
 
     #[test]
     fn brazier_burns_more_coal_on_strong_fire() {
         assert_eq!(coal_needed(&spec(brewing::Heat::None, 10.0)), 0);
         assert_eq!(coal_needed(&spec(brewing::Heat::Low, 1.0)), 1);
-        assert!(
-            coal_needed(&spec(brewing::Heat::High, 8.0))
-                > coal_needed(&spec(brewing::Heat::Low, 8.0))
-        );
+        assert!(coal_needed(&spec(brewing::Heat::High, 8.0)) > coal_needed(&spec(brewing::Heat::Low, 8.0)));
         assert!(coal_needed(&spec(brewing::Heat::High, 96.0)) <= 30);
     }
 
@@ -2887,20 +1856,10 @@ mod tests {
         let mut world = KnowledgeWorld::default();
         // Тот же код, что и при запуске сервера.
         let mut app = App::new();
-        app.insert_resource(level.clone())
-            .insert_resource(KnowledgeWorld::default())
-            .add_systems(Startup, setup_world);
+        app.insert_resource(level.clone()).insert_resource(KnowledgeWorld::default()).add_systems(Startup, setup_world);
         app.update();
-        std::mem::swap(
-            &mut world,
-            &mut *app.world_mut().resource_mut::<KnowledgeWorld>(),
-        );
-        let wild: Vec<&Patch> = world
-            .patches
-            .iter()
-            .filter(|(id, _)| **id >= WILD_PATCH_BASE)
-            .map(|(_, p)| p)
-            .collect();
+        std::mem::swap(&mut world, &mut *app.world_mut().resource_mut::<KnowledgeWorld>());
+        let wild: Vec<&Patch> = world.patches.iter().filter(|(id, _)| **id >= WILD_PATCH_BASE).map(|(_, p)| p).collect();
         assert!(wild.len() >= 40, "диких кустиков мало: {}", wild.len());
         let mut rng = Rng::new(7);
         for p in &wild {
@@ -2909,9 +1868,7 @@ mod tests {
             let (center, radius) = p.home.unwrap();
             // Переезд на новое место тоже остаётся около заросли.
             let moved = wild_spot(&mut rng, &level, center, radius).expect("место нашлось");
-            assert!(
-                Vec2::new(moved.x - center.x, moved.z - center.z).length() <= radius * 2.5 + 14.5
-            );
+            assert!(Vec2::new(moved.x - center.x, moved.z - center.z).length() <= radius * 2.5 + 14.5);
         }
     }
 }

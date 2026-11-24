@@ -679,7 +679,8 @@ mod tests {
     fn every_trade_good_is_priced() {
         // Свои товары и всё, что было до них, должны быть в прейскуранте.
         let missing = unpriced_items();
-        for name in ["Амфора вина", "Солёная рыба", "Спата", "Бинт"] {
+        for name in ["Амфора вина", "Солёная рыба", "Спата", "Бинт"]
+        {
             assert!(!missing.contains(&name), "нет цены у «{name}»");
         }
         assert!(base_price(ItemBaseId::by_name("Солид")) == 7200);

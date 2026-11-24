@@ -24,9 +24,7 @@ pub fn connection_config() -> ConnectionConfig {
     let loot = ChannelConfig {
         channel_id: crate::loot_net::CH_LOOT,
         max_memory_usage_bytes: 5 * 1024 * 1024,
-        send_type: SendType::ReliableOrdered {
-            resend_time: std::time::Duration::from_millis(300),
-        },
+        send_type: SendType::ReliableOrdered { resend_time: std::time::Duration::from_millis(300) },
     };
     config.server_channels_config.push(loot.clone());
     config.client_channels_config.push(loot);
@@ -34,9 +32,7 @@ pub fn connection_config() -> ConnectionConfig {
     let trade = ChannelConfig {
         channel_id: crate::trade_net::CH_TRADE,
         max_memory_usage_bytes: 5 * 1024 * 1024,
-        send_type: SendType::ReliableOrdered {
-            resend_time: std::time::Duration::from_millis(300),
-        },
+        send_type: SendType::ReliableOrdered { resend_time: std::time::Duration::from_millis(300) },
     };
     config.server_channels_config.push(trade.clone());
     config.client_channels_config.push(trade);
@@ -44,9 +40,7 @@ pub fn connection_config() -> ConnectionConfig {
     let lore = ChannelConfig {
         channel_id: crate::lore_net::CH_LORE,
         max_memory_usage_bytes: 2 * 1024 * 1024,
-        send_type: SendType::ReliableOrdered {
-            resend_time: std::time::Duration::from_millis(300),
-        },
+        send_type: SendType::ReliableOrdered { resend_time: std::time::Duration::from_millis(300) },
     };
     config.server_channels_config.push(lore.clone());
     config.client_channels_config.push(lore);
@@ -54,9 +48,7 @@ pub fn connection_config() -> ConnectionConfig {
     let doors = ChannelConfig {
         channel_id: crate::doors::CH_DOOR,
         max_memory_usage_bytes: 1024 * 1024,
-        send_type: SendType::ReliableOrdered {
-            resend_time: std::time::Duration::from_millis(300),
-        },
+        send_type: SendType::ReliableOrdered { resend_time: std::time::Duration::from_millis(300) },
     };
     config.server_channels_config.push(doors.clone());
     config.client_channels_config.push(doors);
@@ -72,9 +64,7 @@ pub fn connection_config() -> ConnectionConfig {
     let smith = ChannelConfig {
         channel_id: crate::smithing_net::CH_SMITH,
         max_memory_usage_bytes: 2 * 1024 * 1024,
-        send_type: SendType::ReliableOrdered {
-            resend_time: std::time::Duration::from_millis(300),
-        },
+        send_type: SendType::ReliableOrdered { resend_time: std::time::Duration::from_millis(300) },
     };
     config.server_channels_config.push(smith.clone());
     config.client_channels_config.push(smith);
@@ -82,9 +72,7 @@ pub fn connection_config() -> ConnectionConfig {
     let console = ChannelConfig {
         channel_id: crate::console_net::CH_CONSOLE,
         max_memory_usage_bytes: 1024 * 1024,
-        send_type: SendType::ReliableOrdered {
-            resend_time: std::time::Duration::from_millis(300),
-        },
+        send_type: SendType::ReliableOrdered { resend_time: std::time::Duration::from_millis(300) },
     };
     config.server_channels_config.push(console.clone());
     config.client_channels_config.push(console);
@@ -92,9 +80,7 @@ pub fn connection_config() -> ConnectionConfig {
     let map = ChannelConfig {
         channel_id: crate::map::CH_MAP,
         max_memory_usage_bytes: 512 * 1024,
-        send_type: SendType::ReliableOrdered {
-            resend_time: std::time::Duration::from_millis(300),
-        },
+        send_type: SendType::ReliableOrdered { resend_time: std::time::Duration::from_millis(300) },
     };
     config.server_channels_config.push(map.clone());
     config.client_channels_config.push(map);
@@ -102,9 +88,7 @@ pub fn connection_config() -> ConnectionConfig {
     let town = ChannelConfig {
         channel_id: crate::estates::CH_TOWN,
         max_memory_usage_bytes: 2 * 1024 * 1024,
-        send_type: SendType::ReliableOrdered {
-            resend_time: std::time::Duration::from_millis(300),
-        },
+        send_type: SendType::ReliableOrdered { resend_time: std::time::Duration::from_millis(300) },
     };
     config.server_channels_config.push(town.clone());
     config.client_channels_config.push(town);
@@ -112,9 +96,7 @@ pub fn connection_config() -> ConnectionConfig {
     let mine = ChannelConfig {
         channel_id: crate::mining_net::CH_MINE,
         max_memory_usage_bytes: 1024 * 1024,
-        send_type: SendType::ReliableOrdered {
-            resend_time: std::time::Duration::from_millis(300),
-        },
+        send_type: SendType::ReliableOrdered { resend_time: std::time::Duration::from_millis(300) },
     };
     config.server_channels_config.push(mine.clone());
     config.client_channels_config.push(mine);
@@ -140,20 +122,10 @@ impl From<NetPos> for Vec3 {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ClientMessage {
     /// Состояние своего персонажа (ненадёжный канал). Сервер проверяет, что скорость правдоподобная.
-    PlayerState {
-        pos: NetPos,
-        yaw: f32,
-        pitch: f32,
-        crouching: bool,
-        sprinting: bool,
-    },
+    PlayerState { pos: NetPos, yaw: f32, pitch: f32, crouching: bool, sprinting: bool },
     /// Начать удар (надёжный канал). `swing` — направление, выбранное мышью
     /// (`None` — по серии). Во время замаха — морф, после парирования — рипост.
-    Attack {
-        yaw: f32,
-        pitch: f32,
-        swing: Option<Swing>,
-    },
+    Attack { yaw: f32, pitch: f32, swing: Option<Swing> },
     /// Финт: бросить свой замах.
     Feint,
     /// Зажать / отпустить защиту (надёжный канал).
@@ -184,13 +156,7 @@ pub enum ActorKind {
 
 impl ActorKind {
     #[cfg_attr(not(test), allow(dead_code))]
-    pub const ENEMIES: [ActorKind; 5] = [
-        ActorKind::Stratiotes,
-        ActorKind::Bucellarius,
-        ActorKind::GothWarrior,
-        ActorKind::AlanLancer,
-        ActorKind::HunArcher,
-    ];
+    pub const ENEMIES: [ActorKind; 5] = [ActorKind::Stratiotes, ActorKind::Bucellarius, ActorKind::GothWarrior, ActorKind::AlanLancer, ActorKind::HunArcher];
 
     pub fn is_npc(self) -> bool {
         !matches!(self, ActorKind::Player)
@@ -218,85 +184,36 @@ impl ActorKind {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ServerMessage {
     /// Вы в игре: ваш номер, где появились и куда смотрите (`yaw`, как у `LocalPlayer`).
-    Welcome {
-        your_id: u64,
-        spawn: NetPos,
-        yaw: f32,
-    },
-    PlayerJoined {
-        id: u64,
-    },
-    PlayerLeft {
-        id: u64,
-    },
+    Welcome { your_id: u64, spawn: NetPos, yaw: f32 },
+    PlayerJoined { id: u64 },
+    PlayerLeft { id: u64 },
     /// Сервер отклонил перемещение и возвращает игрока в эту точку.
-    Correction {
-        pos: NetPos,
-    },
+    Correction { pos: NetPos },
     /// Результат попадания клинка.
-    Hit {
-        attacker: u64,
-        target: u64,
-        outcome: HitOutcome,
-        at: NetPos,
-    },
-    Died {
-        id: u64,
-        killer: Option<u64>,
-    },
+    Hit { attacker: u64, target: u64, outcome: HitOutcome, at: NetPos },
+    Died { id: u64, killer: Option<u64> },
     /// Ваш персонаж возрождён в этой точке.
-    Respawned {
-        pos: NetPos,
-        yaw: f32,
-    },
+    Respawned { pos: NetPos, yaw: f32 },
     /// На земле появилось тело (его можно будет обыскать).
-    CorpseSpawned {
-        corpse_id: u64,
-        kind: ActorKind,
-        pos: NetPos,
-        yaw: f32,
-        gear: crate::gear_look::Gear,
-    },
-    CorpseRemoved {
-        corpse_id: u64,
-    },
+    CorpseSpawned { corpse_id: u64, kind: ActorKind, pos: NetPos, yaw: f32, gear: crate::gear_look::Gear },
+    CorpseRemoved { corpse_id: u64 },
     /// Ранили мирного человека.
-    CivilianHit {
-        civ: crate::civilians::Civ,
-        at: NetPos,
-        amount: f32,
-        head: bool,
-    },
+    CivilianHit { civ: crate::civilians::Civ, at: NetPos, amount: f32, head: bool },
     /// Мирный человек погиб; тело (если ещё лежит): id для обыска, точка и поворот.
-    CivilianDead {
-        civ: crate::civilians::Civ,
-        corpse: Option<(u64, NetPos, f32)>,
-    },
+    CivilianDead { civ: crate::civilians::Civ, corpse: Option<(u64, NetPos, f32)> },
     /// На место погибшего пришёл другой человек (наследник лавки, новый жилец).
-    CivilianBack {
-        civ: crate::civilians::Civ,
-    },
+    CivilianBack { civ: crate::civilians::Civ },
     /// Закон: свидетели, стража, карцер.
     Law(crate::civilians::LawMessage),
     /// Часы мира: игровые секунды от полуночи первого дня (см. `world_clock.rs`).
-    Clock {
-        game: f64,
-    },
+    Clock { game: f64 },
     /// Имя игрока (ник из главного меню). Приходит всем при входе игрока и новичку — про всех.
-    PlayerName {
-        id: u64,
-        name: String,
-    },
+    PlayerName { id: u64, name: String },
 }
 
 /// Ник игрока: не длиннее 24 символов, без управляющих символов.
 pub fn clean_name(s: &str) -> String {
-    s.chars()
-        .filter(|c| !c.is_control())
-        .take(24)
-        .collect::<String>()
-        .trim()
-        .to_string()
+    s.chars().filter(|c| !c.is_control()).take(24).collect::<String>().trim().to_string()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -47,13 +47,7 @@ const TREES: &[(PlantKind, &str, u32)] = &[
 ];
 
 /// Фотосканы камней (Poly Haven, CC0), `models/rocks/<id>.glb`.
-const ROCKS: &[&str] = &[
-    "rock_07",
-    "rock_09",
-    "stone_01",
-    "namaqualand_boulder_02",
-    "rock_face_01",
-];
+const ROCKS: &[&str] = &["rock_07", "rock_09", "stone_01", "namaqualand_boulder_02", "rock_face_01"];
 
 // ---------------------------------------------------------------------------------------------
 // Материал листвы с ветром
@@ -118,34 +112,16 @@ pub struct PendingPlants(pub Vec<Plant>);
 /// Читает картинку из assets/ сразу (без загрузчика), с мип-уровнями; у листвы — с сохранением
 /// доли непрозрачных пикселей на мипах, чтобы крона вдали не редела.
 fn load_image(images: &mut Assets<Image>, rel: &str, srgb: bool, foliage: bool) -> Handle<Image> {
-    let path = bevy::asset::io::file::FileAssetReader::get_base_path()
-        .join("assets")
-        .join(rel);
+    let path = bevy::asset::io::file::FileAssetReader::get_base_path().join("assets").join(rel);
     let ext = if rel.ends_with(".png") { "png" } else { "jpg" };
     let img = std::fs::read(&path)
         .map_err(|e| warn!("нет картинки {}: {e}", path.display()))
         .ok()
-        .and_then(|bytes| {
-            Image::from_buffer(
-                &bytes,
-                ImageType::Extension(ext),
-                CompressedImageFormats::NONE,
-                srgb,
-                ImageSampler::Default,
-                RenderAssetUsages::RENDER_WORLD,
-            )
-            .ok()
-        });
+        .and_then(|bytes| Image::from_buffer(&bytes, ImageType::Extension(ext), CompressedImageFormats::NONE, srgb, ImageSampler::Default, RenderAssetUsages::RENDER_WORLD).ok());
     let Some(img) = img else {
         return images.add(Image::default());
     };
-    let img = img
-        .convert(if srgb {
-            bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb
-        } else {
-            bevy::render::render_resource::TextureFormat::Rgba8Unorm
-        })
-        .unwrap_or(img.clone());
+    let img = img.convert(if srgb { bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb } else { bevy::render::render_resource::TextureFormat::Rgba8Unorm }).unwrap_or(img.clone());
     let mut img = img;
     crate::textures::generate_mips(&mut img, false);
     if foliage {
@@ -160,15 +136,8 @@ fn load_image(images: &mut Assets<Image>, rel: &str, srgb: bool, foliage: bool) 
 fn keep_alpha_coverage(img: &mut Image, cutoff: f32) {
     let size = img.texture_descriptor.size;
     let levels = img.texture_descriptor.mip_level_count;
-    let Some(data) = img.data.as_mut() else {
-        return;
-    };
-    let coverage = |px: &[u8], scale: f32| {
-        px.chunks_exact(4)
-            .filter(|p| p[3] as f32 / 255.0 * scale > cutoff)
-            .count() as f32
-            / (px.len() / 4).max(1) as f32
-    };
+    let Some(data) = img.data.as_mut() else { return };
+    let coverage = |px: &[u8], scale: f32| px.chunks_exact(4).filter(|p| p[3] as f32 / 255.0 * scale > cutoff).count() as f32 / (px.len() / 4).max(1) as f32;
     let (mut w, mut h) = (size.width as usize, size.height as usize);
     let mut off = 0;
     let mut target = 0.0;
@@ -200,11 +169,7 @@ fn keep_alpha_coverage(img: &mut Image, cutoff: f32) {
     }
 }
 
-fn load_vegetation(
-    mut commands: Commands,
-    server: Res<AssetServer>,
-    mut images: ResMut<Assets<Image>>,
-) {
+fn load_vegetation(mut commands: Commands, server: Res<AssetServer>, mut images: ResMut<Assets<Image>>) {
     if crate::level::active() != crate::level::LevelKind::Chersonesus {
         return;
     }
@@ -214,63 +179,21 @@ fn load_vegetation(
     for &(kind, name, n) in TREES {
         for v in 0..n {
             let id = format!("{name}_{v}");
-            trees.push((
-                kind,
-                id.clone(),
-                server.load(format!("models/vegetation/{id}.glb")),
-            ));
-            impostors.insert(
-                id.clone(),
-                load_image(
-                    &mut images,
-                    &format!("textures/vegetation/{id}_imp.png"),
-                    true,
-                    true,
-                ),
-            );
+            trees.push((kind, id.clone(), server.load(format!("models/vegetation/{id}.glb"))));
+            impostors.insert(id.clone(), load_image(&mut images, &format!("textures/vegetation/{id}_imp.png"), true, true));
         }
     }
-    let rocks = ROCKS
-        .iter()
-        .map(|r| (r.to_string(), server.load(format!("models/rocks/{r}.glb"))))
-        .collect();
+    let rocks = ROCKS.iter().map(|r| (r.to_string(), server.load(format!("models/rocks/{r}.glb")))).collect();
     let mut atlases = HashMap::new();
     for a in ["broadleaf", "pine", "scale"] {
-        atlases.insert(
-            a,
-            load_image(
-                &mut images,
-                &format!("textures/vegetation/{a}_atlas.png"),
-                true,
-                true,
-            ),
-        );
+        atlases.insert(a, load_image(&mut images, &format!("textures/vegetation/{a}_atlas.png"), true, true));
     }
     let bark = (
-        load_image(
-            &mut images,
-            "textures/vegetation/bark_albedo.jpg",
-            true,
-            false,
-        ),
-        load_image(
-            &mut images,
-            "textures/vegetation/bark_nrm.jpg",
-            false,
-            false,
-        ),
+        load_image(&mut images, "textures/vegetation/bark_albedo.jpg", true, false),
+        load_image(&mut images, "textures/vegetation/bark_nrm.jpg", false, false),
     );
-    info!(
-        "Растительность: текстуры за {:.2} с",
-        started.elapsed().as_secs_f32()
-    );
-    commands.insert_resource(VegetationAssets {
-        trees,
-        rocks,
-        atlases,
-        bark,
-        impostors,
-    });
+    info!("Растительность: текстуры за {:.2} с", started.elapsed().as_secs_f32());
+    commands.insert_resource(VegetationAssets { trees, rocks, atlases, bark, impostors });
     commands.init_resource::<WindMaterials>();
 }
 
@@ -307,11 +230,7 @@ fn look(kind: PlantKind) -> (&'static str, Color, [f32; 3]) {
         PlantKind::Juniper => ("scale", Color::srgb(0.95, 1.0, 1.0), [1.0, 0.85, 0.8]),
         PlantKind::Cypress => ("scale", Color::srgb(0.75, 0.85, 0.75), [0.9, 0.8, 0.75]),
         // Инжир — светлая сочная листва, гладкая серая кора.
-        PlantKind::Fig => (
-            "broadleaf",
-            Color::srgb(1.05, 1.12, 0.85),
-            [1.25, 1.25, 1.25],
-        ),
+        PlantKind::Fig => ("broadleaf", Color::srgb(1.05, 1.12, 0.85), [1.25, 1.25, 1.25]),
         PlantKind::Shrub => ("broadleaf", Color::srgb(1.05, 1.05, 0.85), [0.9, 0.85, 0.8]),
         PlantKind::Rock => ("broadleaf", Color::WHITE, [1.0, 1.0, 1.0]),
     }
@@ -319,21 +238,11 @@ fn look(kind: PlantKind) -> (&'static str, Color, [f32; 3]) {
 
 fn foliage_material(base: StandardMaterial, kind: WindKind) -> FoliageMaterial {
     let (s, flutter, flex) = wind_of(kind);
-    ExtendedMaterial {
-        base,
-        extension: FoliageExt {
-            wind: Vec4::new(0.0, s, flutter, 0.0),
-            dir: Vec4::new(0.8, 0.45, flex, 0.0),
-        },
-    }
+    ExtendedMaterial { base, extension: FoliageExt { wind: Vec4::new(0.0, s, flutter, 0.0), dir: Vec4::new(0.8, 0.45, flex, 0.0) } }
 }
 
 fn mesh_named(gltf: &Gltf, gltf_meshes: &Assets<GltfMesh>, name: &str) -> Option<Handle<Mesh>> {
-    gltf.named_meshes
-        .get(name)
-        .and_then(|h| gltf_meshes.get(h))
-        .and_then(|m| m.primitives.first())
-        .map(|p| p.mesh.clone())
+    gltf.named_meshes.get(name).and_then(|h| gltf_meshes.get(h)).and_then(|m| m.primitives.first()).map(|p| p.mesh.clone())
 }
 
 /// Габариты меша (min, max) по позициям вершин.
@@ -374,24 +283,10 @@ fn spawn_plants(
     mut standard: ResMut<Assets<StandardMaterial>>,
     mut wind: Option<ResMut<WindMaterials>>,
 ) {
-    let (Some(pending), Some(assets)) = (pending, assets) else {
-        return;
-    };
-    let failed = |h: &Handle<Gltf>| {
-        matches!(
-            server.get_load_state(h),
-            Some(bevy::asset::LoadState::Failed(_))
-        )
-    };
-    let all = assets
-        .trees
-        .iter()
-        .map(|t| &t.2)
-        .chain(assets.rocks.iter().map(|r| &r.1));
-    if all
-        .clone()
-        .any(|h| !server.is_loaded_with_dependencies(h) && !failed(h))
-    {
+    let (Some(pending), Some(assets)) = (pending, assets) else { return };
+    let failed = |h: &Handle<Gltf>| matches!(server.get_load_state(h), Some(bevy::asset::LoadState::Failed(_)));
+    let all = assets.trees.iter().map(|t| &t.2).chain(assets.rocks.iter().map(|r| &r.1));
+    if all.clone().any(|h| !server.is_loaded_with_dependencies(h) && !failed(h)) {
         return;
     }
     let Some(wind) = wind.as_mut() else { return };
@@ -404,11 +299,7 @@ fn spawn_plants(
         let (atlas, tint, bark_tint) = look(kind);
         let bark = foliage.add(foliage_material(
             StandardMaterial {
-                base_color: Color::linear_rgb(
-                    BARK_TINT[0] * bark_tint[0],
-                    BARK_TINT[1] * bark_tint[1],
-                    BARK_TINT[2] * bark_tint[2],
-                ),
+                base_color: Color::linear_rgb(BARK_TINT[0] * bark_tint[0], BARK_TINT[1] * bark_tint[1], BARK_TINT[2] * bark_tint[2]),
                 base_color_texture: Some(assets.bark.0.clone()),
                 normal_map_texture: Some(assets.bark.1.clone()),
                 perceptual_roughness: 0.92,
@@ -447,22 +338,11 @@ fn spawn_plants(
             continue;
         };
         let m = |suffix: &str| mesh_named(gltf, &gltf_meshes, &format!("{id}_{suffix}"));
-        let (Some(b0), Some(l0), Some(b1), Some(l1), Some(imp)) = (
-            m("lod0_bark"),
-            m("lod0_leaf"),
-            m("lod1_bark"),
-            m("lod1_leaf"),
-            m("imp"),
-        ) else {
+        let (Some(b0), Some(l0), Some(b1), Some(l1), Some(imp)) = (m("lod0_bark"), m("lod0_leaf"), m("lod1_bark"), m("lod1_leaf"), m("imp")) else {
             warn!("в модели {id} не все LOD");
             continue;
         };
-        let height = [&b0, &l0]
-            .iter()
-            .filter_map(|h| meshes.get(*h))
-            .filter_map(mesh_bounds)
-            .map(|(_, max)| max.y)
-            .fold(0.5f32, f32::max);
+        let height = [&b0, &l0].iter().filter_map(|h| meshes.get(*h)).filter_map(mesh_bounds).map(|(_, max)| max.y).fold(0.5f32, f32::max);
         let (_, tint, _) = look(*kind);
         let imp_mat = foliage.add(foliage_material(
             StandardMaterial {
@@ -494,181 +374,71 @@ fn spawn_plants(
     let mut rocks: Vec<RockModel> = Vec::new();
     for (id, h) in &assets.rocks {
         let Some(gltf) = gltfs.get(h) else { continue };
-        let (Some(l0), Some(l1)) = (
-            gltf.named_meshes.get(format!("{id}_lod0").as_str()),
-            gltf.named_meshes.get(format!("{id}_lod1").as_str()),
-        ) else {
+        let (Some(l0), Some(l1)) = (gltf.named_meshes.get(format!("{id}_lod0").as_str()), gltf.named_meshes.get(format!("{id}_lod1").as_str())) else {
             warn!("в скане {id} нет LOD");
             continue;
         };
-        let (Some(g0), Some(g1)) = (gltf_meshes.get(l0), gltf_meshes.get(l1)) else {
-            continue;
-        };
-        let (Some(p0), Some(p1)) = (g0.primitives.first(), g1.primitives.first()) else {
-            continue;
-        };
-        let mut sm = p0
-            .material
-            .as_ref()
-            .and_then(|m| gltf_materials.get(m))
-            .map(bevy::pbr::gltf::standard_material_from_gltf_material)
-            .unwrap_or_default();
+        let (Some(g0), Some(g1)) = (gltf_meshes.get(l0), gltf_meshes.get(l1)) else { continue };
+        let (Some(p0), Some(p1)) = (g0.primitives.first(), g1.primitives.first()) else { continue };
+        let mut sm = p0.material.as_ref().and_then(|m| gltf_materials.get(m)).map(bevy::pbr::gltf::standard_material_from_gltf_material).unwrap_or_default();
         sm.base_color = Color::srgb(1.12, 1.08, 1.0);
         // Сетка в главном мире бывает уже выгружена (только для рендера) — тогда берём размер
         // скана из таблицы, иначе камни выходят то с гальку, то со скалу.
-        let size = meshes
-            .get(&p0.mesh)
-            .and_then(mesh_bounds)
-            .map(|(a, b)| (b - a).max_element())
-            .filter(|s| *s > 0.0)
-            .unwrap_or_else(|| rock_scan_size(id));
+        let size = meshes.get(&p0.mesh).and_then(mesh_bounds).map(|(a, b)| (b - a).max_element()).filter(|s| *s > 0.0).unwrap_or_else(|| rock_scan_size(id));
         debug!("скан камня {id}: {size:.2} м");
-        rocks.push(RockModel {
-            size,
-            lod0: p0.mesh.clone(),
-            lod1: p1.mesh.clone(),
-            mat: standard.add(sm),
-        });
+        rocks.push(RockModel { size, lod0: p0.mesh.clone(), lod1: p1.mesh.clone(), mat: standard.add(sm) });
     }
 
     let mut counts: HashMap<PlantKind, usize> = HashMap::new();
     for plant in &pending.0 {
         *counts.entry(plant.kind).or_default() += 1;
         if plant.kind == PlantKind::Rock {
-            let Some(r) = rocks.get(plant.variant as usize % rocks.len().max(1)) else {
-                continue;
-            };
+            let Some(r) = rocks.get(plant.variant as usize % rocks.len().max(1)) else { continue };
             let s = plant.height / r.size;
-            let t = Transform::from_translation(plant.pos)
-                .with_rotation(Quat::from_rotation_y(plant.yaw))
-                .with_scale(Vec3::new(s, s * 0.8, s));
+            let t = Transform::from_translation(plant.pos).with_rotation(Quat::from_rotation_y(plant.yaw)).with_scale(Vec3::new(s, s * 0.8, s));
             let far = (120.0 + plant.height * 150.0).min(500.0);
-            commands.spawn((
-                Mesh3d(r.lod0.clone()),
-                MeshMaterial3d(r.mat.clone()),
-                t,
-                VisibilityRange {
-                    start_margin: 0.0..0.0,
-                    end_margin: 40.0..50.0,
-                    use_aabb: false,
-                },
-            ));
-            commands.spawn((
-                Mesh3d(r.lod1.clone()),
-                MeshMaterial3d(r.mat.clone()),
-                t,
-                VisibilityRange {
-                    start_margin: 40.0..50.0,
-                    end_margin: far..far + 20.0,
-                    use_aabb: false,
-                },
-            ));
+            commands.spawn((Mesh3d(r.lod0.clone()), MeshMaterial3d(r.mat.clone()), t, VisibilityRange { start_margin: 0.0..0.0, end_margin: 40.0..50.0, use_aabb: false }));
+            commands.spawn((Mesh3d(r.lod1.clone()), MeshMaterial3d(r.mat.clone()), t, VisibilityRange { start_margin: 40.0..50.0, end_margin: far..far + 20.0, use_aabb: false }));
             continue;
         }
-        let Some(list) = models.get(&plant.kind).filter(|l| !l.is_empty()) else {
-            continue;
-        };
+        let Some(list) = models.get(&plant.kind).filter(|l| !l.is_empty()) else { continue };
         let m = &list[plant.variant as usize % list.len()];
         let s = plant.height / m.height;
-        let t = Transform::from_translation(plant.pos)
-            .with_rotation(Quat::from_rotation_y(plant.yaw))
-            .with_scale(Vec3::splat(s));
+        let t = Transform::from_translation(plant.pos).with_rotation(Quat::from_rotation_y(plant.yaw)).with_scale(Vec3::splat(s));
         // Дальности LOD растут с размером растения: кусты переходят на импостор раньше деревьев.
         let k = (plant.height / 8.0).clamp(0.35, 1.5);
         let (d0, d1, d2) = (40.0 * k, 120.0 * k, 900.0 * k.min(1.0));
-        let near = VisibilityRange {
-            start_margin: 0.0..0.0,
-            end_margin: d0..d0 + 8.0,
-            use_aabb: false,
-        };
-        let mid = VisibilityRange {
-            start_margin: d0..d0 + 8.0,
-            end_margin: d1..d1 + 15.0,
-            use_aabb: false,
-        };
-        let far = VisibilityRange {
-            start_margin: d1..d1 + 15.0,
-            end_margin: d2..d2 + 30.0,
-            use_aabb: false,
-        };
-        commands.spawn((
-            Mesh3d(m.lod0.0.clone()),
-            MeshMaterial3d(m.bark.clone()),
-            t,
-            near.clone(),
-        ));
-        commands.spawn((
-            Mesh3d(m.lod0.1.clone()),
-            MeshMaterial3d(m.leaf.clone()),
-            t,
-            near,
-        ));
-        commands.spawn((
-            Mesh3d(m.lod1.0.clone()),
-            MeshMaterial3d(m.bark.clone()),
-            t,
-            mid.clone(),
-        ));
-        let mut leaf = commands.spawn((
-            Mesh3d(m.lod1.1.clone()),
-            MeshMaterial3d(m.leaf.clone()),
-            t,
-            mid,
-        ));
+        let near = VisibilityRange { start_margin: 0.0..0.0, end_margin: d0..d0 + 8.0, use_aabb: false };
+        let mid = VisibilityRange { start_margin: d0..d0 + 8.0, end_margin: d1..d1 + 15.0, use_aabb: false };
+        let far = VisibilityRange { start_margin: d1..d1 + 15.0, end_margin: d2..d2 + 30.0, use_aabb: false };
+        commands.spawn((Mesh3d(m.lod0.0.clone()), MeshMaterial3d(m.bark.clone()), t, near.clone()));
+        commands.spawn((Mesh3d(m.lod0.1.clone()), MeshMaterial3d(m.leaf.clone()), t, near));
+        commands.spawn((Mesh3d(m.lod1.0.clone()), MeshMaterial3d(m.bark.clone()), t, mid.clone()));
+        let mut leaf = commands.spawn((Mesh3d(m.lod1.1.clone()), MeshMaterial3d(m.leaf.clone()), t, mid));
         if m.kind == PlantKind::Shrub {
             leaf.insert(NotShadowCaster);
         }
         if m.kind == PlantKind::Shrub {
             // Кусты часто видны сверху (с холма, со стены), а импостер — плоский крест и сверху
             // превращается в тёмную кляксу. Вдали у куста остаётся облегчённая листва (~450 треугольников).
-            commands.spawn((
-                Mesh3d(m.lod1.1.clone()),
-                MeshMaterial3d(m.leaf.clone()),
-                t,
-                far,
-                NotShadowCaster,
-            ));
+            commands.spawn((Mesh3d(m.lod1.1.clone()), MeshMaterial3d(m.leaf.clone()), t, far, NotShadowCaster));
         } else {
-            commands.spawn((
-                Mesh3d(m.imp.clone()),
-                MeshMaterial3d(m.imp_mat.clone()),
-                t,
-                far,
-                NotShadowCaster,
-            ));
+            commands.spawn((Mesh3d(m.imp.clone()), MeshMaterial3d(m.imp_mat.clone()), t, far, NotShadowCaster));
         }
     }
-    info!(
-        "Растительность: {:?} за {:.2} с",
-        counts,
-        started.elapsed().as_secs_f32()
-    );
+    info!("Растительность: {:?} за {:.2} с", counts, started.elapsed().as_secs_f32());
     commands.remove_resource::<PendingPlants>();
 }
 
-fn update_wind(
-    time: Res<Time>,
-    clock: Option<Res<crate::world_clock::WorldClock>>,
-    wind: Option<Res<WindMaterials>>,
-    mut mats: ResMut<Assets<FoliageMaterial>>,
-    mut prev: Local<f32>,
-) {
+fn update_wind(time: Res<Time>, clock: Option<Res<crate::world_clock::WorldClock>>, wind: Option<Res<WindMaterials>>, mut mats: ResMut<Assets<FoliageMaterial>>, mut prev: Local<f32>) {
     let Some(wind) = wind else { return };
     let t = time.elapsed_secs_wrapped();
     // Сила и направление ветра — по погоде (в тихую погоду листва едва шевелится,
     // в ненастье деревья гнёт и треплет).
-    let w = clock
-        .map(|c| {
-            crate::world_clock::weather_at(crate::graphics::frozen_time().unwrap_or(c.game)).wind
-        })
-        .unwrap_or(Vec2::new(3.0, 1.7));
+    let w = clock.map(|c| crate::world_clock::weather_at(crate::graphics::frozen_time().unwrap_or(c.game)).wind).unwrap_or(Vec2::new(3.0, 1.7));
     let speed = w.length();
     let gain = (0.35 + 0.16 * speed).clamp(0.3, 2.2);
-    let dir = if speed > 0.1 {
-        w / speed
-    } else {
-        Vec2::new(0.87, 0.49)
-    };
+    let dir = if speed > 0.1 { w / speed } else { Vec2::new(0.87, 0.49) };
     for (h, kind) in &wind.0 {
         if let Some(mut m) = mats.get_mut(h) {
             m.extension.wind.x = t;
@@ -700,13 +470,7 @@ struct Grass {
 
 fn grass_density() -> f32 {
     static D: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
-    *D.get_or_init(|| {
-        std::env::var("MRPG_GRASS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1.0f32)
-            .clamp(0.0, 3.0)
-    })
+    *D.get_or_init(|| std::env::var("MRPG_GRASS").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0f32).clamp(0.0, 3.0))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -728,23 +492,13 @@ fn update_grass(
         return;
     }
     grass.next = now + 0.2;
-    let (Some(cam), Some(colliders)) = (cameras.iter().next(), colliders) else {
-        return;
-    };
+    let (Some(cam), Some(colliders)) = (cameras.iter().next(), colliders) else { return };
     let Some(wind) = wind.as_mut() else { return };
     let material = grass
         .material
         .get_or_insert_with(|| {
             let h = foliage.add(foliage_material(
-                StandardMaterial {
-                    base_color: Color::WHITE,
-                    double_sided: true,
-                    cull_mode: None,
-                    perceptual_roughness: 0.85,
-                    reflectance: 0.25,
-                    diffuse_transmission: 0.3,
-                    ..default()
-                },
+                StandardMaterial { base_color: Color::WHITE, double_sided: true, cull_mode: None, perceptual_roughness: 0.85, reflectance: 0.25, diffuse_transmission: 0.3, ..default() },
                 WindKind::Grass,
             ));
             wind.0.push((h.clone(), WindKind::Grass));
@@ -752,17 +506,9 @@ fn update_grass(
         })
         .clone();
     let c = cam.translation();
-    let (cx, cz) = (
-        (c.x / GRASS_CHUNK).floor() as i32,
-        (c.z / GRASS_CHUNK).floor() as i32,
-    );
+    let (cx, cz) = ((c.x / GRASS_CHUNK).floor() as i32, (c.z / GRASS_CHUNK).floor() as i32);
     let r = (GRASS_RADIUS / GRASS_CHUNK).ceil() as i32;
-    let center = |k: (i32, i32)| {
-        Vec2::new(
-            (k.0 as f32 + 0.5) * GRASS_CHUNK,
-            (k.1 as f32 + 0.5) * GRASS_CHUNK,
-        )
-    };
+    let center = |k: (i32, i32)| Vec2::new((k.0 as f32 + 0.5) * GRASS_CHUNK, (k.1 as f32 + 0.5) * GRASS_CHUNK);
     let cam2 = Vec2::new(c.x, c.z);
     // Убираем дальние участки и те, у которых сменилась густота.
     let keys: Vec<_> = grass.chunks.keys().copied().collect();
@@ -770,9 +516,7 @@ fn update_grass(
         let d = center(k).distance(cam2);
         let dense = d < GRASS_DENSE;
         let (e, was_dense) = grass.chunks[&k];
-        if d > GRASS_RADIUS + GRASS_CHUNK
-            || (dense != was_dense && (d < GRASS_DENSE - 6.0 || d > GRASS_DENSE + 6.0))
-        {
+        if d > GRASS_RADIUS + GRASS_CHUNK || (dense != was_dense && (d < GRASS_DENSE - 6.0 || d > GRASS_DENSE + 6.0)) {
             commands.entity(e).despawn();
             grass.chunks.remove(&k);
         }
@@ -793,14 +537,7 @@ fn update_grass(
         let dense = d < GRASS_DENSE;
         let mesh = grass_chunk(k, dense, &colliders);
         let e = match mesh {
-            Some(m) => commands
-                .spawn((
-                    Mesh3d(meshes.add(m)),
-                    MeshMaterial3d(material.clone()),
-                    Transform::IDENTITY,
-                    NotShadowCaster,
-                ))
-                .id(),
+            Some(m) => commands.spawn((Mesh3d(meshes.add(m)), MeshMaterial3d(material.clone()), Transform::IDENTITY, NotShadowCaster)).id(),
             None => commands.spawn(Transform::IDENTITY).id(),
         };
         grass.chunks.insert(k, (e, dense));
@@ -808,9 +545,7 @@ fn update_grass(
 }
 
 fn hash2(x: i32, z: i32, s: u32) -> f32 {
-    let mut h = (x as u32).wrapping_mul(374761393)
-        ^ (z as u32).wrapping_mul(668265263)
-        ^ s.wrapping_mul(2246822519);
+    let mut h = (x as u32).wrapping_mul(374761393) ^ (z as u32).wrapping_mul(668265263) ^ s.wrapping_mul(2246822519);
     h = (h ^ (h >> 13)).wrapping_mul(1274126177);
     h ^= h >> 16;
     (h & 0xFFFFFF) as f32 / 16777216.0
@@ -829,16 +564,11 @@ pub fn grass_allowed(x: f32, z: f32, y: f32, colliders: &crate::collision::Level
     if y < crate::level::WATER_Y + 0.7 || crate::level::road_distance(x, z) < 2.6 {
         return false;
     }
-    !colliders.point_solid(Vec3::new(x, y + 0.06, z))
-        && !colliders.point_solid(Vec3::new(x, y + 0.6, z))
+    !colliders.point_solid(Vec3::new(x, y + 0.06, z)) && !colliders.point_solid(Vec3::new(x, y + 0.6, z))
 }
 
 /// Меш травы на участке: пучки тонких изогнутых травинок (ковыль, типчак, полынь) с цветами.
-fn grass_chunk(
-    k: (i32, i32),
-    dense: bool,
-    colliders: &crate::collision::LevelColliders,
-) -> Option<Mesh> {
+fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelColliders) -> Option<Mesh> {
     let density = grass_density();
     let step = if dense { 0.5 } else { 0.95 } / density.sqrt().max(0.2);
     let x0 = k.0 as f32 * GRASS_CHUNK;
@@ -856,12 +586,7 @@ fn grass_chunk(
     let olive = srgb(0.56, 0.55, 0.28);
     let green = srgb(0.36, 0.46, 0.18);
     let sage = srgb(0.62, 0.63, 0.50);
-    let flowers = [
-        srgb(0.90, 0.75, 0.20),
-        srgb(0.88, 0.86, 0.78),
-        srgb(0.52, 0.40, 0.62),
-        srgb(0.75, 0.18, 0.12),
-    ];
+    let flowers = [srgb(0.90, 0.75, 0.20), srgb(0.88, 0.86, 0.78), srgb(0.52, 0.40, 0.62), srgb(0.75, 0.18, 0.12)];
     for iz in 0..n {
         for ix in 0..n {
             let gx = (x0 / step) as i32 + ix;
@@ -876,18 +601,13 @@ fn grass_chunk(
             }
             let y = crate::level::ground_y(x, z);
             // Слишком круто — голый склон.
-            let slope = (crate::level::ground_y(x + 1.0, z) - y)
-                .abs()
-                .max((crate::level::ground_y(x, z + 1.0) - y).abs());
+            let slope = (crate::level::ground_y(x + 1.0, z) - y).abs().max((crate::level::ground_y(x, z + 1.0) - y).abs());
             if slope > 0.7 || !grass_allowed(x, z, y, colliders) {
                 continue;
             }
             let mix = crate::level::fbm(x * 0.02 + 3.0, z * 0.02, 17);
             let wet = (-(y - crate::level::WATER_Y - 2.0) * 0.3).clamp(0.0, 1.0);
-            let base_col = straw
-                .lerp(olive, ((mix - 0.35) * 3.0).clamp(0.0, 1.0))
-                .lerp(sage, ((0.4 - mix) * 4.0).clamp(0.0, 1.0))
-                .lerp(green, wet * 0.7);
+            let base_col = straw.lerp(olive, ((mix - 0.35) * 3.0).clamp(0.0, 1.0)).lerp(sage, ((0.4 - mix) * 4.0).clamp(0.0, 1.0)).lerp(green, wet * 0.7);
             let tall = 0.75 + keep * 0.5;
             let blades = 6 + (hash2(gx, gz, 4) * 6.0) as i32;
             let phase = hash2(gx, gz, 5);
@@ -915,9 +635,7 @@ fn grass_chunk(
                     for sign in [-1.0f32, 1.0] {
                         pos.push((c + side * sign * wd).to_array());
                         // Нормаль почти вверх — трава освещается мягко, без чёрных граней.
-                        let n = (Vec3::Y * 0.85
-                            + Vec3::new(-face.sin(), 0.0, face.cos()) * 0.25 * sign)
-                            .normalize();
+                        let n = (Vec3::Y * 0.85 + Vec3::new(-face.sin(), 0.0, face.cos()) * 0.25 * sign).normalize();
                         nrm.push(n.to_array());
                         let cc = bottom.lerp(top, t.powf(0.7));
                         col.push([cc.x, cc.y, cc.z, 1.0]);
@@ -955,16 +673,13 @@ fn grass_chunk(
         return None;
     }
     Some(
-        Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::RENDER_WORLD,
-        )
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, nrm)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv0)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_1, uv1)
-        .with_inserted_indices(Indices::U32(idx)),
+        Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, nrm)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv0)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_1, uv1)
+            .with_inserted_indices(Indices::U32(idx)),
     )
 }
 
@@ -990,29 +705,15 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
         for &(_, name, n) in TREES {
             for v in 0..n {
-                assert!(
-                    root.join(format!("models/vegetation/{name}_{v}.glb"))
-                        .exists(),
-                    "нет {name}_{v}.glb"
-                );
-                assert!(
-                    root.join(format!("textures/vegetation/{name}_{v}_imp.png"))
-                        .exists(),
-                    "нет импостора {name}_{v}"
-                );
+                assert!(root.join(format!("models/vegetation/{name}_{v}.glb")).exists(), "нет {name}_{v}.glb");
+                assert!(root.join(format!("textures/vegetation/{name}_{v}_imp.png")).exists(), "нет импостора {name}_{v}");
             }
         }
         for r in ROCKS {
-            assert!(
-                root.join(format!("models/rocks/{r}.glb")).exists(),
-                "нет камня {r}"
-            );
+            assert!(root.join(format!("models/rocks/{r}.glb")).exists(), "нет камня {r}");
         }
         for a in ["broadleaf", "pine", "scale"] {
-            assert!(
-                root.join(format!("textures/vegetation/{a}_atlas.png"))
-                    .exists()
-            );
+            assert!(root.join(format!("textures/vegetation/{a}_atlas.png")).exists());
         }
     }
 
@@ -1020,19 +721,8 @@ mod tests {
     #[test]
     fn city_has_plants_of_every_kind() {
         let layout = crate::level::layout();
-        for kind in [
-            PlantKind::Pine,
-            PlantKind::Oak,
-            PlantKind::Juniper,
-            PlantKind::Cypress,
-            PlantKind::Fig,
-            PlantKind::Shrub,
-            PlantKind::Rock,
-        ] {
-            assert!(
-                layout.plants.iter().any(|p| p.kind == kind),
-                "нет растений {kind:?}"
-            );
+        for kind in [PlantKind::Pine, PlantKind::Oak, PlantKind::Juniper, PlantKind::Cypress, PlantKind::Fig, PlantKind::Shrub, PlantKind::Rock] {
+            assert!(layout.plants.iter().any(|p| p.kind == kind), "нет растений {kind:?}");
         }
     }
 }

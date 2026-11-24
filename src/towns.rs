@@ -33,11 +33,7 @@ pub const DEFAULT_WEEK_SECS: f64 = 240.0;
 
 /// Длина недели поселений: хост может задать её переменной `MRPG_WEEK_SECS`, иначе [`DEFAULT_WEEK_SECS`].
 pub fn week_secs() -> f64 {
-    std::env::var("MRPG_WEEK_SECS")
-        .ok()
-        .and_then(|s| s.parse::<f64>().ok())
-        .filter(|s| *s >= 1.0)
-        .unwrap_or(DEFAULT_WEEK_SECS)
+    std::env::var("MRPG_WEEK_SECS").ok().and_then(|s| s.parse::<f64>().ok()).filter(|s| *s >= 1.0).unwrap_or(DEFAULT_WEEK_SECS)
 }
 
 pub const WEEKS_PER_YEAR: u32 = 52;
@@ -45,34 +41,8 @@ pub const WEEKS_PER_YEAR: u32 = 52;
 /// Отсчёт начинается с 1 сентября 510 года: с сентября в империи начинался год (индикт).
 pub const START_YEAR: u32 = 510;
 
-const MONTHS: [&str; 12] = [
-    "сентябрь",
-    "октябрь",
-    "ноябрь",
-    "декабрь",
-    "январь",
-    "февраль",
-    "март",
-    "апрель",
-    "май",
-    "июнь",
-    "июль",
-    "август",
-];
-const MONTHS_GEN: [&str; 12] = [
-    "сентября",
-    "октября",
-    "ноября",
-    "декабря",
-    "января",
-    "февраля",
-    "марта",
-    "апреля",
-    "мая",
-    "июня",
-    "июля",
-    "августа",
-];
+const MONTHS: [&str; 12] = ["сентябрь", "октябрь", "ноябрь", "декабрь", "январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август"];
+const MONTHS_GEN: [&str; 12] = ["сентября", "октября", "ноября", "декабря", "января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа"];
 
 /// Месяц недели: 0 — сентябрь, 11 — август.
 pub fn month_of(week: u32) -> usize {
@@ -128,18 +98,7 @@ pub enum Good {
     Imports,
 }
 
-pub const GOODS: [Good; 10] = [
-    Good::Grain,
-    Good::Fish,
-    Good::Salt,
-    Good::Wine,
-    Good::Oil,
-    Good::Cloth,
-    Good::Hides,
-    Good::Iron,
-    Good::Timber,
-    Good::Imports,
-];
+pub const GOODS: [Good; 10] = [Good::Grain, Good::Fish, Good::Salt, Good::Wine, Good::Oil, Good::Cloth, Good::Hides, Good::Iron, Good::Timber, Good::Imports];
 pub const NG: usize = GOODS.len();
 
 impl Good {
@@ -202,15 +161,7 @@ pub enum TownId {
     Sinope,
 }
 
-pub const TOWNS: [TownId; 7] = [
-    TownId::Herson,
-    TownId::GothVillage,
-    TownId::Doros,
-    TownId::AlanCamp,
-    TownId::SteppeCamp,
-    TownId::Bosporus,
-    TownId::Sinope,
-];
+pub const TOWNS: [TownId; 7] = [TownId::Herson, TownId::GothVillage, TownId::Doros, TownId::AlanCamp, TownId::SteppeCamp, TownId::Bosporus, TownId::Sinope];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TownKind {
@@ -373,94 +324,17 @@ pub struct Route {
 }
 
 pub const ROUTES: [Route; 11] = [
-    Route {
-        a: TownId::Herson,
-        b: TownId::GothVillage,
-        kind: RouteKind::Road,
-        cap: 12.0,
-        danger: 0.01,
-        name: "дорога на готское село",
-    },
-    Route {
-        a: TownId::Herson,
-        b: TownId::Doros,
-        kind: RouteKind::Road,
-        cap: 22.0,
-        danger: 0.03,
-        name: "горная дорога в Дори",
-    },
-    Route {
-        a: TownId::Herson,
-        b: TownId::AlanCamp,
-        kind: RouteKind::Road,
-        cap: 10.0,
-        danger: 0.04,
-        name: "тропа к аланам",
-    },
-    Route {
-        a: TownId::Herson,
-        b: TownId::SteppeCamp,
-        kind: RouteKind::Steppe,
-        cap: 12.0,
-        danger: 0.06,
-        name: "степной шлях",
-    },
-    Route {
-        a: TownId::Herson,
-        b: TownId::Bosporus,
-        kind: RouteKind::Sea,
-        cap: 55.0,
-        danger: 0.04,
-        name: "морем на Боспор",
-    },
-    Route {
-        a: TownId::Herson,
-        b: TownId::Sinope,
-        kind: RouteKind::Sea,
-        cap: 90.0,
-        danger: 0.05,
-        name: "через Понт на Синопу",
-    },
-    Route {
-        a: TownId::GothVillage,
-        b: TownId::Doros,
-        kind: RouteKind::Road,
-        cap: 8.0,
-        danger: 0.01,
-        name: "долиной в Дори",
-    },
-    Route {
-        a: TownId::Doros,
-        b: TownId::AlanCamp,
-        kind: RouteKind::Road,
-        cap: 8.0,
-        danger: 0.03,
-        name: "предгорьями к аланам",
-    },
-    Route {
-        a: TownId::AlanCamp,
-        b: TownId::SteppeCamp,
-        kind: RouteKind::Steppe,
-        cap: 8.0,
-        danger: 0.03,
-        name: "степью к кочевью",
-    },
-    Route {
-        a: TownId::SteppeCamp,
-        b: TownId::Bosporus,
-        kind: RouteKind::Steppe,
-        cap: 14.0,
-        danger: 0.04,
-        name: "степью на Боспор",
-    },
-    Route {
-        a: TownId::Bosporus,
-        b: TownId::Sinope,
-        kind: RouteKind::Sea,
-        cap: 30.0,
-        danger: 0.05,
-        name: "морем с Боспора",
-    },
+    Route { a: TownId::Herson, b: TownId::GothVillage, kind: RouteKind::Road, cap: 12.0, danger: 0.01, name: "дорога на готское село" },
+    Route { a: TownId::Herson, b: TownId::Doros, kind: RouteKind::Road, cap: 22.0, danger: 0.03, name: "горная дорога в Дори" },
+    Route { a: TownId::Herson, b: TownId::AlanCamp, kind: RouteKind::Road, cap: 10.0, danger: 0.04, name: "тропа к аланам" },
+    Route { a: TownId::Herson, b: TownId::SteppeCamp, kind: RouteKind::Steppe, cap: 12.0, danger: 0.06, name: "степной шлях" },
+    Route { a: TownId::Herson, b: TownId::Bosporus, kind: RouteKind::Sea, cap: 55.0, danger: 0.04, name: "морем на Боспор" },
+    Route { a: TownId::Herson, b: TownId::Sinope, kind: RouteKind::Sea, cap: 90.0, danger: 0.05, name: "через Понт на Синопу" },
+    Route { a: TownId::GothVillage, b: TownId::Doros, kind: RouteKind::Road, cap: 8.0, danger: 0.01, name: "долиной в Дори" },
+    Route { a: TownId::Doros, b: TownId::AlanCamp, kind: RouteKind::Road, cap: 8.0, danger: 0.03, name: "предгорьями к аланам" },
+    Route { a: TownId::AlanCamp, b: TownId::SteppeCamp, kind: RouteKind::Steppe, cap: 8.0, danger: 0.03, name: "степью к кочевью" },
+    Route { a: TownId::SteppeCamp, b: TownId::Bosporus, kind: RouteKind::Steppe, cap: 14.0, danger: 0.04, name: "степью на Боспор" },
+    Route { a: TownId::Bosporus, b: TownId::Sinope, kind: RouteKind::Sea, cap: 30.0, danger: 0.05, name: "морем с Боспора" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -618,25 +492,14 @@ impl TownState {
     }
 
     fn harvest_mult(&self) -> f32 {
-        self.effects
-            .iter()
-            .filter_map(|a| {
-                if let Effect::BadHarvest(m) = a.effect {
-                    Some(m)
-                } else {
-                    None
-                }
-            })
-            .fold(1.0, f32::min)
+        self.effects.iter().filter_map(|a| if let Effect::BadHarvest(m) = a.effect { Some(m) } else { None }).fold(1.0, f32::min)
     }
 
     /// Цена товара относительно обычной (1 — как всегда, 2 — вдвое дороже).
     pub fn price(&self, g: Good) -> f32 {
         let d = self.id.def();
         let t = target(d, self.pop, g);
-        ((t + 1.0) / (self.stock[g.idx()] + 1.0))
-            .sqrt()
-            .clamp(0.45, 3.0)
+        ((t + 1.0) / (self.stock[g.idx()] + 1.0)).sqrt().clamp(0.45, 3.0)
     }
 
     /// Сколько народу помещается.
@@ -660,9 +523,7 @@ fn target(d: &TownDef, pop: f32, g: Good) -> f32 {
         Good::Grain | Good::Wine => 26.0,
         _ => 12.0,
     };
-    (d.eat[g.idx()] * k * weeks)
-        .max(d.make[g.idx()] * k * 4.0)
-        .max(1.0)
+    (d.eat[g.idx()] * k * weeks).max(d.make[g.idx()] * k * 4.0).max(1.0)
 }
 
 /// Сколько недель до следующей жатвы (июль).
@@ -742,35 +603,19 @@ const NEWS_KEEP: usize = 60;
 
 impl Towns {
     pub fn new(sites: usize, seed: u64) -> Self {
-        Towns {
-            week: 0,
-            towns: TOWNS.iter().map(|t| TownState::new(*t)).collect(),
-            sites: vec![0; sites],
-            news: Vec::new(),
-            flows: vec![0.0; ROUTES.len()],
-            rng: Rng::new(seed),
-        }
+        Towns { week: 0, towns: TOWNS.iter().map(|t| TownState::new(*t)).collect(), sites: vec![0; sites], news: Vec::new(), flows: vec![0.0; ROUTES.len()], rng: Rng::new(seed) }
     }
 
     /// После загрузки с диска: число стройплощадок могло поменяться вместе с картой.
     pub fn fit_sites(&mut self, sites: usize) {
         self.sites.resize(sites, 0);
         for t in &mut self.towns {
-            t.projects
-                .retain(|p| p.site.is_none_or(|s| (s as usize) < sites));
+            t.projects.retain(|p| p.site.is_none_or(|s| (s as usize) < sites));
         }
         self.flows.resize(ROUTES.len(), 0.0);
         if self.towns.len() != TOWNS.len() {
             let old = std::mem::take(&mut self.towns);
-            self.towns = TOWNS
-                .iter()
-                .map(|id| {
-                    old.iter()
-                        .find(|t| t.id == *id)
-                        .cloned()
-                        .unwrap_or_else(|| TownState::new(*id))
-                })
-                .collect();
+            self.towns = TOWNS.iter().map(|id| old.iter().find(|t| t.id == *id).cloned().unwrap_or_else(|| TownState::new(*id))).collect();
         }
     }
 
@@ -787,13 +632,7 @@ impl Towns {
     }
 
     fn say(&mut self, town: TownId, kind: NewsKind, loud: bool, text: impl Into<String>) {
-        self.news.push(News {
-            week: self.week,
-            town,
-            kind,
-            text: text.into(),
-            loud,
-        });
+        self.news.push(News { week: self.week, town, kind, text: text.into(), loud });
         if self.news.len() > NEWS_KEEP {
             let extra = self.news.len() - NEWS_KEEP;
             self.news.drain(..extra);
@@ -819,29 +658,13 @@ impl Towns {
         // Кончившиеся беды.
         for i in 0..self.towns.len() {
             let id = self.towns[i].id;
-            let ended: Vec<Effect> = self.towns[i]
-                .effects
-                .iter()
-                .filter(|a| a.until <= week)
-                .map(|a| a.effect)
-                .collect();
+            let ended: Vec<Effect> = self.towns[i].effects.iter().filter(|a| a.until <= week).map(|a| a.effect).collect();
             self.towns[i].effects.retain(|a| a.until > week);
             for e in ended {
                 match e {
                     Effect::Plague => {
-                        self.say(
-                            id,
-                            NewsKind::Plague,
-                            true,
-                            format!(
-                                "{}: мор отступил. Живые служат благодарственный молебен.",
-                                id.def().name
-                            ),
-                        );
-                        cues.push(WorldCue::Plague {
-                            town: id,
-                            on: false,
-                        });
+                        self.say(id, NewsKind::Plague, true, format!("{}: мор отступил. Живые служат благодарственный молебен.", id.def().name));
+                        cues.push(WorldCue::Plague { town: id, on: false });
                     }
                     Effect::Raided => {}
                     _ => {}
@@ -864,14 +687,9 @@ impl Towns {
         let t = &mut self.towns[i];
         let d = t.id.def();
         let k = t.pop / 1000.0;
-        let work =
-            (0.35 + 0.65 * t.health) * (0.7 + 0.3 * t.mood) * if t.raided() { 0.6 } else { 1.0 };
+        let work = (0.35 + 0.65 * t.health) * (0.7 + 0.3 * t.mood) * if t.raided() { 0.6 } else { 1.0 };
         let harvest = t.harvest_mult();
-        let murrain = if t.has(|e| matches!(e, Effect::Murrain)) {
-            0.4
-        } else {
-            1.0
-        };
+        let murrain = if t.has(|e| matches!(e, Effect::Murrain)) { 0.4 } else { 1.0 };
         for g in GOODS {
             // Урожай зерна — июль-август, вина — сентябрь-октябрь; рыба — больше осенью.
             let season = match g {
@@ -928,13 +746,7 @@ impl Towns {
             let raided = self.towns[ia].raided() || self.towns[ib].raided();
             let mut cap = r.cap * if plague { 0.25 } else { 1.0 } * if raided { 0.5 } else { 1.0 };
             // Шторм или разбойники.
-            let danger = r.danger
-                * if raided { 2.5 } else { 1.0 }
-                * if winter(week) && r.kind == RouteKind::Steppe {
-                    1.5
-                } else {
-                    1.0
-                };
+            let danger = r.danger * if raided { 2.5 } else { 1.0 } * if winter(week) && r.kind == RouteKind::Steppe { 1.5 } else { 1.0 };
             let lost = self.rng.f32() < danger;
             // Выгоднее всего — где разница в ценах больше.
             let mut wants: Vec<(f32, Good, bool)> = GOODS
@@ -942,11 +754,7 @@ impl Towns {
                 .map(|&g| {
                     let pa = self.towns[ia].price(g);
                     let pb = self.towns[ib].price(g);
-                    if pb > pa {
-                        (pb / pa, g, true)
-                    } else {
-                        (pa / pb, g, false)
-                    }
+                    if pb > pa { (pb / pa, g, true) } else { (pa / pb, g, false) }
                 })
                 .filter(|(gap, _, _)| *gap > 1.12)
                 .collect();
@@ -961,11 +769,7 @@ impl Towns {
                 let fd = self.towns[from].id.def();
                 // Хлеб себе оставляют до новой жатвы.
                 let farmers = fd.make[Good::Grain.idx()] >= fd.eat[Good::Grain.idx()] * 0.5;
-                let keep = if g == Good::Grain && farmers && fd.kind != TownKind::Overseas {
-                    weeks_to_harvest(week).max(4.0) + 2.0
-                } else {
-                    4.0
-                };
+                let keep = if g == Good::Grain && farmers && fd.kind != TownKind::Overseas { weeks_to_harvest(week).max(4.0) + 2.0 } else { 4.0 };
                 let reserve = fd.eat[g.idx()] * self.towns[from].pop / 1000.0 * keep;
                 let spare = (self.towns[from].stock[g.idx()] - reserve).max(0.0);
                 let q = (cap * ((gap - 1.0) / 1.5).min(1.0)).min(spare);
@@ -977,8 +781,7 @@ impl Towns {
                 if !lost {
                     self.towns[to].stock[g.idx()] += q;
                     // Таможня Херсона — октава со всего, что ввезли и вывезли.
-                    if self.towns[to].id == TownId::Herson || self.towns[from].id == TownId::Herson
-                    {
+                    if self.towns[to].id == TownId::Herson || self.towns[from].id == TownId::Herson {
                         self.towns[TownId::Herson.idx()].treasury += q * g.value() / 8.0;
                     }
                     // Купцы с обеих сторон наживаются.
@@ -995,49 +798,25 @@ impl Towns {
                 continue;
             }
             cargo.sort_by(|a, b| b.1.total_cmp(&a.1));
-            let names: Vec<String> = cargo
-                .iter()
-                .take(3)
-                .map(|(g, _)| g.name().to_lowercase())
-                .collect();
+            let names: Vec<String> = cargo.iter().take(3).map(|(g, _)| g.name().to_lowercase()).collect();
             let goods = names.join(", ");
             let herson_side = r.a == TownId::Herson || r.b == TownId::Herson;
             if lost {
                 let text = match r.kind {
-                    RouteKind::Sea => format!(
-                        "Шторм на Понте: корабль ({}) не дошёл. Товар пропал: {goods}.",
-                        r.name
-                    ),
+                    RouteKind::Sea => format!("Шторм на Понте: корабль ({}) не дошёл. Товар пропал: {goods}.", r.name),
                     _ => format!("Разбойники разграбили обоз ({}). Пропало: {goods}.", r.name),
                 };
-                lines.push((
-                    if herson_side { TownId::Herson } else { r.a },
-                    NewsKind::Trade,
-                    text,
-                ));
+                lines.push((if herson_side { TownId::Herson } else { r.a }, NewsKind::Trade, text));
             } else if herson_side && total > 6.0 && self.rng.f32() < 0.35 {
                 let other = if r.a == TownId::Herson { r.b } else { r.a };
                 let inbound = (r.a == TownId::Herson) != (forward > total / 2.0);
                 let text = match (r.kind, inbound) {
-                    (RouteKind::Sea, true) => format!(
-                        "В Карантинную бухту вошёл корабль из {}: {goods}.",
-                        from_name(other)
-                    ),
-                    (RouteKind::Sea, false) => {
-                        format!("Корабль ушёл в {}: на борту {goods}.", to_name(other))
-                    }
+                    (RouteKind::Sea, true) => format!("В Карантинную бухту вошёл корабль из {}: {goods}.", from_name(other)),
+                    (RouteKind::Sea, false) => format!("Корабль ушёл в {}: на борту {goods}.", to_name(other)),
                     (_, true) => format!("Пришёл обоз из {}: {goods}.", from_name(other)),
                     (_, false) => format!("Обоз ушёл в {}: в возах {goods}.", to_name(other)),
                 };
-                lines.push((
-                    TownId::Herson,
-                    if r.kind == RouteKind::Sea {
-                        NewsKind::Ship
-                    } else {
-                        NewsKind::Trade
-                    },
-                    text,
-                ));
+                lines.push((TownId::Herson, if r.kind == RouteKind::Sea { NewsKind::Ship } else { NewsKind::Trade }, text));
             }
         }
         for (town, kind, text) in lines {
@@ -1064,10 +843,7 @@ impl Towns {
         }
         let grain_need = d.eat[Good::Grain.idx()].max(0.1);
         let fish_need = d.eat[Good::Fish.idx()];
-        let hunger = ((short[Good::Grain.idx()] * grain_need
-            + short[Good::Fish.idx()] * fish_need * 0.5)
-            / (grain_need + fish_need * 0.5))
-            .clamp(0.0, 1.0);
+        let hunger = ((short[Good::Grain.idx()] * grain_need + short[Good::Fish.idx()] * fish_need * 0.5) / (grain_need + fish_need * 0.5)).clamp(0.0, 1.0);
         // Если рыба в избытке, она кормит вместо хлеба.
         let hunger = if hunger > 0.0 && t.stock[Good::Fish.idx()] > 1.0 {
             let fill = (hunger * grain_need * k).min(t.stock[Good::Fish.idx()] * 0.5);
@@ -1077,19 +853,10 @@ impl Towns {
             hunger
         };
         t.hunger = hunger;
-        let comfort = 1.0
-            - (short[Good::Wine.idx()]
-                + short[Good::Oil.idx()]
-                + short[Good::Cloth.idx()]
-                + short[Good::Timber.idx()])
-                / 4.0;
+        let comfort = 1.0 - (short[Good::Wine.idx()] + short[Good::Oil.idx()] + short[Good::Cloth.idx()] + short[Good::Timber.idx()]) / 4.0;
 
         // Люди: рождаются, умирают, приходят и уходят.
-        let fertility = if d.kind == TownKind::City || d.kind == TownKind::Overseas {
-            0.038
-        } else {
-            0.046
-        };
+        let fertility = if d.kind == TownKind::City || d.kind == TownKind::Overseas { 0.038 } else { 0.046 };
         let births = t.pop * fertility / 52.0 * (1.0 - hunger * 0.7);
         let deaths = t.pop * (0.031 / 52.0 + hunger * 0.012 + (1.0 - t.health) * 0.018);
         let crowd = t.crowding();
@@ -1112,10 +879,7 @@ impl Towns {
         t.year_deaths += deaths;
 
         // Настроение.
-        let mut target = 0.45 + 0.25 * comfort
-            - 0.6 * hunger
-            - 0.4 * (1.0 - t.health)
-            - 0.2 * (crowd - 1.0).max(0.0);
+        let mut target = 0.45 + 0.25 * comfort - 0.6 * hunger - 0.4 * (1.0 - t.health) - 0.2 * (crowd - 1.0).max(0.0);
         if feast {
             target += 0.2;
         }
@@ -1150,27 +914,16 @@ impl Towns {
         // Праздники Херсона (неделя от 1 сентября): св. Климент Римский, сосланный в Херсон, —
         // конец ноября; Рождество, Богоявление, Пасха (в среднем — середина апреля).
         let feasts: [(u32, &str); 4] = [
-            (
-                12,
-                "Память святого Климента, епископа Римского, сосланного в Херсон: крестный ход к его гробнице, раздача хлеба",
-            ),
+            (12, "Память святого Климента, епископа Римского, сосланного в Херсон: крестный ход к его гробнице, раздача хлеба"),
             (16, "Рождество Христово: литургия в базилике, город гуляет"),
             (18, "Богоявление: водосвятие в бухте, ярмарка у ворот"),
-            (
-                32,
-                "Пасха: по всему городу бьют в деревянные била, крестный ход, разговляются всем городом",
-            ),
+            (32, "Пасха: по всему городу бьют в деревянные била, крестный ход, разговляются всем городом"),
         ];
         for (fw, text) in feasts {
             if w == fw {
                 let until = week + 1;
-                for t in self.towns.iter_mut().filter(|t| {
-                    matches!(t.id, TownId::Herson | TownId::GothVillage | TownId::Doros)
-                }) {
-                    t.effects.push(ActiveEffect {
-                        effect: Effect::Feast,
-                        until,
-                    });
+                for t in self.towns.iter_mut().filter(|t| matches!(t.id, TownId::Herson | TownId::GothVillage | TownId::Doros)) {
+                    t.effects.push(ActiveEffect { effect: Effect::Feast, until });
                 }
                 self.say(TownId::Herson, NewsKind::Feast, true, text);
             }
@@ -1179,21 +932,11 @@ impl Towns {
         if w == 36 {
             let h = self.town_mut(TownId::Herson);
             h.treasury += 45.0;
-            self.say(
-                TownId::Herson,
-                NewsKind::Treasury,
-                true,
-                "Из Константинополя пришёл корабль с жалованьем гарнизону. В лавках оживление.",
-            );
+            self.say(TownId::Herson, NewsKind::Treasury, true, "Из Константинополя пришёл корабль с жалованьем гарнизону. В лавках оживление.");
         }
         // Открытие и закрытие навигации.
         if w == month_start(7) {
-            self.say(
-                TownId::Herson,
-                NewsKind::Ship,
-                true,
-                "Море открылось: навикулярии снаряжают корабли за Понт.",
-            );
+            self.say(TownId::Herson, NewsKind::Ship, true, "Море открылось: навикулярии снаряжают корабли за Понт.");
         }
         if w == month_start(2) {
             self.say(TownId::Herson, NewsKind::Ship, false, "Море закрылось до весны: зимой корабли не ходят. Цены на привозное поползут вверх.");
@@ -1210,35 +953,12 @@ impl Towns {
                 if roll < 0.14 {
                     let locusts = self.rng.f32() < 0.3;
                     let m = self.rng.range_f32(0.3, 0.6);
-                    self.towns[i].effects.push(ActiveEffect {
-                        effect: Effect::BadHarvest(m),
-                        until: week + 14,
-                    });
-                    let why = if locusts {
-                        "саранча поела хлеба"
-                    } else {
-                        "засуха спалила колос"
-                    };
-                    self.say(
-                        id,
-                        NewsKind::Harvest,
-                        true,
-                        format!(
-                            "{}: {why} — урожай будет вполовину. Хлеб подорожает.",
-                            d.name
-                        ),
-                    );
+                    self.towns[i].effects.push(ActiveEffect { effect: Effect::BadHarvest(m), until: week + 14 });
+                    let why = if locusts { "саранча поела хлеба" } else { "засуха спалила колос" };
+                    self.say(id, NewsKind::Harvest, true, format!("{}: {why} — урожай будет вполовину. Хлеб подорожает.", d.name));
                 } else if roll > 0.85 {
-                    self.towns[i].effects.push(ActiveEffect {
-                        effect: Effect::BadHarvest(1.3),
-                        until: week + 14,
-                    });
-                    self.say(
-                        id,
-                        NewsKind::Harvest,
-                        false,
-                        format!("{}: хлеба стоят стеной — урожай обильный.", d.name),
-                    );
+                    self.towns[i].effects.push(ActiveEffect { effect: Effect::BadHarvest(1.3), until: week + 14 });
+                    self.say(id, NewsKind::Harvest, false, format!("{}: хлеба стоят стеной — урожай обильный.", d.name));
                 }
             }
         }
@@ -1250,24 +970,10 @@ impl Towns {
         // Набеги: голодная степь (зимой — особенно) идёт за хлебом и скотом.
         let steppe = self.town(TownId::SteppeCamp).clone();
         let alans_hungry = self.town(TownId::AlanCamp).hunger;
-        let raid_chance = 0.012
-            + steppe.hunger * 0.08
-            + if winter(week) { 0.015 } else { 0.0 }
-            + if steppe.has(|e| matches!(e, Effect::Murrain)) {
-                0.03
-            } else {
-                0.0
-            }
-            + alans_hungry * 0.02;
+        let raid_chance = 0.012 + steppe.hunger * 0.08 + if winter(week) { 0.015 } else { 0.0 } + if steppe.has(|e| matches!(e, Effect::Murrain)) { 0.03 } else { 0.0 } + alans_hungry * 0.02;
         if self.rng.f32() < raid_chance {
             // Цели: селения без стен — чаще, Херсон — только его клеры за стенами.
-            let targets = [
-                (TownId::GothVillage, 3.0),
-                (TownId::AlanCamp, 1.0),
-                (TownId::Herson, 1.2),
-                (TownId::Doros, 0.6),
-                (TownId::Bosporus, 0.4),
-            ];
+            let targets = [(TownId::GothVillage, 3.0), (TownId::AlanCamp, 1.0), (TownId::Herson, 1.2), (TownId::Doros, 0.6), (TownId::Bosporus, 0.4)];
             if let Some(ti) = self.rng.weighted(&targets) {
                 let target = targets[ti].0;
                 self.raid(TownId::SteppeCamp, target, cues);
@@ -1280,31 +986,12 @@ impl Towns {
             let t = &self.towns[i];
             if !t.plague() {
                 let port = matches!(id, TownId::Herson | TownId::Bosporus | TownId::Sinope);
-                let p = 0.0015
-                    + t.hunger * 0.01
-                    + t.crowding().max(1.0) * 0.0
-                    + if port && sea_open(week) { 0.0015 } else { 0.0 }
-                    + (t.crowding() - 1.0).max(0.0) * 0.02;
+                let p = 0.0015 + t.hunger * 0.01 + t.crowding().max(1.0) * 0.0 + if port && sea_open(week) { 0.0015 } else { 0.0 } + (t.crowding() - 1.0).max(0.0) * 0.02;
                 if self.rng.f32() < p {
                     let weeks = self.rng.range_u32(4, 9);
-                    self.towns[i].effects.push(ActiveEffect {
-                        effect: Effect::Plague,
-                        until: week + weeks,
-                    });
-                    let how = if port {
-                        "занесли с корабля"
-                    } else {
-                        "пришла из степи"
-                    };
-                    self.say(
-                        id,
-                        NewsKind::Plague,
-                        true,
-                        format!(
-                            "{}: мор — горячка, {how}. Ксенон полон, травы и снадобья в цене.",
-                            d.name
-                        ),
-                    );
+                    self.towns[i].effects.push(ActiveEffect { effect: Effect::Plague, until: week + weeks });
+                    let how = if port { "занесли с корабля" } else { "пришла из степи" };
+                    self.say(id, NewsKind::Plague, true, format!("{}: мор — горячка, {how}. Ксенон полон, травы и снадобья в цене.", d.name));
                     cues.push(WorldCue::Plague { town: id, on: true });
                 }
             }
@@ -1315,66 +1002,27 @@ impl Towns {
                 TownKind::Overseas => 0.0,
             } * if winter(week) { 1.6 } else { 1.0 };
             if self.rng.f32() < fire {
-                let lost = (self.towns[i].homes * self.rng.range_f32(0.004, 0.02))
-                    .max(1.0)
-                    .round();
+                let lost = (self.towns[i].homes * self.rng.range_f32(0.004, 0.02)).max(1.0).round();
                 let t = &mut self.towns[i];
                 t.homes = (t.homes - lost).max(1.0);
                 t.stock[Good::Timber.idx()] *= 0.8;
                 t.stock[Good::Cloth.idx()] *= 0.9;
                 t.mood = (t.mood - 0.05).max(0.0);
-                let what = if d.kind == TownKind::City {
-                    "в ремесленном квартале"
-                } else {
-                    "в селении"
-                };
+                let what = if d.kind == TownKind::City { "в ремесленном квартале" } else { "в селении" };
                 let n = lost as u32;
-                self.say(
-                    id,
-                    NewsKind::Fire,
-                    d.kind == TownKind::City,
-                    format!(
-                        "{}: пожар {what}, сгорело {n} {}. Погорельцы ищут, где жить.",
-                        d.name,
-                        crate::economy::plural(n, "двор", "двора", "дворов")
-                    ),
-                );
+                self.say(id, NewsKind::Fire, d.kind == TownKind::City, format!("{}: пожар {what}, сгорело {n} {}. Погорельцы ищут, где жить.", d.name, crate::economy::plural(n, "двор", "двора", "дворов")));
             }
             // Падёж скота у скотоводов.
-            if matches!(id, TownId::SteppeCamp | TownId::AlanCamp)
-                && self.rng.f32() < 0.006
-                && !self.towns[i].has(|e| matches!(e, Effect::Murrain))
-            {
-                self.towns[i].effects.push(ActiveEffect {
-                    effect: Effect::Murrain,
-                    until: week + 8,
-                });
-                self.say(
-                    id,
-                    NewsKind::Harvest,
-                    false,
-                    format!(
-                        "{}: падёж скота. Шкуры подорожают, а степь станет голодной.",
-                        d.name
-                    ),
-                );
+            if matches!(id, TownId::SteppeCamp | TownId::AlanCamp) && self.rng.f32() < 0.006 && !self.towns[i].has(|e| matches!(e, Effect::Murrain)) {
+                self.towns[i].effects.push(ActiveEffect { effect: Effect::Murrain, until: week + 8 });
+                self.say(id, NewsKind::Harvest, false, format!("{}: падёж скота. Шкуры подорожают, а степь станет голодной.", d.name));
             }
         }
         // Ярмарка у готов после жатвы.
         if week % WEEKS_PER_YEAR == month_start(1) {
             let until = week + 1;
-            self.town_mut(TownId::GothVillage)
-                .effects
-                .push(ActiveEffect {
-                    effect: Effect::Feast,
-                    until,
-                });
-            self.say(
-                TownId::GothVillage,
-                NewsKind::Feast,
-                true,
-                "Осенняя ярмарка в готском селе: хлеб нового урожая, мёд, воск, скот.",
-            );
+            self.town_mut(TownId::GothVillage).effects.push(ActiveEffect { effect: Effect::Feast, until });
+            self.say(TownId::GothVillage, NewsKind::Feast, true, "Осенняя ярмарка в готском селе: хлеб нового урожая, мёд, воск, скот.");
         }
     }
 
@@ -1396,35 +1044,19 @@ impl Towns {
         t.homes = (t.homes - burned).max(1.0);
         t.mood = (t.mood - 0.12).max(0.0);
         t.defense = (t.defense - 0.15 * strength).max(0.0);
-        t.effects.push(ActiveEffect {
-            effect: Effect::Raided,
-            until: week + 3,
-        });
+        t.effects.push(ActiveEffect { effect: Effect::Raided, until: week + 3 });
         let r = self.town_mut(from);
         r.stock[Good::Grain.idx()] += took_grain;
         r.stock[Good::Hides.idx()] += took_hides;
         let text = if city {
-            format!(
-                "Кочевники налетели на клеры под Херсоном: угнали скот, увели {} {}. Гарнизон закрыл ворота.",
-                captives as u32,
-                crate::economy::plural(captives as u32, "человека", "человек", "человек")
-            )
+            format!("Кочевники налетели на клеры под Херсоном: угнали скот, увели {} {}. Гарнизон закрыл ворота.", captives as u32, crate::economy::plural(captives as u32, "человека", "человек", "человек"))
         } else {
-            format!(
-                "Набег кочевников на {}: сожжено {} {}, уведено в полон {}. Хлеб и скот угнали в степь.",
-                name_acc(target),
-                burned as u32,
-                crate::economy::plural(burned as u32, "двор", "двора", "дворов"),
-                captives as u32
-            )
+            format!("Набег кочевников на {}: сожжено {} {}, уведено в полон {}. Хлеб и скот угнали в степь.", name_acc(target), burned as u32, crate::economy::plural(burned as u32, "двор", "двора", "дворов"), captives as u32)
         };
         self.say(target, NewsKind::Raid, true, text);
         if target.def().place.is_some() {
             let raiders = (2.0 + strength * 4.0).round() as u32;
-            cues.push(WorldCue::Raid {
-                town: target,
-                raiders,
-            });
+            cues.push(WorldCue::Raid { town: target, raiders });
         }
     }
 
@@ -1444,14 +1076,7 @@ impl Towns {
         // Начать новую стройку.
         let (crowd, treasury, plague, defense, projects, raided) = {
             let t = &self.towns[i];
-            (
-                t.crowding(),
-                t.treasury,
-                t.plague(),
-                t.defense,
-                t.projects.clone(),
-                t.raided(),
-            )
+            (t.crowding(), t.treasury, t.plague(), t.defense, t.projects.clone(), t.raided())
         };
         if projects.len() < 2 && !plague && !raided {
             let mut want = None;
@@ -1459,10 +1084,7 @@ impl Towns {
                 want = Some(ProjectKind::Walls);
             } else if crowd > 0.9 && !projects.iter().any(|p| p.kind == ProjectKind::Houses) {
                 want = Some(ProjectKind::Houses);
-            } else if treasury > 120.0
-                && self.towns[i].crafts < 1.4
-                && !projects.iter().any(|p| p.kind == ProjectKind::Workshops)
-            {
+            } else if treasury > 120.0 && self.towns[i].crafts < 1.4 && !projects.iter().any(|p| p.kind == ProjectKind::Workshops) {
                 want = Some(ProjectKind::Workshops);
             }
             // Сёла и станы строят сами, толокой: им нужен только лес.
@@ -1470,17 +1092,8 @@ impl Towns {
             if let Some(kind) = want
                 && (!city || treasury > kind.cost(d.kind) * 0.3)
             {
-                let site = if id == TownId::Herson && kind == ProjectKind::Houses {
-                    self.free_site()
-                } else {
-                    None
-                };
-                self.towns[i].projects.push(Project {
-                    kind,
-                    progress: 0.0,
-                    site,
-                    stalled: 0,
-                });
+                let site = if id == TownId::Herson && kind == ProjectKind::Houses { self.free_site() } else { None };
+                self.towns[i].projects.push(Project { kind, progress: 0.0, site, stalled: 0 });
                 let text = match (kind, site) {
                     (ProjectKind::Houses, Some(_)) => "Курия наняла каменщиков: на месте сгоревшей усадьбы разбирают завал и кладут новый дом.".to_string(),
                     (ProjectKind::Houses, None) => format!("{}: строят новые дворы — народу стало тесно.", d.name),
@@ -1555,56 +1168,25 @@ impl Towns {
                 }
                 ProjectKind::Walls => {
                     t.defense = d.walls;
-                    self.say(
-                        id,
-                        NewsKind::Build,
-                        false,
-                        format!("{}: стены и ворота починили.", d.name),
-                    );
+                    self.say(id, NewsKind::Build, false, format!("{}: стены и ворота починили.", d.name));
                 }
                 ProjectKind::Workshops => {
                     t.crafts += 0.15;
-                    self.say(
-                        id,
-                        NewsKind::Build,
-                        false,
-                        format!(
-                            "{}: новые мастерские заработали — больше своих тканей и железа.",
-                            d.name
-                        ),
-                    );
+                    self.say(id, NewsKind::Build, false, format!("{}: новые мастерские заработали — больше своих тканей и железа.", d.name));
                 }
             }
         }
         // Долго стоящая стройка: курия жалуется.
         let stalled = self.towns[i].projects.iter().any(|p| p.stalled == 6);
         if stalled {
-            let why = if self.towns[i].stock[Good::Timber.idx()] < 1.0 {
-                "нет леса"
-            } else {
-                "нет денег в казне"
-            };
-            self.say(
-                id,
-                NewsKind::Build,
-                false,
-                format!("{}: стройка встала — {why}.", d.name),
-            );
+            let why = if self.towns[i].stock[Good::Timber.idx()] < 1.0 { "нет леса" } else { "нет денег в казне" };
+            self.say(id, NewsKind::Build, false, format!("{}: стройка встала — {why}.", d.name));
         }
     }
 
     fn free_site(&self) -> Option<u16> {
-        let busy: Vec<u16> = self
-            .town(TownId::Herson)
-            .projects
-            .iter()
-            .filter_map(|p| p.site)
-            .collect();
-        self.sites
-            .iter()
-            .enumerate()
-            .find(|(i, s)| **s == 0 && !busy.contains(&(*i as u16)))
-            .map(|(i, _)| i as u16)
+        let busy: Vec<u16> = self.town(TownId::Herson).projects.iter().filter_map(|p| p.site).collect();
+        self.sites.iter().enumerate().find(|(i, s)| **s == 0 && !busy.contains(&(*i as u16))).map(|(i, _)| i as u16)
     }
 
     /// Главные вести (новые сверху).
@@ -1660,9 +1242,7 @@ fn category_goods(c: Category) -> &'static [(Good, f32)] {
         Category::Hide | Category::SteppeGood => &[(Good::Hides, 1.0)],
         Category::Weapon | Category::Armor => &[(Good::Iron, 0.6)],
         Category::Material => &[(Good::Timber, 0.5), (Good::Iron, 0.3)],
-        Category::Import | Category::Dye | Category::Gem | Category::Book => {
-            &[(Good::Imports, 1.0)]
-        }
+        Category::Import | Category::Dye | Category::Gem | Category::Book => &[(Good::Imports, 1.0)],
         Category::Vessel => &[(Good::Imports, 0.3)],
         _ => &[],
     }
@@ -1774,9 +1354,7 @@ pub fn mood_word(m: f32) -> &'static str {
 /// «дешевле на 20%», «как обычно», «дороже вдвое».
 pub fn price_word(p: f32) -> String {
     if p >= 1.9 {
-        format!("дороже в {:.1} раза", p)
-            .replace(".0 ", " ")
-            .replace('.', ",")
+        format!("дороже в {:.1} раза", p).replace(".0 ", " ").replace('.', ",")
     } else if p > 1.08 {
         format!("дороже на {}%", ((p - 1.0) * 100.0).round() as i32)
     } else if p < 0.92 {
@@ -1819,29 +1397,15 @@ mod tests {
                 }
             }
             for t in &w.towns {
-                assert!(
-                    t.pop.is_finite() && t.stock.iter().all(|s| s.is_finite() && *s >= -0.001),
-                    "{:?}",
-                    t
-                );
+                assert!(t.pop.is_finite() && t.stock.iter().all(|s| s.is_finite() && *s >= -0.001), "{:?}", t);
             }
         }
         for t in &w.towns {
             let d = t.id.def();
-            assert!(
-                t.pop > d.pop * 0.5 && t.pop < d.pop * 2.0,
-                "{}: {} жителей (было {})",
-                d.name,
-                t.pop,
-                d.pop
-            );
+            assert!(t.pop > d.pop * 0.5 && t.pop < d.pop * 2.0, "{}: {} жителей (было {})", d.name, t.pop, d.pop);
         }
         let h = w.town(TownId::Herson);
-        assert!(
-            h.price(Good::Grain) < 2.5,
-            "Херсон голодает: цена хлеба {}",
-            h.price(Good::Grain)
-        );
+        assert!(h.price(Good::Grain) < 2.5, "Херсон голодает: цена хлеба {}", h.price(Good::Grain));
         assert!(raids > 0, "за десять лет ни одного набега");
         assert!(plagues <= 8, "слишком много моров: {plagues}");
         assert!(built > 0, "Херсон не строится");
@@ -1867,12 +1431,7 @@ mod tests {
         let mut w = Towns::new(0, 5);
         w.week = 20;
         w.tick_week();
-        let sea: f32 = ROUTES
-            .iter()
-            .zip(&w.flows)
-            .filter(|(r, _)| r.kind == RouteKind::Sea)
-            .map(|(_, f)| *f)
-            .sum();
+        let sea: f32 = ROUTES.iter().zip(&w.flows).filter(|(r, _)| r.kind == RouteKind::Sea).map(|(_, f)| *f).sum();
         assert_eq!(sea, 0.0);
     }
 
@@ -1885,10 +1444,7 @@ mod tests {
         let scarce = market_mult(&t, Category::WineOil);
         assert!(scarce > normal * 1.3, "{normal} -> {scarce}");
         assert!(supply_mult(&t, Category::WineOil) < 0.7);
-        t.effects.push(ActiveEffect {
-            effect: Effect::Plague,
-            until: 99,
-        });
+        t.effects.push(ActiveEffect { effect: Effect::Plague, until: 99 });
         t.health = 0.6;
         assert!(market_mult(&t, Category::Remedy) > 1.5);
     }
@@ -1906,8 +1462,7 @@ mod tests {
             let h = w.town_mut(TownId::Herson);
             h.stock[Good::Timber.idx()] = h.stock[Good::Timber.idx()].max(50.0);
             h.treasury = h.treasury.max(100.0);
-            h.effects
-                .retain(|e| !matches!(e.effect, Effect::Plague | Effect::Raided));
+            h.effects.retain(|e| !matches!(e.effect, Effect::Plague | Effect::Raided));
             h.health = 1.0;
             for c in w.tick_week() {
                 if let WorldCue::SiteStage { site: 0, stage } = c {
@@ -1915,11 +1470,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(
-            stages,
-            vec![1, 2, 3, SITE_DONE],
-            "стадии стройки: {stages:?}"
-        );
+        assert_eq!(stages, vec![1, 2, 3, SITE_DONE], "стадии стройки: {stages:?}");
         assert_eq!(w.sites[0], SITE_DONE);
     }
 
@@ -1953,11 +1504,7 @@ mod balance {
                 let mut b = [0.0f32; 7];
                 let mut dd = [0.0f32; 7];
                 for _ in 0..WEEKS_PER_YEAR {
-                    raids += w
-                        .tick_week()
-                        .iter()
-                        .filter(|c| matches!(c, WorldCue::Raid { .. }))
-                        .count();
+                    raids += w.tick_week().iter().filter(|c| matches!(c, WorldCue::Raid { .. })).count();
                     for (i, t) in w.towns.iter().enumerate() {
                         maxh[i] = maxh[i].max(t.hunger);
                         if t.year_births > 0.0 {
@@ -1966,23 +1513,7 @@ mod balance {
                         }
                     }
                 }
-                let line: Vec<String> = w
-                    .towns
-                    .iter()
-                    .enumerate()
-                    .map(|(i, t)| {
-                        format!(
-                            "{} {:.0} H{:.2} b{:.0} d{:.0} cr{:.2} g{:.2}",
-                            &t.id.def().name[..6.min(t.id.def().name.len())],
-                            t.pop,
-                            maxh[i],
-                            b[i],
-                            dd[i],
-                            t.crowding(),
-                            t.price(Good::Grain)
-                        )
-                    })
-                    .collect();
+                let line: Vec<String> = w.towns.iter().enumerate().map(|(i, t)| format!("{} {:.0} H{:.2} b{:.0} d{:.0} cr{:.2} g{:.2}", &t.id.def().name[..6.min(t.id.def().name.len())], t.pop, maxh[i], b[i], dd[i], t.crowding(), t.price(Good::Grain))).collect();
                 println!("s{seed} y{y} raids{raids}: {}", line.join(" | "));
             }
         }

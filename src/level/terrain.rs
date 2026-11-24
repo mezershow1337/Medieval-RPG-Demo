@@ -72,9 +72,7 @@ pub fn city_distance(x: f32, z: f32) -> f32 {
 }
 
 fn hash(ix: i32, iz: i32, seed: u32) -> f32 {
-    let mut h = (ix as u32).wrapping_mul(374761393)
-        ^ (iz as u32).wrapping_mul(668265263)
-        ^ seed.wrapping_mul(2246822519);
+    let mut h = (ix as u32).wrapping_mul(374761393) ^ (iz as u32).wrapping_mul(668265263) ^ seed.wrapping_mul(2246822519);
     h = (h ^ (h >> 13)).wrapping_mul(1274126177);
     h ^= h >> 16;
     (h & 0xFFFFFF) as f32 / 16777216.0
@@ -109,18 +107,10 @@ pub fn coast(x: f32, z: f32) -> f32 {
     // Открытое море на севере.
     let north = z - (-176.0 + 5.0 * (x * 0.021).sin() + 3.0 * (x * 0.067 + 1.0).sin());
     // Песочная бухта на западе: берег уходит на запад к югу.
-    let west_line = if z < 60.0 {
-        -316.0 + 6.0 * (z * 0.03).sin()
-    } else {
-        -316.0 - (z - 60.0) * 0.8
-    };
+    let west_line = if z < 60.0 { -316.0 + 6.0 * (z * 0.03).sin() } else { -316.0 - (z - 60.0) * 0.8 };
     let west = x - west_line;
     // Карантинная бухта: длинный узкий залив с севера на юг.
-    let bay_w = if z < QUAY_Z.1 {
-        QUAY_EDGE
-    } else {
-        QUAY_EDGE + (z - QUAY_Z.1) * 0.18 + 6.0 * ((z - QUAY_Z.1) * 0.02).sin()
-    };
+    let bay_w = if z < QUAY_Z.1 { QUAY_EDGE } else { QUAY_EDGE + (z - QUAY_Z.1) * 0.18 + 6.0 * ((z - QUAY_Z.1) * 0.02).sin() };
     let bay_e = 470.0 + 10.0 * (z * 0.015).sin() - (z - 220.0).max(0.0) * 0.55;
     let bay_end = 440.0;
     let bay = (bay_w - x).max(x - bay_e).max(z - bay_end);
@@ -161,8 +151,7 @@ pub fn knoll_shape(x: f32, z: f32) -> (f32, f32) {
     let inside = 1.0 - smoothstep(0.15, 1.0, d);
     // Бугры и промоины по склонам; на вершине — пологая седловина.
     let bumps = (fbm(x * 0.11, z * 0.11, 43) - 0.47) * 2.4 * inside * (1.0 - inside * 0.5);
-    let gully =
-        (-(((dx + dz * 0.4 - 14.0) / 3.5).powi(2))).exp() * smoothstep(0.35, 0.8, d) * inside * 2.2;
+    let gully = (-(((dx + dz * 0.4 - 14.0) / 3.5).powi(2))).exp() * smoothstep(0.35, 0.8, d) * inside * 2.2;
     // К северу (к площадке перед уступом) горка обрывается быстро: площадка — на исходной земле.
     // Край обрыва вне выемки рваный.
     let wob = (fbm(x * 0.06 + 11.0, z * 0.06, 57) - 0.47) * 12.0 * smoothstep(10.0, 16.0, dx.abs());
@@ -221,11 +210,7 @@ pub fn height_at(x: f32, z: f32) -> f32 {
         let t = smoothstep(0.0, 10.0, s);
         WATER_Y + 0.25 + (l - WATER_Y - 0.25) * t
     } else {
-        let depth = if quay || (x > QUAY_EDGE && x < 480.0) {
-            4.5
-        } else {
-            0.4
-        };
+        let depth = if quay || (x > QUAY_EDGE && x < 480.0) { 4.5 } else { 0.4 };
         WATER_Y - depth - (-s * 0.12).min(7.0)
     }
 }
@@ -243,20 +228,10 @@ pub fn heightfield(holes: Vec<(Vec2, Vec2)>) -> HeightField {
     let mut data = Vec::with_capacity(n * n);
     for iz in 0..n {
         for ix in 0..n {
-            data.push(height_at(
-                origin.x + ix as f32 * CELL,
-                origin.y + iz as f32 * CELL,
-            ));
+            data.push(height_at(origin.x + ix as f32 * CELL, origin.y + iz as f32 * CELL));
         }
     }
-    HeightField {
-        origin,
-        cell: CELL,
-        nx: n,
-        nz: n,
-        data,
-        holes,
-    }
+    HeightField { origin, cell: CELL, nx: n, nz: n, data, holes }
 }
 
 /// Высота земли (по той же сетке, по которой ходят персонажи). Сетка считается один раз.
@@ -269,13 +244,7 @@ pub fn ground_y(x: f32, z: f32) -> f32 {
 /// Клетки глубоко под водой и в «дырах» пропускаются.
 pub fn terrain_meshes(hf: &HeightField, out: &mut HashMap<(Mat, Chunk), MeshBuilder>) {
     let n = hf.nx;
-    let pos = |ix: usize, iz: usize| {
-        Vec3::new(
-            hf.origin.x + ix as f32 * hf.cell,
-            hf.node(ix, iz),
-            hf.origin.y + iz as f32 * hf.cell,
-        )
-    };
+    let pos = |ix: usize, iz: usize| Vec3::new(hf.origin.x + ix as f32 * hf.cell, hf.node(ix, iz), hf.origin.y + iz as f32 * hf.cell);
     let normal = |ix: usize, iz: usize| {
         let l = hf.node(ix.saturating_sub(1), iz);
         let r = hf.node((ix + 1).min(n - 1), iz);
@@ -287,12 +256,7 @@ pub fn terrain_meshes(hf: &HeightField, out: &mut HashMap<(Mat, Chunk), MeshBuil
     let mut maps: HashMap<(Mat, Chunk), HashMap<usize, u32>> = HashMap::new();
     for iz in 0..n - 1 {
         for ix in 0..n - 1 {
-            let corners = [
-                pos(ix, iz),
-                pos(ix + 1, iz),
-                pos(ix + 1, iz + 1),
-                pos(ix, iz + 1),
-            ];
+            let corners = [pos(ix, iz), pos(ix + 1, iz), pos(ix + 1, iz + 1), pos(ix, iz + 1)];
             if corners.iter().all(|c| c.y < WATER_Y - 2.0) {
                 continue;
             }
@@ -300,20 +264,13 @@ pub fn terrain_meshes(hf: &HeightField, out: &mut HashMap<(Mat, Chunk), MeshBuil
             if hf.in_hole(c.x, c.z) {
                 continue;
             }
-            let mat = if inside_city(c.x, c.z) {
-                Mat::Earth
-            } else {
-                Mat::Terrain
-            };
+            let mat = if inside_city(c.x, c.z) { Mat::Earth } else { Mat::Terrain };
             let chunk = chunk_of(c);
             let key = (mat, chunk);
             let mb = out.entry(key).or_default();
             let map = maps.entry(key).or_default();
             let mut v = [0u32; 4];
-            for (k, (jx, jz)) in [(ix, iz), (ix + 1, iz), (ix + 1, iz + 1), (ix, iz + 1)]
-                .into_iter()
-                .enumerate()
-            {
+            for (k, (jx, jz)) in [(ix, iz), (ix + 1, iz), (ix + 1, iz + 1), (ix, iz + 1)].into_iter().enumerate() {
                 let id = jz * n + jx;
                 v[k] = *map.entry(id).or_insert_with(|| {
                     let p = pos(jx, jz);

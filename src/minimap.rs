@@ -42,13 +42,7 @@ impl Plugin for MinimapPlugin {
         embedded_asset!(app, "shaders/minimap.wesl");
         app.add_plugins(UiMaterialPlugin::<MiniMapMaterial>::default())
             .insert_resource(MiniPool::default())
-            .add_systems(
-                Startup,
-                setup_minimap
-                    .after(crate::map::setup_marker_art)
-                    .after(crate::inventory_ui::setup_fonts)
-                    .after(crate::hud::setup_hud),
-            )
+            .add_systems(Startup, setup_minimap.after(crate::map::setup_marker_art).after(crate::inventory_ui::setup_fonts).after(crate::hud::setup_hud))
             .add_systems(Update, (minimap_input, update_minimap).chain());
     }
 }
@@ -98,86 +92,39 @@ struct MiniUi {
     material: Handle<MiniMapMaterial>,
 }
 
-fn setup_minimap(
-    mut commands: Commands,
-    theme: Res<UiTheme>,
-    column: Res<crate::hud::HudLeftColumn>,
-    mut materials: ResMut<Assets<MiniMapMaterial>>,
-) {
+fn setup_minimap(mut commands: Commands, theme: Res<UiTheme>, column: Res<crate::hud::HudLeftColumn>, mut materials: ResMut<Assets<MiniMapMaterial>>) {
     // Блок мини-карты — первым в левой колонке HUD (её прячет главное меню).
     let root = commands
-        .spawn((
-            MiniRoot,
-            Node {
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                width: px(DIAM),
-                row_gap: px(2),
-                display: Display::None,
-                ..default()
-            },
-        ))
+        .spawn((MiniRoot, Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, width: px(DIAM), row_gap: px(2), display: Display::None, ..default() }))
         .id();
     commands.entity(column.0).insert_children(0, &[root]);
-    let material = materials.add(MiniMapMaterial {
-        window: Vec4::ZERO,
-        sheet: None,
-    });
+    let material = materials.add(MiniMapMaterial { window: Vec4::ZERO, sheet: None });
     let disc = commands
         .spawn((
             MaterialNode(material.clone()),
-            Node {
-                width: px(DIAM),
-                height: px(DIAM),
-                ..default()
-            },
-            BoxShadow::new(
-                Color::srgba(0.0, 0.0, 0.0, 0.55),
-                px(0),
-                px(3),
-                px(0),
-                px(10),
-            ),
+            Node { width: px(DIAM), height: px(DIAM), ..default() },
+            BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.55), px(0), px(3), px(0), px(10)),
             ChildOf(root),
         ))
         .id();
     // Север — буква на ободе вверху.
     commands.spawn((
         theme.bold("С", 13.0, Color::srgb(0.98, 0.93, 0.80)),
-        TextShadow {
-            offset: Vec2::splat(1.0),
-            color: Color::srgba(0.1, 0.05, 0.0, 0.9),
-        },
+        TextShadow { offset: Vec2::splat(1.0), color: Color::srgba(0.1, 0.05, 0.0, 0.9) },
         TextLayout::justify(Justify::Center),
-        Node {
-            position_type: PositionType::Absolute,
-            left: px(DIAM / 2.0 - 10.0),
-            width: px(20),
-            top: px(-2),
-            ..default()
-        },
+        Node { position_type: PositionType::Absolute, left: px(DIAM / 2.0 - 10.0), width: px(20), top: px(-2), ..default() },
         GlobalZIndex(3),
         ChildOf(disc),
     ));
     commands.spawn((
         MiniPlace,
         theme.bold("", 14.0, ink::TITLE),
-        TextShadow {
-            offset: Vec2::splat(1.5),
-            color: Color::srgba(0.0, 0.0, 0.0, 0.85),
-        },
+        TextShadow { offset: Vec2::splat(1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
         TextLayout::justify(Justify::Center),
-        Node {
-            max_width: px(DIAM + 40.0),
-            ..default()
-        },
+        Node { max_width: px(DIAM + 40.0), ..default() },
         ChildOf(root),
     ));
-    commands.insert_resource(MiniUi {
-        disc,
-        root,
-        material,
-    });
+    commands.insert_resource(MiniUi { disc, root, material });
 }
 
 fn minimap_input(
@@ -192,10 +139,7 @@ fn minimap_input(
     // Снимки: `MRPG_MINIMAP_ZOOM=0..4` — масштаб без нажатий.
     if !*env_applied {
         *env_applied = true;
-        if let Some(z) = std::env::var("MRPG_MINIMAP_ZOOM")
-            .ok()
-            .and_then(|v| v.parse::<u8>().ok())
-        {
+        if let Some(z) = std::env::var("MRPG_MINIMAP_ZOOM").ok().and_then(|v| v.parse::<u8>().ok()) {
             s.minimap_zoom = z.min(MINIMAP_RADII.len() as u8 - 1);
         }
     }
@@ -213,8 +157,7 @@ fn minimap_input(
             s.minimap_zoom -= 1;
             changed = true;
         }
-        if keys.any_just_pressed([KeyCode::Minus, KeyCode::NumpadSubtract]) && s.minimap_zoom < last
-        {
+        if keys.any_just_pressed([KeyCode::Minus, KeyCode::NumpadSubtract]) && s.minimap_zoom < last {
             s.minimap_zoom += 1;
             changed = true;
         }
@@ -236,22 +179,14 @@ fn place_caption(pos: Vec3) -> String {
         return p.name.to_string();
     }
     // Перекрёстки и площади, где появляются игроки, тоже названы.
-    if let Some(spot) = crate::level::spawn_spots()
-        .iter()
-        .find(|s| s.pos.xz().distance(pos.xz()) < 10.0)
-    {
+    if let Some(spot) = crate::level::spawn_spots().iter().find(|s| s.pos.xz().distance(pos.xz()) < 10.0) {
         return spot.name.to_string();
     }
     if crate::level::active() != crate::level::LevelKind::Chersonesus {
         return "Замок".into();
     }
     if crate::level::inside_city(pos.x, pos.z) {
-        if pos.z.abs() < crate::level::MAIN_STREET_HALF + 1.0 {
-            "Главная улица"
-        } else {
-            "Херсон"
-        }
-        .into()
+        if pos.z.abs() < crate::level::MAIN_STREET_HALF + 1.0 { "Главная улица" } else { "Херсон" }.into()
     } else {
         "Окрестности Херсона".into()
     }
@@ -265,21 +200,9 @@ fn update_minimap(
     view: Res<MapView>,
     sheet: Res<MapSheet>,
     mut materials: ResMut<Assets<MiniMapMaterial>>,
-    (net, party, art, level): (
-        Res<NetState>,
-        Res<Party>,
-        Res<MarkerArt>,
-        Res<crate::collision::LevelColliders>,
-    ),
-    (residents, mut pool): (
-        Option<Res<crate::life_client::ResidentSpots>>,
-        ResMut<MiniPool>,
-    ),
-    (local, remotes, merchants): (
-        Query<(&LocalPlayer, &Transform)>,
-        Query<(&RemoteActor, &Transform)>,
-        Query<&Transform, With<crate::trade_client::MerchantNpc>>,
-    ),
+    (net, party, art, level): (Res<NetState>, Res<Party>, Res<MarkerArt>, Res<crate::collision::LevelColliders>),
+    (residents, mut pool): (Option<Res<crate::life_client::ResidentSpots>>, ResMut<MiniPool>),
+    (local, remotes, merchants): (Query<(&LocalPlayer, &Transform)>, Query<(&RemoteActor, &Transform)>, Query<&Transform, With<crate::trade_client::MerchantNpc>>),
     mut vis: Query<&mut Visibility>,
     mut nodes: Query<&mut Node>,
     mut colors: Query<(&mut BackgroundColor, &mut BorderColor)>,
@@ -299,10 +222,7 @@ fn update_minimap(
     if !shown {
         return;
     }
-    let zoom = settings
-        .as_ref()
-        .map_or(1, |s| s.minimap_zoom as usize)
-        .min(MINIMAP_RADII.len() - 1);
+    let zoom = settings.as_ref().map_or(1, |s| s.minimap_zoom as usize).min(MINIMAP_RADII.len() - 1);
     let radius = MINIMAP_RADII[zoom];
     let s = MAP_R / radius;
     let c = me_t.translation.xz();
@@ -310,14 +230,8 @@ fn update_minimap(
 
     // Подложка: кусок листа вокруг игрока (шейдер обрезает кругом).
     if let Some(mut m) = materials.get_mut(&ui.material) {
-        let window = sheet
-            .bounds
-            .map_or(Vec4::ZERO, |b| sheet_window(c, radius, b));
-        let window = if sheet.image.is_some() {
-            window
-        } else {
-            Vec4::ZERO
-        };
+        let window = sheet.bounds.map_or(Vec4::ZERO, |b| sheet_window(c, radius, b));
+        let window = if sheet.image.is_some() { window } else { Vec4::ZERO };
         if m.window != window || m.sheet != sheet.image {
             m.window = window;
             m.sheet = sheet.image.clone();
@@ -328,20 +242,9 @@ fn update_minimap(
     let mut people: Vec<(Vec2, Color, f32)> = Vec::new();
     let inside = |p: Vec2| p.distance(c) < radius - 4.0 / s;
     if let Some(r) = &residents {
-        people.extend(
-            r.0.iter()
-                .flatten()
-                .filter(|p| inside(**p))
-                .map(|p| (*p, FOLK, 6.0)),
-        );
+        people.extend(r.0.iter().flatten().filter(|p| inside(**p)).map(|p| (*p, FOLK, 6.0)));
     }
-    people.extend(
-        merchants
-            .iter()
-            .map(|t| t.translation.xz())
-            .filter(|p| inside(*p))
-            .map(|p| (p, MERCHANT, 7.0)),
-    );
+    people.extend(merchants.iter().map(|t| t.translation.xz()).filter(|p| inside(*p)).map(|p| (p, MERCHANT, 7.0)));
     people.extend(
         remotes
             .iter()
@@ -354,14 +257,7 @@ fn update_minimap(
         let e = commands
             .spawn((
                 MiniDot,
-                Node {
-                    position_type: PositionType::Absolute,
-                    width: px(6),
-                    height: px(6),
-                    border: UiRect::all(px(1)),
-                    border_radius: BorderRadius::MAX,
-                    ..default()
-                },
+                Node { position_type: PositionType::Absolute, width: px(6), height: px(6), border: UiRect::all(px(1)), border_radius: BorderRadius::MAX, ..default() },
                 BorderColor::all(RIM_DARK),
                 BackgroundColor(FOLK),
                 Visibility::Hidden,
@@ -387,11 +283,7 @@ fn update_minimap(
         if let Ok((mut bg, mut border)) = colors.get_mut(e) {
             bg.set_if_neq(BackgroundColor(color));
             // Жители — тёмные точки в светлом ободке, чтобы не спутать с рисунком кровель.
-            border.set_if_neq(BorderColor::all(if color == FOLK {
-                RIM_LIGHT
-            } else {
-                RIM_DARK
-            }));
+            border.set_if_neq(BorderColor::all(if color == FOLK { RIM_LIGHT } else { RIM_DARK }));
         }
         if let Ok(mut v) = vis.get_mut(e) {
             v.set_if_neq(Visibility::Inherited);
@@ -416,33 +308,9 @@ fn update_minimap(
             _ => 13.0,
         };
         let entity = *pool.mates.entry(m.key).or_insert_with(|| {
-            let img = if m.yaw.is_some() {
-                art.arrow.clone()
-            } else {
-                art.pin.clone()
-            };
-            let e = commands
-                .spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        width: px(size),
-                        height: px(size),
-                        ..default()
-                    },
-                    GlobalZIndex(2),
-                    ChildOf(ui.disc),
-                ))
-                .id();
-            commands.spawn((
-                ImageNode::new(img),
-                Node {
-                    width: percent(100),
-                    height: percent(100),
-                    ..default()
-                },
-                UiTransform::default(),
-                ChildOf(e),
-            ));
+            let img = if m.yaw.is_some() { art.arrow.clone() } else { art.pin.clone() };
+            let e = commands.spawn((Node { position_type: PositionType::Absolute, width: px(size), height: px(size), ..default() }, GlobalZIndex(2), ChildOf(ui.disc))).id();
+            commands.spawn((ImageNode::new(img), Node { width: percent(100), height: percent(100), ..default() }, UiTransform::default(), ChildOf(e)));
             e
         });
         let edge = MAP_R - size / 2.0 - 1.0;
@@ -475,15 +343,8 @@ mod tests {
 
     #[test]
     fn player_is_in_the_middle_of_the_disc() {
-        let b = MapBounds {
-            min: Vec2::new(-800.0, -700.0),
-            max: Vec2::new(800.0, 900.0),
-        };
-        for (c, r) in [
-            (Vec2::ZERO, 50.0),
-            (Vec2::new(182.0, -15.0), 28.0),
-            (Vec2::new(-200.0, 140.0), 210.0),
-        ] {
+        let b = MapBounds { min: Vec2::new(-800.0, -700.0), max: Vec2::new(800.0, 900.0) };
+        for (c, r) in [(Vec2::ZERO, 50.0), (Vec2::new(182.0, -15.0), 28.0), (Vec2::new(-200.0, 140.0), 210.0)] {
             let w = sheet_window(c, r, b);
             // Середина узла (uv 0.5) — точка игрока на листе.
             let mid = w.xy() + Vec2::splat(0.5) * w.z;

@@ -25,25 +25,9 @@ pub struct SmithingClientPlugin;
 impl Plugin for SmithingClientPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(SmithState::default())
-            .add_systems(
-                Startup,
-                setup_smith_ui.after(crate::inventory_ui::setup_fonts),
-            )
+            .add_systems(Startup, setup_smith_ui.after(crate::inventory_ui::setup_fonts))
             .add_plugins(crate::smithing_fx::SmithFxPlugin)
-            .add_systems(
-                Update,
-                (
-                    receive_smith,
-                    smith_input,
-                    smith_buttons,
-                    predict,
-                    rebuild_panel,
-                    update_live,
-                    update_prompt,
-                )
-                    .chain()
-                    .in_set(SmithSet),
-            );
+            .add_systems(Update, (receive_smith, smith_input, smith_buttons, predict, rebuild_panel, update_live, update_prompt).chain().in_set(SmithSet));
     }
 }
 
@@ -139,15 +123,7 @@ impl SmithState {
             self.stations = crate::level::forges()
                 .iter()
                 .enumerate()
-                .map(|(i, f)| StationView {
-                    id: i as u32 + 1,
-                    name: f.name.to_string(),
-                    kind: f.kind,
-                    fire: f.fire.into(),
-                    anvil: f.anvil.into(),
-                    trough: f.trough.into(),
-                    grind: f.grind.into(),
-                })
+                .map(|(i, f)| StationView { id: i as u32 + 1, name: f.name.to_string(), kind: f.kind, fire: f.fire.into(), anvil: f.anvil.into(), trough: f.trough.into(), grind: f.grind.into() })
                 .collect();
         }
         self.fires.insert(station, (300.0, blast));
@@ -159,12 +135,7 @@ impl SmithState {
     }
     /// Все поковки у горнов: своя — из предсказания (плавнее), чужие — с сервера.
     pub(crate) fn all_pieces(&self) -> Vec<PieceView> {
-        let mut v: Vec<PieceView> = self
-            .others
-            .iter()
-            .filter(|p| p.player != self.me)
-            .cloned()
-            .collect();
+        let mut v: Vec<PieceView> = self.others.iter().filter(|p| p.player != self.me).cloned().collect();
         if let (Some(w), Some(job)) = (self.work.as_ref(), self.pred.as_ref())
             && let Some(p) = PieceView::of(self.me, w.station, job)
         {
@@ -188,29 +159,19 @@ fn receive_smith(
     if let Some(t) = transport {
         state.me = t.client_id();
     }
-    let Some(client) = client.as_mut() else {
-        return;
-    };
+    let Some(client) = client.as_mut() else { return };
     while let Some(bytes) = client.receive_message(CH_SMITH) {
-        let Some(msg) = decode::<SmithServerMessage>(&bytes) else {
-            continue;
-        };
+        let Some(msg) = decode::<SmithServerMessage>(&bytes) else { continue };
         match msg {
             SmithServerMessage::Stations(v) => {
                 state.stations = v;
                 state.rev += 1;
             }
-            SmithServerMessage::Fire {
-                station,
-                fuel,
-                blast,
-            } => {
+            SmithServerMessage::Fire { station, fuel, blast } => {
                 state.fires.insert(station, (fuel, blast));
             }
             SmithServerMessage::Work(w) => {
-                let changed = state.work.as_ref().map(|x| std::mem::discriminant(&x.job))
-                    != w.as_ref().map(|x| std::mem::discriminant(&x.job))
-                    || state.work.is_some() != w.is_some();
+                let changed = state.work.as_ref().map(|x| std::mem::discriminant(&x.job)) != w.as_ref().map(|x| std::mem::discriminant(&x.job)) || state.work.is_some() != w.is_some();
                 state.pred = w.as_ref().map(|w| w.job.clone());
                 state.work = w;
                 if changed {
@@ -221,11 +182,7 @@ fn receive_smith(
                 let now = time.elapsed_secs();
                 loot.notify(text, now);
             }
-            SmithServerMessage::Fx {
-                station,
-                player,
-                fx,
-            } => state.fx_queue.push((station, player, fx)),
+            SmithServerMessage::Fx { station, player, fx } => state.fx_queue.push((station, player, fx)),
             SmithServerMessage::Pieces(v) => state.others = v,
         }
     }
@@ -249,10 +206,7 @@ fn smith_input(
         .stations
         .iter()
         .map(|s| (s.id, Vec3::from(s.anvil)))
-        .filter(|(_, a)| {
-            Vec2::new(a.x - feet.x, a.z - feet.z).length() <= SMITH_REACH - 0.3
-                && (a.y - feet.y).abs() < 3.0
-        })
+        .filter(|(_, a)| Vec2::new(a.x - feet.x, a.z - feet.z).length() <= SMITH_REACH - 0.3 && (a.y - feet.y).abs() < 3.0)
         .min_by(|a, b| a.1.distance(feet).total_cmp(&b.1.distance(feet)))
         .map(|(id, _)| id);
     if state.near != near {
@@ -276,22 +230,14 @@ fn smith_input(
         state.rev += 1;
     }
     state.swing_t += time.delta_secs();
-    let Some(client) = client.as_mut() else {
-        return;
-    };
+    let Some(client) = client.as_mut() else { return };
     // Мехи: качать пробелом в такт. Каждый качок дует, пока мехи выдыхают; держать
     // пробел бесполезно, частить тоже — мехи не успевают набрать воздух.
     let now = time.elapsed_secs();
     if state.open && state.work.is_some() && keys.just_pressed(KeyCode::Space) {
         let gap = now - state.last_pump;
         state.last_pump = now;
-        let q = if gap > 3.0 {
-            0.6
-        } else if gap < 0.4 {
-            0.0
-        } else {
-            (1.0 - (gap / PUMP_PERIOD).ln().abs() / 2.2f32.ln()).clamp(0.0, 1.0)
-        };
+        let q = if gap > 3.0 { 0.6 } else if gap < 0.4 { 0.0 } else { (1.0 - (gap / PUMP_PERIOD).ln().abs() / 2.2f32.ln()).clamp(0.0, 1.0) };
         state.pump_q = q;
         if q > 0.0 {
             state.pump_until = state.pump_until.max(now + 0.35 + 0.65 * q);
@@ -313,16 +259,8 @@ fn smith_input(
         && let Some(job) = &state.pred
     {
         let spot = match job {
-            Job::Forge(f) => Some(if f.spot == Spot::Fire {
-                Spot::Anvil
-            } else {
-                Spot::Fire
-            }),
-            Job::Cast(c) => Some(if c.spot == Spot::Fire {
-                Spot::Anvil
-            } else {
-                Spot::Fire
-            }),
+            Job::Forge(f) => Some(if f.spot == Spot::Fire { Spot::Anvil } else { Spot::Fire }),
+            Job::Cast(c) => Some(if c.spot == Spot::Fire { Spot::Anvil } else { Spot::Fire }),
             _ => None,
         };
         if let Some(s) = spot {
@@ -385,9 +323,7 @@ fn smith_buttons(
     mut pouring: Local<bool>,
     mut client: Option<ResMut<RenetClient>>,
 ) {
-    let Some(client) = client.as_mut() else {
-        return;
-    };
+    let Some(client) = client.as_mut() else { return };
     if !state.open {
         return;
     }
@@ -407,22 +343,12 @@ fn smith_buttons(
         }
         state.last_strike = now;
         let acc = accuracy(swing_pos(state.swing_t, heavy), skill);
-        send(
-            client,
-            &SmithClientMessage::Strike {
-                zone: seg.0,
-                heavy,
-                acc,
-            },
-        );
+        send(client, &SmithClientMessage::Strike { zone: seg.0, heavy, acc });
         // Маятник начинает новый замах.
         state.swing_t = SWING_PERIOD[heavy as usize] * 0.25;
     }
     for i in &pads {
-        if *i == Interaction::Pressed
-            && mouse.just_pressed(MouseButton::Left)
-            && now - state.last_strike > 0.35
-        {
+        if *i == Interaction::Pressed && mouse.just_pressed(MouseButton::Left) && now - state.last_strike > 0.35 {
             state.last_strike = now;
             let acc = accuracy(swing_pos(state.swing_t, false), skill);
             send(client, &SmithClientMessage::Grind { acc });
@@ -437,10 +363,7 @@ fn smith_buttons(
         if *i != Interaction::Pressed {
             continue;
         }
-        let station = state
-            .near
-            .or(state.work.as_ref().map(|w| w.station))
-            .unwrap_or(0);
+        let station = state.near.or(state.work.as_ref().map(|w| w.station)).unwrap_or(0);
         match b.0.clone() {
             Act::Close => {
                 state.open = false;
@@ -463,9 +386,7 @@ fn smith_buttons(
             Act::Skim => send(client, &SmithClientMessage::Skim),
             Act::Warm(on) => send(client, &SmithClientMessage::WarmMould(on)),
             Act::OpenMould => send(client, &SmithClientMessage::OpenMould),
-            Act::Metal(k, d) => {
-                state.metals[k] = (state.metals[k] as i16 + d as i16).clamp(0, 12) as u8
-            }
+            Act::Metal(k, d) => state.metals[k] = (state.metals[k] as i16 + d as i16).clamp(0, 12) as u8,
             Act::Ore(d) => state.ore = (state.ore as i16 + d as i16).clamp(3, 12) as u8,
             Act::Coal(d) => state.charcoal = (state.charcoal as i16 + d as i16).clamp(0, 20) as u8,
         }
@@ -555,13 +476,7 @@ fn setup_smith_ui(mut commands: Commands, fonts: Res<UiFonts>) {
         FocusPolicy::Block,
     ));
     commands
-        .spawn(Node {
-            position_type: PositionType::Absolute,
-            width: percent(100),
-            top: percent(62),
-            justify_content: JustifyContent::Center,
-            ..default()
-        })
+        .spawn(Node { position_type: PositionType::Absolute, width: percent(100), top: percent(62), justify_content: JustifyContent::Center, ..default() })
         .with_children(|p| {
             crate::ui_theme::theme().plaque(p).with_children(|p| {
                 p.spawn((
@@ -581,25 +496,10 @@ fn setup_smith_ui(mut commands: Commands, fonts: Res<UiFonts>) {
         });
 }
 
-fn label(
-    fonts: &UiFonts,
-    s: impl Into<String>,
-    size: f32,
-    color: Color,
-    bold: bool,
-) -> impl Bundle {
+fn label(fonts: &UiFonts, s: impl Into<String>, size: f32, color: Color, bold: bool) -> impl Bundle {
     (
         Text::new(s),
-        TextFont {
-            font: if bold {
-                fonts.bold.clone()
-            } else {
-                fonts.regular.clone()
-            }
-            .into(),
-            font_size: bevy::text::FontSize::Px(size),
-            ..default()
-        },
+        TextFont { font: if bold { fonts.bold.clone() } else { fonts.regular.clone() }.into(), font_size: bevy::text::FontSize::Px(size), ..default() },
         TextColor(color),
     )
 }
@@ -610,40 +510,21 @@ fn button(p: &mut ChildSpawnerCommands, fonts: &UiFonts, text: &str, act: Act, o
 }
 
 fn row<'a>(p: &'a mut ChildSpawnerCommands<'_>) -> EntityCommands<'a> {
-    p.spawn(Node {
-        flex_direction: FlexDirection::Row,
-        flex_wrap: FlexWrap::Wrap,
-        align_items: AlignItems::Center,
-        column_gap: px(5),
-        row_gap: px(4),
-        ..default()
-    })
+    p.spawn(Node { flex_direction: FlexDirection::Row, flex_wrap: FlexWrap::Wrap, align_items: AlignItems::Center, column_gap: px(5), row_gap: px(4), ..default() })
 }
 
 fn have(loot: &LootState, name: &str) -> u32 {
-    loot.inventory.as_ref().map_or(0, |inv| {
-        inv.grid
-            .items
-            .iter()
-            .filter(|p| p.item.info().name == name)
-            .map(|p| p.item.count as u32)
-            .sum()
-    })
+    loot.inventory.as_ref().map_or(0, |inv| inv.grid.items.iter().filter(|p| p.item.info().name == name).map(|p| p.item.count as u32).sum())
 }
 
 /// Руды всех сортов: обожжённой, горной, болотной.
 fn have_ore(loot: &LootState) -> u32 {
-    crate::mining::OreGrade::ALL
-        .iter()
-        .map(|g| have(loot, g.item()))
-        .sum()
+    crate::mining::OreGrade::ALL.iter().map(|g| have(loot, g.item())).sum()
 }
 
 /// Какие полосы взять: лучшие сначала, сталь — одна на лезвие (если просили).
 fn pick_bars(loot: &LootState, pattern: Pattern, steel: bool) -> Vec<ItemUid> {
-    let Some(inv) = loot.inventory.as_ref() else {
-        return vec![];
-    };
+    let Some(inv) = loot.inventory.as_ref() else { return vec![] };
     let info = pattern.info();
     let mut items: Vec<&Item> = inv.grid.items.iter().map(|p| &p.item).collect();
     items.sort_by_key(|i| std::cmp::Reverse(i.quality));
@@ -668,12 +549,7 @@ fn pick_bars(loot: &LootState, pattern: Pattern, steel: bool) -> Vec<ItemUid> {
             break;
         }
         // Без стали — сначала железо.
-        if !steel
-            && i.info().name == STEEL
-            && items
-                .iter()
-                .any(|j| j.info().name == IRON && !out.contains(&j.uid))
-        {
+        if !steel && i.info().name == STEEL && items.iter().any(|j| j.info().name == IRON && !out.contains(&j.uid)) {
             continue;
         }
         out.push(i.uid);
@@ -735,12 +611,7 @@ fn rebuild_panel(
     if !state.open {
         return;
     }
-    let key = (
-        state.rev,
-        loot.rev,
-        knowledge.0.known.len() as u64,
-        state.work.is_some(),
-    );
+    let key = (state.rev, loot.rev, knowledge.0.known.len() as u64, state.work.is_some());
     if state.built == Some(key) {
         return;
     }
@@ -748,13 +619,7 @@ fn rebuild_panel(
     let k = &knowledge.0;
     let fonts = &*fonts;
     let st = &*state;
-    let station = st
-        .work
-        .as_ref()
-        .map(|w| w.station)
-        .or(st.near)
-        .and_then(|id| st.station(id))
-        .cloned();
+    let station = st.work.as_ref().map(|w| w.station).or(st.near).and_then(|id| st.station(id)).cloned();
     commands.entity(entity).despawn_children();
     commands.entity(entity).with_children(|p| {
         row(p).with_children(|r| {
@@ -784,22 +649,10 @@ fn rebuild_panel(
         if forge {
             row(p).with_children(|r| {
                 r.spawn((label(fonts, "", 13.0, TEXT, false), Live::Fuel));
-                button(
-                    r,
-                    fonts,
-                    &format!("Подсыпать уголь ({})", have(&loot, CHARCOAL)),
-                    Act::Fuel,
-                    false,
-                );
+                button(r, fonts, &format!("Подсыпать уголь ({})", have(&loot, CHARCOAL)), Act::Fuel, false);
                 r.spawn(label(fonts, "Дутьё:", 13.0, DIM, false));
                 bar(r, 90.0, Color::srgb(1.0, 0.5, 0.15), Live::Blast);
-                r.spawn(label(
-                    fonts,
-                    "Пробел — качнуть мехи (в такт, раз в секунду)",
-                    12.0,
-                    DIM,
-                    false,
-                ));
+                r.spawn(label(fonts, "Пробел — качнуть мехи (в такт, раз в секунду)", 12.0, DIM, false));
             });
         }
         match st.pred.clone() {
@@ -832,120 +685,40 @@ fn bar(r: &mut ChildSpawnerCommands, w: f32, color: Color, live: Live) {
     });
 }
 
-fn begin_menu(
-    p: &mut ChildSpawnerCommands,
-    fonts: &UiFonts,
-    st: &SmithState,
-    loot: &LootState,
-    k: &crate::lore::Knowledge,
-    forge: bool,
-) {
+fn begin_menu(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, loot: &LootState, k: &crate::lore::Knowledge, forge: bool) {
     if !forge {
         // Сыродутный горн.
-        p.spawn(label(
-            fonts,
-            "Сыродутный горн: руду и уголь слоями, потом непрерывно дуть.",
-            14.0,
-            TEXT,
-            false,
-        ));
+        p.spawn(label(fonts, "Сыродутный горн: руду и уголь слоями, потом непрерывно дуть.", 14.0, TEXT, false));
         row(p).with_children(|r| {
             button(r, fonts, "−", Act::Ore(-1), false);
-            r.spawn(label(
-                fonts,
-                format!("Руда: {} (есть {})", st.ore, have_ore(loot)),
-                14.0,
-                TEXT,
-                true,
-            ));
+            r.spawn(label(fonts, format!("Руда: {} (есть {})", st.ore, have_ore(loot)), 14.0, TEXT, true));
             button(r, fonts, "+", Act::Ore(1), false);
             button(r, fonts, "−", Act::Coal(-1), false);
-            r.spawn(label(
-                fonts,
-                format!("Уголь: {} (есть {})", st.charcoal, have(loot, CHARCOAL)),
-                14.0,
-                TEXT,
-                true,
-            ));
+            r.spawn(label(fonts, format!("Уголь: {} (есть {})", st.charcoal, have(loot, CHARCOAL)), 14.0, TEXT, true));
             button(r, fonts, "+", Act::Coal(1), false);
         });
         let ok = have_ore(loot) >= st.ore as u32 && have(loot, CHARCOAL) >= st.charcoal as u32;
-        button(
-            p,
-            fonts,
-            "Заложить горн",
-            Act::Begin(Plan::Smelt {
-                ore: st.ore,
-                charcoal: st.charcoal,
-            }),
-            ok,
-        );
+        button(p, fonts, "Заложить горн", Act::Begin(Plan::Smelt { ore: st.ore, charcoal: st.charcoal }), ok);
         if k.knows(Lore::Technique(Technique::Smelting)) {
             p.spawn(label(fonts, "Вы знаете: угля по весу примерно столько же, сколько руды; держать жёлто-белый жар, но не белый.", 13.0, DIM, false));
         }
         return;
     }
     row(p).with_children(|r| {
-        button(
-            r,
-            fonts,
-            "Ковка",
-            Act::Tab(Tab::Forge),
-            st.tab == Tab::Forge,
-        );
+        button(r, fonts, "Ковка", Act::Tab(Tab::Forge), st.tab == Tab::Forge);
         button(r, fonts, "Литьё", Act::Tab(Tab::Cast), st.tab == Tab::Cast);
-        button(
-            r,
-            fonts,
-            "Цементация и ремонт",
-            Act::Tab(Tab::Other),
-            st.tab == Tab::Other,
-        );
-        button(
-            r,
-            fonts,
-            "Стрелы",
-            Act::Tab(Tab::Fletch),
-            st.tab == Tab::Fletch,
-        );
+        button(r, fonts, "Цементация и ремонт", Act::Tab(Tab::Other), st.tab == Tab::Other);
+        button(r, fonts, "Стрелы", Act::Tab(Tab::Fletch), st.tab == Tab::Fletch);
     });
     match st.tab {
         Tab::Forge => {
             row(p).with_children(|r| {
-                r.spawn(label(
-                    fonts,
-                    format!(
-                        "Железных полос: {}, стальных: {}, лома: {}, криц: {}",
-                        have(loot, IRON),
-                        have(loot, STEEL),
-                        have(loot, SCRAP),
-                        have(loot, BLOOM)
-                    ),
-                    13.0,
-                    DIM,
-                    false,
-                ));
-                button(
-                    r,
-                    fonts,
-                    if st.steel {
-                        "Наварить сталь на лезвие: да"
-                    } else {
-                        "Наварить сталь: нет"
-                    },
-                    Act::Steel,
-                    st.steel,
-                );
+                r.spawn(label(fonts, format!("Железных полос: {}, стальных: {}, лома: {}, криц: {}", have(loot, IRON), have(loot, STEEL), have(loot, SCRAP), have(loot, BLOOM)), 13.0, DIM, false));
+                button(r, fonts, if st.steel { "Наварить сталь на лезвие: да" } else { "Наварить сталь: нет" }, Act::Steel, st.steel);
             });
             // Разделы: заготовки и доспехи, затем семейства оружия.
             row(p).with_children(|r| {
-                button(
-                    r,
-                    fonts,
-                    "Заготовки и доспехи",
-                    Act::Fam(None),
-                    st.fam.is_none(),
-                );
+                button(r, fonts, "Заготовки и доспехи", Act::Fam(None), st.fam.is_none());
                 for f in crate::arsenal::Fam::ALL {
                     button(r, fonts, f.name(), Act::Fam(Some(f)), st.fam == Some(f));
                 }
@@ -956,78 +729,23 @@ fn begin_menu(
                 let metal = match pat {
                     Pattern::Bloom => "крица".to_string(),
                     Pattern::ScrapWeld => format!("{} лома", info.metal),
-                    _ => format!(
-                        "{} полос{}",
-                        info.metal,
-                        if info.metal == 1 { "а" } else { "ы" }
-                    ),
+                    _ => format!("{} полос{}", info.metal, if info.metal == 1 { "а" } else { "ы" }),
                 };
-                let parts: Vec<String> = info
-                    .parts
-                    .iter()
-                    .map(|(n, c)| {
-                        if *c > 1 {
-                            format!("{} ×{c}", n.to_lowercase())
-                        } else {
-                            n.to_lowercase()
-                        }
-                    })
-                    .collect();
-                let need = if parts.is_empty() {
-                    metal
-                } else {
-                    format!("{metal}; при сборке: {}", parts.join(", "))
-                };
+                let parts: Vec<String> = info.parts.iter().map(|(n, c)| if *c > 1 { format!("{} ×{c}", n.to_lowercase()) } else { n.to_lowercase() }).collect();
+                let need = if parts.is_empty() { metal } else { format!("{metal}; при сборке: {}", parts.join(", ")) };
                 let enough = metal_count(loot, pat) >= info.metal as u32;
                 row(p).with_children(|r| {
                     if known {
-                        button(
-                            r,
-                            fonts,
-                            pat.name(),
-                            Act::Begin(Plan::Forge {
-                                pattern: pat,
-                                metal: pick_bars(loot, pat, st.steel),
-                            }),
-                            enough,
-                        );
-                        r.spawn(label(
-                            fonts,
-                            need,
-                            12.0,
-                            if enough { TEXT } else { DIM },
-                            false,
-                        ));
+                        button(r, fonts, pat.name(), Act::Begin(Plan::Forge { pattern: pat, metal: pick_bars(loot, pat, st.steel) }), enough);
+                        r.spawn(label(fonts, need, 12.0, if enough { TEXT } else { DIM }, false));
                     } else {
-                        r.spawn(label(
-                            fonts,
-                            format!(
-                                "{} — не знаете как ({})",
-                                pat.name(),
-                                info.needs.map(|t| t.name()).unwrap_or("")
-                            ),
-                            12.0,
-                            DIM,
-                            false,
-                        ));
+                        r.spawn(label(fonts, format!("{} — не знаете как ({})", pat.name(), info.needs.map(|t| t.name()).unwrap_or("")), 12.0, DIM, false));
                     }
                 });
             }
         }
         Tab::Cast => {
-            p.spawn(label(
-                fonts,
-                format!(
-                    "Тигель: {} · каменная форма: {} · воск: {} · глина: {}",
-                    have(loot, CRUCIBLE),
-                    have(loot, MOULD),
-                    have(loot, WAX),
-                    have(loot, CLAY)
-                ),
-                13.0,
-                DIM,
-                false,
-            ));
+            p.spawn(label(fonts, format!("Тигель: {} · каменная форма: {} · воск: {} · глина: {}", have(loot, CRUCIBLE), have(loot, MOULD), have(loot, WAX), have(loot, CLAY)), 13.0, DIM, false));
             let mut cu = 0.0;
             let mut sn = 0.0;
             for (i, m) in CastMetal::ALL.into_iter().enumerate() {
@@ -1043,84 +761,24 @@ fn begin_menu(
                 }
                 row(p).with_children(|r| {
                     button(r, fonts, "−", Act::Metal(i, -1), false);
-                    r.spawn(label(
-                        fonts,
-                        format!("{}/{}", st.metals[i], have(loot, m.item())),
-                        14.0,
-                        if st.metals[i] > 0 { TITLE } else { TEXT },
-                        true,
-                    ));
+                    r.spawn(label(fonts, format!("{}/{}", st.metals[i], have(loot, m.item())), 14.0, if st.metals[i] > 0 { TITLE } else { TEXT }, true));
                     button(r, fonts, "+", Act::Metal(i, 1), false);
-                    r.spawn(label(
-                        fonts,
-                        format!("{} · {:.0} др. штука", m.item(), m.drachms()),
-                        13.0,
-                        TEXT,
-                        false,
-                    ));
+                    r.spawn(label(fonts, format!("{} · {:.0} др. штука", m.item(), m.drachms()), 13.0, TEXT, false));
                 });
             }
-            let total: f32 = CastMetal::ALL
-                .iter()
-                .enumerate()
-                .map(|(i, m)| m.drachms() * st.metals[i] as f32)
-                .sum();
-            let tin = if cu + sn > 0.0 {
-                format!(" · олова в бронзе {:.0}%", sn / (cu + sn) * 100.0)
-            } else {
-                String::new()
-            };
-            p.spawn(label(
-                fonts,
-                format!("В тигле: {total:.0} др.{tin}"),
-                13.0,
-                DIM,
-                false,
-            ));
-            let metals: Vec<(CastMetal, u8)> = CastMetal::ALL
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| st.metals[*i] > 0)
-                .map(|(i, m)| (*m, st.metals[i]))
-                .collect();
+            let total: f32 = CastMetal::ALL.iter().enumerate().map(|(i, m)| m.drachms() * st.metals[i] as f32).sum();
+            let tin = if cu + sn > 0.0 { format!(" · олова в бронзе {:.0}%", sn / (cu + sn) * 100.0) } else { String::new() };
+            p.spawn(label(fonts, format!("В тигле: {total:.0} др.{tin}"), 13.0, DIM, false));
+            let metals: Vec<(CastMetal, u8)> = CastMetal::ALL.iter().enumerate().filter(|(i, _)| st.metals[*i] > 0).map(|(i, m)| (*m, st.metals[i])).collect();
             for piece in CastPiece::ALL {
                 let info = piece.info();
                 let known = !info.lost_wax || k.knows(Lore::Technique(Technique::LostWax));
                 row(p).with_children(|r| {
                     if known {
-                        button(
-                            r,
-                            fonts,
-                            &format!("Лить: {}", info.product.to_lowercase()),
-                            Act::Begin(Plan::Cast {
-                                piece,
-                                metals: metals.clone(),
-                            }),
-                            total >= info.drachms,
-                        );
-                        r.spawn(label(
-                            fonts,
-                            format!(
-                                "{:.0} др., {}",
-                                info.drachms,
-                                if info.lost_wax {
-                                    "по воску"
-                                } else {
-                                    "в каменную форму"
-                                }
-                            ),
-                            12.0,
-                            DIM,
-                            false,
-                        ));
+                        button(r, fonts, &format!("Лить: {}", info.product.to_lowercase()), Act::Begin(Plan::Cast { piece, metals: metals.clone() }), total >= info.drachms);
+                        r.spawn(label(fonts, format!("{:.0} др., {}", info.drachms, if info.lost_wax { "по воску" } else { "в каменную форму" }), 12.0, DIM, false));
                     } else {
-                        r.spawn(label(
-                            fonts,
-                            format!("{} — литьё по воску вам неизвестно", info.product),
-                            12.0,
-                            DIM,
-                            false,
-                        ));
+                        r.spawn(label(fonts, format!("{} — литьё по воску вам неизвестно", info.product), 12.0, DIM, false));
                     }
                 });
             }
@@ -1146,30 +804,15 @@ fn begin_menu(
             for what in Fletch::all() {
                 let inputs = what.inputs();
                 let mut enough = inputs.iter().all(|(n, c)| have(loot, n) >= *c as u32);
-                let mut need: Vec<String> = inputs
-                    .iter()
-                    .map(|(n, c)| format!("{} ×{c}", n.to_lowercase()))
-                    .collect();
+                let mut need: Vec<String> = inputs.iter().map(|(n, c)| format!("{} ×{c}", n.to_lowercase())).collect();
                 if what.needs_glue() {
                     need.push("клей или жилы".into());
                     enough &= have(loot, GLUE) + have(loot, SINEW) > 0;
                 }
                 let (product, n) = what.product();
                 row(p).with_children(|r| {
-                    button(
-                        r,
-                        fonts,
-                        &format!("{} ×{n}", product),
-                        Act::Begin(Plan::Fletch(what)),
-                        enough,
-                    );
-                    r.spawn(label(
-                        fonts,
-                        need.join(", "),
-                        12.0,
-                        if enough { TEXT } else { DIM },
-                        false,
-                    ));
+                    button(r, fonts, &format!("{} ×{n}", product), Act::Begin(Plan::Fletch(what)), enough);
+                    r.spawn(label(fonts, need.join(", "), 12.0, if enough { TEXT } else { DIM }, false));
                 });
             }
             p.spawn(label(
@@ -1182,37 +825,12 @@ fn begin_menu(
         }
         Tab::Other => {
             if let Some(inv) = loot.inventory.as_ref() {
-                let bar = inv
-                    .grid
-                    .items
-                    .iter()
-                    .find(|p| p.item.info().name == IRON)
-                    .map(|p| p.item.uid);
+                let bar = inv.grid.items.iter().find(|p| p.item.info().name == IRON).map(|p| p.item.uid);
                 row(p).with_children(|r| {
-                    button(
-                        r,
-                        fonts,
-                        "Цементировать железную полосу",
-                        Act::Begin(Plan::Carburize {
-                            bar: bar.unwrap_or(0),
-                        }),
-                        bar.is_some() && have(loot, CHARCOAL) >= 2 && have(loot, POT) >= 1,
-                    );
-                    r.spawn(label(
-                        fonts,
-                        "полоса, 2 угля, глиняный горшок",
-                        12.0,
-                        DIM,
-                        false,
-                    ));
+                    button(r, fonts, "Цементировать железную полосу", Act::Begin(Plan::Carburize { bar: bar.unwrap_or(0) }), bar.is_some() && have(loot, CHARCOAL) >= 2 && have(loot, POT) >= 1);
+                    r.spawn(label(fonts, "полоса, 2 угля, глиняный горшок", 12.0, DIM, false));
                 });
-                p.spawn(label(
-                    fonts,
-                    "Починить (выправить и наточить):",
-                    14.0,
-                    TITLE,
-                    true,
-                ));
+                p.spawn(label(fonts, "Починить (выправить и наточить):", 14.0, TITLE, true));
                 let mut any = false;
                 for item in inv.all_items() {
                     if let Some((d, m)) = item.durability()
@@ -1220,13 +838,7 @@ fn begin_menu(
                     {
                         any = true;
                         row(p).with_children(|r| {
-                            button(
-                                r,
-                                fonts,
-                                &format!("{} {:.0}/{:.0}", item.info().name, d, m),
-                                Act::Begin(Plan::Repair { uid: item.uid }),
-                                true,
-                            );
+                            button(r, fonts, &format!("{} {:.0}/{:.0}", item.info().name, d, m), Act::Begin(Plan::Repair { uid: item.uid }), true);
                         });
                     }
                 }
@@ -1284,27 +896,10 @@ fn swing_bar(p: &mut ChildSpawnerCommands, fonts: &UiFonts) {
     });
 }
 
-fn work_panel(
-    p: &mut ChildSpawnerCommands,
-    fonts: &UiFonts,
-    st: &SmithState,
-    loot: &LootState,
-    k: &crate::lore::Knowledge,
-    job: &Job,
-) {
+fn work_panel(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, loot: &LootState, k: &crate::lore::Knowledge, job: &Job) {
     // Цвет металла.
     row(p).with_children(|r| {
-        r.spawn((
-            Node {
-                width: px(70),
-                height: px(26),
-                border: UiRect::all(px(1)),
-                ..default()
-            },
-            BorderColor::all(BORDER),
-            BackgroundColor(Color::BLACK),
-            Live::HeatSwatch,
-        ));
+        r.spawn((Node { width: px(70), height: px(26), border: UiRect::all(px(1)), ..default() }, BorderColor::all(BORDER), BackgroundColor(Color::BLACK), Live::HeatSwatch));
         r.spawn((label(fonts, "", 14.0, TEXT, true), Live::HeatText));
     });
     p.spawn((label(fonts, "", 13.0, TEXT, false), Live::Status));
@@ -1312,119 +907,34 @@ fn work_panel(
     match job {
         Job::Forge(f) => {
             let info = f.pattern.info();
-            p.spawn(label(
-                fonts,
-                format!("{} · F — в горн / на наковальню", f.pattern.name()),
-                15.0,
-                TITLE,
-                true,
-            ));
+            p.spawn(label(fonts, format!("{} · F — в горн / на наковальню", f.pattern.name()), 15.0, TITLE, true));
             swing_bar(p, fonts);
             // Поковка: участки — щёлкать по ним.
-            p.spawn((
-                Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: px(3),
-                    height: px(120),
-                    align_items: AlignItems::FlexEnd,
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.1, 0.09, 0.08)),
-            ))
-            .with_children(|r| {
-                for (i, name) in info.segments.iter().enumerate() {
-                    r.spawn((
-                        Segment(i as u8),
-                        Interaction::default(),
-                        FocusPolicy::Block,
-                        Node {
-                            flex_direction: FlexDirection::Column,
-                            justify_content: JustifyContent::FlexEnd,
-                            align_items: AlignItems::Center,
-                            flex_grow: 1.0,
-                            height: percent(100),
-                            border: UiRect::all(px(1)),
-                            ..default()
-                        },
-                        BorderColor::all(Color::srgba(0.4, 0.33, 0.22, 0.6)),
-                    ))
-                    .with_children(|c| {
-                        // Черта «как надо» на 1.0 (из 1.3).
-                        c.spawn((
-                            Node {
-                                position_type: PositionType::Absolute,
-                                top: percent(100.0 - 100.0 / 1.3),
-                                width: percent(100),
-                                height: px(2),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgba(0.9, 0.85, 0.6, 0.7)),
-                        ));
-                        c.spawn((
-                            Node {
-                                width: percent(70),
-                                height: percent(0),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.3, 0.3, 0.3)),
-                            Live::SegFill(i as u8),
-                        ));
-                        c.spawn((
-                            label(fonts, *name, 11.0, DIM, false),
-                            Node {
-                                position_type: PositionType::Absolute,
-                                bottom: px(2),
-                                ..default()
-                            },
-                        ));
-                        c.spawn((
-                            label(fonts, "", 11.0, TEXT, false),
-                            Live::SegText(i as u8),
-                            Node {
-                                position_type: PositionType::Absolute,
-                                top: px(2),
-                                ..default()
-                            },
-                        ));
-                    });
-                }
-            });
+            p.spawn((Node { flex_direction: FlexDirection::Row, column_gap: px(3), height: px(120), align_items: AlignItems::FlexEnd, ..default() }, BackgroundColor(Color::srgb(0.1, 0.09, 0.08))))
+                .with_children(|r| {
+                    for (i, name) in info.segments.iter().enumerate() {
+                        r.spawn((
+                            Segment(i as u8),
+                            Interaction::default(),
+                            FocusPolicy::Block,
+                            Node { flex_direction: FlexDirection::Column, justify_content: JustifyContent::FlexEnd, align_items: AlignItems::Center, flex_grow: 1.0, height: percent(100), border: UiRect::all(px(1)), ..default() },
+                            BorderColor::all(Color::srgba(0.4, 0.33, 0.22, 0.6)),
+                        ))
+                        .with_children(|c| {
+                            // Черта «как надо» на 1.0 (из 1.3).
+                            c.spawn((Node { position_type: PositionType::Absolute, top: percent(100.0 - 100.0 / 1.3), width: percent(100), height: px(2), ..default() }, BackgroundColor(Color::srgba(0.9, 0.85, 0.6, 0.7))));
+                            c.spawn((Node { width: percent(70), height: percent(0), ..default() }, BackgroundColor(Color::srgb(0.3, 0.3, 0.3)), Live::SegFill(i as u8)));
+                            c.spawn((label(fonts, *name, 11.0, DIM, false), Node { position_type: PositionType::Absolute, bottom: px(2), ..default() }));
+                            c.spawn((label(fonts, "", 11.0, TEXT, false), Live::SegText(i as u8), Node { position_type: PositionType::Absolute, top: px(2), ..default() }));
+                        });
+                    }
+                });
             row(p).with_children(|r| {
-                button(
-                    r,
-                    fonts,
-                    "В горн",
-                    Act::Move(Spot::Fire),
-                    f.spot == Spot::Fire,
-                );
-                button(
-                    r,
-                    fonts,
-                    "На наковальню",
-                    Act::Move(Spot::Anvil),
-                    f.spot == Spot::Anvil,
-                );
-                button(
-                    r,
-                    fonts,
-                    "Отпуск у края углей",
-                    Act::Move(Spot::Temper),
-                    f.spot == Spot::Temper,
-                );
-                button(
-                    r,
-                    fonts,
-                    "В золу (отжиг)",
-                    Act::Move(Spot::Ashes),
-                    f.spot == Spot::Ashes,
-                );
-                button(
-                    r,
-                    fonts,
-                    "На точило",
-                    Act::Move(Spot::Grindstone),
-                    f.spot == Spot::Grindstone,
-                );
+                button(r, fonts, "В горн", Act::Move(Spot::Fire), f.spot == Spot::Fire);
+                button(r, fonts, "На наковальню", Act::Move(Spot::Anvil), f.spot == Spot::Anvil);
+                button(r, fonts, "Отпуск у края углей", Act::Move(Spot::Temper), f.spot == Spot::Temper);
+                button(r, fonts, "В золу (отжиг)", Act::Move(Spot::Ashes), f.spot == Spot::Ashes);
+                button(r, fonts, "На точило", Act::Move(Spot::Grindstone), f.spot == Spot::Grindstone);
                 button(r, fonts, "Перевернуть (R)", Act::Flip, false);
             });
             if info.harden {
@@ -1464,13 +974,7 @@ fn work_panel(
             row(p).with_children(|r| {
                 button(r, fonts, "Собрать", Act::Finish(false), f.shaped());
                 if info.kind == PieceKind::Weapon && have(loot, POMMEL) > 0 {
-                    button(
-                        r,
-                        fonts,
-                        "Собрать с бронзовым навершием",
-                        Act::Finish(true),
-                        f.shaped(),
-                    );
+                    button(r, fonts, "Собрать с бронзовым навершием", Act::Finish(true), f.shaped());
                 }
                 button(r, fonts, "Бросить (в лом)", Act::Abandon, false);
             });
@@ -1486,48 +990,23 @@ fn work_panel(
                 hints.push("Калить с вишнёвого. Вода жёстче, масло мягче (кувшин масла), рассол (мешок соли) — жёстче воды.");
             }
             if info.harden && knows(Technique::Tempering) {
-                hints.push(if info.temper_best < 260.0 {
-                    "Отпуск ножа и топора — до соломенного или бронзового."
-                } else {
-                    "Отпуск клинка — до пурпурного или синего."
-                });
+                hints.push(if info.temper_best < 260.0 { "Отпуск ножа и топора — до соломенного или бронзового." } else { "Отпуск клинка — до пурпурного или синего." });
             }
             for h in hints {
                 p.spawn(label(fonts, format!("• {h}"), 12.0, DIM, false));
             }
             if !knows(Technique::Forging) {
-                p.spawn(label(
-                    fonts,
-                    "Вы никогда не ковали: смотрите на цвет металла и пробуйте.",
-                    12.0,
-                    DIM,
-                    false,
-                ));
+                p.spawn(label(fonts, "Вы никогда не ковали: смотрите на цвет металла и пробуйте.", 12.0, DIM, false));
             }
         }
         Job::Cast(c) => {
-            p.spawn(label(
-                fonts,
-                format!(
-                    "Литьё: {} · F — тигель в горн / вынуть",
-                    c.piece.info().product
-                ),
-                15.0,
-                TITLE,
-                true,
-            ));
+            p.spawn(label(fonts, format!("Литьё: {} · F — тигель в горн / вынуть", c.piece.info().product), 15.0, TITLE, true));
             row(p).with_children(|r| {
                 r.spawn(label(fonts, "Залито:", 13.0, DIM, false));
                 bar(r, 200.0, Color::srgb(1.0, 0.7, 0.3), Live::Progress);
             });
             row(p).with_children(|r| {
-                button(
-                    r,
-                    fonts,
-                    "Тигель в горн",
-                    Act::Move(Spot::Fire),
-                    c.spot == Spot::Fire,
-                );
+                button(r, fonts, "Тигель в горн", Act::Move(Spot::Fire), c.spot == Spot::Fire);
                 button(r, fonts, "Снять шлак", Act::Skim, false);
                 button(
                     r,
@@ -1593,20 +1072,10 @@ fn work_panel(
         }
         Job::Soak(s) => {
             let what = match s.kind {
-                SoakKind::Bloomery {
-                    ore,
-                    charcoal,
-                    rich,
-                } => format!("Плавка: руды {ore} (богатость {rich}%), угля {charcoal}"),
+                SoakKind::Bloomery { ore, charcoal, rich } => format!("Плавка: руды {ore} (богатость {rich}%), угля {charcoal}"),
                 SoakKind::Carburize => "Цементация полосы".into(),
             };
-            p.spawn(label(
-                fonts,
-                format!("{what} · качайте мехи пробелом в такт"),
-                15.0,
-                TITLE,
-                true,
-            ));
+            p.spawn(label(fonts, format!("{what} · качайте мехи пробелом в такт"), 15.0, TITLE, true));
             row(p).with_children(|r| {
                 r.spawn(label(fonts, "Прошло:", 13.0, DIM, false));
                 bar(r, 200.0, Color::srgb(0.8, 0.6, 0.3), Live::Progress);
@@ -1618,46 +1087,17 @@ fn work_panel(
             let (_, nh) = heat_color(hi);
             if knows(Technique::Smelting) || knows(Technique::Carburizing) {
                 row(p).with_children(|r| {
-                    r.spawn((
-                        Node {
-                            width: px(18),
-                            height: px(14),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(cl[0], cl[1], cl[2])),
-                    ));
-                    r.spawn(label(
-                        fonts,
-                        format!("Нужный жар: от «{nl}» до «{nh}»"),
-                        13.0,
-                        DIM,
-                        false,
-                    ));
+                    r.spawn((Node { width: px(18), height: px(14), ..default() }, BackgroundColor(Color::srgb(cl[0], cl[1], cl[2]))));
+                    r.spawn(label(fonts, format!("Нужный жар: от «{nl}» до «{nh}»"), 13.0, DIM, false));
                 });
             }
             row(p).with_children(|r| {
-                button(
-                    r,
-                    fonts,
-                    if matches!(s.kind, SoakKind::Bloomery { .. }) {
-                        "Разломать горн, вынуть крицу"
-                    } else {
-                        "Разбить горшок"
-                    },
-                    Act::Finish(false),
-                    s.done(),
-                );
+                button(r, fonts, if matches!(s.kind, SoakKind::Bloomery { .. }) { "Разломать горн, вынуть крицу" } else { "Разбить горшок" }, Act::Finish(false), s.done());
                 button(r, fonts, "Бросить", Act::Abandon, false);
             });
         }
         Job::Repair { item, .. } => {
-            p.spawn(label(
-                fonts,
-                format!("Ремонт: {}", item.info().name),
-                15.0,
-                TITLE,
-                true,
-            ));
+            p.spawn(label(fonts, format!("Ремонт: {}", item.info().name), 15.0, TITLE, true));
             row(p).with_children(|r| {
                 bar(r, 200.0, Color::srgb(0.6, 0.8, 0.5), Live::Progress);
             });
@@ -1695,12 +1135,8 @@ fn work_panel(
             });
             swing_bar(p, fonts);
             let hint = match what {
-                crate::archery::Fletch::Shafts => {
-                    "Колоть, строгать и править древки: щёлкайте в такт"
-                }
-                crate::archery::Fletch::Arrows(_) => {
-                    "Насадить наконечник, вклеить перья, обмотать: щёлкайте в такт"
-                }
+                crate::archery::Fletch::Shafts => "Колоть, строгать и править древки: щёлкайте в такт",
+                crate::archery::Fletch::Arrows(_) => "Насадить наконечник, вклеить перья, обмотать: щёлкайте в такт",
             };
             p.spawn((
                 GrindPad,
@@ -1733,30 +1169,14 @@ fn work_panel(
 }
 
 /// Живые части: маятник, цвет металла, участки, уголь.
-fn update_live(
-    state: Res<SmithState>,
-    knowledge: Res<MyKnowledge>,
-    mut nodes: Query<(
-        &Live,
-        Option<&mut Node>,
-        Option<&mut BackgroundColor>,
-        Option<&mut Text>,
-        Option<&mut TextColor>,
-    )>,
-) {
+fn update_live(state: Res<SmithState>, knowledge: Res<MyKnowledge>, mut nodes: Query<(&Live, Option<&mut Node>, Option<&mut BackgroundColor>, Option<&mut Text>, Option<&mut TextColor>)>) {
     if !state.open {
         return;
     }
     let k = &knowledge.0;
     let skill = k.skill(Skill::Smithing);
     let swing = swing_pos(state.swing_t, false);
-    let (fuel, blast) = state
-        .work
-        .as_ref()
-        .map(|w| w.station)
-        .or(state.near)
-        .and_then(|id| state.fires.get(&id).copied())
-        .unwrap_or((0.0, 0.0));
+    let (fuel, blast) = state.work.as_ref().map(|w| w.station).or(state.near).and_then(|id| state.fires.get(&id).copied()).unwrap_or((0.0, 0.0));
     let named = k.knows(Lore::Technique(Technique::Forging));
     let job = state.pred.as_ref();
     let temp = match job {
@@ -1798,31 +1218,11 @@ fn update_live(
                     let s = match job {
                         Some(Job::Forge(f)) if f.quenched && f.temp < 400.0 => {
                             let shown = f.temper.max(f.temp);
-                            if k.knows(Lore::Technique(Technique::Tempering)) {
-                                format!("Побежалость: {}", temper_color(shown).1)
-                            } else {
-                                "Закалено. Цвет на зачищенной стали меняется от жара".into()
-                            }
+                            if k.knows(Lore::Technique(Technique::Tempering)) { format!("Побежалость: {}", temper_color(shown).1) } else { "Закалено. Цвет на зачищенной стали меняется от жара".into() }
                         }
                         Some(Job::Cast(c)) => {
-                            let state = if c.melt >= 1.0 {
-                                "расплав жидкий"
-                            } else if c.melt > 0.0 {
-                                "плавится"
-                            } else {
-                                "твёрдый"
-                            };
-                            format!(
-                                "{}{} · {state}, шлак {:.0}%, форма прогрета {:.0}%",
-                                if named { name } else { "металл" },
-                                if c.spot == Spot::Fire {
-                                    " (в горне)"
-                                } else {
-                                    ""
-                                },
-                                c.dross * 100.0,
-                                c.mould_heat * 100.0
-                            )
+                            let state = if c.melt >= 1.0 { "расплав жидкий" } else if c.melt > 0.0 { "плавится" } else { "твёрдый" };
+                            format!("{}{} · {state}, шлак {:.0}%, форма прогрета {:.0}%", if named { name } else { "металл" }, if c.spot == Spot::Fire { " (в горне)" } else { "" }, c.dross * 100.0, c.mould_heat * 100.0)
                         }
                         Some(Job::Forge(f)) => {
                             let where_ = match f.spot {
@@ -1832,19 +1232,9 @@ fn update_live(
                                 Spot::Ashes => "в золе",
                                 Spot::Grindstone => "на точиле",
                             };
-                            if named {
-                                format!("{} — {where_}", name)
-                            } else {
-                                format!("Светится вот так — {where_}")
-                            }
+                            if named { format!("{} — {where_}", name) } else { format!("Светится вот так — {where_}") }
                         }
-                        _ => {
-                            if named {
-                                name.to_string()
-                            } else {
-                                String::new()
-                            }
-                        }
+                        _ => if named { name.to_string() } else { String::new() },
                     };
                     if t.0 != s {
                         t.0 = s;
@@ -1853,11 +1243,7 @@ fn update_live(
             }
             Live::Fuel => {
                 if let Some(mut t) = text {
-                    let s = if fuel <= 0.0 {
-                        "Горн погас: нужен уголь".to_string()
-                    } else {
-                        format!("Угля в горне на {}", crate::lore::fmt_secs(fuel))
-                    };
+                    let s = if fuel <= 0.0 { "Горн погас: нужен уголь".to_string() } else { format!("Угля в горне на {}", crate::lore::fmt_secs(fuel)) };
                     if t.0 != s {
                         t.0 = s;
                     }
@@ -1877,22 +1263,14 @@ fn update_live(
                     let s = f.shape.get(*i as usize).copied().unwrap_or(0.0);
                     n.height = percent((s / 1.3 * 100.0).clamp(2.0, 100.0));
                     if let Some(mut b) = bg {
-                        b.0 = if temp > 480.0 {
-                            col
-                        } else {
-                            Color::srgb(0.32, 0.31, 0.3)
-                        };
+                        b.0 = if temp > 480.0 { col } else { Color::srgb(0.32, 0.31, 0.3) };
                     }
                 }
             }
             Live::SegText(i) => {
                 if let (Some(mut t), Some(Job::Forge(f))) = (text, job) {
                     let s = f.shape.get(*i as usize).copied().unwrap_or(0.0);
-                    let v = if named {
-                        format!("{:.0}%", s * 100.0)
-                    } else {
-                        String::new()
-                    };
+                    let v = if named { format!("{:.0}%", s * 100.0) } else { String::new() };
                     if t.0 != v {
                         t.0 = v;
                     }
@@ -1922,29 +1300,13 @@ fn update_live(
                                 v.push("окалина".into());
                             }
                             if f.lean.abs() > crate::smithing::LEAN_SAFE * 0.7 {
-                                v.push(if f.lean.abs() > crate::smithing::LEAN_SAFE {
-                                    "заготовку ведёт — переверните (R)!".into()
-                                } else {
-                                    "заготовку начинает вести".into()
-                                });
+                                v.push(if f.lean.abs() > crate::smithing::LEAN_SAFE { "заготовку ведёт — переверните (R)!".into() } else { "заготовку начинает вести".into() });
                             }
                             v.push(format!("ударов {}", f.strikes));
                             v.join(" · ")
                         }
-                        Some(Job::Soak(s)) => format!(
-                            "В нужном жару {:.0}% времени, осталось {}",
-                            s.steadiness() * 100.0,
-                            crate::lore::fmt_secs((s.total - s.elapsed).max(0.0))
-                        ),
-                        Some(Job::Cast(c)) => {
-                            if c.opened {
-                                format!("Отделка {:.0}%", c.chased.min(1.0) * 100.0)
-                            } else if c.pouring {
-                                "Льётся…".into()
-                            } else {
-                                String::new()
-                            }
-                        }
+                        Some(Job::Soak(s)) => format!("В нужном жару {:.0}% времени, осталось {}", s.steadiness() * 100.0, crate::lore::fmt_secs((s.total - s.elapsed).max(0.0))),
+                        Some(Job::Cast(c)) => if c.opened { format!("Отделка {:.0}%", c.chased.min(1.0) * 100.0) } else if c.pouring { "Льётся…".into() } else { String::new() },
                         _ => String::new(),
                     };
                     if t.0 != s {
@@ -1957,9 +1319,7 @@ fn update_live(
                     let v = match job {
                         Some(Job::Cast(c)) => c.poured,
                         Some(Job::Soak(s)) => s.elapsed / s.total,
-                        Some(Job::Repair { progress, .. }) | Some(Job::Fletch { progress, .. }) => {
-                            *progress
-                        }
+                        Some(Job::Repair { progress, .. }) | Some(Job::Fletch { progress, .. }) => *progress,
                         _ => 0.0,
                     };
                     n.width = percent(v.clamp(0.0, 1.0) * 100.0);
@@ -1972,11 +1332,7 @@ fn update_live(
 fn update_prompt(state: Res<SmithState>, mut text: Single<&mut Text, With<SmithPrompt>>) {
     let line = match (state.open, state.near) {
         (false, Some(id)) => state.station(id).map(|s| {
-            if state.work.as_ref().is_some_and(|w| w.station == id) {
-                format!("[B] {} — продолжить работу", s.name)
-            } else {
-                format!("[B] {} — работать у горна", s.name)
-            }
+            if state.work.as_ref().is_some_and(|w| w.station == id) { format!("[B] {} — продолжить работу", s.name) } else { format!("[B] {} — работать у горна", s.name) }
         }),
         _ => None,
     }

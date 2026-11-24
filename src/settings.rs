@@ -8,12 +8,10 @@
 use bevy::anti_alias::fxaa::Fxaa;
 use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::audio::{GlobalVolume, Volume};
-use bevy::camera::RenderTarget;
-use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::VisibilityRange;
-use bevy::light::{
-    CascadeShadowConfigBuilder, DirectionalLightShadowMap, ShadowFilteringMethod, VolumetricFog,
-};
+use bevy::camera::primitives::Aabb;
+use bevy::camera::RenderTarget;
+use bevy::light::{CascadeShadowConfigBuilder, DirectionalLightShadowMap, ShadowFilteringMethod, VolumetricFog};
 use bevy::mesh::skinning::SkinnedMesh;
 use bevy::pbr::ScreenSpaceAmbientOcclusion;
 use bevy::post_process::bloom::Bloom;
@@ -124,11 +122,7 @@ impl Default for Settings {
             show_controls: false,
             last_address: String::new(),
             // Для начала — имя пользователя Windows; его можно сменить в главном меню.
-            nickname: crate::protocol::clean_name(
-                &std::env::var("USERNAME")
-                    .or_else(|_| std::env::var("USER"))
-                    .unwrap_or_default(),
-            ),
+            nickname: crate::protocol::clean_name(&std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default()),
             look: crate::appearance::Look::PLAYER_DEFAULT,
             kit: Default::default(),
         };
@@ -241,9 +235,7 @@ impl Settings {
             if line.starts_with('#') {
                 continue;
             }
-            let Some((k, v)) = line.split_once('=') else {
-                continue;
-            };
+            let Some((k, v)) = line.split_once('=') else { continue };
             let (k, v) = (k.trim(), v.trim());
             let f = |d: f32| v.parse::<f32>().unwrap_or(d);
             let u = |d: u8| v.parse::<u8>().unwrap_or(d);
@@ -270,9 +262,7 @@ impl Settings {
                 "show_fps" => s.show_fps = b(s.show_fps),
                 "minimap" => s.minimap = b(s.minimap),
                 "show_controls" => s.show_controls = b(s.show_controls),
-                "minimap_zoom" => {
-                    s.minimap_zoom = u(s.minimap_zoom).min(MINIMAP_RADII.len() as u8 - 1)
-                }
+                "minimap_zoom" => s.minimap_zoom = u(s.minimap_zoom).min(MINIMAP_RADII.len() as u8 - 1),
                 "last_address" => s.last_address = v.to_string(),
                 "nickname" => s.nickname = crate::protocol::clean_name(v),
                 "look" => s.look = crate::appearance::Look::from_text(v).unwrap_or(s.look),
@@ -290,19 +280,13 @@ impl Settings {
     }
 
     pub fn load() -> Settings {
-        let Some(path) = Self::path() else {
-            return Settings::default();
-        };
+        let Some(path) = Self::path() else { return Settings::default() };
         match std::fs::read_to_string(&path) {
             Ok(text) => Settings::from_text(&text),
             Err(_) => {
                 // Старый файл меню (сборка до настроек) — подхватываем адрес.
                 let mut s = Settings::default();
-                if let Some(last) = path
-                    .parent()
-                    .map(|d| d.join("last_address.txt"))
-                    .and_then(|f| std::fs::read_to_string(f).ok())
-                {
+                if let Some(last) = path.parent().map(|d| d.join("last_address.txt")).and_then(|f| std::fs::read_to_string(f).ok()) {
                     s.last_address = last.trim().to_string();
                 }
                 s
@@ -333,18 +317,7 @@ impl Plugin for SettingsPlugin {
             .insert_resource(SceneTarget::default())
             .add_systems(
                 PostUpdate,
-                (
-                    apply_window,
-                    apply_audio,
-                    apply_sun,
-                    apply_cameras,
-                    apply_render_scale,
-                    apply_smoke,
-                    apply_water,
-                    detail_ranges,
-                    toggle_effects_f9,
-                    toggle_fullscreen_f11,
-                )
+                (apply_window, apply_audio, apply_sun, apply_cameras, apply_render_scale, apply_smoke, apply_water, detail_ranges, toggle_effects_f9, toggle_fullscreen_f11)
                     .before(bevy::camera::CameraUpdateSystems),
             );
     }
@@ -365,11 +338,7 @@ fn apply_window(settings: Res<Settings>, mut window: Single<&mut Window, With<Pr
     if !settings.is_changed() {
         return;
     }
-    let present = if settings.vsync {
-        PresentMode::AutoVsync
-    } else {
-        PresentMode::AutoNoVsync
-    };
+    let present = if settings.vsync { PresentMode::AutoVsync } else { PresentMode::AutoNoVsync };
     if window.present_mode != present {
         window.present_mode = present;
     }
@@ -383,11 +352,7 @@ fn apply_window(settings: Res<Settings>, mut window: Single<&mut Window, With<Pr
     }
 }
 
-fn apply_audio(
-    settings: Res<Settings>,
-    mut volume: ResMut<GlobalVolume>,
-    audio: Option<ResMut<crate::audio::AudioSettings>>,
-) {
+fn apply_audio(settings: Res<Settings>, mut volume: ResMut<GlobalVolume>, audio: Option<ResMut<crate::audio::AudioSettings>>) {
     if settings.is_changed() {
         volume.volume = Volume::Linear(settings.volume);
         if let Some(mut a) = audio {
@@ -402,10 +367,7 @@ fn apply_audio(
 struct SunConfigured;
 
 /// Тени солнца: размер карты, число каскадов, дальность.
-fn apply_sun(
-    settings: Res<Settings>,
-    mut map: ResMut<DirectionalLightShadowMap>,
-    mut sun: Query<(&mut DirectionalLight, &mut bevy::light::CascadeShadowConfig)>,
+fn apply_sun(settings: Res<Settings>, mut map: ResMut<DirectionalLightShadowMap>, mut sun: Query<(&mut DirectionalLight, &mut bevy::light::CascadeShadowConfig)>,
     fresh: Query<Entity, (With<DirectionalLight>, Without<SunConfigured>)>,
     mut commands: Commands,
 ) {
@@ -428,13 +390,7 @@ fn apply_sun(
     }
     for (mut light, mut cfg) in &mut sun {
         light.shadow_maps_enabled = settings.shadows > 0;
-        *cfg = CascadeShadowConfigBuilder {
-            num_cascades: cascades,
-            first_cascade_far_bound: first.min(dist * 0.5),
-            maximum_distance: dist,
-            ..default()
-        }
-        .build();
+        *cfg = CascadeShadowConfigBuilder { num_cascades: cascades, first_cascade_far_bound: first.min(dist * 0.5), maximum_distance: dist, ..default() }.build();
     }
 }
 
@@ -444,15 +400,7 @@ fn apply_cameras(
     mut commands: Commands,
     settings: Res<Settings>,
     mut generation: Local<u32>,
-    mut cams: Query<
-        (
-            Entity,
-            &mut Projection,
-            Option<&AppliedTo>,
-            Has<crate::player::PlayerCamera>,
-        ),
-        With<Camera3d>,
-    >,
+    mut cams: Query<(Entity, &mut Projection, Option<&AppliedTo>, Has<crate::player::PlayerCamera>), With<Camera3d>>,
 ) {
     let g = bump(&settings, &mut generation);
     let m = crate::graphics::mood();
@@ -467,26 +415,16 @@ fn apply_cameras(
             }
         }
         let mut ec = commands.entity(e);
-        ec.insert((
-            AppliedTo(g),
-            crate::graphics::distance_fog(&m, settings.draw_distance),
-        ));
+        ec.insert((AppliedTo(g), crate::graphics::distance_fog(&m, settings.draw_distance)));
         // Сглаживание: TAA требует предварительных проходов (глубина, движение) — на низких
         // эффектах дешевле FXAA.
         if settings.effects == 0 {
-            ec.remove::<TemporalAntiAliasing>()
-                .insert((Fxaa::default(), ShadowFilteringMethod::Gaussian));
+            ec.remove::<TemporalAntiAliasing>().insert((Fxaa::default(), ShadowFilteringMethod::Gaussian));
         } else {
-            ec.remove::<Fxaa>().insert((
-                TemporalAntiAliasing::default(),
-                ShadowFilteringMethod::Temporal,
-            ));
+            ec.remove::<Fxaa>().insert((TemporalAntiAliasing::default(), ShadowFilteringMethod::Temporal));
         }
         if settings.effects >= 1 {
-            ec.insert(Bloom {
-                intensity: if m.day { 0.16 } else { 0.2 },
-                ..Bloom::NATURAL
-            });
+            ec.insert(Bloom { intensity: if m.day { 0.16 } else { 0.2 }, ..Bloom::NATURAL });
         } else {
             ec.remove::<Bloom>();
         }
@@ -496,12 +434,7 @@ fn apply_cameras(
             ec.remove::<ScreenSpaceAmbientOcclusion>();
         }
         if settings.effects >= 3 {
-            ec.insert(VolumetricFog {
-                ambient_intensity: 0.0,
-                step_count: 48,
-                jitter: 0.5,
-                ..default()
-            });
+            ec.insert(VolumetricFog { ambient_intensity: 0.0, step_count: 48, jitter: 0.5, ..default() });
         } else {
             ec.remove::<VolumetricFog>();
         }
@@ -547,11 +480,7 @@ fn apply_render_scale(
                 UiCamera,
                 IsDefaultUiCamera,
                 Camera2d,
-                Camera {
-                    order: 10,
-                    clear_color: ClearColorConfig::Custom(Color::BLACK),
-                    ..default()
-                },
+                Camera { order: 10, clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() },
                 Msaa::Off,
             ));
         }
@@ -574,12 +503,7 @@ fn apply_render_scale(
     }
     let size = ((full.as_vec2() * scale).round().as_uvec2()).max(UVec2::splat(64));
     if target.image.is_none() || target.size != size {
-        let image = Image::new_target_texture(
-            size.x,
-            size.y,
-            TextureFormat::Rgba8Unorm,
-            Some(TextureFormat::Rgba8UnormSrgb),
-        );
+        let image = Image::new_target_texture(size.x, size.y, TextureFormat::Rgba8Unorm, Some(TextureFormat::Rgba8UnormSrgb));
         let handle = images.add(image);
         target.image = Some(handle.clone());
         target.size = size;
@@ -591,12 +515,7 @@ fn apply_render_scale(
                 let node = commands
                     .spawn((
                         ImageNode::new(handle),
-                        Node {
-                            position_type: PositionType::Absolute,
-                            width: percent(100),
-                            height: percent(100),
-                            ..default()
-                        },
+                        Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), ..default() },
                         // Под всем остальным интерфейсом.
                         GlobalZIndex(i32::MIN),
                     ))
@@ -609,38 +528,24 @@ fn apply_render_scale(
     for (e, rt) in &cams {
         let ok = matches!(rt, Some(RenderTarget::Image(i)) if i.handle == handle);
         if !ok {
-            commands
-                .entity(e)
-                .insert(RenderTarget::Image(handle.clone().into()));
+            commands.entity(e).insert(RenderTarget::Image(handle.clone().into()));
         }
     }
 }
 
 /// Дым из труб — много полупрозрачных слоёв; на низких эффектах его не рисуем.
-fn apply_smoke(
-    settings: Res<Settings>,
-    mut smoke: Query<&mut Visibility, With<MeshMaterial3d<crate::smoke::SmokeMaterial>>>,
-    added: Query<(), Added<MeshMaterial3d<crate::smoke::SmokeMaterial>>>,
-) {
+fn apply_smoke(settings: Res<Settings>, mut smoke: Query<&mut Visibility, With<MeshMaterial3d<crate::smoke::SmokeMaterial>>>, added: Query<(), Added<MeshMaterial3d<crate::smoke::SmokeMaterial>>>) {
     if !settings.is_changed() && added.is_empty() {
         return;
     }
-    let want = if settings.effects >= 1 {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
+    let want = if settings.effects >= 1 { Visibility::Inherited } else { Visibility::Hidden };
     for mut v in &mut smoke {
         v.set_if_neq(want);
     }
 }
 
 /// Море: на простом качестве — только крупные волны и без пены по глубине.
-fn apply_water(
-    settings: Res<Settings>,
-    mut mats: ResMut<Assets<crate::sky::WaterMaterial>>,
-    added: Query<(), Added<MeshMaterial3d<crate::sky::WaterMaterial>>>,
-) {
+fn apply_water(settings: Res<Settings>, mut mats: ResMut<Assets<crate::sky::WaterMaterial>>, added: Query<(), Added<MeshMaterial3d<crate::sky::WaterMaterial>>>) {
     if !settings.is_changed() && added.is_empty() {
         return;
     }
@@ -660,23 +565,11 @@ struct DetailRanged;
 fn detail_ranges(
     mut commands: Commands,
     settings: Res<Settings>,
-    fresh: Query<
-        (Entity, &Aabb, &GlobalTransform),
-        (
-            With<Mesh3d>,
-            Without<DetailRanged>,
-            Without<SkinnedMesh>,
-            Without<NoDetailRange>,
-        ),
-    >,
+    fresh: Query<(Entity, &Aabb, &GlobalTransform), (With<Mesh3d>, Without<DetailRanged>, Without<SkinnedMesh>, Without<NoDetailRange>)>,
     mut ranged: Query<&mut VisibilityRange, With<DetailRanged>>,
 ) {
     let end = settings.detail_distance();
-    let range = |end: f32| VisibilityRange {
-        start_margin: 0.0..0.0,
-        end_margin: end..end + 8.0,
-        use_aabb: false,
-    };
+    let range = |end: f32| VisibilityRange { start_margin: 0.0..0.0, end_margin: end..end + 8.0, use_aabb: false };
     for (e, aabb, gt) in &fresh {
         let size = Vec3::from(aabb.half_extents) * 2.0 * gt.scale().abs();
         if size.max_element() < 2.5 {
@@ -697,11 +590,7 @@ fn detail_ranges(
 pub struct NoDetailRange;
 
 /// F9 — быстро переключить эффекты: низкие ↔ сохранённые (или высокие).
-fn toggle_effects_f9(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut settings: ResMut<Settings>,
-    mut prev: Local<Option<u8>>,
-) {
+fn toggle_effects_f9(keys: Res<ButtonInput<KeyCode>>, mut settings: ResMut<Settings>, mut prev: Local<Option<u8>>) {
     if !keys.just_pressed(KeyCode::F9) {
         return;
     }
@@ -716,11 +605,7 @@ fn toggle_effects_f9(
 }
 
 /// F11 — полный экран ↔ окно.
-fn toggle_fullscreen_f11(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut settings: ResMut<Settings>,
-    mut prev: Local<Option<u8>>,
-) {
+fn toggle_fullscreen_f11(keys: Res<ButtonInput<KeyCode>>, mut settings: ResMut<Settings>, mut prev: Local<Option<u8>>) {
     if !keys.just_pressed(KeyCode::F11) {
         return;
     }
@@ -749,6 +634,7 @@ pub fn effects_name(v: u8) -> &'static str {
         _ => "ультра",
     }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -783,3 +669,4 @@ mod tests {
         assert_eq!(Settings::default().preset(), Some(Preset::Medium));
     }
 }
+

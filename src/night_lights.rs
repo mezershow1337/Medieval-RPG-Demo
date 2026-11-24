@@ -17,29 +17,16 @@ impl Plugin for NightLightsPlugin {
 const TORCH_LM: f32 = 30_000.0;
 const TORCH_RANGE: f32 = 10.0;
 
-fn torch_lights(
-    mut commands: Commands,
-    slots: Query<(Entity, &ShownProp), (With<PropSlot>, Changed<ShownProp>)>,
-) {
+fn torch_lights(mut commands: Commands, slots: Query<(Entity, &ShownProp), (With<PropSlot>, Changed<ShownProp>)>) {
     for (e, shown) in &slots {
         if shown.0 != Some(Prop::Torch) {
             continue;
         }
         // Пламя — на конце древка (ось рукояти +Y, шар огня на 0.36 м).
         commands.entity(e).with_child((
-            PointLight {
-                color: Color::srgb(1.0, 0.55, 0.25),
-                intensity: TORCH_LM,
-                range: TORCH_RANGE,
-                radius: 0.07,
-                shadow_maps_enabled: false,
-                ..default()
-            },
+            PointLight { color: Color::srgb(1.0, 0.55, 0.25), intensity: TORCH_LM, range: TORCH_RANGE, radius: 0.07, shadow_maps_enabled: false, ..default() },
             Transform::from_xyz(0.0, 0.42, 0.0),
-            crate::graphics::Flicker {
-                base: TORCH_LM,
-                phase: (e.to_bits() % 997) as f32 * 0.37,
-            },
+            crate::graphics::Flicker { base: TORCH_LM, phase: (e.to_bits() % 997) as f32 * 0.37 },
         ));
     }
 }

@@ -32,13 +32,7 @@ impl Room {
         let doors = b
             .doors
             .iter()
-            .filter(|d| {
-                d.center.y.abs() < 1.0
-                    && d.center.x > near.x0
-                    && d.center.x < near.x1
-                    && d.center.z > near.z0
-                    && d.center.z < near.z1
-            })
+            .filter(|d| d.center.y.abs() < 1.0 && d.center.x > near.x0 && d.center.x < near.x1 && d.center.z > near.z0 && d.center.z < near.z1)
             .copied()
             .collect();
         // Что уже стоит в комнате (колонны, печи, столы): выше ступеньки и ниже головы.
@@ -48,30 +42,13 @@ impl Room {
             .filter(|k| k.solid)
             .map(|k| k.aabb)
             .chain(b.invisible.iter().copied())
-            .filter(|a| {
-                a.max.y > 0.45
-                    && a.min.y < 1.8
-                    && a.min.x < r.x1
-                    && a.max.x > r.x0
-                    && a.min.z < r.z1
-                    && a.max.z > r.z0
-            })
+            .filter(|a| a.max.y > 0.45 && a.min.y < 1.8 && a.min.x < r.x1 && a.max.x > r.x0 && a.min.z < r.z1 && a.max.z > r.z0)
             .map(|a| Rect::new(a.min.x, a.min.z, a.max.x, a.max.z))
             // Стены вокруг комнаты не считаем (комната задана по их граням).
             .filter(|f| !(f.w() > r.w() * 0.9 || f.d() > r.d() * 0.9))
-            .chain(
-                b.keep_clear
-                    .iter()
-                    .filter(|p| p.y.abs() < 1.0)
-                    .map(|p| Rect::new(p.x - 0.8, p.z - 0.8, p.x + 0.8, p.z + 0.8)),
-            )
+            .chain(b.keep_clear.iter().filter(|p| p.y.abs() < 1.0).map(|p| Rect::new(p.x - 0.8, p.z - 0.8, p.x + 0.8, p.z + 0.8)))
             .collect();
-        Room {
-            r,
-            used,
-            doors,
-            walls: Vec::new(),
-        }
+        Room { r, used, doors, walls: Vec::new() }
     }
 
     /// Свободна ли площадка: внутри комнаты, не на занятом месте и не в проходе у двери.
@@ -93,20 +70,10 @@ impl Room {
 
     /// Площадка `len` (вдоль стены) × `depth` (от стены) у одной из стен `sides` (по порядку
     /// предпочтения). Возвращает площадку и стену, к которой она прижата.
-    pub fn take(
-        &mut self,
-        len: f32,
-        depth: f32,
-        sides: &[Side],
-        rng: &mut Rng,
-    ) -> Option<(Rect, Side)> {
+    pub fn take(&mut self, len: f32, depth: f32, sides: &[Side], rng: &mut Rng) -> Option<(Rect, Side)> {
         for &side in sides {
             let r = self.r;
-            let (s0, s1) = if side.along_x() {
-                (r.x0, r.x1)
-            } else {
-                (r.z0, r.z1)
-            };
+            let (s0, s1) = if side.along_x() { (r.x0, r.x1) } else { (r.z0, r.z1) };
             let mut options = Vec::new();
             let mut s = s0 + 0.05;
             while s + len <= s1 - 0.05 {
@@ -123,13 +90,7 @@ impl Room {
             }
             if !options.is_empty() {
                 // Чаще — в углу (у края стены), иначе — где придётся.
-                let f = if rng.chance(0.5) {
-                    options[0]
-                } else if rng.chance(0.5) {
-                    *options.last().unwrap()
-                } else {
-                    options[rng.int(options.len())]
-                };
+                let f = if rng.chance(0.5) { options[0] } else if rng.chance(0.5) { *options.last().unwrap() } else { options[rng.int(options.len())] };
                 self.used.push(f);
                 return Some((f, side));
             }
@@ -144,11 +105,7 @@ impl Room {
         let mut options = Vec::new();
         for &side in sides {
             let r = self.r;
-            let (s0, s1) = if side.along_x() {
-                (r.x0, r.x1)
-            } else {
-                (r.z0, r.z1)
-            };
+            let (s0, s1) = if side.along_x() { (r.x0, r.x1) } else { (r.z0, r.z1) };
             let mut s = s0 + 0.15;
             while s + len <= s1 - 0.15 {
                 let f = match side {
@@ -158,14 +115,8 @@ impl Room {
                     Side::E => Rect::new(r.x1 - 0.15, s, r.x1, s + len),
                 };
                 // Тонкие полосы у стен в `used` — то, что там уже висит (ковры, колышки, полки).
-                let hung = self
-                    .used
-                    .iter()
-                    .any(|u| u.w().min(u.d()) <= 0.2 && overlaps(&u.inset(-0.1), &f));
-                if !hung
-                    && !self.walls.iter().any(|u| overlaps(&u.inset(-0.15), &f))
-                    && self.doors.iter().all(|d| !overlaps(&door_zone(d), &f))
-                {
+                let hung = self.used.iter().any(|u| u.w().min(u.d()) <= 0.2 && overlaps(&u.inset(-0.1), &f));
+                if !hung && !self.walls.iter().any(|u| overlaps(&u.inset(-0.15), &f)) && self.doors.iter().all(|d| !overlaps(&door_zone(d), &f)) {
                     options.push((f, side));
                 }
                 s += 0.25;
@@ -211,18 +162,11 @@ impl Room {
 
     /// Поставить жителя рядом с `want`, лицом к точке `look`.
     pub fn resident(&mut self, b: &mut Builder, want: Vec3, look: Vec3, role: Role) -> bool {
-        let Some(p) = self.spot(want) else {
-            return false;
-        };
+        let Some(p) = self.spot(want) else { return false };
         let d = look - p;
-        let yaw = if d.length_squared() > 0.01 {
-            (-d.x).atan2(-d.z)
-        } else {
-            0.0
-        };
+        let yaw = if d.length_squared() > 0.01 { (-d.x).atan2(-d.z) } else { 0.0 };
         b.resident(p, yaw, role);
-        self.used
-            .push(Rect::new(p.x - 0.3, p.z - 0.3, p.x + 0.3, p.z + 0.3));
+        self.used.push(Rect::new(p.x - 0.3, p.z - 0.3, p.x + 0.3, p.z + 0.3));
         true
     }
 }
@@ -236,19 +180,9 @@ fn door_zone(d: &DoorSpec) -> Rect {
     let along = d.width / 2.0 + 0.3;
     let across = d.wall_t / 2.0 + 1.1;
     if d.along_x {
-        Rect::new(
-            d.center.x - along,
-            d.center.z - across,
-            d.center.x + along,
-            d.center.z + across,
-        )
+        Rect::new(d.center.x - along, d.center.z - across, d.center.x + along, d.center.z + across)
     } else {
-        Rect::new(
-            d.center.x - across,
-            d.center.z - along,
-            d.center.x + across,
-            d.center.z + along,
-        )
+        Rect::new(d.center.x - across, d.center.z - along, d.center.x + across, d.center.z + along)
     }
 }
 
@@ -265,34 +199,14 @@ pub(super) fn inward(side: Side) -> Vec3 {
 pub fn bed(b: &mut Builder, f: Rect, rng: &mut Rng) {
     kit::bed(b, f);
     let along_x = f.w() > f.d();
-    let cover = if rng.chance(0.5) {
-        Mat::Rug
-    } else {
-        Mat::Cloth
-    };
-    let (c0, c1) = if along_x {
-        (
-            Rect::new(f.x0 + f.w() * 0.32, f.z0 + 0.02, f.x1 - 0.02, f.z1 - 0.02),
-            Rect::new(f.x0 + 0.08, f.z0 + 0.12, f.x0 + 0.42, f.z1 - 0.12),
-        )
-    } else {
-        (
-            Rect::new(f.x0 + 0.02, f.z0 + f.d() * 0.32, f.x1 - 0.02, f.z1 - 0.02),
-            Rect::new(f.x0 + 0.12, f.z0 + 0.08, f.x1 - 0.12, f.z0 + 0.42),
-        )
-    };
+    let cover = if rng.chance(0.5) { Mat::Rug } else { Mat::Cloth };
+    let (c0, c1) = if along_x { (Rect::new(f.x0 + f.w() * 0.32, f.z0 + 0.02, f.x1 - 0.02, f.z1 - 0.02), Rect::new(f.x0 + 0.08, f.z0 + 0.12, f.x0 + 0.42, f.z1 - 0.12)) } else { (Rect::new(f.x0 + 0.02, f.z0 + f.d() * 0.32, f.x1 - 0.02, f.z1 - 0.02), Rect::new(f.x0 + 0.12, f.z0 + 0.08, f.x1 - 0.12, f.z0 + 0.42)) };
     b.mesh(cover).cuboid(c0.min3(0.6), c0.max3(0.66));
     // Свисающий край покрывала.
     if along_x {
-        b.mesh(cover).cuboid(
-            Vec3::new(c0.x0, 0.3, c0.z1),
-            Vec3::new(c0.x1, 0.66, c0.z1 + 0.03),
-        );
+        b.mesh(cover).cuboid(Vec3::new(c0.x0, 0.3, c0.z1), Vec3::new(c0.x1, 0.66, c0.z1 + 0.03));
     } else {
-        b.mesh(cover).cuboid(
-            Vec3::new(c0.x1, 0.3, c0.z0),
-            Vec3::new(c0.x1 + 0.03, 0.66, c0.z1),
-        );
+        b.mesh(cover).cuboid(Vec3::new(c0.x1, 0.3, c0.z0), Vec3::new(c0.x1 + 0.03, 0.66, c0.z1));
     }
     b.mesh(Mat::Canvas).cuboid(c1.min3(0.6), c1.max3(0.74));
 }
@@ -315,14 +229,8 @@ pub fn cupboard(b: &mut Builder, f: Rect, side: Side, name: &'static str, rng: &
     let len = if side.along_x() { f.w() } else { f.d() };
     let m = b.mesh(Mat::Wood);
     // Рамка створок и карниз.
-    m.cuboid(
-        front - along * (len / 2.0) + Vec3::Y * (h - 0.08),
-        front + along * (len / 2.0) + n * 0.05 + Vec3::Y * (h + 0.04),
-    );
-    m.cuboid(
-        front - along * 0.02 + Vec3::Y * 0.1,
-        front + along * 0.02 + n * 0.02 + Vec3::Y * (h - 0.1),
-    );
+    m.cuboid(front - along * (len / 2.0) + Vec3::Y * (h - 0.08), front + along * (len / 2.0) + n * 0.05 + Vec3::Y * (h + 0.04));
+    m.cuboid(front - along * 0.02 + Vec3::Y * 0.1, front + along * 0.02 + n * 0.02 + Vec3::Y * (h - 0.1));
     let iron = b.mesh(Mat::Iron);
     for s in [-1.0f32, 1.0] {
         let k = front + along * s * 0.08 + Vec3::Y * 0.85;
@@ -331,46 +239,16 @@ pub fn cupboard(b: &mut Builder, f: Rect, side: Side, name: &'static str, rng: &
     let top = f.center(h);
     for k in 0..2 {
         if rng.chance(0.7) {
-            kit::jug(
-                b,
-                top + along * (k as f32 - 0.5) * len * 0.5,
-                rng.range(0.18, 0.3),
-                Mat::Ceramic,
-            );
+            kit::jug(b, top + along * (k as f32 - 0.5) * len * 0.5, rng.range(0.18, 0.3), Mat::Ceramic);
         }
     }
-    b.container(
-        f.center(0.0)
-            + n * (if side.along_x() { f.d() } else { f.w() } / 2.0 + 0.25)
-            + Vec3::Y * 1.0,
-        name,
-    );
+    b.container(f.center(0.0) + n * (if side.along_x() { f.d() } else { f.w() } / 2.0 + 0.25) + Vec3::Y * 1.0, name);
 }
 
 /// Плетёная корзина (может быть обыскиваемой).
 pub fn basket(b: &mut Builder, p: Vec3, r: f32, h: f32, fill: Mat, name: Option<&'static str>) {
-    b.mesh(Mat::Thatch).lathe(
-        p,
-        &[
-            (0.0, 0.0),
-            (r * 0.8, 0.0),
-            (r, h * 0.8),
-            (r * 1.05, h),
-            (r * 0.95, h),
-            (r * 0.85, h * 0.85),
-        ],
-        10,
-    );
-    b.mesh(fill).lathe(
-        p + Vec3::Y * (h * 0.8),
-        &[
-            (0.0, 0.0),
-            (r * 0.85, 0.0),
-            (r * 0.6, h * 0.2),
-            (0.0, h * 0.25),
-        ],
-        8,
-    );
+    b.mesh(Mat::Thatch).lathe(p, &[(0.0, 0.0), (r * 0.8, 0.0), (r, h * 0.8), (r * 1.05, h), (r * 0.95, h), (r * 0.85, h * 0.85)], 10);
+    b.mesh(fill).lathe(p + Vec3::Y * (h * 0.8), &[(0.0, 0.0), (r * 0.85, 0.0), (r * 0.6, h * 0.2), (0.0, h * 0.25)], 8);
     kit::hidden(b, p - Vec3::new(r, 0.0, r), p + Vec3::new(r, h, r));
     if let Some(name) = name {
         b.container(p + Vec3::Y * (h + 0.15), name);
@@ -380,21 +258,11 @@ pub fn basket(b: &mut Builder, p: Vec3, r: f32, h: f32, fill: Mat, name: Option<
 /// Треногий табурет.
 pub fn stool(b: &mut Builder, p: Vec3) {
     let m = b.mesh(Mat::Wood);
-    m.lathe(
-        p + Vec3::Y * 0.42,
-        &[(0.0, 0.0), (0.18, 0.0), (0.18, 0.05), (0.0, 0.05)],
-        10,
-    );
+    m.lathe(p + Vec3::Y * 0.42, &[(0.0, 0.0), (0.18, 0.0), (0.18, 0.05), (0.0, 0.05)], 10);
     for k in 0..3 {
         let a = k as f32 * std::f32::consts::TAU / 3.0;
         let foot = p + Vec3::new(a.cos() * 0.17, 0.0, a.sin() * 0.17);
-        m.beam(
-            foot,
-            p + Vec3::new(a.cos() * 0.1, 0.42, a.sin() * 0.1),
-            0.02,
-            0.02,
-            Vec3::Y,
-        );
+        m.beam(foot, p + Vec3::new(a.cos() * 0.1, 0.42, a.sin() * 0.1), 0.02, 0.02, Vec3::Y);
     }
 }
 
@@ -402,31 +270,15 @@ pub fn stool(b: &mut Builder, p: Vec3) {
 pub fn chair(b: &mut Builder, p: Vec3, back: Vec3) {
     let side = Vec3::new(back.z, 0.0, back.x);
     let m = b.mesh(Mat::Wood);
-    m.cuboid(
-        p - side * 0.25 - back * 0.22 + Vec3::Y * 0.44,
-        p + side * 0.25 + back * 0.22 + Vec3::Y * 0.5,
-    );
+    m.cuboid(p - side * 0.25 - back * 0.22 + Vec3::Y * 0.44, p + side * 0.25 + back * 0.22 + Vec3::Y * 0.5);
     for (s, d) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
         let q = p + side * (s * 0.21) + back * (d * 0.18);
-        m.cuboid(
-            q - Vec3::new(0.025, 0.0, 0.025),
-            q + Vec3::new(0.025, 0.44, 0.025),
-        );
+        m.cuboid(q - Vec3::new(0.025, 0.0, 0.025), q + Vec3::new(0.025, 0.44, 0.025));
     }
     let bb = p + back * 0.2;
-    m.cuboid(
-        bb - side * 0.25 + Vec3::Y * 0.5,
-        bb + side * 0.25 + back * 0.04 + Vec3::Y * 1.05,
-    );
-    b.mesh(Mat::Rug).cuboid(
-        p - side * 0.22 - back * 0.2 + Vec3::Y * 0.5,
-        p + side * 0.22 + back * 0.18 + Vec3::Y * 0.55,
-    );
-    kit::hidden(
-        b,
-        p - Vec3::new(0.25, 0.0, 0.25),
-        p + Vec3::new(0.25, 0.5, 0.25),
-    );
+    m.cuboid(bb - side * 0.25 + Vec3::Y * 0.5, bb + side * 0.25 + back * 0.04 + Vec3::Y * 1.05);
+    b.mesh(Mat::Rug).cuboid(p - side * 0.22 - back * 0.2 + Vec3::Y * 0.5, p + side * 0.22 + back * 0.18 + Vec3::Y * 0.55);
+    kit::hidden(b, p - Vec3::new(0.25, 0.0, 0.25), p + Vec3::new(0.25, 0.5, 0.25));
 }
 
 /// Бронзовая подставка с глиняным светильником; `light` — с настоящим светом.
@@ -434,58 +286,20 @@ pub fn lampstand(b: &mut Builder, p: Vec3, light: bool) {
     let m = b.mesh(Mat::Bronze);
     for k in 0..3 {
         let a = k as f32 * std::f32::consts::TAU / 3.0 + 0.3;
-        m.beam(
-            p + Vec3::new(a.cos() * 0.16, 0.0, a.sin() * 0.16),
-            p + Vec3::Y * 0.15,
-            0.012,
-            0.012,
-            Vec3::Y,
-        );
+        m.beam(p + Vec3::new(a.cos() * 0.16, 0.0, a.sin() * 0.16), p + Vec3::Y * 0.15, 0.012, 0.012, Vec3::Y);
     }
-    m.lathe(
-        p + Vec3::Y * 0.12,
-        &[
-            (0.02, 0.0),
-            (0.018, 1.2),
-            (0.09, 1.22),
-            (0.09, 1.25),
-            (0.0, 1.26),
-        ],
-        8,
-    );
+    m.lathe(p + Vec3::Y * 0.12, &[(0.02, 0.0), (0.018, 1.2), (0.09, 1.22), (0.09, 1.25), (0.0, 1.26)], 8);
     oil_lamp(b, p + Vec3::Y * 1.38);
     if light {
-        b.lamp(
-            p + Vec3::Y * 1.55,
-            Color::srgb(1.0, 0.68, 0.38),
-            2_500.0,
-            5.5,
-        );
+        b.lamp(p + Vec3::Y * 1.55, Color::srgb(1.0, 0.68, 0.38), 2_500.0, 5.5);
     }
 }
 
 /// Глиняный светильник с огоньком.
 pub fn oil_lamp(b: &mut Builder, p: Vec3) {
-    b.mesh(Mat::Ceramic).lathe(
-        p,
-        &[
-            (0.0, 0.0),
-            (0.05, 0.0),
-            (0.06, 0.02),
-            (0.05, 0.035),
-            (0.0, 0.04),
-        ],
-        8,
-    );
-    b.mesh(Mat::Ceramic).cuboid(
-        p + Vec3::new(0.04, 0.0, -0.015),
-        p + Vec3::new(0.09, 0.03, 0.015),
-    );
-    b.mesh(Mat::Coals).lathe(
-        p + Vec3::new(0.085, 0.03, 0.0),
-        &[(0.0, 0.0), (0.01, 0.01), (0.0, 0.04)],
-        4,
-    );
+    b.mesh(Mat::Ceramic).lathe(p, &[(0.0, 0.0), (0.05, 0.0), (0.06, 0.02), (0.05, 0.035), (0.0, 0.04)], 8);
+    b.mesh(Mat::Ceramic).cuboid(p + Vec3::new(0.04, 0.0, -0.015), p + Vec3::new(0.09, 0.03, 0.015));
+    b.mesh(Mat::Coals).lathe(p + Vec3::new(0.085, 0.03, 0.0), &[(0.0, 0.0), (0.01, 0.01), (0.0, 0.04)], 4);
 }
 
 /// Ковёр или циновка.
@@ -494,14 +308,8 @@ pub fn rug(b: &mut Builder, f: Rect, mat: Mat) {
     if mat == Mat::Rug {
         // Кайма.
         let i = f.inset(0.12);
-        b.mesh(Mat::Cloth).cuboid(
-            Vec3::new(i.x0, 0.0, i.z0),
-            Vec3::new(i.x1, 0.022, i.z0 + 0.06),
-        );
-        b.mesh(Mat::Cloth).cuboid(
-            Vec3::new(i.x0, 0.0, i.z1 - 0.06),
-            Vec3::new(i.x1, 0.022, i.z1),
-        );
+        b.mesh(Mat::Cloth).cuboid(Vec3::new(i.x0, 0.0, i.z0), Vec3::new(i.x1, 0.022, i.z0 + 0.06));
+        b.mesh(Mat::Cloth).cuboid(Vec3::new(i.x0, 0.0, i.z1 - 0.06), Vec3::new(i.x1, 0.022, i.z1));
     }
 }
 
@@ -509,32 +317,17 @@ pub fn rug(b: &mut Builder, f: Rect, mat: Mat) {
 pub fn wall_cross(b: &mut Builder, p: Vec3, out: Vec3) {
     let side = Vec3::new(out.z, 0.0, out.x).abs();
     let m = b.mesh(Mat::Wood);
-    m.cuboid(
-        p - side * 0.03 + Vec3::Y * -0.3,
-        p + side * 0.03 + out * 0.04 + Vec3::Y * 0.3,
-    );
-    m.cuboid(
-        p - side * 0.2 + Vec3::Y * 0.08,
-        p + side * 0.2 + out * 0.04 + Vec3::Y * 0.14,
-    );
+    m.cuboid(p - side * 0.03 + Vec3::Y * -0.3, p + side * 0.03 + out * 0.04 + Vec3::Y * 0.3);
+    m.cuboid(p - side * 0.2 + Vec3::Y * 0.08, p + side * 0.2 + out * 0.04 + Vec3::Y * 0.14);
 }
 
 /// Колышки с плащом и сумкой на стене.
 pub fn pegs(b: &mut Builder, p: Vec3, out: Vec3, mat: Mat) {
     let side = Vec3::new(out.z, 0.0, out.x).abs();
-    b.mesh(Mat::Wood).cuboid(
-        p - side * 0.5 - Vec3::Y * 0.03,
-        p + side * 0.5 + out * 0.08 + Vec3::Y * 0.03,
-    );
+    b.mesh(Mat::Wood).cuboid(p - side * 0.5 - Vec3::Y * 0.03, p + side * 0.5 + out * 0.08 + Vec3::Y * 0.03);
     let c = b.mesh(mat);
-    c.cuboid(
-        p - side * 0.35 + out * 0.03 - Vec3::Y * 1.0,
-        p - side * 0.0 + out * 0.09,
-    );
-    b.mesh(Mat::Felt).cuboid(
-        p + side * 0.15 + out * 0.03 - Vec3::Y * 0.4,
-        p + side * 0.4 + out * 0.14,
-    );
+    c.cuboid(p - side * 0.35 + out * 0.03 - Vec3::Y * 1.0, p - side * 0.0 + out * 0.09);
+    b.mesh(Mat::Felt).cuboid(p + side * 0.15 + out * 0.03 - Vec3::Y * 0.4, p + side * 0.4 + out * 0.14);
 }
 
 /// Связки чеснока, лука и сушёных трав под потолком.
@@ -542,19 +335,9 @@ pub fn hanging_bunches(b: &mut Builder, a: Vec3, c: Vec3, n: usize) {
     b.mesh(Mat::Wood).beam(a, c, 0.025, 0.025, Vec3::Y);
     for k in 0..n {
         let q = a + (c - a) * ((k as f32 + 0.5) / n as f32);
-        let mat = [
-            Mat::HerbGreen,
-            Mat::Plaster,
-            Mat::HerbSilver,
-            Mat::PetalYellow,
-        ][k % 4];
-        b.mesh(Mat::Canvas)
-            .beam(q, q - Vec3::Y * 0.25, 0.006, 0.006, Vec3::X);
-        b.mesh(mat).lathe(
-            q - Vec3::Y * 0.55,
-            &[(0.0, 0.0), (0.07, 0.08), (0.05, 0.25), (0.0, 0.3)],
-            6,
-        );
+        let mat = [Mat::HerbGreen, Mat::Plaster, Mat::HerbSilver, Mat::PetalYellow][k % 4];
+        b.mesh(Mat::Canvas).beam(q, q - Vec3::Y * 0.25, 0.006, 0.006, Vec3::X);
+        b.mesh(mat).lathe(q - Vec3::Y * 0.55, &[(0.0, 0.0), (0.07, 0.08), (0.05, 0.25), (0.0, 0.3)], 6);
     }
 }
 
@@ -563,80 +346,29 @@ pub fn tripod_cauldron(b: &mut Builder, p: Vec3) {
     let m = b.mesh(Mat::Iron);
     for k in 0..3 {
         let a = k as f32 * std::f32::consts::TAU / 3.0;
-        m.beam(
-            p + Vec3::new(a.cos() * 0.55, 0.0, a.sin() * 0.55),
-            p + Vec3::Y * 1.1,
-            0.015,
-            0.015,
-            Vec3::Y,
-        );
+        m.beam(p + Vec3::new(a.cos() * 0.55, 0.0, a.sin() * 0.55), p + Vec3::Y * 1.1, 0.015, 0.015, Vec3::Y);
     }
     m.beam(p + Vec3::Y * 1.1, p + Vec3::Y * 0.75, 0.008, 0.008, Vec3::X);
-    b.mesh(Mat::Bronze).lathe(
-        p + Vec3::Y * 0.4,
-        &[
-            (0.0, 0.0),
-            (0.2, 0.03),
-            (0.26, 0.18),
-            (0.24, 0.34),
-            (0.22, 0.34),
-            (0.22, 0.3),
-        ],
-        12,
-    );
+    b.mesh(Mat::Bronze).lathe(p + Vec3::Y * 0.4, &[(0.0, 0.0), (0.2, 0.03), (0.26, 0.18), (0.24, 0.34), (0.22, 0.34), (0.22, 0.3)], 12);
 }
 
 /// Мешки с зерном, мукой или шерстью.
 pub fn sacks(b: &mut Builder, f: Rect, rng: &mut Rng) {
     let along_x = f.w() > f.d();
-    let n = ((if along_x { f.w() } else { f.d() }) / 0.55)
-        .floor()
-        .max(1.0) as usize;
+    let n = ((if along_x { f.w() } else { f.d() }) / 0.55).floor().max(1.0) as usize;
     for k in 0..n {
         let t = (k as f32 + 0.5) / n as f32;
-        let p = if along_x {
-            Vec3::new(f.x0 + f.w() * t, 0.0, f.cz())
-        } else {
-            Vec3::new(f.cx(), 0.0, f.z0 + f.d() * t)
-        };
+        let p = if along_x { Vec3::new(f.x0 + f.w() * t, 0.0, f.cz()) } else { Vec3::new(f.cx(), 0.0, f.z0 + f.d() * t) };
         let h = rng.range(0.55, 0.8);
-        b.mesh(Mat::Canvas).lathe(
-            p,
-            &[
-                (0.0, 0.0),
-                (0.2, 0.0),
-                (0.26, h * 0.4),
-                (0.22, h * 0.85),
-                (0.1, h),
-                (0.0, h),
-            ],
-            8,
-        );
+        b.mesh(Mat::Canvas).lathe(p, &[(0.0, 0.0), (0.2, 0.0), (0.26, h * 0.4), (0.22, h * 0.85), (0.1, h), (0.0, h)], 8);
     }
     b.invisible.push(Aabb::new(f.min3(0.0), f.max3(0.7)));
 }
 
 /// Глиняная гидрия (вода) с черпаком.
 pub fn hydria(b: &mut Builder, p: Vec3) {
-    b.mesh(Mat::Ceramic).lathe(
-        p,
-        &[
-            (0.0, 0.0),
-            (0.12, 0.0),
-            (0.22, 0.2),
-            (0.24, 0.4),
-            (0.16, 0.58),
-            (0.09, 0.64),
-            (0.11, 0.7),
-            (0.0, 0.7),
-        ],
-        12,
-    );
-    kit::hidden(
-        b,
-        p - Vec3::new(0.22, 0.0, 0.22),
-        p + Vec3::new(0.22, 0.7, 0.22),
-    );
+    b.mesh(Mat::Ceramic).lathe(p, &[(0.0, 0.0), (0.12, 0.0), (0.22, 0.2), (0.24, 0.4), (0.16, 0.58), (0.09, 0.64), (0.11, 0.7), (0.0, 0.7)], 12);
+    kit::hidden(b, p - Vec3::new(0.22, 0.0, 0.22), p + Vec3::new(0.22, 0.7, 0.22));
 }
 
 /// Посуда на столе: миски, кружки, хлеб, кувшин.
@@ -646,43 +378,11 @@ pub fn table_setting(b: &mut Builder, f: Rect, y: f32, rng: &mut Rng) {
     let n = (len / 0.45).floor().max(1.0) as usize;
     for k in 0..n {
         let t = (k as f32 + 0.5) / n as f32;
-        let p = if along_x {
-            Vec3::new(
-                f.x0 + f.w() * t,
-                y,
-                f.cz() + if k % 2 == 0 { -0.12 } else { 0.12 },
-            )
-        } else {
-            Vec3::new(
-                f.cx() + if k % 2 == 0 { -0.12 } else { 0.12 },
-                y,
-                f.z0 + f.d() * t,
-            )
-        };
+        let p = if along_x { Vec3::new(f.x0 + f.w() * t, y, f.cz() + if k % 2 == 0 { -0.12 } else { 0.12 }) } else { Vec3::new(f.cx() + if k % 2 == 0 { -0.12 } else { 0.12 }, y, f.z0 + f.d() * t) };
         match rng.int(4) {
-            0 => b.mesh(Mat::Ceramic).lathe(
-                p,
-                &[
-                    (0.0, 0.0),
-                    (0.06, 0.0),
-                    (0.11, 0.04),
-                    (0.1, 0.045),
-                    (0.0, 0.02),
-                ],
-                10,
-            ),
+            0 => b.mesh(Mat::Ceramic).lathe(p, &[(0.0, 0.0), (0.06, 0.0), (0.11, 0.04), (0.1, 0.045), (0.0, 0.02)], 10),
             1 => kit::jug(b, p, 0.12, Mat::Ceramic),
-            2 => b.mesh(Mat::Thatch).lathe(
-                p,
-                &[
-                    (0.0, 0.0),
-                    (0.1, 0.0),
-                    (0.1, 0.04),
-                    (0.06, 0.08),
-                    (0.0, 0.09),
-                ],
-                8,
-            ),
+            2 => b.mesh(Mat::Thatch).lathe(p, &[(0.0, 0.0), (0.1, 0.0), (0.1, 0.04), (0.06, 0.08), (0.0, 0.09)], 8),
             _ => kit::jug(b, p, 0.24, Mat::Ceramic),
         }
     }
@@ -697,19 +397,12 @@ pub fn workbench(b: &mut Builder, f: Rect, tools: Mat) {
     let m = b.mesh(tools);
     for k in 0..4 {
         let t = (k as f32 + 0.5) / 4.0 * 0.8 + 0.1;
-        let p = if along_x {
-            Vec3::new(f.x0 + f.w() * t, 0.85, f.cz())
-        } else {
-            Vec3::new(f.cx(), 0.85, f.z0 + f.d() * t)
-        };
+        let p = if along_x { Vec3::new(f.x0 + f.w() * t, 0.85, f.cz()) } else { Vec3::new(f.cx(), 0.85, f.z0 + f.d() * t) };
         let dir = if along_x { Vec3::Z } else { Vec3::X };
         m.beam(p - dir * 0.12, p + dir * 0.12, 0.015, 0.01, Vec3::Y);
     }
     let _ = len;
-    b.mesh(Mat::Thatch).cuboid(
-        f.center(0.0) - Vec3::new(0.3, 0.0, 0.3),
-        f.center(0.0) + Vec3::new(0.3, 0.03, 0.3),
-    );
+    b.mesh(Mat::Thatch).cuboid(f.center(0.0) - Vec3::new(0.3, 0.0, 0.3), f.center(0.0) + Vec3::new(0.3, 0.03, 0.3));
 }
 
 /// Пюпитр-стол с раскрытым кодексом, чернильницей и стилями.
@@ -717,26 +410,10 @@ pub fn desk_codex(b: &mut Builder, f: Rect) {
     kit::table(b, f, 0.8);
     let c = f.center(0.8);
     let m = b.mesh(Mat::Wood);
-    m.cuboid(
-        c + Vec3::new(-0.2, 0.0, -0.15),
-        c + Vec3::new(0.2, 0.02, 0.15),
-    );
-    b.mesh(Mat::Canvas).cuboid(
-        c + Vec3::new(-0.18, 0.02, -0.13),
-        c + Vec3::new(0.18, 0.045, 0.13),
-    );
-    b.mesh(Mat::Bronze).lathe(
-        c + Vec3::new(0.3, 0.0, 0.1),
-        &[(0.0, 0.0), (0.035, 0.0), (0.035, 0.05), (0.01, 0.06)],
-        8,
-    );
-    b.mesh(Mat::Wood).beam(
-        c + Vec3::new(0.25, 0.01, -0.1),
-        c + Vec3::new(0.4, 0.01, -0.05),
-        0.006,
-        0.006,
-        Vec3::Y,
-    );
+    m.cuboid(c + Vec3::new(-0.2, 0.0, -0.15), c + Vec3::new(0.2, 0.02, 0.15));
+    b.mesh(Mat::Canvas).cuboid(c + Vec3::new(-0.18, 0.02, -0.13), c + Vec3::new(0.18, 0.045, 0.13));
+    b.mesh(Mat::Bronze).lathe(c + Vec3::new(0.3, 0.0, 0.1), &[(0.0, 0.0), (0.035, 0.0), (0.035, 0.05), (0.01, 0.06)], 8);
+    b.mesh(Mat::Wood).beam(c + Vec3::new(0.25, 0.01, -0.1), c + Vec3::new(0.4, 0.01, -0.05), 0.006, 0.006, Vec3::Y);
 }
 
 /// Стойка с копьями и щитом.
@@ -746,27 +423,13 @@ pub fn weapon_rack(b: &mut Builder, f: Rect, side: Side) {
     let len = if side.along_x() { f.w() } else { f.d() };
     let c = f.center(0.0);
     let m = b.mesh(Mat::Wood);
-    m.beam(
-        c - along * len * 0.45 + Vec3::Y * 1.2,
-        c + along * len * 0.45 + Vec3::Y * 1.2,
-        0.03,
-        0.03,
-        Vec3::Y,
-    );
-    m.beam(
-        c - along * len * 0.45 + Vec3::Y * 0.2,
-        c + along * len * 0.45 + Vec3::Y * 0.2,
-        0.03,
-        0.03,
-        Vec3::Y,
-    );
+    m.beam(c - along * len * 0.45 + Vec3::Y * 1.2, c + along * len * 0.45 + Vec3::Y * 1.2, 0.03, 0.03, Vec3::Y);
+    m.beam(c - along * len * 0.45 + Vec3::Y * 0.2, c + along * len * 0.45 + Vec3::Y * 0.2, 0.03, 0.03, Vec3::Y);
     let k = (len / 0.25) as usize;
     for i in 0..k {
         let q = c - along * len * 0.4 + along * (i as f32 * 0.25);
-        b.mesh(Mat::Wood)
-            .beam(q, q + Vec3::Y * 2.4 - n * 0.1, 0.015, 0.015, Vec3::X);
-        b.mesh(Mat::Iron)
-            .spire(q + Vec3::Y * 2.4 - n * 0.1, 0.035, 0.22, 4);
+        b.mesh(Mat::Wood).beam(q, q + Vec3::Y * 2.4 - n * 0.1, 0.015, 0.015, Vec3::X);
+        b.mesh(Mat::Iron).spire(q + Vec3::Y * 2.4 - n * 0.1, 0.035, 0.22, 4);
     }
     kit::hidden(b, f.min3(0.0), f.max3(2.4));
 }
@@ -776,48 +439,16 @@ pub fn potter_wheel(b: &mut Builder, p: Vec3) {
     let m = b.mesh(Mat::Wood);
     m.lathe(p, &[(0.0, 0.0), (0.4, 0.0), (0.4, 0.08), (0.0, 0.08)], 14);
     m.beam(p + Vec3::Y * 0.08, p + Vec3::Y * 0.7, 0.03, 0.03, Vec3::X);
-    m.lathe(
-        p + Vec3::Y * 0.7,
-        &[(0.0, 0.0), (0.22, 0.0), (0.22, 0.04), (0.0, 0.04)],
-        12,
-    );
-    b.mesh(Mat::Ceramic).lathe(
-        p + Vec3::Y * 0.74,
-        &[
-            (0.0, 0.0),
-            (0.1, 0.0),
-            (0.12, 0.12),
-            (0.08, 0.22),
-            (0.09, 0.25),
-        ],
-        10,
-    );
-    kit::hidden(
-        b,
-        p - Vec3::new(0.4, 0.0, 0.4),
-        p + Vec3::new(0.4, 0.8, 0.4),
-    );
+    m.lathe(p + Vec3::Y * 0.7, &[(0.0, 0.0), (0.22, 0.0), (0.22, 0.04), (0.0, 0.04)], 12);
+    b.mesh(Mat::Ceramic).lathe(p + Vec3::Y * 0.74, &[(0.0, 0.0), (0.1, 0.0), (0.12, 0.12), (0.08, 0.22), (0.09, 0.25)], 10);
+    kit::hidden(b, p - Vec3::new(0.4, 0.0, 0.4), p + Vec3::new(0.4, 0.8, 0.4));
 }
 
 /// Жаровня (переносной очаг из меди) с углями.
 pub fn brazier(b: &mut Builder, p: Vec3) {
-    b.mesh(Mat::Bronze).lathe(
-        p,
-        &[
-            (0.08, 0.0),
-            (0.05, 0.35),
-            (0.28, 0.45),
-            (0.3, 0.55),
-            (0.0, 0.5),
-        ],
-        12,
-    );
+    b.mesh(Mat::Bronze).lathe(p, &[(0.08, 0.0), (0.05, 0.35), (0.28, 0.45), (0.3, 0.55), (0.0, 0.5)], 12);
     b.mesh(Mat::Coals).disc(p + Vec3::Y * 0.54, 0.26, 10, true);
-    kit::hidden(
-        b,
-        p - Vec3::new(0.28, 0.0, 0.28),
-        p + Vec3::new(0.28, 0.55, 0.28),
-    );
+    kit::hidden(b, p - Vec3::new(0.28, 0.0, 0.28), p + Vec3::new(0.28, 0.55, 0.28));
 }
 
 /// Бельевая верёвка через двор с простынями и туникой.
@@ -826,8 +457,7 @@ pub fn washing_line(b: &mut Builder, a: Vec3, c: Vec3, rng: &mut Rng) {
     for q in [a, c] {
         m.beam(q, q + Vec3::Y * 2.2, 0.04, 0.04, Vec3::X);
     }
-    b.mesh(Mat::Canvas)
-        .beam(a + Vec3::Y * 2.1, c + Vec3::Y * 2.1, 0.006, 0.006, Vec3::Y);
+    b.mesh(Mat::Canvas).beam(a + Vec3::Y * 2.1, c + Vec3::Y * 2.1, 0.006, 0.006, Vec3::Y);
     let len = a.distance(c);
     let dir = (c - a) / len;
     let mut s = 0.4;
@@ -838,33 +468,17 @@ pub fn washing_line(b: &mut Builder, a: Vec3, c: Vec3, rng: &mut Rng) {
         let mat = [Mat::Canvas, Mat::Cloth, Mat::Canvas, Mat::Rug][rng.int(4)];
         let drop = rng.range(0.6, 1.1);
         let n = Vec3::new(-dir.z, 0.0, dir.x);
-        b.mesh(mat)
-            .quad([p0, p1, p1 - Vec3::Y * drop, p0 - Vec3::Y * drop], n);
-        b.mesh(mat)
-            .quad([p1, p0, p0 - Vec3::Y * drop, p1 - Vec3::Y * drop], -n);
+        b.mesh(mat).quad([p0, p1, p1 - Vec3::Y * drop, p0 - Vec3::Y * drop], n);
+        b.mesh(mat).quad([p1, p0, p0 - Vec3::Y * drop, p1 - Vec3::Y * drop], -n);
         s += w + 0.3;
     }
 }
 
 /// Деревянная лохань (стирка, мытьё).
 pub fn tub(b: &mut Builder, p: Vec3) {
-    b.mesh(Mat::Wood).lathe(
-        p,
-        &[
-            (0.0, 0.0),
-            (0.35, 0.0),
-            (0.42, 0.4),
-            (0.38, 0.4),
-            (0.32, 0.06),
-        ],
-        12,
-    );
+    b.mesh(Mat::Wood).lathe(p, &[(0.0, 0.0), (0.35, 0.0), (0.42, 0.4), (0.38, 0.4), (0.32, 0.06)], 12);
     b.mesh(Mat::Water).disc(p + Vec3::Y * 0.3, 0.38, 10, true);
-    kit::hidden(
-        b,
-        p - Vec3::new(0.4, 0.0, 0.4),
-        p + Vec3::new(0.4, 0.4, 0.4),
-    );
+    kit::hidden(b, p - Vec3::new(0.4, 0.0, 0.4), p + Vec3::new(0.4, 0.4, 0.4));
 }
 
 // ---------------------------------------------------------------------------
@@ -898,14 +512,7 @@ pub enum Trade {
 
 impl Trade {
     pub fn pick(rng: &mut Rng) -> Self {
-        [
-            Trade::Cobbler,
-            Trade::Carpenter,
-            Trade::Potter,
-            Trade::Netmaker,
-            Trade::Metalworker,
-            Trade::Dyer,
-        ][rng.int(6)]
+        [Trade::Cobbler, Trade::Carpenter, Trade::Potter, Trade::Netmaker, Trade::Metalworker, Trade::Dyer][rng.int(6)]
     }
 }
 
@@ -920,21 +527,11 @@ pub struct Household {
 
 impl Household {
     pub fn new() -> Self {
-        Household {
-            wife: false,
-            master: false,
-            child: false,
-            craft: false,
-        }
+        Household { wife: false, master: false, child: false, craft: false }
     }
     /// Никого не ставить (горница, служебные помещения).
     pub fn full() -> Self {
-        Household {
-            wife: true,
-            master: true,
-            child: true,
-            craft: true,
-        }
+        Household { wife: true, master: true, child: true, craft: true }
     }
 }
 
@@ -945,16 +542,8 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
         return;
     }
     let mut room = Room::new(b, r);
-    let long = if r.w() > r.d() {
-        [Side::N, Side::S, Side::W, Side::E]
-    } else {
-        [Side::W, Side::E, Side::N, Side::S]
-    };
-    let short = if r.w() > r.d() {
-        [Side::W, Side::E, Side::N, Side::S]
-    } else {
-        [Side::N, Side::S, Side::W, Side::E]
-    };
+    let long = if r.w() > r.d() { [Side::N, Side::S, Side::W, Side::E] } else { [Side::W, Side::E, Side::N, Side::S] };
+    let short = if r.w() > r.d() { [Side::W, Side::E, Side::N, Side::S] } else { [Side::N, Side::S, Side::W, Side::E] };
     let all = [Side::N, Side::E, Side::S, Side::W];
     let c = r.center(0.0);
     let wealth = b.wealth;
@@ -982,22 +571,11 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             if let Some((f, s)) = room.take(1.6, 0.35, &long, rng) {
                 let mut rr = Rng::new(rng.int(9999) as u32);
                 kit::shelf(b, f, 2, &mut rr, Mat::Ceramic);
-                hanging_bunches(
-                    b,
-                    f.center(2.5) + inward(s) * 0.25 - axis(s) * 0.7,
-                    f.center(2.5) + inward(s) * 0.25 + axis(s) * 0.7,
-                    5,
-                );
+                hanging_bunches(b, f.center(2.5) + inward(s) * 0.25 - axis(s) * 0.7, f.center(2.5) + inward(s) * 0.25 + axis(s) * 0.7, 5);
             }
             // Полка с посудой и припасами (вещи хозяев).
             let herb = ["Сушёный чабрец", "Сушёная мята", "Сушёный шалфей"][rng.int(3)];
-            let mut upper = vec![
-                Ware::Bowls,
-                one(cozy::CUP),
-                Ware::Jug(0.22),
-                one(cozy::LAMP),
-                one(herb),
-            ];
+            let mut upper = vec![Ware::Bowls, one(cozy::CUP), Ware::Jug(0.22), one(cozy::LAMP), one(herb)];
             let mut lower = vec![one("Глиняный горшок"), Ware::Pot, one(cozy::BOWL)];
             if rng.chance(0.5) {
                 lower.push(one("Горшок мёда"));
@@ -1018,14 +596,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                 hydria(b, f.center(0.0));
             }
             if let Some((f, _)) = room.take(0.6, 0.6, &all, rng) {
-                basket(
-                    b,
-                    f.center(0.0),
-                    0.25,
-                    0.4,
-                    Mat::HerbGreen,
-                    Some("Корзина с припасами"),
-                );
+                basket(b, f.center(0.0), 0.25, 0.4, Mat::HerbGreen, Some("Корзина с припасами"));
             }
             if let Some((f, _)) = room.take(0.6, 0.6, &all, rng) {
                 cozy::amphora_ring(b, f.center(0.0), rng);
@@ -1033,12 +604,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             // Рабочий стол: нож, хлеб, рыба, ступка.
             if let Some((f, _)) = room.take(1.2, 0.55, &all, rng) {
                 kit::table(b, f, 0.75);
-                let mut w = vec![
-                    one(cozy::KNIFE),
-                    one(cozy::BREAD),
-                    one(cozy::BOWL),
-                    Ware::Fruit([Mat::PetalYellow, Mat::PetalRed, Mat::HerbGreen][rng.int(3)]),
-                ];
+                let mut w = vec![one(cozy::KNIFE), one(cozy::BREAD), one(cozy::BOWL), Ware::Fruit([Mat::PetalYellow, Mat::PetalRed, Mat::HerbGreen][rng.int(3)])];
                 if rng.chance(0.6) {
                     w.push(one("Солёная рыба"));
                 }
@@ -1065,16 +631,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                 cozy::hanging_fish(b, p - axis(s) * 0.6, p + axis(s) * 0.6, 4);
             }
             if !people.wife {
-                people.wife = room.resident(
-                    b,
-                    c,
-                    c + Vec3::X,
-                    if rng.chance(0.3) {
-                        Role::Cook
-                    } else {
-                        Role::Housewife
-                    },
-                );
+                people.wife = room.resident(b, c, c + Vec3::X, if rng.chance(0.3) { Role::Cook } else { Role::Housewife });
             }
         }
         Kind::Bedroom => {
@@ -1092,17 +649,12 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             }
             // Сандалии у ложа и ночной горшок.
             for (f, s) in &beds {
-                let edge = f.center(0.0)
-                    + inward(*s) * ((if s.along_x() { f.d() } else { f.w() }) / 2.0 + 0.2);
+                let edge = f.center(0.0) + inward(*s) * ((if s.along_x() { f.d() } else { f.w() }) / 2.0 + 0.2);
                 if rng.chance(0.7) {
                     cozy::sandals(b, edge + axis(*s) * 0.3, inward(*s));
                 }
                 if rng.chance(0.35) {
-                    cozy::chamber_pot(
-                        b,
-                        f.center(0.0)
-                            - axis(*s) * ((if s.along_x() { f.w() } else { f.d() }) / 2.0 - 0.25),
-                    );
+                    cozy::chamber_pot(b, f.center(0.0) - axis(*s) * ((if s.along_x() { f.w() } else { f.d() }) / 2.0 - 0.25));
                 }
             }
             if let Some((f, _)) = room.take(1.0, 0.6, &all, rng) {
@@ -1129,17 +681,9 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                     w.push(one(cozy::AMPULLA));
                 }
                 if wealth >= 2 && rng.chance(0.5) {
-                    w.push(one([
-                        "Серебряный перстень",
-                        "Бронзовая фибула",
-                        cozy::ENKOLPION,
-                    ][rng.int(3)]));
+                    w.push(one(["Серебряный перстень", "Бронзовая фибула", cozy::ENKOLPION][rng.int(3)]));
                 } else if rng.chance(0.2) {
-                    w.push(one([
-                        "Нательный крест",
-                        "Бронзовая фибула",
-                        "Бронзовая пряжка",
-                    ][rng.int(3)]));
+                    w.push(one(["Нательный крест", "Бронзовая фибула", "Бронзовая пряжка"][rng.int(3)]));
                 }
                 cozy::lay(b, f.inset(0.03), 0.55, &w, rng);
             }
@@ -1155,16 +699,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                 stool(b, f.center(0.0));
             }
             if let Some((f, s)) = room.take(1.0, 0.15, &all, rng) {
-                pegs(
-                    b,
-                    f.center(1.9) - inward(s) * 0.07,
-                    inward(s),
-                    if rng.chance(0.5) {
-                        Mat::Cloth
-                    } else {
-                        Mat::Felt
-                    },
-                );
+                pegs(b, f.center(1.9) - inward(s) * 0.07, inward(s), if rng.chance(0.5) { Mat::Cloth } else { Mat::Felt });
             }
             if rng.chance(0.45) {
                 let mut upper = vec![Ware::Jug(0.2), one(cozy::AMPULLA)];
@@ -1178,8 +713,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             }
             // Завеса над ложем.
             if let Some((f, s)) = beds.first().copied().filter(|_| rng.chance(0.55)) {
-                let p = f.center(1.55)
-                    - inward(s) * ((if s.along_x() { f.d() } else { f.w() }) / 2.0 - 0.02);
+                let p = f.center(1.55) - inward(s) * ((if s.along_x() { f.d() } else { f.w() }) / 2.0 - 0.02);
                 cozy::wall_hanging(b, p, inward(s), 1.3, 0.9, rng);
             } else if let Some(s) = all.get(rng.int(4)) {
                 let p = wall_point(r, *s, 2.2);
@@ -1187,15 +721,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             }
             let cr = r.inset(0.9);
             if cr.w() > 0.8 && cr.d() > 0.8 {
-                rug(
-                    b,
-                    cr,
-                    if rng.chance(0.5) {
-                        Mat::Rug
-                    } else {
-                        Mat::Thatch
-                    },
-                );
+                rug(b, cr, if rng.chance(0.5) { Mat::Rug } else { Mat::Thatch });
             }
             // Детский угол: лошадка, кости, мяч; у самых маленьких — люлька.
             if rng.chance(0.45)
@@ -1224,23 +750,11 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             }
             if let Some((f, _)) = room.take(1.4, 0.5, &all, rng) {
                 for k in 0..3 {
-                    kit::amphora(
-                        b,
-                        f.center(0.0) + axis_of(&f) * (k as f32 - 1.0) * 0.45,
-                        1.0,
-                        rng.int(3) as u32,
-                    );
+                    kit::amphora(b, f.center(0.0) + axis_of(&f) * (k as f32 - 1.0) * 0.45, 1.0, rng.int(3) as u32);
                 }
             }
             if let Some((f, _)) = room.take(0.6, 0.6, &all, rng) {
-                basket(
-                    b,
-                    f.center(0.0),
-                    0.28,
-                    0.45,
-                    Mat::PetalYellow,
-                    Some("Корзина"),
-                );
+                basket(b, f.center(0.0), 0.28, 0.45, Mat::PetalYellow, Some("Корзина"));
             }
             if let Some((f, _)) = room.take(1.0, 0.6, &all, rng) {
                 b.loot(LootTableId::Storehouse);
@@ -1249,11 +763,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             // Помост с припасами: мёд, воск, масло, рыба, соль.
             if let Some((f, _)) = room.take(1.5, 0.45, &all, rng) {
                 kit::bench(b, f);
-                let mut w = vec![
-                    one(["Кувшин вина", "Кувшин оливкового масла"][rng.int(2)]),
-                    one("Солёная рыба"),
-                    one(cozy::FIGS),
-                ];
+                let mut w = vec![one(["Кувшин вина", "Кувшин оливкового масла"][rng.int(2)]), one("Солёная рыба"), one(cozy::FIGS)];
                 if rng.chance(0.5) {
                     w.push(one("Горшок мёда"));
                 }
@@ -1284,14 +794,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                 }
             }
             if let Some((f, _)) = room.take(0.6, 0.6, &all, rng) {
-                basket(
-                    b,
-                    f.center(0.0),
-                    0.28,
-                    0.4,
-                    Mat::Felt,
-                    Some("Корзина с шерстью"),
-                );
+                basket(b, f.center(0.0), 0.28, 0.4, Mat::Felt, Some("Корзина с шерстью"));
             }
             if let Some((f, _)) = room.take(0.5, 0.5, &all, rng) {
                 basket(b, f.center(0.0), 0.2, 0.3, Mat::Canvas, None);
@@ -1302,12 +805,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             // Скамья с пряжей, веретёнами и ножницами.
             if let Some((f, _)) = room.take(1.3, 0.4, &all, rng) {
                 kit::bench(b, f);
-                let mut w = vec![
-                    one(cozy::YARN),
-                    one(cozy::SPINDLE),
-                    one(cozy::YARN),
-                    one(cozy::SHEARS),
-                ];
+                let mut w = vec![one(cozy::YARN), one(cozy::SPINDLE), one(cozy::YARN), one(cozy::SHEARS)];
                 if rng.chance(0.5) {
                     w.push(one(cozy::SPINDLE));
                 }
@@ -1332,11 +830,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             }
             // Стол посередине, если комната позволяет, иначе — у стены.
             let t = Rect::new(c.x - 0.7, c.z - 0.4, c.x + 0.7, c.z + 0.4);
-            let t = if r.w() < r.d() {
-                Rect::new(c.x - 0.4, c.z - 0.7, c.x + 0.4, c.z + 0.7)
-            } else {
-                t
-            };
+            let t = if r.w() < r.d() { Rect::new(c.x - 0.4, c.z - 0.7, c.x + 0.4, c.z + 0.7) } else { t };
             let table = if room.free(t.inset(-0.6)) {
                 room.reserve(t.inset(-0.3));
                 Some(t)
@@ -1347,24 +841,14 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                 kit::table(b, t, 0.72);
                 // Льняная скатерть и всё, что на столе.
                 let cloth = t.inset(0.1);
-                b.mesh(if rng.chance(0.6) {
-                    Mat::PetalWhite
-                } else {
-                    Mat::Canvas
-                })
-                .cuboid(cloth.min3(0.72), cloth.max3(0.725));
+                b.mesh(if rng.chance(0.6) { Mat::PetalWhite } else { Mat::Canvas }).cuboid(cloth.min3(0.72), cloth.max3(0.725));
                 let w = cozy::table_wares(wealth, rng);
                 cozy::lay(b, t.inset(0.06), 0.725, &w, rng);
                 for (k, s) in [Side::N, Side::S, Side::W, Side::E].into_iter().enumerate() {
-                    let p = t.center(0.0)
-                        + s.out() * (if s.along_x() { t.d() } else { t.w() } / 2.0 + 0.35);
+                    let p = t.center(0.0) + s.out() * (if s.along_x() { t.d() } else { t.w() } / 2.0 + 0.35);
                     let foot = Rect::new(p.x - 0.2, p.z - 0.2, p.x + 0.2, p.z + 0.2);
                     if room.free(foot) && (k < 2 || rng.chance(0.5)) {
-                        if k == 0 {
-                            chair(b, p, s.out())
-                        } else {
-                            stool(b, p)
-                        }
+                        if k == 0 { chair(b, p, s.out()) } else { stool(b, p) }
                         room.reserve(foot);
                     }
                 }
@@ -1387,12 +871,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             if wealth >= 2 && rng.chance(0.6) {
                 upper.push(one("Стеклянная чаша"));
             }
-            let mut lower = vec![
-                one(cozy::BOWL),
-                one(cozy::CUP),
-                Ware::Jug(0.3),
-                one(cozy::LAMP),
-            ];
+            let mut lower = vec![one(cozy::BOWL), one(cozy::CUP), Ware::Jug(0.3), one(cozy::LAMP)];
             if rng.chance(0.35) {
                 lower.push(one("Кувшин вина"));
             }
@@ -1404,27 +883,14 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                 && let Some((f, _)) = room.take(0.7, 0.6, &all, rng)
             {
                 kit::table(b, f, 0.6);
-                cozy::lay(
-                    b,
-                    f.inset(0.04),
-                    0.6,
-                    &[one(cozy::TABULA), one(cozy::DICE)],
-                    rng,
-                );
+                cozy::lay(b, f.inset(0.04), 0.6, &[one(cozy::TABULA), one(cozy::DICE)], rng);
             }
             if let Some((f, _)) = room.take(0.6, 0.6, &all, rng) {
                 brazier(b, f.center(0.0));
             }
             // Завеса на стене, крест, у зажиточных — икона с лампадкой.
             if let Some((f, s)) = room.take(1.4, 0.1, &all, rng) {
-                cozy::wall_hanging(
-                    b,
-                    f.center(1.7) - inward(s) * 0.05,
-                    inward(s),
-                    1.3,
-                    1.1,
-                    rng,
-                );
+                cozy::wall_hanging(b, f.center(1.7) - inward(s) * 0.05, inward(s), 1.3, 1.1, rng);
             }
             let s = all[rng.int(4)];
             if wealth >= 2 && rng.chance(0.6) {
@@ -1437,17 +903,12 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                 cozy::bracket_lamp(b, wall_point(r, s, 2.0) + axis(s) * 0.9, inward(s));
             }
             if !people.master {
-                people.master =
-                    room.resident(b, c + Vec3::new(0.6, 0.0, 0.6), c, Role::Householder);
+                people.master = room.resident(b, c + Vec3::new(0.6, 0.0, 0.6), c, Role::Householder);
             }
         }
         Kind::Workshop(trade) => {
             b.loot(LootTableId::Workshop);
-            let tools = if matches!(trade, Trade::Metalworker) {
-                Mat::Iron
-            } else {
-                Mat::Bronze
-            };
+            let tools = if matches!(trade, Trade::Metalworker) { Mat::Iron } else { Mat::Bronze };
             let mut bench_at = None;
             if let Some((f, s)) = room.take(1.8, 0.7, &long, rng) {
                 workbench(b, f, tools);
@@ -1455,45 +916,12 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             }
             // Что сделано и чем работают: настоящие вещи на полке мастерской.
             let goods: Vec<Ware> = match trade {
-                Trade::Cobbler => vec![
-                    one("Кожаные сапоги"),
-                    one(cozy::SHEARS),
-                    one("Кожаные сапоги"),
-                    one("Сырая шкура"),
-                ],
-                Trade::Carpenter => vec![
-                    one("Плотничий топор"),
-                    one("Ясеневая заготовка"),
-                    one(cozy::HORSE),
-                    one(cozy::CASKET),
-                ],
-                Trade::Potter => vec![
-                    one(cozy::BOWL),
-                    one(cozy::LAMP),
-                    one(cozy::CUP),
-                    one(cozy::BOWL),
-                    one(cozy::LAMP),
-                    one("Глиняный горшок"),
-                ],
-                Trade::Netmaker => vec![
-                    Ware::Item("Свинцовые грузила", 6),
-                    one("Отрез льна"),
-                    Ware::Item("Свинцовые грузила", 4),
-                ],
-                Trade::Metalworker => vec![
-                    one("Бронзовая пряжка"),
-                    one("Бронзовая фибула"),
-                    one("Бронзовый лом"),
-                    one("Медный лом"),
-                    one(cozy::BRONZE_LAMP),
-                ],
-                Trade::Dyer => vec![
-                    one("Корень марены"),
-                    one("Вайда"),
-                    one("Квасцы"),
-                    one(cozy::YARN),
-                    one(cozy::YARN),
-                ],
+                Trade::Cobbler => vec![one("Кожаные сапоги"), one(cozy::SHEARS), one("Кожаные сапоги"), one("Сырая шкура")],
+                Trade::Carpenter => vec![one("Плотничий топор"), one("Ясеневая заготовка"), one(cozy::HORSE), one(cozy::CASKET)],
+                Trade::Potter => vec![one(cozy::BOWL), one(cozy::LAMP), one(cozy::CUP), one(cozy::BOWL), one(cozy::LAMP), one("Глиняный горшок")],
+                Trade::Netmaker => vec![Ware::Item("Свинцовые грузила", 6), one("Отрез льна"), Ware::Item("Свинцовые грузила", 4)],
+                Trade::Metalworker => vec![one("Бронзовая пряжка"), one("Бронзовая фибула"), one("Бронзовый лом"), one("Медный лом"), one(cozy::BRONZE_LAMP)],
+                Trade::Dyer => vec![one("Корень марены"), one("Вайда"), one("Квасцы"), one(cozy::YARN), one(cozy::YARN)],
             };
             let (upper, lower) = goods.split_at(goods.len() / 2);
             cozy::shelf_unit(b, &mut room, &all, 1.5, upper, lower, rng);
@@ -1518,18 +946,8 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                     }
                     if let Some((f, _)) = room.take(0.5, 0.5, &all, rng) {
                         // Чурбак для рубки с топором.
-                        b.solid(
-                            [f.x0 + 0.05, 0.0, f.z0 + 0.05],
-                            [f.x1 - 0.05, 0.5, f.z1 - 0.05],
-                            Mat::Wood,
-                        );
-                        b.mesh(Mat::Iron).beam(
-                            f.center(0.5),
-                            f.center(0.85) + Vec3::X * 0.1,
-                            0.02,
-                            0.06,
-                            Vec3::Z,
-                        );
+                        b.solid([f.x0 + 0.05, 0.0, f.z0 + 0.05], [f.x1 - 0.05, 0.5, f.z1 - 0.05], Mat::Wood);
+                        b.mesh(Mat::Iron).beam(f.center(0.5), f.center(0.85) + Vec3::X * 0.1, 0.02, 0.06, Vec3::Z);
                     }
                 }
                 Trade::Potter => {
@@ -1546,23 +964,11 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                         let a = f.center(0.3) - axis(s) * 0.8;
                         let m = b.mesh(Mat::Canvas);
                         for k in 0..6 {
-                            m.beam(
-                                a + axis(s) * (k as f32 * 0.32),
-                                a + axis(s) * (k as f32 * 0.32) + Vec3::Y * 1.6,
-                                0.004,
-                                0.004,
-                                inward(s),
-                            );
+                            m.beam(a + axis(s) * (k as f32 * 0.32), a + axis(s) * (k as f32 * 0.32) + Vec3::Y * 1.6, 0.004, 0.004, inward(s));
                         }
                         for k in 0..6 {
                             let y = 0.3 + k as f32 * 0.27;
-                            m.beam(
-                                a + Vec3::Y * y,
-                                a + axis(s) * 1.6 + Vec3::Y * y,
-                                0.004,
-                                0.004,
-                                Vec3::Y,
-                            );
+                            m.beam(a + Vec3::Y * y, a + axis(s) * 1.6 + Vec3::Y * y, 0.004, 0.004, Vec3::Y);
                         }
                     }
                     if let Some((f, _)) = room.take(0.6, 0.6, &all, rng) {
@@ -1575,32 +981,17 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                         b.lamp(f.center(0.8), Color::srgb(1.0, 0.45, 0.15), 2_500.0, 4.0);
                     }
                     if let Some((f, _)) = room.take(0.5, 0.5, &all, rng) {
-                        b.solid(
-                            [f.x0 + 0.05, 0.0, f.z0 + 0.05],
-                            [f.x1 - 0.05, 0.55, f.z1 - 0.05],
-                            Mat::Wood,
-                        );
-                        b.mesh(Mat::Iron).cuboid(
-                            f.center(0.55) - Vec3::new(0.15, 0.0, 0.07),
-                            f.center(0.55) + Vec3::new(0.15, 0.12, 0.07),
-                        );
+                        b.solid([f.x0 + 0.05, 0.0, f.z0 + 0.05], [f.x1 - 0.05, 0.55, f.z1 - 0.05], Mat::Wood);
+                        b.mesh(Mat::Iron).cuboid(f.center(0.55) - Vec3::new(0.15, 0.0, 0.07), f.center(0.55) + Vec3::new(0.15, 0.12, 0.07));
                     }
                 }
                 Trade::Dyer => {
                     for mat in [Mat::Rug, Mat::Cloth, Mat::PetalYellow] {
                         if let Some((f, _)) = room.take(0.8, 0.8, &all, rng) {
                             let p = f.center(0.0);
-                            b.mesh(Mat::Ceramic).lathe(
-                                p,
-                                &[(0.0, 0.0), (0.3, 0.0), (0.36, 0.55), (0.32, 0.58)],
-                                12,
-                            );
+                            b.mesh(Mat::Ceramic).lathe(p, &[(0.0, 0.0), (0.3, 0.0), (0.36, 0.55), (0.32, 0.58)], 12);
                             b.mesh(mat).disc(p + Vec3::Y * 0.5, 0.31, 10, true);
-                            kit::hidden(
-                                b,
-                                p - Vec3::new(0.35, 0.0, 0.35),
-                                p + Vec3::new(0.35, 0.6, 0.35),
-                            );
+                            kit::hidden(b, p - Vec3::new(0.35, 0.0, 0.35), p + Vec3::new(0.35, 0.6, 0.35));
                         }
                     }
                     if let Some((f, s)) = room.take(2.0, 0.1, &all, rng) {
@@ -1635,8 +1026,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                 if let Some((f, s)) = room.take(2.0, 0.95, &long, rng) {
                     bed(b, f, rng);
                     if rng.chance(0.5) {
-                        let edge = f.center(0.0)
-                            + inward(s) * ((if s.along_x() { f.d() } else { f.w() }) / 2.0 + 0.2);
+                        let edge = f.center(0.0) + inward(s) * ((if s.along_x() { f.d() } else { f.w() }) / 2.0 + 0.2);
                         cozy::sandals(b, edge + axis(s) * 0.3, inward(s));
                     }
                 }
@@ -1647,10 +1037,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                     if rng.chance(0.5) {
                         cozy::folded_blankets(b, f.center(0.55), f.w() > f.d(), rng);
                     } else {
-                        let w = [
-                            one(cozy::COMB),
-                            one([cozy::SPINDLE, cozy::LAMP, cozy::MIRROR][rng.int(3)]),
-                        ];
+                        let w = [one(cozy::COMB), one([cozy::SPINDLE, cozy::LAMP, cozy::MIRROR][rng.int(3)])];
                         cozy::lay(b, f.inset(0.08), 0.55, &w, rng);
                     }
                 }
@@ -1663,14 +1050,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             {
                 kit::loom(b, f.center(0.0) - inward(s) * 0.2, s.along_x());
                 if let Some((f, _)) = room.take(0.6, 0.6, &all, rng) {
-                    basket(
-                        b,
-                        f.center(0.0),
-                        0.25,
-                        0.35,
-                        Mat::Felt,
-                        Some("Корзина с пряжей"),
-                    );
+                    basket(b, f.center(0.0), 0.25, 0.35, Mat::Felt, Some("Корзина с пряжей"));
                 }
             }
             for _ in 0..2 {
@@ -1684,14 +1064,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             if rng.chance(0.5)
                 && let Some((f, s)) = room.take(1.3, 0.1, &all, rng)
             {
-                cozy::wall_hanging(
-                    b,
-                    f.center(1.6) - inward(s) * 0.05,
-                    inward(s),
-                    1.2,
-                    0.9,
-                    rng,
-                );
+                cozy::wall_hanging(b, f.center(1.6) - inward(s) * 0.05, inward(s), 1.2, 0.9, rng);
             }
             if rng.chance(0.4)
                 && let Some((f, _)) = room.take(0.7, 0.6, &all, rng)
@@ -1701,11 +1074,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             let k = (r.w().max(r.d()) / 4.0) as usize;
             for i in 0..k {
                 let t = (i as f32 + 0.5) / k as f32;
-                let p = if r.w() > r.d() {
-                    Vec3::new(r.x0 + r.w() * t, 0.0, r.cz())
-                } else {
-                    Vec3::new(r.cx(), 0.0, r.z0 + r.d() * t)
-                };
+                let p = if r.w() > r.d() { Vec3::new(r.x0 + r.w() * t, 0.0, r.cz()) } else { Vec3::new(r.cx(), 0.0, r.z0 + r.d() * t) };
                 let f = Rect::new(p.x - 0.7, p.z - 0.5, p.x + 0.7, p.z + 0.5);
                 if room.free(f) && rng.chance(0.6) {
                     rug(b, f, Mat::Rug);
@@ -1749,32 +1118,15 @@ pub fn shop_extras(b: &mut Builder, r: Rect, taken: &[Rect], keeper: bool, rng: 
         sacks(b, f, rng);
     }
     if let Some((f, _)) = room.take(0.6, 0.6, &all, rng) {
-        basket(
-            b,
-            f.center(0.0),
-            0.26,
-            0.4,
-            [Mat::PetalYellow, Mat::HerbGreen, Mat::Ceramic][rng.int(3)],
-            Some("Корзина с товаром"),
-        );
+        basket(b, f.center(0.0), 0.26, 0.4, [Mat::PetalYellow, Mat::HerbGreen, Mat::Ceramic][rng.int(3)], Some("Корзина с товаром"));
     }
     if let Some((f, _)) = room.take(1.0, 0.6, &all, rng) {
         chest(b, f, "Ларь лавочника");
     }
     // Безмен на прилавке.
     let p = counter.center(1.0);
-    b.mesh(Mat::Bronze).beam(
-        p + Vec3::new(-0.25, 0.25, 0.0),
-        p + Vec3::new(0.25, 0.27, 0.0),
-        0.01,
-        0.01,
-        Vec3::Y,
-    );
-    b.mesh(Mat::Bronze).lathe(
-        p + Vec3::new(0.22, 0.02, 0.0),
-        &[(0.0, 0.0), (0.07, 0.0), (0.07, 0.02)],
-        8,
-    );
+    b.mesh(Mat::Bronze).beam(p + Vec3::new(-0.25, 0.25, 0.0), p + Vec3::new(0.25, 0.27, 0.0), 0.01, 0.01, Vec3::Y);
+    b.mesh(Mat::Bronze).lathe(p + Vec3::new(0.22, 0.02, 0.0), &[(0.0, 0.0), (0.07, 0.0), (0.07, 0.02)], 8);
     if keeper {
         let behind = r.center(0.0);
         room.resident(b, behind, counter.center(0.0), Role::Shopkeeper);
@@ -1783,14 +1135,7 @@ pub fn shop_extras(b: &mut Builder, r: Rect, taken: &[Rect], keeper: bool, rng: 
 
 /// Обитатели и сундуки общественного здания или мастерской: `chests` — подписи сундуков
 /// (добыча — по `table`), `people` — кто стоит и где примерно (точка), лицом к `look`.
-pub fn extras(
-    b: &mut Builder,
-    r: Rect,
-    table: LootTableId,
-    chests: &[&'static str],
-    people: &[(Role, Vec3, Vec3)],
-    rng: &mut Rng,
-) {
+pub fn extras(b: &mut Builder, r: Rect, table: LootTableId, chests: &[&'static str], people: &[(Role, Vec3, Vec3)], rng: &mut Rng) {
     let mut room = Room::new(b, r);
     b.loot(table);
     let all = [Side::N, Side::E, Side::S, Side::W];
@@ -1813,13 +1158,7 @@ pub fn extras(
 }
 
 /// Двор усадьбы: бельё, лохань, скамья, корзины; иногда ребёнок или хозяин во дворе.
-pub fn yard_extras(
-    b: &mut Builder,
-    r: Rect,
-    stair: Option<Rect>,
-    people: &mut Household,
-    rng: &mut Rng,
-) {
+pub fn yard_extras(b: &mut Builder, r: Rect, stair: Option<Rect>, people: &mut Household, rng: &mut Rng) {
     if r.w() < 4.0 || r.d() < 4.0 {
         return;
     }
@@ -1828,12 +1167,7 @@ pub fn yard_extras(
         room.reserve(s);
     }
     // Уже стоящее во дворе (цистерна, пифосы, дерево) — грубо: середина двора занята.
-    room.reserve(Rect::new(
-        r.cx() - 1.6,
-        r.cz() - 1.6,
-        r.cx() + 1.6,
-        r.cz() + 1.6,
-    ));
+    room.reserve(Rect::new(r.cx() - 1.6, r.cz() - 1.6, r.cx() + 1.6, r.cz() + 1.6));
     let all = [Side::N, Side::E, Side::S, Side::W];
     if rng.chance(0.55)
         && let Some((f, s)) = room.take(3.2, 0.6, &all, rng)

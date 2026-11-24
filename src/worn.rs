@@ -38,38 +38,19 @@ fn place(base: ItemBaseId, along: Option<f32>, at: Vec3, q: Quat) -> Transform {
     let p = Vec3::new(0.0, hy, along.map_or(0.0, |d| hz - d));
     // −Z модели (острие) -> +Y оружия, +Y модели (толщина) -> +Z.
     let rot = q * Quat::from_rotation_x(FRAC_PI_2);
-    Transform {
-        translation: at - rot * p,
-        rotation: rot,
-        scale: Vec3::ONE,
-    }
+    Transform { translation: at - rot * p, rotation: rot, scale: Vec3::ONE }
 }
 
 /// Модель предмета в руке, в системе оружия рига.
 pub fn in_hand(base: ItemBaseId, kind: WeaponKind) -> Transform {
     let len = crate::icons::model_half_extents(base)[2] * 2.0;
-    place(
-        base,
-        Some(grip_from_butt(kind, len)),
-        crate::client::weapon_grips(kind).0,
-        Quat::IDENTITY,
-    )
+    place(base, Some(grip_from_butt(kind, len)), crate::client::weapon_grips(kind).0, Quat::IDENTITY)
 }
 
 /// Показать оружие под сущностью `e`: своя модель предмета, если есть, иначе общая по виду.
-pub fn set_weapon_model(
-    commands: &mut Commands,
-    e: Entity,
-    kind: WeaponKind,
-    base: Option<ItemBaseId>,
-    finish: u8,
-    models: Option<&ItemModels>,
-) {
+pub fn set_weapon_model(commands: &mut Commands, e: Entity, kind: WeaponKind, base: Option<ItemBaseId>, finish: u8, models: Option<&ItemModels>) {
     commands.entity(e).despawn_related::<Children>();
-    match (
-        base.filter(|b| has_model(*b) && kind != WeaponKind::Fists),
-        models,
-    ) {
+    match (base.filter(|b| has_model(*b) && kind != WeaponKind::Fists), models) {
         (Some(b), Some(models)) => {
             commands.entity(e).with_children(|w| {
                 let mut m = w.spawn((WorldAssetRoot(models.get(b)), in_hand(b, kind)));
@@ -95,12 +76,7 @@ pub struct Extras {
 
 impl Extras {
     pub fn of(gear: &Gear) -> Self {
-        Extras {
-            sheathed: gear.main_hand.filter(|_| gear.holstered),
-            quiver: gear.quiver,
-            neck: gear.neck,
-            ring: gear.ring,
-        }
+        Extras { sheathed: gear.main_hand.filter(|_| gear.holstered), quiver: gear.quiver, neck: gear.neck, ring: gear.ring }
     }
 }
 
@@ -114,11 +90,7 @@ pub struct Worn {
 
 impl Worn {
     pub fn new(want: Extras) -> Self {
-        Self {
-            want,
-            built: None,
-            spawned: Vec::new(),
-        }
+        Self { want, built: None, spawned: Vec::new() }
     }
     /// Скелет пересобран (его дети удалены вместе с вещами) — повесить заново.
     pub fn reset(&mut self) {
@@ -134,61 +106,25 @@ pub fn mount(slot: &str, base: ItemBaseId) -> (Bone, Transform) {
             let kind = WeaponKind::from_item_name(base.base().name);
             if matches!(kind, WeaponKind::Spear | WeaponKind::Bow) {
                 // Копьё и лук — за спиной наискось (от правого бедра к левому плечу).
-                (
-                    Bone::Torso,
-                    place(
-                        base,
-                        None,
-                        Vec3::new(0.0, 0.12, 0.17),
-                        Quat::from_rotation_z(0.55),
-                    ),
-                )
+                (Bone::Torso, place(base, None, Vec3::new(0.0, 0.12, 0.17), Quat::from_rotation_z(0.55)))
             } else {
                 // Меч, сакс, топор, булава — у левого бедра, рукоять вперёд-вверх, остриё вниз-назад.
                 let len = crate::icons::model_half_extents(base)[2] * 2.0;
                 let q = Quat::from_rotation_z(-0.12) * Quat::from_rotation_x(PI - 0.45);
-                (
-                    Bone::Pelvis,
-                    place(
-                        base,
-                        Some(grip_from_butt(kind, len)),
-                        Vec3::new(-0.2, 0.04, -0.08),
-                        q,
-                    ),
-                )
+                (Bone::Pelvis, place(base, Some(grip_from_butt(kind, len)), Vec3::new(-0.2, 0.04, -0.08), q))
             }
         }
         // Колчан со стрелами у правого бедра сзади, оперением вверх.
-        "quiver" => (
-            Bone::Pelvis,
-            place(
-                base,
-                None,
-                Vec3::new(0.19, -0.02, 0.1),
-                Quat::from_rotation_z(0.15) * Quat::from_rotation_x(PI + 0.2),
-            ),
-        ),
+        "quiver" => (Bone::Pelvis, place(base, None, Vec3::new(0.19, -0.02, 0.1), Quat::from_rotation_z(0.15) * Quat::from_rotation_x(PI + 0.2))),
         // Нательный крест на груди: лицом вперёд, верхом вверх.
-        "neck" => (
-            Bone::Torso,
-            Transform::from_translation(Vec3::new(0.0, 0.15, -0.168))
-                .with_rotation(Quat::from_rotation_z(PI) * Quat::from_rotation_x(-FRAC_PI_2)),
-        ),
+        "neck" => (Bone::Torso, Transform::from_translation(Vec3::new(0.0, 0.15, -0.168)).with_rotation(Quat::from_rotation_z(PI) * Quat::from_rotation_x(-FRAC_PI_2))),
         // Перстень на левой руке.
-        _ => (
-            Bone::HandL,
-            Transform::from_translation(Vec3::new(0.01, -0.075, -0.02))
-                .with_rotation(Quat::from_rotation_x(FRAC_PI_2)),
-        ),
+        _ => (Bone::HandL, Transform::from_translation(Vec3::new(0.01, -0.075, -0.02)).with_rotation(Quat::from_rotation_x(FRAC_PI_2))),
     }
 }
 
 /// Повесить вещи на суставы готовых скелетов.
-pub fn attach_worn(
-    mut commands: Commands,
-    models: Option<Res<ItemModels>>,
-    mut rigs: Query<(&Rig, &mut Worn, Option<&crate::rig::RigBulk>)>,
-) {
+pub fn attach_worn(mut commands: Commands, models: Option<Res<ItemModels>>, mut rigs: Query<(&Rig, &mut Worn, Option<&crate::rig::RigBulk>)>) {
     let Some(models) = models else { return };
     for (rig, mut worn, bulk) in &mut rigs {
         let bulk = bulk.map_or(0.0, |b| b.0);
@@ -201,18 +137,8 @@ pub fn attach_worn(
             }
         }
         let w = worn.want;
-        for (slot, id) in [
-            ("sheath", w.sheathed),
-            ("quiver", w.quiver),
-            ("neck", w.neck),
-            ("ring", w.ring),
-        ] {
-            let Some(base) = id
-                .map(ItemBaseId)
-                .filter(|b| (b.0 as usize) < crate::items::ITEM_BASES.len() && has_model(*b))
-            else {
-                continue;
-            };
+        for (slot, id) in [("sheath", w.sheathed), ("quiver", w.quiver), ("neck", w.neck), ("ring", w.ring)] {
+            let Some(base) = id.map(ItemBaseId).filter(|b| (b.0 as usize) < crate::items::ITEM_BASES.len() && has_model(*b)) else { continue };
             let (bone, mut tf) = mount(slot, base);
             // У плотного телосложения грудь, бока и спина дальше от костей.
             tf.translation += bulk
@@ -223,13 +149,7 @@ pub fn attach_worn(
                     ("sheath", _) => Vec3::new(-0.035, 0.0, -0.015),
                     _ => Vec3::ZERO,
                 };
-            let e = commands
-                .spawn((
-                    WorldAssetRoot(models.get(base)),
-                    tf,
-                    ChildOf(rig.joint(bone)),
-                ))
-                .id();
+            let e = commands.spawn((WorldAssetRoot(models.get(base)), tf, ChildOf(rig.joint(bone)))).id();
             worn.spawned.push(e);
         }
         worn.built = Some(w);
@@ -266,11 +186,7 @@ mod tests {
             };
             assert!(has_model(id), "нет модели у «{}»", b.name);
             let (_, tf) = mount(slot, id);
-            assert!(
-                tf.translation.is_finite() && tf.rotation.is_normalized(),
-                "{}",
-                b.name
-            );
+            assert!(tf.translation.is_finite() && tf.rotation.is_normalized(), "{}", b.name);
         }
     }
 

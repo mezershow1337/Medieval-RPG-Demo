@@ -28,19 +28,13 @@ pub struct WorldClock {
 impl Default for WorldClock {
     fn default() -> Self {
         // С `MRPG_HOUR` часы идут и без сервера (снимки города с камеры ожидания).
-        Self {
-            game: start_hour() as f64 * 3600.0,
-            synced: std::env::var("MRPG_HOUR").is_ok(),
-        }
+        Self { game: start_hour() as f64 * 3600.0, synced: std::env::var("MRPG_HOUR").is_ok() }
     }
 }
 
 fn start_hour() -> f32 {
     // Больше 24 — следующие сутки (`MRPG_HOUR=40` — 16:00 второго дня).
-    std::env::var("MRPG_HOUR")
-        .ok()
-        .and_then(|h| h.parse::<f32>().ok())
-        .map_or(7.5, |h| h.max(0.0))
+    std::env::var("MRPG_HOUR").ok().and_then(|h| h.parse::<f32>().ok()).map_or(7.5, |h| h.max(0.0))
 }
 
 impl WorldClock {
@@ -103,8 +97,7 @@ pub fn part_of_day(hour: f32) -> &'static str {
 
 /// Простой детерминированный хэш (одинаковый у сервера и клиентов).
 pub fn hash(a: u64, b: u64) -> u64 {
-    let mut x = a.wrapping_mul(0x9E37_79B9_7F4A_7C15)
-        ^ b.wrapping_add(0x632B_E59B_D9B4_E019).rotate_left(23);
+    let mut x = a.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ b.wrapping_add(0x632B_E59B_D9B4_E019).rotate_left(23);
     x ^= x >> 31;
     x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
     x ^= x >> 29;
@@ -132,9 +125,7 @@ pub fn rain_window(day: u32) -> Option<(f32, f32)> {
 pub fn rain_at(game: f64) -> f32 {
     let day = (game / DAY).floor().max(0.0) as u32;
     let h = (game.rem_euclid(DAY) / 3600.0) as f32;
-    let Some((a, b)) = rain_window(day) else {
-        return 0.0;
-    };
+    let Some((a, b)) = rain_window(day) else { return 0.0 };
     if h < a || h > b {
         return 0.0;
     }
@@ -188,13 +179,8 @@ fn rain_overcast(game: f64) -> f32 {
         if d < 0 {
             continue;
         }
-        let Some((a, b)) = rain_window(d as u32) else {
-            continue;
-        };
-        let (a, b) = (
-            d as f64 * DAY + a as f64 * 3600.0,
-            d as f64 * DAY + b as f64 * 3600.0,
-        );
+        let Some((a, b)) = rain_window(d as u32) else { continue };
+        let (a, b) = (d as f64 * DAY + a as f64 * 3600.0, d as f64 * DAY + b as f64 * 3600.0);
         let v = if game < a {
             1.0 - ((a - game) / (2.0 * 3600.0)) as f32
         } else if game > b {
@@ -212,10 +198,7 @@ fn rain_overcast(game: f64) -> f32 {
 /// тучами и ветром с моря.
 /// Мокрость города 0..1: в дождь растёт, после — ещё часа полтора сохнет (лужи держатся).
 pub fn wetness(game: f64) -> f32 {
-    (0..=9)
-        .map(|k| rain_at(game - k as f64 * 600.0) * (1.0 - k as f32 / 10.0))
-        .fold(0.0, f32::max)
-        .clamp(0.0, 1.0)
+    (0..=9).map(|k| rain_at(game - k as f64 * 600.0) * (1.0 - k as f32 / 10.0)).fold(0.0, f32::max).clamp(0.0, 1.0)
 }
 
 pub fn weather_at(game: f64) -> Weather {
@@ -241,12 +224,7 @@ pub fn weather_at(game: f64) -> Weather {
     let speed = keyed(game, |k| 1.0 + 6.0 * unit(k, 0xD2).powi(2)) + 5.0 * over * (0.5 + rain);
     // В мгле ветра почти нет.
     let speed = speed * (1.0 - 0.7 * mist);
-    Weather {
-        rain,
-        clouds: clouds.clamp(0.0, 1.0),
-        fog: fog.clamp(0.0, 1.0),
-        wind: Vec2::new(ang.cos(), ang.sin()) * speed,
-    }
+    Weather { rain, clouds: clouds.clamp(0.0, 1.0), fog: fog.clamp(0.0, 1.0), wind: Vec2::new(ang.cos(), ang.sin()) * speed }
 }
 
 // ---------- Солнце и луна ----------
@@ -307,11 +285,7 @@ pub fn daylight(game: f64) -> f32 {
 /// луна и тучи учтены).
 pub fn darkness(game: f64) -> f32 {
     let w = weather_at(game);
-    let moon = if moon_dir(game).y > 0.05 {
-        moon_light(game) * (1.0 - 0.85 * w.clouds)
-    } else {
-        0.0
-    };
+    let moon = if moon_dir(game).y > 0.05 { moon_light(game) * (1.0 - 0.85 * w.clouds) } else { 0.0 };
     let night = 1.0 - daylight(game);
     (night * (1.0 - 0.35 * moon)).clamp(0.0, 1.0)
 }
@@ -322,47 +296,25 @@ pub struct ClockServerPlugin;
 
 impl Plugin for ClockServerPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<WorldClock>()
-            .add_observer(clock_on_connect)
-            .add_systems(PreUpdate, tick_server_clock);
+        app.init_resource::<WorldClock>().add_observer(clock_on_connect).add_systems(PreUpdate, tick_server_clock);
     }
 }
 
-fn tick_server_clock(
-    time: Res<Time>,
-    mut clock: ResMut<WorldClock>,
-    mut server: Option<ResMut<bevy_renet::RenetServer>>,
-    mut next: Local<f32>,
-) {
+fn tick_server_clock(time: Res<Time>, mut clock: ResMut<WorldClock>, mut server: Option<ResMut<bevy_renet::RenetServer>>, mut next: Local<f32>) {
     clock.game += time.delta_secs_f64() * TIME_SCALE;
     clock.synced = true;
     let now = time.elapsed_secs();
     if now >= *next {
         *next = now + SYNC_EVERY;
         if let Some(s) = server.as_deref_mut() {
-            s.broadcast_message(
-                crate::protocol::CH_RELIABLE,
-                crate::protocol::encode(&crate::protocol::ServerMessage::Clock {
-                    game: clock.game,
-                }),
-            );
+            s.broadcast_message(crate::protocol::CH_RELIABLE, crate::protocol::encode(&crate::protocol::ServerMessage::Clock { game: clock.game }));
         }
     }
 }
 
-fn clock_on_connect(
-    event: On<bevy_renet::RenetServerEvent>,
-    mut server: ResMut<bevy_renet::RenetServer>,
-    clock: Res<WorldClock>,
-) {
-    let bevy_renet::renet::ServerEvent::ClientConnected { client_id } = &event.0 else {
-        return;
-    };
-    server.send_message(
-        *client_id,
-        crate::protocol::CH_RELIABLE,
-        crate::protocol::encode(&crate::protocol::ServerMessage::Clock { game: clock.game }),
-    );
+fn clock_on_connect(event: On<bevy_renet::RenetServerEvent>, mut server: ResMut<bevy_renet::RenetServer>, clock: Res<WorldClock>) {
+    let bevy_renet::renet::ServerEvent::ClientConnected { client_id } = &event.0 else { return };
+    server.send_message(*client_id, crate::protocol::CH_RELIABLE, crate::protocol::encode(&crate::protocol::ServerMessage::Clock { game: clock.game }));
 }
 
 // ---------- Клиент ----------
@@ -371,9 +323,7 @@ pub struct ClockClientPlugin;
 
 impl Plugin for ClockClientPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<WorldClock>()
-            .add_message::<ClockSync>()
-            .add_systems(PreUpdate, tick_client_clock);
+        app.init_resource::<WorldClock>().add_message::<ClockSync>().add_systems(PreUpdate, tick_client_clock);
     }
 }
 
@@ -381,11 +331,7 @@ impl Plugin for ClockClientPlugin {
 #[derive(Message, Clone, Copy, Debug)]
 pub struct ClockSync(pub f64);
 
-fn tick_client_clock(
-    time: Res<Time>,
-    mut clock: ResMut<WorldClock>,
-    mut sync: MessageReader<ClockSync>,
-) {
+fn tick_client_clock(time: Res<Time>, mut clock: ResMut<WorldClock>, mut sync: MessageReader<ClockSync>) {
     clock.game += time.delta_secs_f64() * TIME_SCALE;
     for s in sync.read() {
         let diff = s.0 - clock.game;
@@ -406,30 +352,19 @@ mod tests {
 
     #[test]
     fn hours_and_days() {
-        let c = WorldClock {
-            game: DAY * 2.0 + 13.5 * 3600.0,
-            synced: true,
-        };
+        let c = WorldClock { game: DAY * 2.0 + 13.5 * 3600.0, synced: true };
         assert_eq!(c.day(), 2);
         assert!((c.hour() - 13.5).abs() < 1e-4);
         assert_eq!(c.hhmm(), "13:30");
         assert!(!c.night());
-        assert!(
-            WorldClock {
-                game: 23.0 * 3600.0,
-                synced: true
-            }
-            .night()
-        );
+        assert!(WorldClock { game: 23.0 * 3600.0, synced: true }.night());
     }
 
     #[test]
     fn rain_is_rare_and_smooth() {
         let rainy = (0..400).filter(|d| rain_window(*d).is_some()).count();
         assert!((40..160).contains(&rainy), "дождливых дней {rainy} из 400");
-        let (d, (a, b)) = (0..400)
-            .find_map(|d| rain_window(d).map(|w| (d, w)))
-            .unwrap();
+        let (d, (a, b)) = (0..400).find_map(|d| rain_window(d).map(|w| (d, w))).unwrap();
         let mid = d as f64 * DAY + ((a + b) * 0.5) as f64 * 3600.0;
         assert!(rain_at(mid) > 0.3);
         assert_eq!(rain_at(d as f64 * DAY + (a as f64 - 0.5) * 3600.0), 0.0);
@@ -444,21 +379,11 @@ mod tests {
                 let g = d as f64 * DAY + h as f64 * 3600.0;
                 let w = weather_at(g);
                 if w.rain > 0.5 || w.fog > 0.5 || w.clouds > 0.8 {
-                    println!(
-                        "{:6.2} ч: дождь {:.2} тучи {:.2} туман {:.2} ветер {:.1}",
-                        g / 3600.0,
-                        w.rain,
-                        w.clouds,
-                        w.fog,
-                        w.wind_speed()
-                    );
+                    println!("{:6.2} ч: дождь {:.2} тучи {:.2} туман {:.2} ветер {:.1}", g / 3600.0, w.rain, w.clouds, w.fog, w.wind_speed());
                 }
             }
             let m = moon_light(d as f64 * DAY);
-            println!(
-                "сутки {d}: луна {m:.2}, в полночь на высоте {:.2}",
-                moon_dir(d as f64 * DAY + 0.5 * 3600.0).y
-            );
+            println!("сутки {d}: луна {m:.2}, в полночь на высоте {:.2}", moon_dir(d as f64 * DAY + 0.5 * 3600.0).y);
         }
     }
 
@@ -468,48 +393,23 @@ mod tests {
         assert!(at(13.0).y > 0.75, "полдень: {:?}", at(13.0));
         // В полдень солнце на юге (+Z).
         assert!(at(12.8).z > 0.4);
-        assert!(
-            at(7.0).x > 0.5 && at(7.0).y > 0.0,
-            "утро на востоке: {:?}",
-            at(7.0)
-        );
-        assert!(
-            at(19.0).x < -0.5 && at(19.0).y > 0.0,
-            "вечер на западе: {:?}",
-            at(19.0)
-        );
+        assert!(at(7.0).x > 0.5 && at(7.0).y > 0.0, "утро на востоке: {:?}", at(7.0));
+        assert!(at(19.0).x < -0.5 && at(19.0).y > 0.0, "вечер на западе: {:?}", at(19.0));
         assert!(at(23.5).y < -0.3 && at(2.0).y < -0.3);
         // Восход около шести, закат около восьми вечера.
-        let rise = (40..90)
-            .map(|i| i as f32 * 0.1)
-            .find(|h| at(*h).y > 0.0)
-            .unwrap();
-        let set = (170..220)
-            .map(|i| i as f32 * 0.1)
-            .find(|h| at(*h).y < 0.0)
-            .unwrap();
-        assert!(
-            (5.5..6.8).contains(&rise) && (19.0..20.3).contains(&set),
-            "восход {rise}, закат {set}"
-        );
+        let rise = (40..90).map(|i| i as f32 * 0.1).find(|h| at(*h).y > 0.0).unwrap();
+        let set = (170..220).map(|i| i as f32 * 0.1).find(|h| at(*h).y < 0.0).unwrap();
+        assert!((5.5..6.8).contains(&rise) && (19.0..20.3).contains(&set), "восход {rise}, закат {set}");
         assert!(daylight(DAY + 13.0 * 3600.0) > 0.99 && daylight(DAY + 1.0 * 3600.0) < 0.01);
     }
 
     #[test]
     fn moon_waxes_and_wanes() {
-        let full = (0..30)
-            .map(|d| moon_light(d as f64 * DAY))
-            .fold(0.0f32, f32::max);
-        let new = (0..30)
-            .map(|d| moon_light(d as f64 * DAY))
-            .fold(1.0f32, f32::min);
+        let full = (0..30).map(|d| moon_light(d as f64 * DAY)).fold(0.0f32, f32::max);
+        let new = (0..30).map(|d| moon_light(d as f64 * DAY)).fold(1.0f32, f32::min);
         assert!(full > 0.95 && new < 0.05);
         // Первые ночи — светлые: луна высоко около полуночи.
-        assert!(
-            moon_dir(DAY * 1.0 + 0.5 * 3600.0).y > 0.2,
-            "{:?}",
-            moon_dir(DAY + 1800.0)
-        );
+        assert!(moon_dir(DAY * 1.0 + 0.5 * 3600.0).y > 0.2, "{:?}", moon_dir(DAY + 1800.0));
         assert!(darkness(DAY * 2.0 + 13.0 * 3600.0) < 0.01);
         assert!(darkness(DAY * 2.0 + 1.0 * 3600.0) > 0.5);
     }
@@ -524,14 +424,10 @@ mod tests {
             assert!((0.0..=1.0).contains(&w.fog) && (0.0..=1.0).contains(&w.clouds));
             prev = w;
         }
-        let (d, (a, b)) = (1..400)
-            .find_map(|d| rain_window(d).map(|w| (d, w)))
-            .unwrap();
+        let (d, (a, b)) = (1..400).find_map(|d| rain_window(d).map(|w| (d, w))).unwrap();
         let mid = weather_at(d as f64 * DAY + ((a + b) * 0.5) as f64 * 3600.0);
         assert!(mid.rain > 0.3 && mid.clouds > 0.85, "{mid:?}");
-        let foggy = (0..60)
-            .filter(|d| weather_at(*d as f64 * DAY + 6.0 * 3600.0).fog > 0.4)
-            .count();
+        let foggy = (0..60).filter(|d| weather_at(*d as f64 * DAY + 6.0 * 3600.0).fog > 0.4).count();
         assert!((3..30).contains(&foggy), "туманных утр {foggy} из 60");
     }
 }

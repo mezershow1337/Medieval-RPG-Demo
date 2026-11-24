@@ -235,11 +235,7 @@ pub fn unit_weight(base: ItemBaseId) -> f32 {
     if let Some(a) = crate::arsenal::of_base(base) {
         return a.kg;
     }
-    WEIGHTS
-        .iter()
-        .find(|(n, _)| *n == name)
-        .map(|(_, w)| *w)
-        .unwrap_or_else(|| estimate(base))
+    WEIGHTS.iter().find(|(n, _)| *n == name).map(|(_, w)| *w).unwrap_or_else(|| estimate(base))
 }
 
 /// Оценка веса предмета, которого нет в таблице: по виду и числу клеток.
@@ -286,22 +282,14 @@ pub fn encumbrance(weight: f32, capacity: f32) -> f32 {
 /// Предметы без своего веса в таблице (для тестов).
 #[allow(dead_code)]
 pub fn unweighted_items() -> Vec<&'static str> {
-    ITEM_BASES
-        .iter()
-        .filter(|b| !WEIGHTS.iter().any(|(n, _)| *n == b.name))
-        .map(|b| b.name)
-        .collect()
+    ITEM_BASES.iter().filter(|b| !WEIGHTS.iter().any(|(n, _)| *n == b.name)).map(|b| b.name).collect()
 }
 
 /// «1,2 кг», «350 г».
 pub fn format_weight(kg: f32) -> String {
     if kg < 1.0 {
         let g = kg * 1000.0;
-        if g < 10.0 {
-            format!("{g:.1} г").replace('.', ",")
-        } else {
-            format!("{g:.0} г")
-        }
+        if g < 10.0 { format!("{g:.1} г").replace('.', ",") } else { format!("{g:.0} г") }
     } else if kg < 10.0 {
         format!("{kg:.1} кг").replace('.', ",")
     } else {
@@ -316,23 +304,12 @@ mod tests {
     #[test]
     fn table_names_exist_and_weights_are_sane() {
         for (name, w) in WEIGHTS {
-            assert!(
-                ItemBaseId::find(name).is_some(),
-                "в таблице веса лишнее имя «{name}»"
-            );
+            assert!(ItemBaseId::find(name).is_some(), "в таблице веса лишнее имя «{name}»");
             assert!(*w > 0.0 && *w < 60.0, "странный вес «{name}»: {w}");
         }
         // Всё, что было в игре к появлению веса, взвешено вручную.
         let missing = unweighted_items();
-        for name in [
-            "Спата",
-            "Кольчуга",
-            "Амфора вина",
-            "Солид",
-            "Шалфей",
-            "Алембик",
-            "Цельс. О медицине",
-        ] {
+        for name in ["Спата", "Кольчуга", "Амфора вина", "Солид", "Шалфей", "Алембик", "Цельс. О медицине"] {
             assert!(!missing.contains(&name), "нет веса у «{name}»");
         }
         for b in 0..ITEM_BASES.len() {

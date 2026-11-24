@@ -15,12 +15,7 @@ pub struct CombatSfxPlugin;
 
 impl Plugin for CombatSfxPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Fighters>().add_systems(
-            Update,
-            (track_fighters, actions, hits, arrows)
-                .chain()
-                .before(AudioSet),
-        );
+        app.init_resource::<Fighters>().add_systems(Update, (track_fighters, actions, hits, arrows).chain().before(AudioSet));
     }
 }
 
@@ -36,11 +31,7 @@ pub struct Fighters {
 
 impl Default for Fighters {
     fn default() -> Self {
-        Self {
-            by_id: HashMap::new(),
-            last_fight: -1000.0,
-            hostile_near: -1000.0,
-        }
+        Self { by_id: HashMap::new(), last_fight: -1000.0, hostile_near: -1000.0 }
     }
 }
 
@@ -58,10 +49,7 @@ pub fn voice_pitch(id: u64) -> f32 {
 }
 
 fn armored(kind: ActorKind) -> bool {
-    matches!(
-        kind,
-        ActorKind::Stratiotes | ActorKind::Bucellarius | ActorKind::AlanLancer
-    )
+    matches!(kind, ActorKind::Stratiotes | ActorKind::Bucellarius | ActorKind::AlanLancer)
 }
 
 fn track_fighters(
@@ -71,24 +59,10 @@ fn track_fighters(
     local: Query<&Transform, (With<LocalFighter>, With<LocalPlayer>)>,
 ) {
     for (r, t) in &remotes {
-        fighters.by_id.insert(
-            r.id,
-            FighterInfo {
-                pos: t.translation,
-                kind: r.kind,
-                local: false,
-            },
-        );
+        fighters.by_id.insert(r.id, FighterInfo { pos: t.translation, kind: r.kind, local: false });
     }
     if let (Some(id), Ok(t)) = (net.and_then(|n| n.my_id), local.single()) {
-        fighters.by_id.insert(
-            id,
-            FighterInfo {
-                pos: t.translation,
-                kind: ActorKind::Player,
-                local: true,
-            },
-        );
+        fighters.by_id.insert(id, FighterInfo { pos: t.translation, kind: ActorKind::Player, local: true });
     }
 }
 
@@ -123,13 +97,7 @@ fn actions(
 ) {
     let now = time.elapsed_secs();
     let mut seen = Vec::new();
-    let mut each = |e: Entity,
-                    id: u64,
-                    kind: ActorKind,
-                    action: &Action,
-                    weapon: WeaponKind,
-                    t: &Transform,
-                    is_local: bool| {
+    let mut each = |e: Entity, id: u64, kind: ActorKind, action: &Action, weapon: WeaponKind, t: &Transform, is_local: bool| {
         seen.push(e);
         let ph = phase(action);
         let prev = last.insert(e, ph).unwrap_or(ph);
@@ -158,88 +126,43 @@ fn actions(
                 let gain = if is_local { 0.55 } else { 0.7 };
                 out.write(Sfx::at(name, hand).gain(gain).range(1.5, 22.0).spread(0.1));
                 if rng.chance(if kind.is_npc() { 0.45 } else { 0.3 }) {
-                    out.write(
-                        Sfx::at("grunt", t.translation + Vec3::Y * 1.6)
-                            .gain(0.5)
-                            .pitch(voice_pitch(id))
-                            .range(1.5, 25.0),
-                    );
+                    out.write(Sfx::at("grunt", t.translation + Vec3::Y * 1.6).gain(0.5).pitch(voice_pitch(id)).range(1.5, 25.0));
                 }
             }
             _ => {}
         }
     };
     for (e, r, t) in &remotes {
-        each(
-            e,
-            r.id,
-            r.kind,
-            &r.fighter.action,
-            r.fighter.weapon,
-            t,
-            false,
-        );
+        each(e, r.id, r.kind, &r.fighter.action, r.fighter.weapon, t, false);
     }
     if let Ok((e, f, t)) = local.single() {
-        each(
-            e,
-            0,
-            ActorKind::Player,
-            &f.fighter.action,
-            f.fighter.weapon,
-            t,
-            true,
-        );
+        each(e, 0, ActorKind::Player, &f.fighter.action, f.fighter.weapon, t, true);
     }
     last.retain(|e, _| seen.contains(e));
 }
 
 /// Попадания, парирования, блоки, смерти.
-fn hits(
-    time: Res<Time>,
-    mut events: MessageReader<CombatFeedback>,
-    mut out: MessageWriter<Sfx>,
-    mut fighters: ResMut<Fighters>,
-    mut rng: ResMut<SfxRng>,
-) {
+fn hits(time: Res<Time>, mut events: MessageReader<CombatFeedback>, mut out: MessageWriter<Sfx>, mut fighters: ResMut<Fighters>, mut rng: ResMut<SfxRng>) {
     let now = time.elapsed_secs();
     for ev in events.read() {
         match *ev {
-            CombatFeedback::Hit {
-                attacker,
-                target,
-                outcome,
-                at,
-            } => {
+            CombatFeedback::Hit { attacker, target, outcome, at } => {
                 let tgt = fighters.by_id.get(&target).copied();
                 let att = fighters.by_id.get(&attacker).copied();
                 if tgt.is_some_and(|t| t.local) || att.is_some_and(|a| a.local) {
                     fighters.last_fight = now;
                 }
                 // Схватка в двух шагах тоже тревожит.
-                if fighters
-                    .by_id
-                    .values()
-                    .any(|f| f.local && f.pos.distance(at) < 12.0)
-                {
+                if fighters.by_id.values().any(|f| f.local && f.pos.distance(at) < 12.0) {
                     fighters.hostile_near = now;
                 }
                 match outcome {
                     HitOutcome::Damage { killed, head, .. } => {
-                        let name = if tgt.is_some_and(|t| armored(t.kind)) || head {
-                            "hit_armor"
-                        } else {
-                            "hit_flesh"
-                        };
+                        let name = if tgt.is_some_and(|t| armored(t.kind)) || head { "hit_armor" } else { "hit_flesh" };
                         out.write(Sfx::at(name, at).gain(0.95).range(2.0, 35.0));
                         if !killed && let Some(t) = tgt {
                             if rng.chance(0.75) {
-                                out.write(
-                                    Sfx::at("pain", t.pos + Vec3::Y * 1.6)
-                                        .gain(0.6)
-                                        .pitch(voice_pitch(target))
-                                        .range(2.0, 35.0),
-                                );
+                                out.write(Sfx::at("pain", t.pos + Vec3::Y * 1.6).gain(0.6).pitch(voice_pitch(target)).range(2.0, 35.0));
                             }
                         }
                     }
@@ -248,13 +171,7 @@ fn hits(
                     }
                     // Встречный удар: клинки сшиблись в полёте — звон выше и резче.
                     HitOutcome::Chambered => {
-                        out.write(
-                            Sfx::at("parry", at)
-                                .gain(1.0)
-                                .pitch(1.12)
-                                .range(3.0, 60.0)
-                                .spread(0.08),
-                        );
+                        out.write(Sfx::at("parry", at).gain(1.0).pitch(1.12).range(3.0, 60.0).spread(0.08));
                     }
                     HitOutcome::Blocked { tier } => {
                         let g = match tier {
@@ -271,29 +188,15 @@ fn hits(
                     HitOutcome::GuardBroken => {
                         out.write(Sfx::at("guard_break", at).gain(1.0).range(3.0, 50.0));
                         if let Some(t) = tgt {
-                            out.write(
-                                Sfx::at("grunt", t.pos + Vec3::Y * 1.6)
-                                    .gain(0.55)
-                                    .pitch(voice_pitch(target) * 0.95)
-                                    .range(2.0, 30.0),
-                            );
+                            out.write(Sfx::at("grunt", t.pos + Vec3::Y * 1.6).gain(0.55).pitch(voice_pitch(target) * 0.95).range(2.0, 30.0));
                         }
                     }
                 }
             }
             CombatFeedback::Died { id, .. } => {
                 if let Some(t) = fighters.by_id.get(&id).copied() {
-                    out.write(
-                        Sfx::at("death", t.pos + Vec3::Y * 1.5)
-                            .gain(0.7)
-                            .pitch(voice_pitch(id))
-                            .range(2.0, 40.0),
-                    );
-                    out.write(
-                        Sfx::at("body_fall", t.pos + Vec3::Y * 0.3)
-                            .gain(0.85)
-                            .range(2.0, 30.0),
-                    );
+                    out.write(Sfx::at("death", t.pos + Vec3::Y * 1.5).gain(0.7).pitch(voice_pitch(id)).range(2.0, 40.0));
+                    out.write(Sfx::at("body_fall", t.pos + Vec3::Y * 0.3).gain(0.85).range(2.0, 30.0));
                     if t.local {
                         fighters.last_fight = now;
                     }
@@ -312,25 +215,11 @@ struct ArrowTrack {
 }
 
 /// Стрелы: свист у самого уха и стук, когда стрела воткнулась.
-fn arrows(
-    ears: Res<super::Ears>,
-    mut out: MessageWriter<Sfx>,
-    q: Query<(Entity, &Transform), With<ArrowVisual>>,
-    mut gone: RemovedComponents<ArrowVisual>,
-    mut tracks: Local<HashMap<Entity, ArrowTrack>>,
-) {
+fn arrows(ears: Res<super::Ears>, mut out: MessageWriter<Sfx>, q: Query<(Entity, &Transform), With<ArrowVisual>>, mut gone: RemovedComponents<ArrowVisual>, mut tracks: Local<HashMap<Entity, ArrowTrack>>) {
     for (e, t) in &q {
         let p = t.translation;
-        let d = if ears.valid {
-            p.distance(ears.pos)
-        } else {
-            f32::MAX
-        };
-        let tr = tracks.entry(e).or_insert(ArrowTrack {
-            pos: p,
-            best: d,
-            whizzed: false,
-        });
+        let d = if ears.valid { p.distance(ears.pos) } else { f32::MAX };
+        let tr = tracks.entry(e).or_insert(ArrowTrack { pos: p, best: d, whizzed: false });
         tr.pos = p;
         if d < tr.best {
             tr.best = d;

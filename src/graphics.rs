@@ -4,20 +4,18 @@
 //! Что включено — решают настройки (`settings.rs`); F9 — быстро сбросить эффекты на низкие.
 
 use crate::level::Mat;
-pub use crate::sky::{SkyMaterial, SkyUniform};
 use bevy::asset::{RenderAssetUsages, embedded_asset};
-use bevy::camera::Hdr;
 use bevy::core_pipeline::tonemapping::Tonemapping;
-use bevy::light::EnvironmentMapLight;
-use bevy::light::{
-    CascadeShadowConfigBuilder, FogVolume, NotShadowCaster, NotShadowReceiver, VolumetricLight,
-};
+use bevy::light::{CascadeShadowConfigBuilder, FogVolume, NotShadowCaster, NotShadowReceiver, VolumetricLight};
 use bevy::mesh::Indices;
 use bevy::pbr::{DistanceFog, ExtendedMaterial, FogFalloff, MaterialExtension};
-use bevy::post_process::effect_stack::Vignette;
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, PrimitiveTopology};
+use bevy::camera::Hdr;
+use bevy::light::EnvironmentMapLight;
+use bevy::post_process::effect_stack::Vignette;
 use bevy::render::view::{ColorGrading, ColorGradingGlobal, ColorGradingSection};
+pub use crate::sky::{SkyMaterial, SkyUniform};
 use bevy::shader::ShaderRef;
 
 /// Направление на солнце в замке (закатное солнце с запада-юго-запада).
@@ -114,9 +112,7 @@ pub fn set_shot_time(t: Option<f64>) {
 pub fn mood() -> Mood {
     match crate::level::active() {
         crate::level::LevelKind::Castle => castle_mood(),
-        crate::level::LevelKind::Chersonesus => {
-            mood_at(frozen_time().unwrap_or(crate::world_clock::WorldClock::default().game))
-        }
+        crate::level::LevelKind::Chersonesus => mood_at(frozen_time().unwrap_or(crate::world_clock::WorldClock::default().game)),
     }
 }
 
@@ -172,20 +168,11 @@ impl Key {
         Key {
             sun_color: v(self.sun_color, o.sun_color),
             lux: f(self.lux, o.lux),
-            ambient: (
-                v(self.ambient.0, o.ambient.0),
-                f(self.ambient.1, o.ambient.1),
-            ),
+            ambient: (v(self.ambient.0, o.ambient.0), f(self.ambient.1, o.ambient.1)),
             horizon: v(self.horizon, o.horizon),
-            horizon_sun: (
-                v(self.horizon_sun.0, o.horizon_sun.0),
-                f(self.horizon_sun.1, o.horizon_sun.1),
-            ),
+            horizon_sun: (v(self.horizon_sun.0, o.horizon_sun.0), f(self.horizon_sun.1, o.horizon_sun.1)),
             zenith: v(self.zenith, o.zenith),
-            fog_far: (
-                v(self.fog_far.0, o.fog_far.0),
-                v(self.fog_far.1, o.fog_far.1),
-            ),
+            fog_far: (v(self.fog_far.0, o.fog_far.0), v(self.fog_far.1, o.fog_far.1)),
             visibility: f(self.visibility, o.visibility),
             sky_light: f(self.sky_light, o.sky_light),
             haze: f(self.haze, o.haze),
@@ -288,18 +275,11 @@ pub fn mood_at(game: f64) -> Mood {
     let dim = 1.0 - 0.25 * w.rain;
     let horizon = grey(key.horizon, 0.75 * overcast) * dim;
     let zenith = grey(key.zenith, 0.8 * overcast).lerp(horizon * 0.9, 0.5 * overcast) * dim;
-    let horizon_sun = (
-        key.horizon_sun.0 * (1.0 - 0.85 * overcast),
-        key.horizon_sun.1,
-    );
+    let horizon_sun = (key.horizon_sun.0 * (1.0 - 0.85 * overcast), key.horizon_sun.1);
     // Главный свет: солнце (пока оно над горизонтом), ночью — луна.
     // Под сплошными тучами прямого солнца почти нет: тени расплываются, свет идёт от неба.
-    let sun_lux =
-        key.lux * smooth01((e + 0.02) / 0.08) * (1.0 - 0.97 * overcast) * (1.0 - 0.4 * w.rain);
-    let moon_lux = (12.0 + 190.0 * moon_light)
-        * smooth01((moon.y - 0.02) / 0.15)
-        * night
-        * (1.0 - 0.85 * overcast);
+    let sun_lux = key.lux * smooth01((e + 0.02) / 0.08) * (1.0 - 0.97 * overcast) * (1.0 - 0.4 * w.rain);
+    let moon_lux = (12.0 + 190.0 * moon_light) * smooth01((moon.y - 0.02) / 0.15) * night * (1.0 - 0.85 * overcast);
     let (light_dir, light_color, lux) = if sun_lux >= moon_lux {
         // Под низким солнцем свет не должен идти снизу.
         let d = Vec3::new(sun.x, sun.y.max(0.05), sun.z).normalize();
@@ -315,10 +295,7 @@ pub fn mood_at(game: f64) -> Mood {
         sun: light_dir,
         sun_color: c(light_color),
         lux,
-        ambient: (
-            c(key.ambient.0.lerp(Vec3::splat(0.7), 0.5 * overcast)),
-            key.ambient.1 * (1.0 + 0.35 * overcast * dayness.max(0.3)),
-        ),
+        ambient: (c(key.ambient.0.lerp(Vec3::splat(0.7), 0.5 * overcast)), key.ambient.1 * (1.0 + 0.35 * overcast * dayness.max(0.3))),
         horizon,
         horizon_sun,
         zenith,
@@ -366,16 +343,7 @@ impl Plugin for GraphicsPlugin {
         ))
         .add_observer(setup_camera)
         .add_systems(Startup, setup_environment)
-        .add_systems(
-            Update,
-            (
-                billboard_flames,
-                flicker_lights,
-                cull_far_lights,
-                follow_sky,
-                attach_sky_light,
-            ),
-        );
+        .add_systems(Update, (billboard_flames, flicker_lights, cull_far_lights, follow_sky, attach_sky_light));
     }
 
     fn finish(&self, app: &mut App) {
@@ -388,6 +356,7 @@ impl Plugin for GraphicsPlugin {
         let _ = SURFACE_TEXTURES.set(tex);
     }
 }
+
 
 // ---------- Камень, дерево, черепица и т. д. ----------
 
@@ -462,645 +431,57 @@ fn lin(c: Color) -> Vec4 {
 pub fn surface_material(mat: Mat) -> SurfaceMaterial {
     // (основной цвет, второй цвет, узор, масштаб, разброс, рельеф, шероховатость, металл, мох, грязь, свечение)
     let (a, b, pattern, scale, var, bump, rough, metal, moss, grime, glow) = match mat {
-        Mat::Grass => (
-            Color::srgb(0.13, 0.22, 0.08),
-            Color::srgb(0.24, 0.26, 0.12),
-            P_GRASS,
-            1.0,
-            0.5,
-            0.4,
-            0.95,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::Cobble => (
-            Color::srgb(0.36, 0.34, 0.32),
-            Color::srgb(0.12, 0.11, 0.10),
-            P_COBBLE,
-            1.0,
-            0.35,
-            1.0,
-            0.85,
-            0.0,
-            0.35,
-            0.0,
-            0.0,
-        ),
-        Mat::Stone => (
-            Color::srgb(0.52, 0.51, 0.49),
-            Color::srgb(0.22, 0.21, 0.20),
-            P_ASHLAR,
-            0.8,
-            0.25,
-            1.0,
-            0.88,
-            0.0,
-            0.5,
-            0.6,
-            0.0,
-        ),
-        Mat::DarkStone => (
-            Color::srgb(0.38, 0.37, 0.38),
-            Color::srgb(0.14, 0.13, 0.14),
-            P_ASHLAR,
-            0.9,
-            0.25,
-            1.0,
-            0.85,
-            0.0,
-            0.4,
-            0.6,
-            0.0,
-        ),
-        Mat::Floor => (
-            Color::srgb(0.42, 0.38, 0.34),
-            Color::srgb(0.16, 0.14, 0.13),
-            P_FLAGSTONE,
-            1.0,
-            0.3,
-            0.8,
-            0.55,
-            0.0,
-            0.0,
-            0.2,
-            0.0,
-        ),
-        Mat::Wood => (
-            Color::srgb(0.34, 0.22, 0.12),
-            Color::srgb(0.18, 0.11, 0.06),
-            P_WOOD,
-            1.0,
-            0.35,
-            0.6,
-            0.75,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::Banner => (
-            Color::srgb(0.50, 0.04, 0.05),
-            Color::srgb(0.85, 0.62, 0.20),
-            P_CLOTH,
-            1.0,
-            0.2,
-            0.3,
-            0.9,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::Gold => (
-            Color::srgb(0.90, 0.68, 0.30),
-            Color::srgb(0.55, 0.38, 0.12),
-            P_METAL,
-            1.0,
-            0.2,
-            0.3,
-            0.3,
-            1.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::Trim => (
-            Color::srgb(0.62, 0.58, 0.52),
-            Color::srgb(0.30, 0.28, 0.25),
-            P_ASHLAR,
-            1.6,
-            0.15,
-            0.5,
-            0.8,
-            0.0,
-            0.3,
-            0.4,
-            0.0,
-        ),
-        Mat::Roof => (
-            Color::srgb(0.20, 0.22, 0.27),
-            Color::srgb(0.08, 0.09, 0.11),
-            P_SLATE,
-            1.0,
-            0.3,
-            1.0,
-            0.6,
-            0.0,
-            0.25,
-            0.0,
-            0.0,
-        ),
-        Mat::Iron => (
-            Color::srgb(0.22, 0.21, 0.20),
-            Color::srgb(0.35, 0.20, 0.12),
-            P_METAL,
-            1.0,
-            0.3,
-            0.3,
-            0.45,
-            0.9,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::Coals => (
-            Color::srgb(0.08, 0.05, 0.04),
-            Color::srgb(1.0, 0.35, 0.08),
-            P_COALS,
-            1.0,
-            0.5,
-            0.5,
-            0.9,
-            0.0,
-            0.0,
-            0.0,
-            6.0,
-        ),
-        Mat::Water => (
-            Color::srgb(0.06, 0.13, 0.16),
-            Color::srgb(0.10, 0.2, 0.22),
-            P_WATER,
-            1.0,
-            0.0,
-            0.3,
-            0.05,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::Leaves => (
-            Color::srgb(0.07, 0.15, 0.07),
-            Color::srgb(0.16, 0.24, 0.09),
-            P_LEAVES,
-            1.0,
-            0.4,
-            1.0,
-            0.9,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::Paving => (
-            Color::srgb(0.66, 0.61, 0.52),
-            Color::srgb(0.36, 0.33, 0.28),
-            P_FLAGSTONE,
-            0.8,
-            0.3,
-            0.9,
-            0.8,
-            0.0,
-            0.1,
-            0.0,
-            0.0,
-        ),
-        Mat::Limestone => (
-            Color::srgb(0.70, 0.64, 0.52),
-            Color::srgb(0.42, 0.38, 0.31),
-            P_ASHLAR,
-            0.62,
-            0.22,
-            1.0,
-            0.9,
-            0.0,
-            0.25,
-            0.55,
-            0.0,
-        ),
-        Mat::Rubble => (
-            Color::srgb(0.62, 0.57, 0.47),
-            Color::srgb(0.55, 0.50, 0.42),
-            P_RUBBLE,
-            1.0,
-            0.35,
-            1.2,
-            0.92,
-            0.0,
-            0.15,
-            0.6,
-            0.0,
-        ),
-        Mat::Plaster => (
-            Color::srgb(0.86, 0.83, 0.76),
-            Color::srgb(0.66, 0.60, 0.50),
-            P_PLASTER,
-            1.0,
-            0.18,
-            0.3,
-            0.9,
-            0.0,
-            0.05,
-            0.8,
-            0.0,
-        ),
-        Mat::Tile => (
-            Color::srgb(0.54, 0.30, 0.2),
-            Color::srgb(0.30, 0.15, 0.09),
-            P_TILE,
-            1.0,
-            0.25,
-            1.2,
-            0.7,
-            0.0,
-            0.35,
-            0.0,
-            0.0,
-        ),
-        Mat::Brick => (
-            Color::srgb(0.55, 0.25, 0.14),
-            Color::srgb(0.68, 0.63, 0.55),
-            P_BRICK,
-            1.0,
-            0.25,
-            0.8,
-            0.9,
-            0.0,
-            0.0,
-            0.5,
-            0.0,
-        ),
-        Mat::OpusMixtum => (
-            Color::srgb(0.68, 0.63, 0.53),
-            Color::srgb(0.62, 0.58, 0.50),
-            P_MIXTUM,
-            1.0,
-            0.25,
-            1.0,
-            0.9,
-            0.0,
-            0.1,
-            0.55,
-            0.0,
-        ),
-        Mat::Marble => (
-            Color::srgb(0.88, 0.87, 0.84),
-            Color::srgb(0.52, 0.55, 0.60),
-            P_MARBLE,
-            1.0,
-            0.1,
-            0.25,
-            0.3,
-            0.0,
-            0.0,
-            0.2,
-            0.0,
-        ),
-        Mat::Mosaic => (
-            Color::srgb(0.85, 0.80, 0.70),
-            Color::srgb(0.58, 0.18, 0.12),
-            P_MOSAIC,
-            1.0,
-            0.1,
-            0.4,
-            0.55,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::Earth => (
-            Color::srgb(0.48, 0.41, 0.32),
-            Color::srgb(0.66, 0.62, 0.55),
-            P_EARTH,
-            1.0,
-            0.3,
-            0.7,
-            0.95,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::Terrain => (
-            Color::srgb(0.30, 0.33, 0.15),
-            Color::srgb(0.60, 0.57, 0.50),
-            P_TERRAIN,
-            1.0,
-            0.3,
-            0.8,
-            0.95,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::Signinum => (
-            Color::srgb(0.68, 0.45, 0.38),
-            Color::srgb(0.50, 0.33, 0.28),
-            P_PLASTER,
-            1.6,
-            0.25,
-            0.4,
-            0.8,
-            0.0,
-            0.1,
-            0.6,
-            0.0,
-        ),
-        Mat::Canvas => (
-            Color::srgb(0.78, 0.72, 0.60),
-            Color::srgb(0.6, 0.55, 0.45),
-            P_PLAIN,
-            1.0,
-            0.15,
-            0.2,
-            0.95,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::Felt => (
-            Color::srgb(0.62, 0.56, 0.47),
-            Color::srgb(0.4, 0.34, 0.28),
-            P_PLAIN,
-            1.0,
-            0.25,
-            0.4,
-            1.0,
-            0.0,
-            0.0,
-            0.4,
-            0.0,
-        ),
+        Mat::Grass => (Color::srgb(0.13, 0.22, 0.08), Color::srgb(0.24, 0.26, 0.12), P_GRASS, 1.0, 0.5, 0.4, 0.95, 0.0, 0.0, 0.0, 0.0),
+        Mat::Cobble => (Color::srgb(0.36, 0.34, 0.32), Color::srgb(0.12, 0.11, 0.10), P_COBBLE, 1.0, 0.35, 1.0, 0.85, 0.0, 0.35, 0.0, 0.0),
+        Mat::Stone => (Color::srgb(0.52, 0.51, 0.49), Color::srgb(0.22, 0.21, 0.20), P_ASHLAR, 0.8, 0.25, 1.0, 0.88, 0.0, 0.5, 0.6, 0.0),
+        Mat::DarkStone => (Color::srgb(0.38, 0.37, 0.38), Color::srgb(0.14, 0.13, 0.14), P_ASHLAR, 0.9, 0.25, 1.0, 0.85, 0.0, 0.4, 0.6, 0.0),
+        Mat::Floor => (Color::srgb(0.42, 0.38, 0.34), Color::srgb(0.16, 0.14, 0.13), P_FLAGSTONE, 1.0, 0.3, 0.8, 0.55, 0.0, 0.0, 0.2, 0.0),
+        Mat::Wood => (Color::srgb(0.34, 0.22, 0.12), Color::srgb(0.18, 0.11, 0.06), P_WOOD, 1.0, 0.35, 0.6, 0.75, 0.0, 0.0, 0.0, 0.0),
+        Mat::Banner => (Color::srgb(0.50, 0.04, 0.05), Color::srgb(0.85, 0.62, 0.20), P_CLOTH, 1.0, 0.2, 0.3, 0.9, 0.0, 0.0, 0.0, 0.0),
+        Mat::Gold => (Color::srgb(0.90, 0.68, 0.30), Color::srgb(0.55, 0.38, 0.12), P_METAL, 1.0, 0.2, 0.3, 0.3, 1.0, 0.0, 0.0, 0.0),
+        Mat::Trim => (Color::srgb(0.62, 0.58, 0.52), Color::srgb(0.30, 0.28, 0.25), P_ASHLAR, 1.6, 0.15, 0.5, 0.8, 0.0, 0.3, 0.4, 0.0),
+        Mat::Roof => (Color::srgb(0.20, 0.22, 0.27), Color::srgb(0.08, 0.09, 0.11), P_SLATE, 1.0, 0.3, 1.0, 0.6, 0.0, 0.25, 0.0, 0.0),
+        Mat::Iron => (Color::srgb(0.22, 0.21, 0.20), Color::srgb(0.35, 0.20, 0.12), P_METAL, 1.0, 0.3, 0.3, 0.45, 0.9, 0.0, 0.0, 0.0),
+        Mat::Coals => (Color::srgb(0.08, 0.05, 0.04), Color::srgb(1.0, 0.35, 0.08), P_COALS, 1.0, 0.5, 0.5, 0.9, 0.0, 0.0, 0.0, 6.0),
+        Mat::Water => (Color::srgb(0.06, 0.13, 0.16), Color::srgb(0.10, 0.2, 0.22), P_WATER, 1.0, 0.0, 0.3, 0.05, 0.0, 0.0, 0.0, 0.0),
+        Mat::Leaves => (Color::srgb(0.07, 0.15, 0.07), Color::srgb(0.16, 0.24, 0.09), P_LEAVES, 1.0, 0.4, 1.0, 0.9, 0.0, 0.0, 0.0, 0.0),
+        Mat::Paving => (Color::srgb(0.66, 0.61, 0.52), Color::srgb(0.36, 0.33, 0.28), P_FLAGSTONE, 0.8, 0.3, 0.9, 0.8, 0.0, 0.1, 0.0, 0.0),
+        Mat::Limestone => (Color::srgb(0.70, 0.64, 0.52), Color::srgb(0.42, 0.38, 0.31), P_ASHLAR, 0.62, 0.22, 1.0, 0.9, 0.0, 0.25, 0.55, 0.0),
+        Mat::Rubble => (Color::srgb(0.62, 0.57, 0.47), Color::srgb(0.55, 0.50, 0.42), P_RUBBLE, 1.0, 0.35, 1.2, 0.92, 0.0, 0.15, 0.6, 0.0),
+        Mat::Plaster => (Color::srgb(0.86, 0.83, 0.76), Color::srgb(0.66, 0.60, 0.50), P_PLASTER, 1.0, 0.18, 0.3, 0.9, 0.0, 0.05, 0.8, 0.0),
+        Mat::Tile => (Color::srgb(0.54, 0.30, 0.2), Color::srgb(0.30, 0.15, 0.09), P_TILE, 1.0, 0.25, 1.2, 0.7, 0.0, 0.35, 0.0, 0.0),
+        Mat::Brick => (Color::srgb(0.55, 0.25, 0.14), Color::srgb(0.68, 0.63, 0.55), P_BRICK, 1.0, 0.25, 0.8, 0.9, 0.0, 0.0, 0.5, 0.0),
+        Mat::OpusMixtum => (Color::srgb(0.68, 0.63, 0.53), Color::srgb(0.62, 0.58, 0.50), P_MIXTUM, 1.0, 0.25, 1.0, 0.9, 0.0, 0.1, 0.55, 0.0),
+        Mat::Marble => (Color::srgb(0.88, 0.87, 0.84), Color::srgb(0.52, 0.55, 0.60), P_MARBLE, 1.0, 0.1, 0.25, 0.3, 0.0, 0.0, 0.2, 0.0),
+        Mat::Mosaic => (Color::srgb(0.85, 0.80, 0.70), Color::srgb(0.58, 0.18, 0.12), P_MOSAIC, 1.0, 0.1, 0.4, 0.55, 0.0, 0.0, 0.0, 0.0),
+        Mat::Earth => (Color::srgb(0.48, 0.41, 0.32), Color::srgb(0.66, 0.62, 0.55), P_EARTH, 1.0, 0.3, 0.7, 0.95, 0.0, 0.0, 0.0, 0.0),
+        Mat::Terrain => (Color::srgb(0.30, 0.33, 0.15), Color::srgb(0.60, 0.57, 0.50), P_TERRAIN, 1.0, 0.3, 0.8, 0.95, 0.0, 0.0, 0.0, 0.0),
+        Mat::Signinum => (Color::srgb(0.68, 0.45, 0.38), Color::srgb(0.50, 0.33, 0.28), P_PLASTER, 1.6, 0.25, 0.4, 0.8, 0.0, 0.1, 0.6, 0.0),
+        Mat::Canvas => (Color::srgb(0.78, 0.72, 0.60), Color::srgb(0.6, 0.55, 0.45), P_PLAIN, 1.0, 0.15, 0.2, 0.95, 0.0, 0.0, 0.0, 0.0),
+        Mat::Felt => (Color::srgb(0.62, 0.56, 0.47), Color::srgb(0.4, 0.34, 0.28), P_PLAIN, 1.0, 0.25, 0.4, 1.0, 0.0, 0.0, 0.4, 0.0),
         // Шерсть, крашенная мареной (ковры, покрывала) и вайдой (покрывала, занавеси).
-        Mat::Rug => (
-            Color::srgb(0.5, 0.17, 0.12),
-            Color::srgb(0.32, 0.1, 0.07),
-            P_PLAIN,
-            1.0,
-            0.3,
-            0.4,
-            1.0,
-            0.0,
-            0.0,
-            0.3,
-            0.0,
-        ),
-        Mat::Cloth => (
-            Color::srgb(0.24, 0.3, 0.46),
-            Color::srgb(0.14, 0.18, 0.3),
-            P_PLAIN,
-            1.0,
-            0.25,
-            0.3,
-            1.0,
-            0.0,
-            0.0,
-            0.2,
-            0.0,
-        ),
-        Mat::Thatch => (
-            Color::srgb(0.55, 0.45, 0.28),
-            Color::srgb(0.33, 0.27, 0.16),
-            P_WOOD,
-            0.5,
-            0.4,
-            1.0,
-            1.0,
-            0.0,
-            0.3,
-            0.0,
-            0.0,
-        ),
-        Mat::Ceramic => (
-            Color::srgb(0.66, 0.40, 0.26),
-            Color::srgb(0.5, 0.3, 0.2),
-            P_PLAIN,
-            1.0,
-            0.2,
-            0.15,
-            0.75,
-            0.0,
-            0.0,
-            0.3,
-            0.0,
-        ),
-        Mat::Bronze => (
-            Color::srgb(0.55, 0.40, 0.22),
-            Color::srgb(0.25, 0.42, 0.33),
-            P_METAL,
-            1.0,
-            0.25,
-            0.3,
-            0.4,
-            0.9,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::Conifer => (
-            Color::srgb(0.08, 0.15, 0.10),
-            Color::srgb(0.12, 0.2, 0.12),
-            P_LEAVES,
-            1.6,
-            0.35,
-            1.0,
-            0.9,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::HerbGreen => (
-            Color::srgb(0.16, 0.30, 0.10),
-            Color::srgb(0.25, 0.36, 0.14),
-            P_LEAVES,
-            3.0,
-            0.35,
-            0.6,
-            0.85,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::HerbSilver => (
-            Color::srgb(0.42, 0.48, 0.40),
-            Color::srgb(0.55, 0.58, 0.50),
-            P_LEAVES,
-            3.0,
-            0.25,
-            0.6,
-            0.9,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::PetalYellow => (
-            Color::srgb(0.95, 0.75, 0.10),
-            Color::srgb(0.8, 0.6, 0.1),
-            P_PLAIN,
-            1.0,
-            0.1,
-            0.0,
-            0.7,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::PetalPurple => (
-            Color::srgb(0.50, 0.30, 0.65),
-            Color::srgb(0.4, 0.2, 0.5),
-            P_PLAIN,
-            1.0,
-            0.1,
-            0.0,
-            0.7,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::PetalWhite => (
-            Color::srgb(0.92, 0.90, 0.84),
-            Color::srgb(0.8, 0.8, 0.7),
-            P_PLAIN,
-            1.0,
-            0.1,
-            0.0,
-            0.7,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::PetalRed => (
-            Color::srgb(0.80, 0.08, 0.05),
-            Color::srgb(0.6, 0.05, 0.03),
-            P_PLAIN,
-            1.0,
-            0.1,
-            0.0,
-            0.7,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::PetalPink => (
-            Color::srgb(0.85, 0.50, 0.65),
-            Color::srgb(0.7, 0.4, 0.5),
-            P_PLAIN,
-            1.0,
-            0.1,
-            0.0,
-            0.7,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::Leather => (
-            Color::srgb(0.36, 0.22, 0.13),
-            Color::srgb(0.22, 0.13, 0.07),
-            P_PLAIN,
-            1.0,
-            0.3,
-            0.5,
-            0.65,
-            0.0,
-            0.0,
-            0.3,
-            0.0,
-        ),
-        Mat::Bread => (
-            Color::srgb(0.70, 0.45, 0.20),
-            Color::srgb(0.48, 0.28, 0.11),
-            P_PLAIN,
-            1.0,
-            0.3,
-            0.5,
-            0.9,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::Glass => (
-            Color::srgb(0.42, 0.55, 0.46),
-            Color::srgb(0.30, 0.44, 0.38),
-            P_PLAIN,
-            1.0,
-            0.1,
-            0.05,
-            0.08,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
+        Mat::Rug => (Color::srgb(0.5, 0.17, 0.12), Color::srgb(0.32, 0.1, 0.07), P_PLAIN, 1.0, 0.3, 0.4, 1.0, 0.0, 0.0, 0.3, 0.0),
+        Mat::Cloth => (Color::srgb(0.24, 0.3, 0.46), Color::srgb(0.14, 0.18, 0.3), P_PLAIN, 1.0, 0.25, 0.3, 1.0, 0.0, 0.0, 0.2, 0.0),
+        Mat::Thatch => (Color::srgb(0.55, 0.45, 0.28), Color::srgb(0.33, 0.27, 0.16), P_WOOD, 0.5, 0.4, 1.0, 1.0, 0.0, 0.3, 0.0, 0.0),
+        Mat::Ceramic => (Color::srgb(0.66, 0.40, 0.26), Color::srgb(0.5, 0.3, 0.2), P_PLAIN, 1.0, 0.2, 0.15, 0.75, 0.0, 0.0, 0.3, 0.0),
+        Mat::Bronze => (Color::srgb(0.55, 0.40, 0.22), Color::srgb(0.25, 0.42, 0.33), P_METAL, 1.0, 0.25, 0.3, 0.4, 0.9, 0.0, 0.0, 0.0),
+        Mat::Conifer => (Color::srgb(0.08, 0.15, 0.10), Color::srgb(0.12, 0.2, 0.12), P_LEAVES, 1.6, 0.35, 1.0, 0.9, 0.0, 0.0, 0.0, 0.0),
+        Mat::HerbGreen => (Color::srgb(0.16, 0.30, 0.10), Color::srgb(0.25, 0.36, 0.14), P_LEAVES, 3.0, 0.35, 0.6, 0.85, 0.0, 0.0, 0.0, 0.0),
+        Mat::HerbSilver => (Color::srgb(0.42, 0.48, 0.40), Color::srgb(0.55, 0.58, 0.50), P_LEAVES, 3.0, 0.25, 0.6, 0.9, 0.0, 0.0, 0.0, 0.0),
+        Mat::PetalYellow => (Color::srgb(0.95, 0.75, 0.10), Color::srgb(0.8, 0.6, 0.1), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
+        Mat::PetalPurple => (Color::srgb(0.50, 0.30, 0.65), Color::srgb(0.4, 0.2, 0.5), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
+        Mat::PetalWhite => (Color::srgb(0.92, 0.90, 0.84), Color::srgb(0.8, 0.8, 0.7), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
+        Mat::PetalRed => (Color::srgb(0.80, 0.08, 0.05), Color::srgb(0.6, 0.05, 0.03), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
+        Mat::PetalPink => (Color::srgb(0.85, 0.50, 0.65), Color::srgb(0.7, 0.4, 0.5), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
+        Mat::Leather => (Color::srgb(0.36, 0.22, 0.13), Color::srgb(0.22, 0.13, 0.07), P_PLAIN, 1.0, 0.3, 0.5, 0.65, 0.0, 0.0, 0.3, 0.0),
+        Mat::Bread => (Color::srgb(0.70, 0.45, 0.20), Color::srgb(0.48, 0.28, 0.11), P_PLAIN, 1.0, 0.3, 0.5, 0.9, 0.0, 0.0, 0.0, 0.0),
+        Mat::Glass => (Color::srgb(0.42, 0.55, 0.46), Color::srgb(0.30, 0.44, 0.38), P_PLAIN, 1.0, 0.1, 0.05, 0.08, 0.0, 0.0, 0.0, 0.0),
         // Красная охра по штукатурке (цоколь и полосы в горнице).
-        Mat::Ochre => (
-            Color::srgb(0.55, 0.22, 0.13),
-            Color::srgb(0.40, 0.15, 0.09),
-            P_PLASTER,
-            1.0,
-            0.2,
-            0.3,
-            0.9,
-            0.0,
-            0.05,
-            0.5,
-            0.0,
-        ),
-        Mat::Bedrock => (
-            Color::srgb(0.34, 0.3, 0.25),
-            Color::srgb(0.2, 0.18, 0.15),
-            P_RUBBLE,
-            1.0,
-            0.3,
-            1.2,
-            0.92,
-            0.0,
-            0.2,
-            0.5,
-            0.0,
-        ),
-        Mat::Limonite => (
-            Color::srgb(0.33, 0.2, 0.1),
-            Color::srgb(0.2, 0.11, 0.06),
-            P_RUBBLE,
-            1.0,
-            0.35,
-            1.2,
-            0.9,
-            0.0,
-            0.0,
-            0.3,
-            0.0,
-        ),
-        Mat::Soot => (
-            Color::srgb(0.075, 0.068, 0.062),
-            Color::srgb(0.03, 0.03, 0.03),
-            P_EARTH,
-            1.0,
-            0.3,
-            0.7,
-            0.95,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        Mat::Shingle => (
-            Color::srgb(0.52, 0.48, 0.4),
-            Color::srgb(0.4, 0.37, 0.31),
-            P_EARTH,
-            1.0,
-            0.3,
-            0.8,
-            0.9,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
+        Mat::Ochre => (Color::srgb(0.55, 0.22, 0.13), Color::srgb(0.40, 0.15, 0.09), P_PLASTER, 1.0, 0.2, 0.3, 0.9, 0.0, 0.05, 0.5, 0.0),
+        Mat::Bedrock => (Color::srgb(0.34, 0.3, 0.25), Color::srgb(0.2, 0.18, 0.15), P_RUBBLE, 1.0, 0.3, 1.2, 0.92, 0.0, 0.2, 0.5, 0.0),
+        Mat::Limonite => (Color::srgb(0.33, 0.2, 0.1), Color::srgb(0.2, 0.11, 0.06), P_RUBBLE, 1.0, 0.35, 1.2, 0.9, 0.0, 0.0, 0.3, 0.0),
+        Mat::Soot => (Color::srgb(0.075, 0.068, 0.062), Color::srgb(0.03, 0.03, 0.03), P_EARTH, 1.0, 0.3, 0.7, 0.95, 0.0, 0.0, 0.0, 0.0),
+        Mat::Shingle => (Color::srgb(0.52, 0.48, 0.4), Color::srgb(0.4, 0.37, 0.31), P_EARTH, 1.0, 0.3, 0.8, 0.9, 0.0, 0.0, 0.0, 0.0),
     };
     let photo = photo_layers(mat);
     let tex = surface_textures();
@@ -1109,38 +490,15 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
     let layer = |l: u32| &crate::surface_layers::LAYERS[l as usize];
     let mean = |l: u32| Vec3::from_array(layer(l).mean);
     ExtendedMaterial {
-        base: StandardMaterial {
-            base_color: a,
-            perceptual_roughness: rough,
-            metallic: metal,
-            reflectance: 0.4,
-            ..default()
-        },
+        base: StandardMaterial { base_color: a, perceptual_roughness: rough, metallic: metal, reflectance: 0.4, ..default() },
         extension: SurfaceExt {
             color_b: lin(b).truncate().extend(wet_capacity(mat)),
             params: Vec4::new(pattern, scale, var, bump),
             params2: Vec4::new(moss, grime, glow, 0.0),
-            photo: if has_photo {
-                Vec4::new(
-                    top as f32,
-                    1.0 / layer(top).meters,
-                    side as f32,
-                    1.0 / layer(side).meters,
-                )
-            } else {
-                Vec4::new(-1.0, 1.0, -1.0, 1.0)
-            },
+            photo: if has_photo { Vec4::new(top as f32, 1.0 / layer(top).meters, side as f32, 1.0 / layer(side).meters) } else { Vec4::new(-1.0, 1.0, -1.0, 1.0) },
             // Воде вместо фото передаём солнце (для отражений неба и солнечной дорожки) и «день».
-            photo_mean: if mat == Mat::Water {
-                mood().sun.normalize().extend(0.0)
-            } else {
-                mean(top).extend(tint)
-            },
-            photo_mean_b: if mat == Mat::Water {
-                Vec4::new(if mood().day { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0)
-            } else {
-                mean(side).extend(relief)
-            },
+            photo_mean: if mat == Mat::Water { mood().sun.normalize().extend(0.0) } else { mean(top).extend(tint) },
+            photo_mean_b: if mat == Mat::Water { Vec4::new(if mood().day { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0) } else { mean(side).extend(relief) },
             albedo: tex.map(|t| t.0.clone()),
             nrm: tex.map(|t| t.1.clone()),
         },
@@ -1155,13 +513,7 @@ fn wet_capacity(mat: Mat) -> f32 {
         Mat::Tile | Mat::Roof => 0.8,
         Mat::Terrain => 0.7,
         Mat::Marble => 0.6,
-        Mat::Limestone
-        | Mat::Stone
-        | Mat::DarkStone
-        | Mat::Rubble
-        | Mat::Trim
-        | Mat::OpusMixtum
-        | Mat::Brick => 0.5,
+        Mat::Limestone | Mat::Stone | Mat::DarkStone | Mat::Rubble | Mat::Trim | Mat::OpusMixtum | Mat::Brick => 0.5,
         Mat::Grass | Mat::Wood | Mat::Thatch => 0.45,
         Mat::Plaster | Mat::Signinum => 0.3,
         _ => 0.0,
@@ -1178,13 +530,7 @@ pub fn depth_rank(mat: Mat) -> f32 {
         Mat::Felt | Mat::Canvas | Mat::Cloth => 11,
         Mat::Water | Mat::Coals => 10,
         Mat::Mosaic | Mat::Signinum => 9,
-        Mat::Ceramic
-        | Mat::Bronze
-        | Mat::Iron
-        | Mat::Gold
-        | Mat::Glass
-        | Mat::Bread
-        | Mat::Leather => 8,
+        Mat::Ceramic | Mat::Bronze | Mat::Iron | Mat::Gold | Mat::Glass | Mat::Bread | Mat::Leather => 8,
         Mat::Ochre => 7,
         Mat::Paving | Mat::Floor | Mat::Cobble => 7,
         Mat::Plaster | Mat::Trim => 6,
@@ -1205,9 +551,7 @@ pub fn push_along_normals(mesh: &mut Mesh, dist: f32) {
     if dist == 0.0 {
         return;
     }
-    let Some(V::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL).cloned() else {
-        return;
-    };
+    let Some(V::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL).cloned() else { return };
     if let Some(V::Float32x3(pos)) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
         for (p, n) in pos.iter_mut().zip(&normals) {
             for i in 0..3 {
@@ -1254,8 +598,7 @@ fn photo_layers(mat: Mat) -> Option<(u32, u32, f32, f32)> {
     })
 }
 
-static SURFACE_TEXTURES: std::sync::OnceLock<Option<(Handle<Image>, Handle<Image>)>> =
-    std::sync::OnceLock::new();
+static SURFACE_TEXTURES: std::sync::OnceLock<Option<(Handle<Image>, Handle<Image>)>> = std::sync::OnceLock::new();
 
 fn surface_textures() -> Option<&'static (Handle<Image>, Handle<Image>)> {
     SURFACE_TEXTURES.get().and_then(|t| t.as_ref())
@@ -1264,11 +607,8 @@ fn surface_textures() -> Option<&'static (Handle<Image>, Handle<Image>)> {
 /// Собирает массивы слоёв фотоматериалов (assets/textures/surface) с мип-уровнями.
 fn load_surface_textures(images: &mut Assets<Image>) -> Option<(Handle<Image>, Handle<Image>)> {
     use bevy::image::{CompressedImageFormats, ImageSampler, ImageType};
-    use bevy::render::render_resource::{
-        Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
-    };
-    let dir =
-        bevy::asset::io::file::FileAssetReader::get_base_path().join("assets/textures/surface");
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension};
+    let dir = bevy::asset::io::file::FileAssetReader::get_base_path().join("assets/textures/surface");
     let layers = crate::surface_layers::LAYERS;
     let load = |suffix: &str, srgb: bool| -> Option<Image> {
         // Слои декодируем и уменьшаем параллельно — это ~40 картинок 1024².
@@ -1278,23 +618,10 @@ fn load_surface_textures(images: &mut Assets<Image>) -> Option<(Handle<Image>, H
                 .map(|l| {
                     let path = dir.join(format!("{}_{}.jpg", l.name, suffix));
                     s.spawn(move || {
-                        let bytes = std::fs::read(&path)
-                            .map_err(|e| warn!("нет текстуры {}: {e}", path.display()))
-                            .ok()?;
-                        let mut img = Image::from_buffer(
-                            &bytes,
-                            ImageType::Extension("jpg"),
-                            CompressedImageFormats::NONE,
-                            srgb,
-                            ImageSampler::Default,
-                            RenderAssetUsages::default(),
-                        )
-                        .ok()?;
+                        let bytes = std::fs::read(&path).map_err(|e| warn!("нет текстуры {}: {e}", path.display())).ok()?;
+                        let mut img = Image::from_buffer(&bytes, ImageType::Extension("jpg"), CompressedImageFormats::NONE, srgb, ImageSampler::Default, RenderAssetUsages::default()).ok()?;
                         crate::textures::generate_mips(&mut img, suffix == "nrm");
-                        crate::textures::cap_size(
-                            &mut img,
-                            crate::settings::startup().texture_cap(),
-                        );
+                        crate::textures::cap_size(&mut img, crate::settings::startup().texture_cap());
                         Some(img)
                     })
                 })
@@ -1313,38 +640,18 @@ fn load_surface_textures(images: &mut Assets<Image>) -> Option<(Handle<Image>, H
         for img in &decoded {
             data.extend_from_slice(img.data.as_ref()?);
         }
-        let format = if srgb {
-            TextureFormat::Rgba8UnormSrgb
-        } else {
-            TextureFormat::Rgba8Unorm
-        };
-        let mut arr = Image::new_uninit(
-            Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: decoded.len() as u32,
-            },
-            TextureDimension::D2,
-            format,
-            RenderAssetUsages::RENDER_WORLD,
-        );
+        let format = if srgb { TextureFormat::Rgba8UnormSrgb } else { TextureFormat::Rgba8Unorm };
+        let mut arr = Image::new_uninit(Extent3d { width: w, height: h, depth_or_array_layers: decoded.len() as u32 }, TextureDimension::D2, format, RenderAssetUsages::RENDER_WORLD);
         arr.data = Some(data);
         arr.texture_descriptor.mip_level_count = levels;
         arr.sampler = crate::textures::quality_sampler(true);
-        arr.texture_view_descriptor = Some(TextureViewDescriptor {
-            dimension: Some(TextureViewDimension::D2Array),
-            ..default()
-        });
+        arr.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::D2Array), ..default() });
         Some(arr)
     };
     let started = std::time::Instant::now();
     let albedo = load("albedo", true)?;
     let nrm = load("nrm", false)?;
-    info!(
-        "Фотоматериалы: {} слоёв за {:.2} с",
-        layers.len(),
-        started.elapsed().as_secs_f32()
-    );
+    info!("Фотоматериалы: {} слоёв за {:.2} с", layers.len(), started.elapsed().as_secs_f32());
     Some((images.add(albedo), images.add(nrm)))
 }
 
@@ -1364,9 +671,7 @@ impl Material for GlassMaterial {
 }
 
 pub fn glass_material(rose: bool) -> GlassMaterial {
-    GlassMaterial {
-        params: Vec4::new(if rose { 1.0 } else { 0.0 }, 2.6, 0.0, 0.0),
-    }
+    GlassMaterial { params: Vec4::new(if rose { 1.0 } else { 0.0 }, 2.6, 0.0, 0.0) }
 }
 
 // ---------- Пламя факелов ----------
@@ -1397,48 +702,19 @@ pub struct Flicker {
     pub phase: f32,
 }
 
-pub fn spawn_flame(
-    commands: &mut Commands,
-    mesh: Handle<Mesh>,
-    material: Handle<FlameMaterial>,
-    pos: Vec3,
-    out: Vec3,
-    phase: f32,
-) {
-    commands.spawn((
-        Mesh3d(mesh),
-        MeshMaterial3d(material),
-        Transform::from_translation(pos),
-        Billboard,
-        NotShadowCaster,
-        NotShadowReceiver,
-    ));
+pub fn spawn_flame(commands: &mut Commands, mesh: Handle<Mesh>, material: Handle<FlameMaterial>, pos: Vec3, out: Vec3, phase: f32) {
+    commands.spawn((Mesh3d(mesh), MeshMaterial3d(material), Transform::from_translation(pos), Billboard, NotShadowCaster, NotShadowReceiver));
     // Свет чуть отодвинут от стены, чтобы стена освещалась ровнее.
     let intensity = 45_000.0;
     commands.spawn((
-        PointLight {
-            color: Color::srgb(1.0, 0.58, 0.28),
-            intensity,
-            range: 13.0,
-            radius: 0.15,
-            shadow_maps_enabled: false,
-            ..default()
-        },
+        PointLight { color: Color::srgb(1.0, 0.58, 0.28), intensity, range: 13.0, radius: 0.15, shadow_maps_enabled: false, ..default() },
         Transform::from_translation(pos + out * 0.35 + Vec3::Y * 0.1),
-        Flicker {
-            base: intensity,
-            phase,
-        },
+        Flicker { base: intensity, phase },
     ));
 }
 
-fn billboard_flames(
-    cameras: Query<&GlobalTransform, With<Camera3d>>,
-    mut flames: Query<&mut Transform, With<Billboard>>,
-) {
-    let Some(cam) = cameras.iter().next() else {
-        return;
-    };
+fn billboard_flames(cameras: Query<&GlobalTransform, With<Camera3d>>, mut flames: Query<&mut Transform, With<Billboard>>) {
+    let Some(cam) = cameras.iter().next() else { return };
     let cam_pos = cam.translation();
     for mut t in &mut flames {
         let d = cam_pos - t.translation;
@@ -1447,48 +723,29 @@ fn billboard_flames(
     }
 }
 
-fn flicker_lights(
-    time: Res<Time>,
-    mood: Option<Res<crate::daylight::CurrentMood>>,
-    mut lights: Query<(&mut PointLight, &Flicker)>,
-) {
+fn flicker_lights(time: Res<Time>, mood: Option<Res<crate::daylight::CurrentMood>>, mut lights: Query<(&mut PointLight, &Flicker)>) {
     let t = time.elapsed_secs();
     // Ночью глаз привыкает к темноте: огонь кажется ярче и светит дальше.
     let boost = 1.0 + 1.3 * mood.map_or(0.0, |m| m.0.night);
     for (mut light, f) in &mut lights {
         let p = f.phase;
-        let n = (t * 9.1 + p).sin() * 0.5
-            + (t * 23.7 + p * 2.3).sin() * 0.3
-            + (t * 4.3 + p * 0.7).sin() * 0.2;
+        let n = (t * 9.1 + p).sin() * 0.5 + (t * 23.7 + p * 2.3).sin() * 0.3 + (t * 4.3 + p * 0.7).sin() * 0.2;
         light.intensity = f.base * boost * (0.85 + 0.12 * n);
     }
 }
 
 /// Далёкие факелы и светильники выключаем: в городе их сотни, а освещают они лишь пару комнат.
-fn cull_far_lights(
-    time: Res<Time>,
-    settings: Res<crate::settings::Settings>,
-    mut next: Local<f32>,
-    cameras: Query<&GlobalTransform, With<Camera3d>>,
-    mut lights: Query<(&GlobalTransform, &PointLight, &mut Visibility), With<Flicker>>,
-) {
+fn cull_far_lights(time: Res<Time>, settings: Res<crate::settings::Settings>, mut next: Local<f32>, cameras: Query<&GlobalTransform, With<Camera3d>>, mut lights: Query<(&GlobalTransform, &PointLight, &mut Visibility), With<Flicker>>) {
     let now = time.elapsed_secs();
     if now < *next {
         return;
     }
     *next = now + 0.25;
-    let Some(cam) = cameras.iter().next() else {
-        return;
-    };
+    let Some(cam) = cameras.iter().next() else { return };
     let c = cam.translation();
     for (t, light, mut vis) in &mut lights {
-        let far =
-            settings.light_distance() + light.range * if settings.effects == 0 { 1.2 } else { 2.0 };
-        let want = if t.translation().distance_squared(c) < far * far {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
+        let far = settings.light_distance() + light.range * if settings.effects == 0 { 1.2 } else { 2.0 };
+        let want = if t.translation().distance_squared(c) < far * far { Visibility::Inherited } else { Visibility::Hidden };
         if *vis != want {
             *vis = want;
         }
@@ -1520,58 +777,33 @@ fn sky_mesh(radius: f32) -> Mesh {
     let w = segs as u32 + 1;
     for r in 0..rings as u32 {
         for s in 0..segs as u32 {
-            let (a, b, c, d) = (
-                r * w + s,
-                r * w + s + 1,
-                (r + 1) * w + s,
-                (r + 1) * w + s + 1,
-            );
+            let (a, b, c, d) = (r * w + s, r * w + s + 1, (r + 1) * w + s, (r + 1) * w + s + 1);
             idx.extend_from_slice(&[a, b, c, b, d, c]);
         }
     }
-    Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    )
-    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, nrm)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
-    .with_inserted_indices(Indices::U32(idx))
+    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, nrm)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
+        .with_inserted_indices(Indices::U32(idx))
 }
 
-fn setup_environment(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut skies: ResMut<Assets<SkyMaterial>>,
-    mut images: ResMut<Assets<Image>>,
-) {
+fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut skies: ResMut<Assets<SkyMaterial>>, mut images: ResMut<Assets<Image>>) {
     let m = mood();
     commands.insert_resource(ClearColor(m.fog()));
     // Свет неба: то же небо в кубической карте, отфильтрованной на процессоре один раз.
     let started = std::time::Instant::now();
     let (diffuse, specular) = crate::sky::sky_environment(&m.sky_uniform());
-    info!(
-        "Карта окружения неба за {:.2} с",
-        started.elapsed().as_secs_f32()
-    );
-    commands.insert_resource(crate::sky::SkyEnvironment {
-        diffuse: images.add(diffuse),
-        specular: images.add(specular),
-    });
+    info!("Карта окружения неба за {:.2} с", started.elapsed().as_secs_f32());
+    commands.insert_resource(crate::sky::SkyEnvironment { diffuse: images.add(diffuse), specular: images.add(specular) });
     // Размер карты теней и каскады — по настройкам (`settings::apply_sun`).
     commands.insert_resource(bevy::light::DirectionalLightShadowMap { size: 2048 });
-    commands.insert_resource(GlobalAmbientLight {
-        color: m.ambient.0,
-        brightness: m.ambient.1,
-        ..default()
-    });
+    commands.insert_resource(GlobalAmbientLight { color: m.ambient.0, brightness: m.ambient.1, ..default() });
 
     let sun = m.sun.normalize();
     commands.spawn((
         Mesh3d(meshes.add(sky_mesh(SKY_RADIUS))),
-        MeshMaterial3d(skies.add(SkyMaterial {
-            sky: m.sky_uniform(),
-        })),
+        MeshMaterial3d(skies.add(SkyMaterial { sky: m.sky_uniform() })),
         Transform::IDENTITY,
         SkyDome,
         NotShadowCaster,
@@ -1580,51 +812,24 @@ fn setup_environment(
 
     // Солнце (ночью — луна): направление, цвет и сила ведёт `daylight.rs` по часам мира.
     commands.spawn((
-        DirectionalLight {
-            color: m.sun_color,
-            illuminance: m.lux,
-            shadow_maps_enabled: true,
-            ..default()
-        },
+        DirectionalLight { color: m.sun_color, illuminance: m.lux, shadow_maps_enabled: true, ..default() },
         Transform::from_translation(sun * 100.0).looking_at(Vec3::ZERO, Vec3::Y),
-        CascadeShadowConfigBuilder {
-            num_cascades: 4,
-            first_cascade_far_bound: 12.0,
-            maximum_distance: m.shadow_distance,
-            ..default()
-        }
-        .build(),
+        CascadeShadowConfigBuilder { num_cascades: 4, first_cascade_far_bound: 12.0, maximum_distance: m.shadow_distance, ..default() }.build(),
         VolumetricLight,
         SunLight,
-        // Солнце видит и слой теней своего тела (камера его не рисует).
-        crate::self_body::sun_layers(),
     ));
     // Лёгкая дымка: в ней видны лучи низкого солнца между домами, из окон и от факелов.
     // В Херсонесе она гуще у земли — вечерний дым очагов и морская мгла, утром бывает туман.
     match crate::level::active() {
         crate::level::LevelKind::Castle => {
             commands.spawn((
-                FogVolume {
-                    fog_color: Color::srgb(0.85, 0.8, 0.8),
-                    density_factor: 0.03,
-                    absorption: 0.0,
-                    scattering: 0.25,
-                    scattering_asymmetry: 0.6,
-                    ..default()
-                },
+                FogVolume { fog_color: Color::srgb(0.85, 0.8, 0.8), density_factor: 0.03, absorption: 0.0, scattering: 0.25, scattering_asymmetry: 0.6, ..default() },
                 Transform::from_xyz(0.0, 20.0, 0.0).with_scale(Vec3::new(600.0, 40.0, 600.0)),
             ));
         }
         crate::level::LevelKind::Chersonesus => {
             commands.spawn((
-                FogVolume {
-                    fog_color: Color::srgb(0.95, 0.9, 0.88),
-                    density_factor: m.haze,
-                    absorption: 0.0,
-                    scattering: 0.3,
-                    scattering_asymmetry: 0.72,
-                    ..default()
-                },
+                FogVolume { fog_color: Color::srgb(0.95, 0.9, 0.88), density_factor: m.haze, absorption: 0.0, scattering: 0.3, scattering_asymmetry: 0.72, ..default() },
                 Transform::from_xyz(0.0, 6.0, 0.0).with_scale(Vec3::new(1800.0, 14.0, 1800.0)),
                 HazeVolume,
             ));
@@ -1642,14 +847,8 @@ pub struct HazeVolume;
 
 const SKY_RADIUS: f32 = 900.0;
 
-fn follow_sky(
-    cameras: Query<&GlobalTransform, With<Camera3d>>,
-    settings: Res<crate::settings::Settings>,
-    mut sky: Query<&mut Transform, With<SkyDome>>,
-) {
-    let Some(cam) = cameras.iter().next() else {
-        return;
-    };
+fn follow_sky(cameras: Query<&GlobalTransform, With<Camera3d>>, settings: Res<crate::settings::Settings>, mut sky: Query<&mut Transform, With<SkyDome>>) {
+    let Some(cam) = cameras.iter().next() else { return };
     // Сфера неба — внутри дальности прорисовки, иначе камера её обрежет.
     let scale = (crate::settings::sky_radius(&settings) / SKY_RADIUS).min(1.0);
     for mut t in &mut sky {
@@ -1669,12 +868,7 @@ fn setup_camera(event: On<Add<Camera3d>>, mut commands: Commands) {
         Tonemapping::TonyMcMapface,
         color_grading(&m),
         // Лёгкое затемнение углов кадра, как у объектива.
-        Vignette {
-            intensity: 0.32,
-            radius: 0.85,
-            smoothness: 3.0,
-            ..default()
-        },
+        Vignette { intensity: 0.32, radius: 0.85, smoothness: 3.0, ..default() },
         Msaa::Off,
     ));
 }
@@ -1685,36 +879,19 @@ pub fn distance_fog(m: &Mood, draw_distance: f32) -> DistanceFog {
     DistanceFog {
         color: m.fog(),
         // Свечение дымки к солнцу — слабее, чем у неба: иначе город против солнца тонет в оранжевом.
-        directional_light_color: Color::linear_rgba(
-            m.horizon_sun.0.x * 0.55,
-            m.horizon_sun.0.y * 0.55,
-            m.horizon_sun.0.z * 0.55,
-            1.0,
-        ),
+        directional_light_color: Color::linear_rgba(m.horizon_sun.0.x * 0.55, m.horizon_sun.0.y * 0.55, m.horizon_sun.0.z * 0.55, 1.0),
         directional_light_exponent: m.horizon_sun.1,
-        falloff: FogFalloff::from_visibility_colors(
-            m.visibility.min(draw_distance),
-            m.fog_far.0,
-            m.fog_far.1,
-        ),
+        falloff: FogFalloff::from_visibility_colors(m.visibility.min(draw_distance), m.fog_far.0, m.fog_far.1),
     }
 }
 
 /// Цветокоррекция: чуть больше контраста в средних тонах, насыщенные света (закатное
 /// золото), чуть приглушённые тени — как на плёнке.
 pub fn color_grading(m: &Mood) -> ColorGrading {
-    let section = |saturation: f32, contrast: f32| ColorGradingSection {
-        saturation,
-        contrast,
-        ..default()
-    };
+    let section = |saturation: f32, contrast: f32| ColorGradingSection { saturation, contrast, ..default() };
     ColorGrading {
         // Ночью глаз привыкает к темноте, но краски уходят (сумеречное зрение).
-        global: ColorGradingGlobal {
-            exposure: m.exposure,
-            post_saturation: 1.06 - 0.3 * m.night - 0.15 * m.overcast,
-            ..default()
-        },
+        global: ColorGradingGlobal { exposure: m.exposure, post_saturation: 1.06 - 0.3 * m.night - 0.15 * m.overcast, ..default() },
         shadows: section(0.92, 1.0),
         midtones: section(1.04, 1.08),
         highlights: section(1.1, 1.0),
@@ -1722,17 +899,11 @@ pub fn color_grading(m: &Mood) -> ColorGrading {
 }
 
 /// Свет неба (карта окружения) — на каждую 3D-камеру, как только карта готова.
-fn attach_sky_light(
-    mut commands: Commands,
-    env: Option<Res<crate::sky::SkyEnvironment>>,
-    cameras: Query<Entity, (With<Camera3d>, Without<EnvironmentMapLight>)>,
-) {
+fn attach_sky_light(mut commands: Commands, env: Option<Res<crate::sky::SkyEnvironment>>, cameras: Query<Entity, (With<Camera3d>, Without<EnvironmentMapLight>)>) {
     let Some(env) = env else { return };
     let m = mood();
     for e in &cameras {
-        commands
-            .entity(e)
-            .insert(crate::sky::sky_environment_light(&env, &m));
+        commands.entity(e).insert(crate::sky::sky_environment_light(&env, &m));
     }
 }
 

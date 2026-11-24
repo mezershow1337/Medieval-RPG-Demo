@@ -3,11 +3,11 @@
 //! движение камеры вслед за ударом и эффекты попаданий.
 
 use crate::client::{CharacterAssets, NetState, RemoteActor, RemoteIndex};
+use crate::rig::Blade;
 use crate::combat::{self, Action, Fighter, HitOutcome, Swing};
+use bevy::input::mouse::AccumulatedMouseMotion;
 use crate::player::{LocalPlayer, PlayerCamera};
 use crate::protocol::*;
-use crate::rig::Blade;
-use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use bevy_renet::RenetClient;
@@ -30,12 +30,7 @@ pub struct LocalFighter {
 
 impl LocalFighter {
     pub fn new(fighter: Fighter) -> Self {
-        Self {
-            fighter,
-            move_mult: 1.0,
-            finish: 200,
-            gear: Default::default(),
-        }
+        Self { fighter, move_mult: 1.0, finish: 200, gear: Default::default() }
     }
 }
 
@@ -46,16 +41,8 @@ struct ViewSword;
 /// События боя для эффектов и интерфейса.
 #[derive(Message, Clone, Copy, Debug)]
 pub enum CombatFeedback {
-    Hit {
-        attacker: u64,
-        target: u64,
-        outcome: HitOutcome,
-        at: Vec3,
-    },
-    Died {
-        id: u64,
-        killer: Option<u64>,
-    },
+    Hit { attacker: u64, target: u64, outcome: HitOutcome, at: Vec3 },
+    Died { id: u64, killer: Option<u64> },
 }
 
 /// Последнее заметное событие для надписи в центре экрана.
@@ -144,27 +131,14 @@ pub struct CombatHints(pub bool);
 
 impl CombatHints {
     fn from_env() -> Self {
-        CombatHints(
-            std::env::var("MRPG_COMBAT_HINTS")
-                .map(|v| v != "0")
-                .unwrap_or(true),
-        )
+        CombatHints(std::env::var("MRPG_COMBAT_HINTS").map(|v| v != "0").unwrap_or(true))
     }
 }
 
-fn toggle_combat_hints(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut hints: ResMut<CombatHints>,
-    mut banner: ResMut<Banner>,
-) {
+fn toggle_combat_hints(keys: Res<ButtonInput<KeyCode>>, mut hints: ResMut<CombatHints>, mut banner: ResMut<Banner>) {
     if keys.just_pressed(KeyCode::F7) {
         hints.0 = !hints.0;
-        banner.text = if hints.0 {
-            "Подсказки боя включены (F7)"
-        } else {
-            "Подсказки боя выключены (F7)"
-        }
-        .into();
+        banner.text = if hints.0 { "Подсказки боя включены (F7)" } else { "Подсказки боя выключены (F7)" }.into();
         banner.color = Color::srgb(0.85, 0.85, 0.85);
         banner.time_left = 1.5;
     }
@@ -176,24 +150,8 @@ struct ViewGlow;
 
 pub fn spawn_view_sword(parent: &mut ChildSpawnerCommands, assets: &CharacterAssets) {
     parent.spawn((ViewGlow, crate::client::riposte_glow_bundle(assets)));
-    parent.spawn((
-        ViewSword,
-        ShownViewWeapon(combat::WeaponKind::Spatha, None),
-        crate::rig::NeedsWeapon(combat::WeaponKind::Spatha),
-        Transform::default(),
-        Visibility::default(),
-        crate::self_body::Shade::NoShadow,
-    ));
-    // Правая рука держит оружие всегда, левая — второй хват (копьё) или кулак в стойке.
-    for left in [false, true] {
-        parent.spawn((
-            ViewArmRoot,
-            crate::rig::NeedsViewArm(None, left),
-            Transform::default(),
-            Visibility::default(),
-            crate::self_body::Shade::NoShadow,
-        ));
-    }
+    parent.spawn((ViewSword, ShownViewWeapon(combat::WeaponKind::Spatha, None), crate::rig::NeedsWeapon(combat::WeaponKind::Spatha), Transform::default(), Visibility::default()));
+    parent.spawn((ViewArmRoot, crate::rig::NeedsViewArm(None), Transform::default(), Visibility::default()));
 }
 
 /// Какое оружие показано от первого лица.
@@ -209,21 +167,11 @@ fn refresh_view_weapon(
 ) {
     let Ok(f) = local.single() else { return };
     let kind = f.fighter.weapon;
-    let held = f
-        .gear
-        .main_hand
-        .filter(|_| !f.gear.holstered && kind != combat::WeaponKind::Fists);
+    let held = f.gear.main_hand.filter(|_| !f.gear.holstered && kind != combat::WeaponKind::Fists);
     for (e, mut w) in &mut shown {
         if (w.0, w.1) != (kind, held) {
             (w.0, w.1) = (kind, held);
-            crate::worn::set_weapon_model(
-                &mut commands,
-                e,
-                kind,
-                held.map(crate::items::ItemBaseId),
-                f.finish,
-                models.as_deref(),
-            );
+            crate::worn::set_weapon_model(&mut commands, e, kind, held.map(crate::items::ItemBaseId), f.finish, models.as_deref());
         }
     }
 }
@@ -236,7 +184,7 @@ struct ViewArmRoot;
 fn refresh_view_arm(
     mut commands: Commands,
     local: Query<&LocalFighter>,
-    arms: Query<(Entity, &crate::rig::ViewArm), With<ViewArmRoot>>,
+    arms: Query<Entity, (With<ViewArmRoot>, With<crate::rig::ViewArm>)>,
     net: Option<Res<NetState>>,
     mut shown: Local<crate::gear_look::Gear>,
 ) {
@@ -244,48 +192,21 @@ fn refresh_view_arm(
     if f.gear == *shown {
         return;
     }
-    // Ждём, пока обе руки соберутся (у них уже есть суставы), иначе переодевать нечего.
-    if arms.iter().len() < 2 {
-        return;
-    }
+    // Ждём, пока рука соберётся (у неё уже есть суставы), иначе переодевать нечего.
+    let Ok(e) = arms.single() else { return };
     *shown = f.gear;
     let id = net.as_ref().and_then(|n| n.my_id).unwrap_or(0);
     let outfit = crate::rig::Outfit::for_actor(ActorKind::Player, id).with_gear(&f.gear);
-    for (e, arm) in &arms {
-        commands
-            .entity(e)
-            .despawn_related::<Children>()
-            .remove::<crate::rig::ViewArm>()
-            .insert(crate::rig::NeedsViewArm(Some(outfit), arm.left));
-    }
+    commands.entity(e).despawn_related::<Children>().remove::<crate::rig::ViewArm>().insert(crate::rig::NeedsViewArm(Some(outfit)));
 }
 
-fn setup_sparks(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let glow = |materials: &mut Assets<StandardMaterial>, c: Color, e: LinearRgba| {
-        materials.add(StandardMaterial {
-            base_color: c,
-            emissive: e,
-            unlit: true,
-            ..default()
-        })
-    };
+fn setup_sparks(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
+    let glow = |materials: &mut Assets<StandardMaterial>, c: Color, e: LinearRgba| materials.add(StandardMaterial { base_color: c, emissive: e, unlit: true, ..default() });
     commands.insert_resource(SparkAssets {
         mesh: meshes.add(Cuboid::new(0.03, 0.03, 0.03)),
-        gold: glow(
-            &mut materials,
-            Color::srgb(1.0, 0.8, 0.3),
-            LinearRgba::rgb(20.0, 12.0, 3.0),
-        ),
+        gold: glow(&mut materials, Color::srgb(1.0, 0.8, 0.3), LinearRgba::rgb(20.0, 12.0, 3.0)),
         white: glow(&mut materials, Color::WHITE, LinearRgba::rgb(8.0, 8.0, 8.0)),
-        blood: glow(
-            &mut materials,
-            Color::srgb(0.6, 0.02, 0.02),
-            LinearRgba::rgb(0.6, 0.0, 0.0),
-        ),
+        blood: glow(&mut materials, Color::srgb(0.6, 0.02, 0.02), LinearRgba::rgb(0.6, 0.0, 0.0)),
     });
 }
 
@@ -316,28 +237,16 @@ fn combat_input(
     let decay = (-time.delta_secs() / AIM_MEMORY).exp();
     aim.motion = aim.motion * decay + Vec2::new(motion.delta.x, -motion.delta.y);
     // ЛКМ по предмету — захват (props_client), ПКМ с предметом в руках — бросок.
-    let (no_attack, no_guard) = grab
-        .map(|g| (g.blocks_attack(), g.blocks_guard()))
-        .unwrap_or((false, false));
+    let (no_attack, no_guard) = grab.map(|g| (g.blocks_attack(), g.blocks_guard())).unwrap_or((false, false));
     let Some(mut client) = client else { return };
-    let Ok((p, mut f)) = local.single_mut() else {
-        return;
-    };
-    aim.pending =
-        Swing::from_mouse(aim.motion, AIM_THRESHOLD).map(|s| f.fighter.weapon.normalize(s));
+    let Ok((p, mut f)) = local.single_mut() else { return };
+    aim.pending = Swing::from_mouse(aim.motion, AIM_THRESHOLD).map(|s| f.fighter.weapon.normalize(s));
     if f.fighter.is_dead() {
         return;
     }
     let mut attack = |f: &mut LocalFighter, swing: Option<Swing>| {
         f.fighter.try_attack(swing);
-        client.send_message(
-            CH_RELIABLE,
-            encode(&ClientMessage::Attack {
-                yaw: p.yaw,
-                pitch: p.pitch,
-                swing,
-            }),
-        );
+        client.send_message(CH_RELIABLE, encode(&ClientMessage::Attack { yaw: p.yaw, pitch: p.pitch, swing }));
     };
     if !no_attack {
         if mouse.just_pressed(MouseButton::Left) {
@@ -357,25 +266,11 @@ fn combat_input(
     // Защита: ПКМ. Вовремя — парирование с рипостом, дольше — глухой блок.
     if mouse.just_pressed(MouseButton::Right) && !no_guard {
         f.fighter.set_guard(true);
-        client.send_message(
-            CH_RELIABLE,
-            encode(&ClientMessage::Guard {
-                on: true,
-                yaw: p.yaw,
-                pitch: p.pitch,
-            }),
-        );
+        client.send_message(CH_RELIABLE, encode(&ClientMessage::Guard { on: true, yaw: p.yaw, pitch: p.pitch }));
     }
     if mouse.just_released(MouseButton::Right) {
         f.fighter.set_guard(false);
-        client.send_message(
-            CH_RELIABLE,
-            encode(&ClientMessage::Guard {
-                on: false,
-                yaw: p.yaw,
-                pitch: p.pitch,
-            }),
-        );
+        client.send_message(CH_RELIABLE, encode(&ClientMessage::Guard { on: false, yaw: p.yaw, pitch: p.pitch }));
     }
 }
 
@@ -389,9 +284,7 @@ fn tick_local(time: Res<Time>, mut local: Query<(&mut LocalPlayer, &mut LocalFig
 /// Для снимков: `MRPG_FP_POSE=фаза:удар:доля` (см. `combat::showcase_action`) застывает своё
 /// действие от первого лица; `MRPG_FP_AIM=ur` — метка направления у прицела.
 fn fp_pose_for_shots(mut local: Query<&mut LocalFighter>, mut aim: ResMut<AttackAim>) {
-    let Ok(mut f) = local.single_mut() else {
-        return;
-    };
+    let Ok(mut f) = local.single_mut() else { return };
     let spec = std::env::var("MRPG_FP_POSE").unwrap_or_default();
     if let Some(a) = combat::showcase_action(&spec, f.fighter.weapon) {
         f.fighter.action = a;
@@ -402,10 +295,7 @@ fn fp_pose_for_shots(mut local: Query<&mut LocalFighter>, mut aim: ResMut<Attack
             f.fighter.riposte_timer = 0.0;
         }
     }
-    if let Some(s) = std::env::var("MRPG_FP_AIM")
-        .ok()
-        .and_then(|s| Swing::from_code(&s))
-    {
+    if let Some(s) = std::env::var("MRPG_FP_AIM").ok().and_then(|s| Swing::from_code(&s)) {
         aim.pending = Some(s);
     }
 }
@@ -422,21 +312,11 @@ pub fn reconcile(local: &mut LocalFighter, snap: &ActorSnapshot) {
     local.finish = snap.finish;
     local.gear = snap.gear;
     // Оружие меняем только вне удара, чтобы не сбить анимацию.
-    if snap.weapon != local.fighter.weapon
-        && matches!(local.fighter.action, Action::Idle | Action::Guard { .. })
-    {
+    if snap.weapon != local.fighter.weapon && matches!(local.fighter.action, Action::Idle | Action::Guard { .. }) {
         local.fighter.weapon = snap.weapon;
     }
-    let forced = matches!(
-        snap.action,
-        Action::Stagger { .. }
-            | Action::Recoil { .. }
-            | Action::Flinch { .. }
-            | Action::GuardStagger { .. }
-            | Action::Dead
-    );
-    let same =
-        std::mem::discriminant(&snap.action) == std::mem::discriminant(&local.fighter.action);
+    let forced = matches!(snap.action, Action::Stagger { .. } | Action::Recoil { .. } | Action::Flinch { .. } | Action::GuardStagger { .. } | Action::Dead);
+    let same = std::mem::discriminant(&snap.action) == std::mem::discriminant(&local.fighter.action);
     if forced && !same {
         local.fighter.action = snap.action;
         local.fighter.queued_attack = false;
@@ -450,35 +330,13 @@ fn animate_view_sword(
     shake: Res<Shake>,
     local: Query<(&LocalPlayer, &LocalFighter)>,
     mut camera: Query<&mut Transform, (With<PlayerCamera>, Without<ViewSword>)>,
-    mut sword: Query<
-        (&mut Transform, &mut Visibility, &Children),
-        (With<ViewSword>, Without<PlayerCamera>),
-    >,
+    mut sword: Query<(&mut Transform, &mut Visibility, &Children), (With<ViewSword>, Without<PlayerCamera>)>,
     mut blades: Query<(&Blade, &mut MeshMaterial3d<StandardMaterial>)>,
     mut tints: ResMut<crate::rig::BladeTints>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut arm: Query<
-        (&crate::rig::ViewArm, &mut Visibility),
-        (With<ViewArmRoot>, Without<ViewSword>),
-    >,
-    mut joints: Query<
-        &mut Transform,
-        (
-            Without<ViewSword>,
-            Without<PlayerCamera>,
-            Without<ViewArmRoot>,
-            Without<ViewGlow>,
-        ),
-    >,
-    mut glow: Query<
-        (&mut Transform, &mut Visibility),
-        (
-            With<ViewGlow>,
-            Without<ViewSword>,
-            Without<PlayerCamera>,
-            Without<ViewArmRoot>,
-        ),
-    >,
+    mut arm: Query<(&crate::rig::ViewArm, &mut Visibility), (With<ViewArmRoot>, Without<ViewSword>)>,
+    mut joints: Query<&mut Transform, (Without<ViewSword>, Without<PlayerCamera>, Without<ViewArmRoot>, Without<ViewGlow>)>,
+    mut glow: Query<(&mut Transform, &mut Visibility), (With<ViewGlow>, Without<ViewSword>, Without<PlayerCamera>, Without<ViewArmRoot>)>,
     hints: Res<CombatHints>,
     mut cam_motion: Local<CamMotion>,
     mut smoothed: Local<Option<(Vec3, Quat)>>,
@@ -493,20 +351,11 @@ fn animate_view_sword(
         let s = shake.0 * 0.04;
         let t = time.elapsed_secs() * 60.0;
         let m = cam_motion.0;
-        cam.rotation = Quat::from_rotation_y(m.y)
-            * Quat::from_rotation_x(p.pitch + m.x + (t.sin() * s))
-            * Quat::from_rotation_z(m.z + (t * 1.3).cos() * s);
+        cam.rotation = Quat::from_rotation_y(m.y) * Quat::from_rotation_x(p.pitch + m.x + (t.sin() * s)) * Quat::from_rotation_z(m.z + (t * 1.3).cos() * s);
     }
-    let Ok((mut st, mut vis, children)) = sword.single_mut() else {
-        return;
-    };
-    *vis = if f.fighter.is_dead() || crate::work_client::hands_busy(work.as_deref()) {
-        Visibility::Hidden
-    } else {
-        Visibility::Inherited
-    };
-    let (hilt, dir) =
-        combat::view_weapon_pose(&f.fighter.action, f.fighter.weapon, time.elapsed_secs());
+    let Ok((mut st, mut vis, children)) = sword.single_mut() else { return };
+    *vis = if f.fighter.is_dead() || crate::work_client::hands_busy(work.as_deref()) { Visibility::Hidden } else { Visibility::Inherited };
+    let (hilt, dir) = combat::weapon_pose(&f.fighter.action, f.fighter.weapon, time.elapsed_secs());
     // Удар в мире наклонён на 0.6 от взгляда, а камера — на весь взгляд; компенсируем разницу.
     let fix = Quat::from_rotation_x(-p.pitch * 0.4);
     // Меч от первого лица чуть приподнят, чтобы в кадре была рука с рукоятью.
@@ -526,77 +375,26 @@ fn animate_view_sword(
         }
     }
     *smoothed = Some((st.translation, st.rotation));
-    let riposte = matches!(
-        f.fighter.action,
-        Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. }
-    );
+    let riposte = matches!(f.fighter.action, Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. });
     let _ = &assets;
     if let Ok((mut gt, mut gv)) = glow.single_mut() {
-        let g = (riposte && hints.0)
-            .then(|| crate::client::riposte_glow_transform(&st, f.fighter.weapon))
-            .flatten()
-            .filter(|_| *vis != Visibility::Hidden);
-        *gv = if g.is_some() {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
+        let g = (riposte && hints.0).then(|| crate::client::riposte_glow_transform(&st, f.fighter.weapon)).flatten().filter(|_| *vis != Visibility::Hidden);
+        *gv = if g.is_some() { Visibility::Inherited } else { Visibility::Hidden };
         if let Some(g) = g {
             *gt = g;
         }
     }
     for c in children.iter() {
         if let Ok((b, mut m)) = blades.get_mut(c) {
-            m.0 = if riposte && hints.0 {
-                assets.blade_red.clone()
-            } else {
-                tints.get(&mut materials, &b.0, f.finish)
-            };
+            m.0 = if riposte && hints.0 { assets.blade_red.clone() } else { tints.get(&mut materials, &b.0, f.finish) };
         }
     }
-    // Правая рука держит рукоять; левая — древко копья спереди или поднята кулаком
-    // в кулачной стойке; со щитом или одноручным оружием её в кадре нет.
-    let (right_grip, left_grip) = crate::client::weapon_grips(f.fighter.weapon);
-    let axis = st.rotation * Vec3::Y;
-    let fists = f.fighter.weapon == combat::WeaponKind::Fists && !f.fighter.has_shield;
-    for (arm, mut arm_vis) in &mut arm {
-        let target = if !arm.left {
-            Some((st.transform_point(right_grip), axis))
-        } else if let Some(l) = left_grip {
-            Some((st.transform_point(l), axis))
-        } else if fists {
-            let guard = matches!(
-                f.fighter.action,
-                Action::Windup { .. } | Action::Strike { .. } | Action::Recovery { .. }
-            );
-            let fist = if guard {
-                Vec3::new(-0.16, -0.08, -0.28)
-            } else {
-                Vec3::new(-0.2, -0.18, -0.3)
-            };
-            let (pos, _) = view_framing(fix * fist, Vec3::NEG_Z);
-            Some((
-                Vec3::new(-0.06, -0.25 + VIEW_LIFT, -0.04) + pos,
-                (fix * Vec3::new(0.15, 0.25, -1.0)).normalize(),
-            ))
-        } else {
-            None
-        };
-        let Some((grip, axis)) = target else {
-            *arm_vis = Visibility::Hidden;
-            continue;
-        };
+    // Рука держит рукоять.
+    if let Ok((arm, mut arm_vis)) = arm.single_mut() {
         *arm_vis = *vis;
-        let shoulder = if arm.left {
-            VIEW_SHOULDER * Vec3::new(-1.0, 1.0, 1.0)
-        } else {
-            VIEW_SHOULDER
-        };
-        for (joint, (pos, rot)) in arm
-            .joints()
-            .into_iter()
-            .zip(crate::rig::view_arm_pose(shoulder, grip, axis, arm.left))
-        {
+        let grip = st.transform_point(crate::client::weapon_grips(f.fighter.weapon).0);
+        let axis = st.rotation * Vec3::Y;
+        for (joint, (pos, rot)) in arm.joints().into_iter().zip(crate::rig::view_arm_pose(VIEW_SHOULDER, grip, axis)) {
             if let Ok(mut t) = joints.get_mut(joint) {
                 t.translation = pos;
                 t.rotation = rot;
@@ -636,11 +434,7 @@ fn swing_camera(action: &Action, weapon: combat::WeaponKind) -> Vec3 {
         if swing == Swing::Thrust {
             return Vec3::new(-0.035 * push, 0.0, 0.0);
         }
-        Vec3::new(
-            0.025 * s.y * m - 0.015 * push,
-            -0.03 * s.x * m,
-            -0.05 * s.x * m,
-        )
+        Vec3::new(0.025 * s.y * m - 0.015 * push, -0.03 * s.x * m, -0.05 * s.x * m)
     };
     let smooth = |t: f32| {
         let t = t.clamp(0.0, 1.0);
@@ -650,28 +444,16 @@ fn swing_camera(action: &Action, weapon: combat::WeaponKind) -> Vec3 {
         _ if weapon.ranged() => Vec3::ZERO,
         Action::Windup { t, dur, swing, .. } => {
             let k = 1.0 - (1.0 - (t.max(0.0) / dur.max(0.01)).clamp(0.0, 1.0)).powi(2);
-            if swing == Swing::Thrust {
-                Vec3::new(0.02 * k, 0.0, 0.0)
-            } else {
-                at(swing, k, 0.0)
-            }
+            if swing == Swing::Thrust { Vec3::new(0.02 * k, 0.0, 0.0) } else { at(swing, k, 0.0) }
         }
         Action::Strike { t, swing, .. } => {
             let p = (t / weapon.timing(swing).release).clamp(0.0, 1.0);
             let push = (p * std::f32::consts::PI).sin();
-            if swing == Swing::Thrust {
-                at(swing, 0.0, push)
-            } else {
-                at(swing, 1.0 - 2.0 * smooth(p), push)
-            }
+            if swing == Swing::Thrust { at(swing, 0.0, push) } else { at(swing, 1.0 - 2.0 * smooth(p), push) }
         }
         Action::Recovery { t, swing } => {
             let k = 1.0 - smooth(t / weapon.timing(swing).recovery);
-            if swing == Swing::Thrust {
-                Vec3::ZERO
-            } else {
-                at(swing, -k, 0.0)
-            }
+            if swing == Swing::Thrust { Vec3::ZERO } else { at(swing, -k, 0.0) }
         }
         Action::Recoil { t, dur } => {
             let k = (1.0 - t / dur).max(0.0).powi(2);
@@ -711,21 +493,10 @@ fn feedback_effects(
         seed ^= seed << 17;
         (seed >> 40) as f32 / (1u64 << 24) as f32 - 0.5
     };
-    let is_npc = |id: u64| {
-        index
-            .0
-            .get(&id)
-            .and_then(|e| remotes.get(*e).ok())
-            .is_some_and(|r| r.kind.is_npc())
-    };
+    let is_npc = |id: u64| index.0.get(&id).and_then(|e| remotes.get(*e).ok()).is_some_and(|r| r.kind.is_npc());
     for ev in events.read() {
         match *ev {
-            CombatFeedback::Hit {
-                attacker,
-                target,
-                outcome,
-                at,
-            } => {
+            CombatFeedback::Hit { attacker, target, outcome, at } => {
                 let (count, mat, speed) = match outcome {
                     HitOutcome::Parried | HitOutcome::Chambered => (18, sparks.gold.clone(), 4.0),
                     HitOutcome::Blocked { .. } => (10, sparks.white.clone(), 3.0),
@@ -734,24 +505,10 @@ fn feedback_effects(
                     HitOutcome::Damage { .. } => (12, sparks.blood.clone(), 2.0),
                 };
                 // Свою кровь не рисуем — вместо неё красная вспышка экрана.
-                let count = if Some(target) == me && matches!(outcome, HitOutcome::Damage { .. }) {
-                    0
-                } else {
-                    count
-                };
+                let count = if Some(target) == me && matches!(outcome, HitOutcome::Damage { .. }) { 0 } else { count };
                 for _ in 0..count {
-                    let v = Vec3::new(rnd(), rnd() + 0.6, rnd()).normalize()
-                        * speed
-                        * (0.5 + rnd() + 0.5);
-                    commands.spawn((
-                        Spark {
-                            velocity: v,
-                            life: 0.45,
-                        },
-                        Mesh3d(sparks.mesh.clone()),
-                        MeshMaterial3d(mat.clone()),
-                        Transform::from_translation(at),
-                    ));
+                    let v = Vec3::new(rnd(), rnd() + 0.6, rnd()).normalize() * speed * (0.5 + rnd() + 0.5);
+                    commands.spawn((Spark { velocity: v, life: 0.45 }, Mesh3d(sparks.mesh.clone()), MeshMaterial3d(mat.clone()), Transform::from_translation(at)));
                 }
                 let mut say = |text: &str, color: Color| {
                     banner.text = text.to_string();
@@ -768,10 +525,7 @@ fn feedback_effects(
                         say("Отбил! Рипост — ЛКМ", gold);
                         shake.0 = shake.0.max(0.2);
                         if let Some(f) = me_f.as_mut() {
-                            f.fighter.action = Action::GuardStagger {
-                                t: 0.0,
-                                dur: combat::PARRY_SHOCK,
-                            };
+                            f.fighter.action = Action::GuardStagger { t: 0.0, dur: combat::PARRY_SHOCK };
                             f.fighter.riposte_timer = combat::PARRY_SHOCK + combat::RIPOSTE_WINDOW;
                             f.fighter.last_parry_timed = true;
                             f.fighter.guard_used = true;
@@ -781,10 +535,7 @@ fn feedback_effects(
                         say("Удар отбит — защищайся (ПКМ)!", red);
                         shake.0 = 0.7;
                         if let Some(f) = me_f.as_mut() {
-                            f.fighter.action = Action::Recoil {
-                                t: 0.0,
-                                dur: combat::PARRIED_RECOIL,
-                            };
+                            f.fighter.action = Action::Recoil { t: 0.0, dur: combat::PARRIED_RECOIL };
                             f.fighter.reset_combo();
                         }
                     }
@@ -794,39 +545,23 @@ fn feedback_effects(
                             && let Action::Windup { t, dur, swing, .. } = f.fighter.action
                         {
                             let left = (dur - t).min(combat::RIPOSTE_WINDUP).max(0.05);
-                            f.fighter.action = Action::Windup {
-                                t: 0.0,
-                                dur: left,
-                                swing,
-                                riposte: false,
-                                morphed: true,
-                            };
+                            f.fighter.action = Action::Windup { t: 0.0, dur: left, swing, riposte: false, morphed: true };
                         }
                     }
                     HitOutcome::Chambered if Some(attacker) == me => {
                         say("Ваш удар встречен", red);
                         shake.0 = 0.6;
                         if let Some(f) = me_f.as_mut() {
-                            f.fighter.action = Action::Recoil {
-                                t: 0.0,
-                                dur: combat::CHAMBERED_RECOIL,
-                            };
+                            f.fighter.action = Action::Recoil { t: 0.0, dur: combat::CHAMBERED_RECOIL };
                             f.fighter.reset_combo();
                         }
                     }
                     HitOutcome::Blocked { tier } if Some(attacker) == me => {
-                        let shield = index
-                            .0
-                            .get(&target)
-                            .and_then(|e| remotes.get(*e).ok())
-                            .is_some_and(|r| r.fighter.has_shield);
+                        let shield = index.0.get(&target).and_then(|e| remotes.get(*e).ok()).is_some_and(|r| r.fighter.has_shield);
                         if shield && tier != combat::ImpactTier::Heavy {
                             say("Принято на щит", grey);
                             if let Some(f) = me_f.as_mut() {
-                                f.fighter.action = Action::Recoil {
-                                    t: 0.0,
-                                    dur: combat::BLOCK_BOUNCE,
-                                };
+                                f.fighter.action = Action::Recoil { t: 0.0, dur: combat::BLOCK_BOUNCE };
                                 f.fighter.reset_combo();
                             }
                         } else {
@@ -850,10 +585,7 @@ fn feedback_effects(
                         say("Защиту пробили — нет сил", red);
                         shake.0 = 0.8;
                         if let Some(f) = me_f.as_mut() {
-                            f.fighter.action = Action::Stagger {
-                                t: 0.0,
-                                dur: combat::GUARD_BREAK_STAGGER,
-                            };
+                            f.fighter.action = Action::Stagger { t: 0.0, dur: combat::GUARD_BREAK_STAGGER };
                         }
                     }
                     HitOutcome::GuardBroken if Some(attacker) == me => {
@@ -866,10 +598,7 @@ fn feedback_effects(
                         say("Клинок ударился о стену", grey);
                         shake.0 = shake.0.max(0.4);
                         if let Some(f) = me_f.as_mut() {
-                            f.fighter.action = Action::Stagger {
-                                t: 0.0,
-                                dur: combat::WALL_BOUNCE,
-                            };
+                            f.fighter.action = Action::Stagger { t: 0.0, dur: combat::WALL_BOUNCE };
                             f.fighter.reset_combo();
                         }
                     }
@@ -884,13 +613,7 @@ fn feedback_effects(
                         if let Some(f) = me_f.as_mut() {
                             f.fighter.swing_landed = true;
                         }
-                        shake.0 = shake.0.max(if head {
-                            0.3
-                        } else if is_npc(target) {
-                            0.2
-                        } else {
-                            0.0
-                        });
+                        shake.0 = shake.0.max(if head { 0.3 } else if is_npc(target) { 0.2 } else { 0.0 });
                     }
                     _ => {}
                 }
@@ -910,11 +633,7 @@ fn feedback_effects(
     }
 }
 
-fn update_sparks(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut sparks: Query<(Entity, &mut Spark, &mut Transform)>,
-) {
+fn update_sparks(mut commands: Commands, time: Res<Time>, mut sparks: Query<(Entity, &mut Spark, &mut Transform)>) {
     let dt = time.delta_secs();
     for (e, mut s, mut t) in &mut sparks {
         s.life -= dt;
@@ -928,12 +647,7 @@ fn update_sparks(
     }
 }
 
-fn decay_effects(
-    time: Res<Time>,
-    mut banner: ResMut<Banner>,
-    mut flash: ResMut<DamageFlash>,
-    mut shake: ResMut<Shake>,
-) {
+fn decay_effects(time: Res<Time>, mut banner: ResMut<Banner>, mut flash: ResMut<DamageFlash>, mut shake: ResMut<Shake>) {
     let dt = time.delta_secs();
     banner.time_left = (banner.time_left - dt).max(0.0);
     flash.0 = (flash.0 - dt * 1.5).max(0.0);

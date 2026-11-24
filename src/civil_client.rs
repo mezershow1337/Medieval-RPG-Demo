@@ -18,17 +18,9 @@ impl Plugin for CivilClientPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CivilNet>()
             .init_resource::<LawUi>()
-            .add_systems(
-                Startup,
-                setup_law_ui.after(crate::inventory_ui::setup_fonts),
-            )
+            .add_systems(Startup, setup_law_ui.after(crate::inventory_ui::setup_fonts))
             .add_systems(Update, (apply_civil, law_input, draw_law_ui).chain())
-            .add_systems(
-                Update,
-                law_demo
-                    .before(apply_civil)
-                    .run_if(|| std::env::var_os("MRPG_LAW_DEMO").is_some()),
-            );
+            .add_systems(Update, law_demo.before(apply_civil).run_if(|| std::env::var_os("MRPG_LAW_DEMO").is_some()));
     }
 }
 
@@ -36,11 +28,7 @@ impl Plugin for CivilClientPlugin {
 #[derive(Message, Clone, Debug)]
 pub enum CivilNet {
     Hit,
-    Dead {
-        civ: Civ,
-        corpse: Option<(u64, Vec3, f32)>,
-        fresh: bool,
-    },
+    Dead { civ: Civ, corpse: Option<(u64, Vec3, f32)>, fresh: bool },
     Back(Civ),
     Law(LawMessage),
 }
@@ -85,12 +73,7 @@ struct PersuadeButton;
 #[derive(Component)]
 struct WitnessText;
 
-const SCREAMS: [&str; 4] = [
-    "«Помогите! Убивают!»",
-    "«Стража! Стража!»",
-    "«Не надо! Пощади!»",
-    "«Люди добрые, разбой!»",
-];
+const SCREAMS: [&str; 4] = ["«Помогите! Убивают!»", "«Стража! Стража!»", "«Не надо! Пощади!»", "«Люди добрые, разбой!»"];
 
 #[allow(clippy::too_many_arguments)]
 fn apply_civil(
@@ -116,10 +99,7 @@ fn apply_civil(
             }
             CivilNet::Dead { civ, corpse, fresh } => match civ {
                 Civ::Resident(i) => {
-                    let Some((e, r, t)) = residents.iter().find(|(_, r, _)| r.index == i as usize)
-                    else {
-                        continue;
-                    };
+                    let Some((e, r, t)) = residents.iter().find(|(_, r, _)| r.index == i as usize) else { continue };
                     commands.entity(e).insert(Fallen);
                     if let Ok(mut v) = vis.get_mut(e) {
                         *v = Visibility::Hidden;
@@ -128,23 +108,11 @@ fn apply_civil(
                         && !corpses.0.contains_key(&id)
                     {
                         let outfit = crate::residents::outfit(r.role, i as u64 + 17);
-                        crate::client::spawn_civ_corpse(
-                            &mut commands,
-                            &mut corpses,
-                            id,
-                            outfit,
-                            t.scale.y,
-                            pos,
-                            yaw,
-                            fresh,
-                        );
+                        crate::client::spawn_civ_corpse(&mut commands, &mut corpses, id, outfit, t.scale.y, pos, yaw, fresh);
                     }
                 }
                 Civ::Merchant(id) => {
-                    let Some((e, _, children)) = merchants.iter().find(|(_, m, _)| m.id.0 == id)
-                    else {
-                        continue;
-                    };
+                    let Some((e, _, children)) = merchants.iter().find(|(_, m, _)| m.id.0 == id) else { continue };
                     commands.entity(e).insert(Fallen);
                     // Прилавок остаётся, прячем самого торговца.
                     for c in children.iter().filter(|c| rigs.contains(*c)) {
@@ -152,30 +120,17 @@ fn apply_civil(
                             *v = Visibility::Hidden;
                         }
                     }
-                    let info = trade
-                        .as_ref()
-                        .and_then(|t| t.merchants.iter().find(|m| m.id.0 == id));
+                    let info = trade.as_ref().and_then(|t| t.merchants.iter().find(|m| m.id.0 == id));
                     if let (Some((cid, pos, yaw)), Some(info)) = (corpse, info)
                         && !corpses.0.contains_key(&cid)
                     {
-                        crate::client::spawn_civ_corpse(
-                            &mut commands,
-                            &mut corpses,
-                            cid,
-                            crate::trade_client::outfit_for(info),
-                            1.0,
-                            pos,
-                            yaw,
-                            fresh,
-                        );
+                        crate::client::spawn_civ_corpse(&mut commands, &mut corpses, cid, crate::trade_client::outfit_for(info), 1.0, pos, yaw, fresh);
                     }
                 }
             },
             CivilNet::Back(civ) => match civ {
                 Civ::Resident(i) => {
-                    if let Some((e, _, _)) =
-                        residents.iter().find(|(_, r, _)| r.index == i as usize)
-                    {
+                    if let Some((e, _, _)) = residents.iter().find(|(_, r, _)| r.index == i as usize) {
                         commands.entity(e).remove::<Fallen>();
                         if let Ok(mut v) = vis.get_mut(e) {
                             *v = Visibility::Inherited;
@@ -183,8 +138,7 @@ fn apply_civil(
                     }
                 }
                 Civ::Merchant(id) => {
-                    if let Some((e, _, children)) = merchants.iter().find(|(_, m, _)| m.id.0 == id)
-                    {
+                    if let Some((e, _, children)) = merchants.iter().find(|(_, m, _)| m.id.0 == id) {
                         commands.entity(e).remove::<Fallen>();
                         for c in children.iter().filter(|c| rigs.contains(*c)) {
                             if let Ok(mut v) = vis.get_mut(c) {
@@ -199,15 +153,8 @@ fn apply_civil(
                     ui.notice = text;
                     ui.notice_until = now + 6.0;
                 }
-                LawMessage::Halt {
-                    fine,
-                    crimes,
-                    purse,
-                    persuade,
-                } => ui.halt = Some((fine, crimes, purse, persuade)),
-                LawMessage::Witnessed { count, secs } => {
-                    ui.witnessed = (count > 0).then_some((count, now + secs))
-                }
+                LawMessage::Halt { fine, crimes, purse, persuade } => ui.halt = Some((fine, crimes, purse, persuade)),
+                LawMessage::Witnessed { count, secs } => ui.witnessed = (count > 0).then_some((count, now + secs)),
                 LawMessage::HaltEnd => ui.halt = None,
                 LawMessage::Jailed { secs } => {
                     ui.halt = None;
@@ -227,87 +174,39 @@ fn apply_civil(
 /// свидетели бегут доносить.
 fn law_demo(mut out: MessageWriter<CivilNet>, mut sent: Local<bool>) {
     // Отсчёт на снимке не убегает (кадры в облаке идут медленно).
-    out.write(CivilNet::Law(LawMessage::Witnessed {
-        count: 2,
-        secs: 7.0,
-    }));
+    out.write(CivilNet::Law(LawMessage::Witnessed { count: 2, secs: 7.0 }));
     if *sent {
         return;
     }
     *sent = true;
-    out.write(CivilNet::Law(LawMessage::Halt {
-        fine: 680,
-        crimes: vec!["кража".into(), "побои".into()],
-        purse: 412,
-        persuade: Some(38),
-    }));
-    out.write(CivilNet::Law(LawMessage::Notice(
-        "«Держи вора!» — вас заметили: «Серебряная фибула».".into(),
-    )));
+    out.write(CivilNet::Law(LawMessage::Halt { fine: 680, crimes: vec!["кража".into(), "побои".into()], purse: 412, persuade: Some(38) }));
+    out.write(CivilNet::Law(LawMessage::Notice("«Держи вора!» — вас заметили: «Серебряная фибула».".into())));
 }
 
 fn setup_law_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>) {
     let font = |size: f32, bold: bool| TextFont {
-        font: if bold {
-            fonts.bold.clone()
-        } else {
-            fonts.regular.clone()
-        }
-        .into(),
+        font: if bold { fonts.bold.clone() } else { fonts.regular.clone() }.into(),
         font_size: bevy::text::FontSize::Px(size),
         ..default()
     };
     // Сообщения закона — над хотбаром.
     commands
-        .spawn((
-            ShotKeep,
-            Node {
-                position_type: PositionType::Absolute,
-                width: percent(100),
-                bottom: percent(17),
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-        ))
+        .spawn((ShotKeep, Node { position_type: PositionType::Absolute, width: percent(100), bottom: percent(17), justify_content: JustifyContent::Center, ..default() }))
         .with_children(|p| {
-            p.spawn((
-                NoticeText,
-                Text::new(""),
-                font(18.0, false),
-                TextColor(Color::srgb(0.98, 0.86, 0.6)),
-                TextLayout::justify(Justify::Center),
-                TextShadow::default(),
-            ));
+            p.spawn((NoticeText, Text::new(""), font(18.0, false), TextColor(Color::srgb(0.98, 0.86, 0.6)), TextLayout::justify(Justify::Center), TextShadow::default()));
         });
     // Свидетели бегут к страже — сверху по центру, на коже.
     commands
-        .spawn((
-            ShotKeep,
-            Node {
-                position_type: PositionType::Absolute,
-                width: percent(100),
-                top: px(64),
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-        ))
+        .spawn((ShotKeep, Node { position_type: PositionType::Absolute, width: percent(100), top: px(64), justify_content: JustifyContent::Center, ..default() }))
         .with_children(|p| {
             p.spawn((
                 WitnessText,
-                Node {
-                    padding: crate::ui_theme::Skin::Leather.padding(),
-                    ..default()
-                },
+                Node { padding: crate::ui_theme::Skin::Leather.padding(), ..default() },
                 crate::ui_theme::theme().skin(crate::ui_theme::Skin::Leather),
                 Visibility::Hidden,
             ))
             .with_children(|b| {
-                b.spawn((
-                    Text::new(""),
-                    font(19.0, true),
-                    TextColor(Color::srgb(1.0, 0.72, 0.45)),
-                    TextShadow::default(),
-                ));
+                b.spawn((Text::new(""), font(19.0, true), TextColor(Color::srgb(1.0, 0.72, 0.45)), TextShadow::default()));
             });
         });
     // Разговор со стражником.
@@ -315,14 +214,7 @@ fn setup_law_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
         .spawn((
             LawRoot,
             ShotKeep,
-            Node {
-                position_type: PositionType::Absolute,
-                width: percent(100),
-                height: percent(100),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
+            Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
             Visibility::Hidden,
         ))
         .with_children(|p| {
@@ -339,29 +231,15 @@ fn setup_law_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
             .with_children(|w| {
                 w.spawn(crate::ui_theme::theme().title("Стражник гарнизона", 28.0));
                 crate::ui_theme::theme().divider(w);
-                w.spawn((
-                    LawText,
-                    Text::new(""),
-                    font(17.0, false),
-                    TextColor(Color::srgb(0.95, 0.9, 0.8)),
-                ));
+                w.spawn((LawText, Text::new(""), font(17.0, false), TextColor(Color::srgb(0.95, 0.9, 0.8))));
                 for (answer, label) in [
                     (LawAnswer::Pay, "1. Уплатить пеню"),
-                    (
-                        LawAnswer::Jail,
-                        "2. Сдаться: карцер претории, пеня спишется",
-                    ),
+                    (LawAnswer::Jail, "2. Сдаться: карцер претории, пеня спишется"),
                     (LawAnswer::Resist, "3. Сопротивляться"),
                 ] {
                     crate::ui_theme::theme().button_sized(w, label, 17.0, LawButton(answer), true);
                 }
-                crate::ui_theme::theme().button_sized(
-                    w,
-                    "4. Уговорить",
-                    17.0,
-                    (LawButton(LawAnswer::Persuade), PersuadeButton),
-                    true,
-                );
+                crate::ui_theme::theme().button_sized(w, "4. Уговорить", 17.0, (LawButton(LawAnswer::Persuade), PersuadeButton), true);
             });
         });
 }
@@ -388,12 +266,7 @@ fn law_input(
         cursor.visible = true;
     }
     let can_persuade = ui.halt.as_ref().is_some_and(|h| h.3.is_some());
-    for (key, answer) in [
-        (KeyCode::Digit1, LawAnswer::Pay),
-        (KeyCode::Digit2, LawAnswer::Jail),
-        (KeyCode::Digit3, LawAnswer::Resist),
-        (KeyCode::Digit4, LawAnswer::Persuade),
-    ] {
+    for (key, answer) in [(KeyCode::Digit1, LawAnswer::Pay), (KeyCode::Digit2, LawAnswer::Jail), (KeyCode::Digit3, LawAnswer::Resist), (KeyCode::Digit4, LawAnswer::Persuade)] {
         if keys.just_pressed(key) && (answer != LawAnswer::Persuade || can_persuade) {
             send_answer(&mut client, answer);
         }
@@ -418,20 +291,12 @@ fn draw_law_ui(
     mut texts: Query<&mut Text, (Without<LawText>, Without<NoticeText>)>,
 ) {
     let now = time.elapsed_secs();
-    let want = if ui.open() {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
+    let want = if ui.open() { Visibility::Inherited } else { Visibility::Hidden };
     if **root != want {
         **root = want;
     }
     if let Some((fine, crimes, purse, chance)) = &ui.halt {
-        let why = if crimes.is_empty() {
-            "кража или сбыт краденого".to_string()
-        } else {
-            crimes.join(", ")
-        };
+        let why = if crimes.is_empty() { "кража или сбыт краденого".to_string() } else { crimes.join(", ") };
         let line = format!(
             "«Стой! Ты нарушил закон: {why}.\nПеня — {}. Плати сейчас, иди в карцер или пеняй на себя».\n\nПри вас: {}.",
             format_money(*fine),
@@ -441,11 +306,7 @@ fn draw_law_ui(
             text.0 = line;
         }
         let (node, children) = &mut *persuade;
-        let display = if chance.is_some() {
-            Display::Flex
-        } else {
-            Display::None
-        };
+        let display = if chance.is_some() { Display::Flex } else { Display::None };
         if node.display != display {
             node.display = display;
         }
@@ -462,14 +323,8 @@ fn draw_law_ui(
     }
     // Свидетели: сколько их и сколько секунд, пока первый не добежит до стражи.
     let (vis, children) = &mut *witness;
-    let seen = ui
-        .witnessed
-        .filter(|_| ui.jailed_until.is_none_or(|u| u < now));
-    let want = if seen.is_some() {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
+    let seen = ui.witnessed.filter(|_| ui.jailed_until.is_none_or(|u| u < now));
+    let want = if seen.is_some() { Visibility::Inherited } else { Visibility::Hidden };
     if **vis != want {
         **vis = want;
     }
@@ -490,10 +345,7 @@ fn draw_law_ui(
         }
     }
     let line = if let Some(until) = ui.jailed_until.filter(|u| *u > now) {
-        format!(
-            "Вы в карцере претории. Осталось {} с.",
-            (until - now).ceil() as u32
-        )
+        format!("Вы в карцере претории. Осталось {} с.", (until - now).ceil() as u32)
     } else if now < ui.notice_until {
         ui.notice.clone()
     } else {

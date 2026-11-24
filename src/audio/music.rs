@@ -10,18 +10,13 @@ pub struct MusicPlugin;
 
 impl Plugin for MusicPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<MusicDirector>()
-            .add_systems(Update, (choose, crossfade).chain().before(super::AudioSet));
+        app.init_resource::<MusicDirector>().add_systems(Update, (choose, crossfade).chain().before(super::AudioSet));
     }
 }
 
 /// Сколько длится пьеса (с) — из `bank_gen::MUSIC`.
 fn track_len(name: &str) -> f32 {
-    super::bank_gen::MUSIC
-        .iter()
-        .find(|(n, _)| *n == name)
-        .map(|(_, s)| *s)
-        .unwrap_or(120.0)
+    super::bank_gen::MUSIC.iter().find(|(n, _)| *n == name).map(|(_, s)| *s).unwrap_or(120.0)
 }
 
 /// Что играет и что должно играть.
@@ -56,14 +51,7 @@ pub fn calm_track(scene: &Scene) -> &'static str {
     }
 }
 
-fn choose(
-    time: Res<Time>,
-    scene: Res<Scene>,
-    fighters: Res<Fighters>,
-    ears: Res<Ears>,
-    mut dir: ResMut<MusicDirector>,
-    mut rng: ResMut<SfxRng>,
-) {
+fn choose(time: Res<Time>, scene: Res<Scene>, fighters: Res<Fighters>, ears: Res<Ears>, mut dir: ResMut<MusicDirector>, mut rng: ResMut<SfxRng>) {
     if !ears.valid {
         return;
     }
@@ -87,32 +75,17 @@ fn choose(
     }
     let calm = calm_track(&scene);
     // Пьеса доиграла — тишина на минуту-другую (в храме пение почти без перерыва).
-    if let Some(t) = dir
-        .playing
-        .iter()
-        .find(|t| t.target > 0.0 && t.name == calm)
+    if let Some(t) = dir.playing.iter().find(|t| t.target > 0.0 && t.name == calm)
         && now - t.started > track_len(calm) - 5.0
     {
-        dir.rest_until = now
-            + if calm == "sacred" {
-                rng.range(6.0, 15.0)
-            } else {
-                rng.range(45.0, 110.0)
-            };
+        dir.rest_until = now + if calm == "sacred" { rng.range(6.0, 15.0) } else { rng.range(45.0, 110.0) };
         dir.want = None;
         return;
     }
     dir.want = Some(calm);
 }
 
-fn crossfade(
-    mut commands: Commands,
-    time: Res<Time>,
-    bank: Option<Res<Bank>>,
-    ears: Res<Ears>,
-    mut dir: ResMut<MusicDirector>,
-    mut q: Query<&mut Emitter>,
-) {
+fn crossfade(mut commands: Commands, time: Res<Time>, bank: Option<Res<Bank>>, ears: Res<Ears>, mut dir: ResMut<MusicDirector>, mut q: Query<&mut Emitter>) {
     let Some(bank) = bank else { return };
     let now = time.elapsed_secs();
     let want = dir.want;
@@ -125,22 +98,9 @@ fn crossfade(
             "sacred" => 0.75,
             _ => 0.65,
         };
-        let em = Emitter {
-            at: None,
-            follow: None,
-            gain,
-            near: 1.0,
-            range: 1.0,
-            channel: Channel::Music,
-            fade: 0.0,
-        };
+        let em = Emitter { at: None, follow: None, gain, near: 1.0, range: 1.0, channel: Channel::Music, fade: 0.0 };
         let entity = spawn_loop(&mut commands, h.clone(), em, &ears);
-        dir.playing.push(Track {
-            name,
-            entity,
-            started: now,
-            target: 1.0,
-        });
+        dir.playing.push(Track { name, entity, started: now, target: 1.0 });
     }
     let into_combat = want == Some("combat");
     let dt = time.delta_secs();
@@ -158,18 +118,11 @@ fn crossfade(
         };
         if let Ok(mut em) = q.get_mut(t.entity) {
             let step = dt / secs;
-            em.fade = if em.fade < t.target {
-                (em.fade + step).min(t.target)
-            } else {
-                (em.fade - step).max(t.target)
-            };
+            em.fade = if em.fade < t.target { (em.fade + step).min(t.target) } else { (em.fade - step).max(t.target) };
         }
     }
     dir.playing.retain(|t| {
-        let silent = q
-            .get(t.entity)
-            .map(|em| em.fade <= 0.0 && t.target == 0.0)
-            .unwrap_or(true);
+        let silent = q.get(t.entity).map(|em| em.fade <= 0.0 && t.target == 0.0).unwrap_or(true);
         if silent {
             commands.entity(t.entity).despawn();
         }
@@ -183,15 +136,9 @@ mod tests {
 
     #[test]
     fn calm_music_by_place() {
-        let temple = Scene {
-            sacred: 1.0,
-            ..default()
-        };
+        let temple = Scene { sacred: 1.0, ..default() };
         assert_eq!(calm_track(&temple), "sacred");
-        let mut street = Scene {
-            city: 1.0,
-            ..default()
-        };
+        let mut street = Scene { city: 1.0, ..default() };
         street.time = Some(TimeOfDay::Day);
         assert_eq!(calm_track(&street), "city");
         street.time = Some(TimeOfDay::Night);
