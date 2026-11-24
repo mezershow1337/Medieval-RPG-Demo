@@ -7,7 +7,7 @@
 //!
 //! `MRPG_TIME=day|golden` замораживает время для снимков (см. `graphics::frozen_time`).
 
-use crate::graphics::{HazeVolume, Mood, SkyDome, SkyMaterial, SunLight, mood_at};
+use crate::graphics::{HazeVolume, Mood, SkyDome, SkyMaterial, SunLight, SurfaceMaterial, mood_at};
 use crate::sky::{SkyEnvironment, SkyUniform, WaterMaterial};
 use crate::smoke::SmokeMaterial;
 use bevy::light::{EnvironmentMapLight, FogVolume};
@@ -21,9 +21,16 @@ pub struct DaylightPlugin;
 
 impl Plugin for DaylightPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<EnvBake>().add_systems(Update, (drive_daylight, rebake_environment).chain());
+        app.init_resource::<EnvBake>().add_systems(Update, (drive_daylight, rebake_environment, drive_windows).chain());
     }
 }
+
+/// Материал светящихся окон (ночью — тёплый свет за решёткой).
+#[derive(Resource)]
+pub struct WindowGlow(pub Handle<StandardMaterial>);
+
+#[derive(Component)]
+pub struct WindowGlowMesh;
 
 /// Свет и небо сейчас (для других систем: дождь, факелы, свечение окон).
 #[derive(Resource, Clone, Copy)]
@@ -47,6 +54,8 @@ fn drive_daylight(
     mut skies: ResMut<Assets<SkyMaterial>>,
     mut waters: ResMut<Assets<WaterMaterial>>,
     mut smokes: ResMut<Assets<SmokeMaterial>>,
+    mut surfaces: ResMut<Assets<SurfaceMaterial>>,
+    mut wet_shown: Local<Option<f32>>,
     mut cams: Query<(Option<&mut DistanceFog>, Option<&mut ColorGrading>, Option<&mut EnvironmentMapLight>), With<Camera3d>>,
     mut ambient: ResMut<GlobalAmbientLight>,
     mut clear: ResMut<ClearColor>,
@@ -67,6 +76,11 @@ fn drive_daylight(
     for (mut light, mut tf) in &mut sun {
         light.illuminance = m.lux;
         light.color = m.sun_color;
+        // Под сплошными тучами резких теней нет: свет рассеян по всему небу.
+        let shadows = m.overcast < 0.6 && settings.shadows > 0;
+        if light.shadow_maps_enabled != shadows {
+            light.shadow_maps_enabled = shadows;
+        }
         *tf = Transform::from_translation(m.sun * 100.0).looking_at(Vec3::ZERO, Vec3::Y);
     }
     for mut f in &mut haze {
@@ -93,6 +107,16 @@ fn drive_daylight(
             s.smoke.sky = u;
         }
     }
+    // Мокрые камни: перезаливаем материалы, только когда мокрость заметно изменилась.
+    if wet_shown.is_none_or(|w| (w - m.wet).abs() > 0.02) {
+        *wet_shown = Some(m.wet);
+        let ids: Vec<_> = surfaces.ids().collect();
+        for id in ids {
+            if let Some(mut s) = surfaces.get_mut(id) {
+                s.extension.params2.w = m.wet;
+            }
+        }
+    }
     let fog = crate::graphics::distance_fog(&m, settings.draw_distance);
     let grading = crate::graphics::color_grading(&m);
     for (f, g, env) in &mut cams {
@@ -109,6 +133,32 @@ fn drive_daylight(
     ambient.color = m.ambient.0;
     ambient.brightness = m.ambient.1;
     clear.0 = m.fog();
+}
+
+/// Окна: светятся с сумерек до рассвета.
+fn drive_windows(mood: Option<Res<CurrentMood>>, glow: Option<Res<WindowGlow>>, mut glow_mesh: Query<&mut Visibility, With<WindowGlowMesh>>, mut stds: ResMut<Assets<StandardMaterial>>, mut shown: Local<f32>) {
+    let Some(m) = mood.map(|m| m.0) else { return };
+    let lit = smoothstep_f(0.35, 0.8, m.night);
+    if (lit - *shown).abs() < 0.01 && !(lit == 0.0 && *shown != 0.0) {
+        return;
+    }
+    *shown = lit;
+    for mut v in &mut glow_mesh {
+        let want = if lit > 0.01 { Visibility::Inherited } else { Visibility::Hidden };
+        if *v != want {
+            *v = want;
+        }
+    }
+    if let Some(g) = glow.as_ref()
+        && let Some(mut mat) = stds.get_mut(&g.0)
+    {
+        mat.emissive = LinearRgba::rgb(1.0, 0.52, 0.2) * (6.0 * lit);
+    }
+}
+
+fn smoothstep_f(a: f32, b: f32, x: f32) -> f32 {
+    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 /// Пересчёт карты окружения (свет неба и отражения) в фоне.

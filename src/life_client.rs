@@ -765,8 +765,8 @@ struct RainBox(f32);
 #[derive(Resource)]
 struct RainLook(Handle<StandardMaterial>);
 
-const RAIN_H: f32 = 22.0;
-const RAIN_R: f32 = 24.0;
+const RAIN_H: f32 = 14.0;
+const RAIN_R: f32 = 16.0;
 
 fn setup_rain(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
     use bevy::asset::RenderAssetUsages;
@@ -774,14 +774,18 @@ fn setup_rain(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats
     let mut pos: Vec<[f32; 3]> = Vec::new();
     let mut nrm: Vec<[f32; 3]> = Vec::new();
     let mut idx: Vec<u32> = Vec::new();
-    // Струи: косые крестики из двух тонких полосок.
-    for k in 0..7000u64 {
+    // Капли: короткие тонкие чёрточки (крестик из двух полосок), густо; у самой камеры — пусто,
+    // чтобы капля не перечёркивала весь кадр.
+    for k in 0..36000u64 {
         let x = (crate::world_clock::unit(k, 1) * 2.0 - 1.0) * RAIN_R;
         let z = (crate::world_clock::unit(k, 2) * 2.0 - 1.0) * RAIN_R;
+        if x * x + z * z < 2.2 * 2.2 {
+            continue;
+        }
         let y = crate::world_clock::unit(k, 3) * RAIN_H;
-        let len = 0.5 + 0.4 * crate::world_clock::unit(k, 4);
+        let len = 0.16 + 0.2 * crate::world_clock::unit(k, 4);
         let top = Vec3::new(x, y, z);
-        let bot = top + Vec3::new(0.06, -len, 0.03);
+        let bot = top + Vec3::new(0.01, -len, 0.005);
         for side in [Vec3::new(0.006, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.006)] {
             let b = pos.len() as u32;
             for p in [top - side, top + side, bot + side, bot - side] {
@@ -821,7 +825,7 @@ fn rain(
         // Струи светятся сами (unlit): ночью они лишь чуть светлее тьмы.
         let day = m.map_or(1.0, |md| md.dayness.max(1.0 - md.night));
         let lit = 0.16 + 0.66 * day;
-        let c = Color::srgba(0.95 * lit, lit, (1.07 * lit).min(1.0), 0.45 * r);
+        let c = Color::srgba(0.95 * lit, lit, (1.07 * lit).min(1.0), 0.75 * r);
         let old = mat.base_color.to_srgba();
         if (old.red - c.to_srgba().red).abs() + (old.alpha - c.alpha()).abs() > 0.01 {
             mat.base_color = c;

@@ -60,6 +60,8 @@ pub struct Mood {
     pub moon_light: f32,
     pub wind: Vec2,
     pub rain: f32,
+    /// Мокрость мостовых и крыш (держится после дождя).
+    pub wet: f32,
     /// Плотность объёмной дымки у земли (лучи от факелов и солнца, утренняя мгла).
     pub haze: f32,
     /// Экспозиция цветокоррекции (ступени).
@@ -137,6 +139,7 @@ fn castle_mood() -> Mood {
         moon_light: 0.0,
         wind: Vec2::ZERO,
         rain: 0.0,
+        wet: 0.0,
         haze: 0.03,
         exposure: 0.2,
     }
@@ -311,6 +314,7 @@ pub fn mood_at(game: f64) -> Mood {
         moon_light,
         wind: w.wind,
         rain: w.rain,
+        wet: wc::wetness(game),
         haze: key.haze + 0.03 * fog * fog + 0.004 * w.rain,
         // Под тучами и в дождь мир темнее и глуше (глаз не успевает подстроиться полностью).
         exposure: key.exposure - 0.35 * overcast - 0.25 * w.rain,
@@ -479,7 +483,7 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
     ExtendedMaterial {
         base: StandardMaterial { base_color: a, perceptual_roughness: rough, metallic: metal, reflectance: 0.4, ..default() },
         extension: SurfaceExt {
-            color_b: lin(b),
+            color_b: lin(b).truncate().extend(wet_capacity(mat)),
             params: Vec4::new(pattern, scale, var, bump),
             params2: Vec4::new(moss, grime, glow, 0.0),
             photo: if has_photo { Vec4::new(top as f32, 1.0 / layer(top).meters, side as f32, 1.0 / layer(side).meters) } else { Vec4::new(-1.0, 1.0, -1.0, 1.0) },
@@ -489,6 +493,21 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
             albedo: tex.map(|t| t.0.clone()),
             nrm: tex.map(|t| t.1.clone()),
         },
+    }
+}
+
+/// Насколько материал мокнет под дождём (0 — внутри домов или не меняется: ткань, металл, листья).
+fn wet_capacity(mat: Mat) -> f32 {
+    match mat {
+        Mat::Paving | Mat::Cobble => 1.0,
+        Mat::Earth => 0.9,
+        Mat::Tile | Mat::Roof => 0.8,
+        Mat::Terrain => 0.7,
+        Mat::Marble => 0.6,
+        Mat::Limestone | Mat::Stone | Mat::DarkStone | Mat::Rubble | Mat::Trim | Mat::OpusMixtum | Mat::Brick => 0.5,
+        Mat::Grass | Mat::Wood | Mat::Thatch => 0.45,
+        Mat::Plaster | Mat::Signinum => 0.3,
+        _ => 0.0,
     }
 }
 
@@ -689,12 +708,14 @@ fn billboard_flames(cameras: Query<&GlobalTransform, With<Camera3d>>, mut flames
     }
 }
 
-fn flicker_lights(time: Res<Time>, mut lights: Query<(&mut PointLight, &Flicker)>) {
+fn flicker_lights(time: Res<Time>, mood: Option<Res<crate::daylight::CurrentMood>>, mut lights: Query<(&mut PointLight, &Flicker)>) {
     let t = time.elapsed_secs();
+    // Ночью глаз привыкает к темноте: огонь кажется ярче и светит дальше.
+    let boost = 1.0 + 1.3 * mood.map_or(0.0, |m| m.0.night);
     for (mut light, f) in &mut lights {
         let p = f.phase;
         let n = (t * 9.1 + p).sin() * 0.5 + (t * 23.7 + p * 2.3).sin() * 0.3 + (t * 4.3 + p * 0.7).sin() * 0.2;
-        light.intensity = f.base * (0.85 + 0.12 * n);
+        light.intensity = f.base * boost * (0.85 + 0.12 * n);
     }
 }
 

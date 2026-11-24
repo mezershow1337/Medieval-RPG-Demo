@@ -223,6 +223,7 @@ fn opening(b: &mut Builder, f: WallFrame, o: Op, l: f32, r: f32, y0: f32, y1: f3
             let (a, c) = f.bounds((l, r), ((sill + top) / 2.0 - 0.02, (sill + top) / 2.0 + 0.02), (dm - 0.02, dm + 0.02));
             m.cuboid(a, c);
             b.invisible.push(Aabb::new(f.p(l, sill, dm - 0.05), f.p(r, top, dm + 0.05)));
+            b.windows.push(Aabb::new(f.p(l, sill, dm - 0.01), f.p(r, top, dm + 0.01)));
         }
         Op::Upper { sill, top, w, .. } => {
             let (sill, top) = ((y0 + sill).min(y1), (y0 + top).min(y1));

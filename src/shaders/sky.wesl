@@ -29,7 +29,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         // Млечный путь: полоса мелких звёзд и бледное свечение.
         let band = exp(-pow((dir.x * 0.8 - dir.z * 0.6 + 0.15 * dir.y), 2.0) * 9.0);
         let dust = step(0.95 - 0.04 * band, hash21(floor(sp * 1.7) + 17.0)) * band * 0.25;
-        var stars = vec3<f32>(0.9, 0.92, 1.0) * (mag + dust) * smoothstep(0.12, 0.0, length(fp)) * tw;
+        // Звезда — пятнышко около пикселя (меньше — теряется при сглаживании кадра).
+        var stars = vec3<f32>(0.9, 0.92, 1.0) * (mag * 1.6 + dust) * smoothstep(0.34, 0.04, length(fp)) * tw;
         stars += vec3<f32>(0.010, 0.011, 0.016) * band * n;
         // За облаками звёзд не видно.
         let cloud = cloud_layer(dir, s, s.zenith.w, horizon_color(dir, s)).x;
