@@ -14,9 +14,13 @@ mod castle;
 mod city;
 mod geom;
 pub mod places;
+mod spawns;
 mod terrain;
 
 pub use places::*;
+/// Полуширина главной улицы Херсона.
+pub const MAIN_STREET_HALF: f32 = city::MAIN_HALF;
+pub use spawns::{SpawnChoice, pick_spawn, spawn_spot, spawn_spots};
 pub use terrain::{WATER_Y, city_distance as city_wall_distance, fbm, ground_y, height_at, inside_city};
 
 /// Расстояние от точки до ближайшей загородной дороги (для травы и т. п.).

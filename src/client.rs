@@ -179,6 +179,7 @@ pub fn run(start: crate::menu::Start) {
         .add_plugins(crate::loot_client::LootClientPlugin)
         .add_plugins(crate::doors::DoorClientPlugin)
         .add_plugins(crate::map::MapClientPlugin)
+        .add_plugins(crate::minimap::MinimapPlugin)
         .add_plugins(crate::residents::ResidentsPlugin)
         .add_plugins(crate::world_clock::ClockClientPlugin)
         .add_plugins(crate::life_client::LifeClientPlugin)
@@ -523,7 +524,7 @@ fn receive_reliable(
     while let Some(bytes) = client.receive_message(CH_RELIABLE) {
         let Some(msg) = decode::<ServerMessage>(&bytes) else { continue };
         match msg {
-            ServerMessage::Welcome { your_id, spawn } => {
+            ServerMessage::Welcome { your_id, spawn, yaw } => {
                 info!("Подключились к серверу, наш id {your_id}");
                 state.my_id = Some(your_id);
                 state.error = None;
@@ -536,7 +537,7 @@ fn receive_reliable(
                     }
                 }
                 if local.is_empty() {
-                    spawn_local_player(&mut commands, spawn.into(), &assets);
+                    spawn_local_player(&mut commands, spawn.into(), yaw, &assets);
                 }
             }
             ServerMessage::Correction { pos } => {
@@ -571,10 +572,12 @@ fn receive_reliable(
                 }
                 feedback.write(CombatFeedback::Died { id, killer });
             }
-            ServerMessage::Respawned { pos } => {
+            ServerMessage::Respawned { pos, yaw } => {
                 for (mut p, mut t, f) in &mut local {
                     t.translation = pos.into();
                     p.velocity = Vec3::ZERO;
+                    p.yaw = yaw;
+                    p.pitch = 0.0;
                     if let Some(mut f) = f {
                         f.fighter = crate::npc::fighter_for(ActorKind::Player);
                     }

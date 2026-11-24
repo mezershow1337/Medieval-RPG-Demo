@@ -58,6 +58,7 @@ mod lore;
 mod lore_client;
 mod lore_net;
 mod map;
+mod minimap;
 mod map_render;
 mod medicine;
 mod medicine_server;

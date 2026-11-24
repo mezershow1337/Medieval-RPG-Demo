@@ -342,6 +342,7 @@ enum Field {
     Sfx,
     Ambient,
     ShowFps,
+    Minimap,
 }
 
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
@@ -513,6 +514,7 @@ fn adjust(s: &mut Settings, f: Field, d: i32) {
         Field::Sfx => s.sfx = ((s.sfx + 0.1 * d as f32) * 10.0).round().clamp(0.0, 10.0) / 10.0,
         Field::Ambient => s.ambient = ((s.ambient + 0.1 * d as f32) * 10.0).round().clamp(0.0, 10.0) / 10.0,
         Field::ShowFps => s.show_fps = !s.show_fps,
+        Field::Minimap => s.minimap = !s.minimap,
     }
 }
 
@@ -535,6 +537,7 @@ fn value_text(s: &Settings, f: Field) -> String {
         Field::Sfx => format!("{:.0} %", s.sfx * 100.0),
         Field::Ambient => format!("{:.0} %", s.ambient * 100.0),
         Field::ShowFps => yes(s.show_fps),
+        Field::Minimap => yes(s.minimap),
     }
 }
 
@@ -836,6 +839,7 @@ fn settings_body(p: &mut ChildSpawnerCommands, fonts: &UiFonts, s: &Settings) {
             row(c, fonts, s, "Режим", Field::WindowMode, Some("F11"));
             row(c, fonts, s, "Верт. синхронизация", Field::Vsync, None);
             row(c, fonts, s, "Показывать FPS", Field::ShowFps, None);
+            row(c, fonts, s, "Мини-карта", Field::Minimap, Some("N"));
             section(c, fonts, "Управление и звук");
             row(c, fonts, s, "Угол обзора", Field::Fov, None);
             row(c, fonts, s, "Чувствит. мыши", Field::Sensitivity, None);

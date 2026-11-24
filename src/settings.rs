@@ -51,6 +51,10 @@ pub struct Settings {
     pub ambient: f32,
     /// Показывать FPS и пинг в углу экрана.
     pub show_fps: bool,
+    /// Мини-карта в правом верхнем углу (N — показать/спрятать).
+    pub minimap: bool,
+    /// Масштаб мини-карты: номер в [`MINIMAP_RADII`].
+    pub minimap_zoom: u8,
     /// Последний адрес, к которому подключались (поле «Подключиться»).
     pub last_address: String,
     /// Ник игрока (виден другим вместо числового номера).
@@ -111,6 +115,8 @@ impl Default for Settings {
             sfx: 0.9,
             ambient: 0.8,
             show_fps: false,
+            minimap: true,
+            minimap_zoom: 1,
             last_address: String::new(),
             // Для начала — имя пользователя Windows; его можно сменить в главном меню.
             nickname: crate::protocol::clean_name(&std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default()),
@@ -122,6 +128,9 @@ impl Default for Settings {
         s
     }
 }
+
+/// Сколько метров от игрока до края мини-карты на каждом масштабе.
+pub const MINIMAP_RADII: [f32; 5] = [28.0, 50.0, 80.0, 130.0, 210.0];
 
 pub const DRAW_DISTANCES: [f32; 7] = [150.0, 200.0, 275.0, 350.0, 450.0, 600.0, 1000.0];
 pub const RENDER_SCALES: [u32; 6] = [50, 60, 70, 75, 85, 100];
@@ -190,7 +199,7 @@ impl Settings {
         format!(
             "# Настройки Medieval RPG. Можно править руками; неизвестные строки пропускаются.\n\
              draw_distance = {}\nshadows = {}\nwater = {}\neffects = {}\ntextures = {}\nrender_scale = {}\n\
-             vsync = {}\nwindow_mode = {}\nfov = {}\nsensitivity = {}\nvolume = {}\nmusic = {}\nsfx = {}\nambient = {}\nshow_fps = {}\nlast_address = {}\nnickname = {}\nlook = {}\nkit = {}\n",
+             vsync = {}\nwindow_mode = {}\nfov = {}\nsensitivity = {}\nvolume = {}\nmusic = {}\nsfx = {}\nambient = {}\nshow_fps = {}\nminimap = {}\nminimap_zoom = {}\nlast_address = {}\nnickname = {}\nlook = {}\nkit = {}\n",
             self.draw_distance,
             self.shadows,
             self.water,
@@ -206,6 +215,8 @@ impl Settings {
             self.sfx,
             self.ambient,
             b(self.show_fps),
+            b(self.minimap),
+            self.minimap_zoom,
             self.last_address,
             self.nickname,
             self.look.to_text(),
@@ -245,6 +256,8 @@ impl Settings {
                 "sfx" => s.sfx = f(s.sfx),
                 "ambient" => s.ambient = f(s.ambient),
                 "show_fps" => s.show_fps = b(s.show_fps),
+                "minimap" => s.minimap = b(s.minimap),
+                "minimap_zoom" => s.minimap_zoom = u(s.minimap_zoom).min(MINIMAP_RADII.len() as u8 - 1),
                 "last_address" => s.last_address = v.to_string(),
                 "nickname" => s.nickname = crate::protocol::clean_name(v),
                 "look" => s.look = crate::appearance::Look::from_text(v).unwrap_or(s.look),

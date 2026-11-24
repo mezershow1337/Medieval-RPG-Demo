@@ -57,7 +57,7 @@ pub fn run(server_addr: SocketAddr, name: String) {
             }
             while let Some(bytes) = client.receive_message(CH_RELIABLE) {
                 match decode::<ServerMessage>(&bytes) {
-                    Some(ServerMessage::Welcome { spawn, .. }) | Some(ServerMessage::Respawned { pos: spawn }) => {
+                    Some(ServerMessage::Welcome { spawn, .. }) | Some(ServerMessage::Respawned { pos: spawn, .. }) => {
                         feet = Some(spawn.into());
                         home = spawn.into();
                         println!("Бот появился в {home}");

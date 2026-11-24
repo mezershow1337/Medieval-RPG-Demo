@@ -387,18 +387,13 @@ mod tests {
         assert_eq!(n, ids.len(), "повторяются id мест");
     }
 
-    /// Заливка проходимого пола города от агоры (шаг 0,4 м, на уровне улиц): к каждому месту
-    /// внутри стен и на набережной можно дойти — лавки, кабинеты и мастерские не замурованы.
-    #[test]
-    fn places_inside_walls_are_reachable() {
-        let level = level();
-        // Двери открыты: проверяем, что комнаты не замурованы мебелью и жителями.
-        level.set_all_doors(true);
+    /// Заливка проходимого пола города от агоры (шаг 0,4 м, на уровне улиц): куда можно дойти.
+    fn reachable_from_agora(level: &LevelColliders) -> impl Fn(Vec3) -> bool {
         let cell = 0.4;
         let (x0, z0) = (-305.0f32, -170.0f32);
         let (nx, nz) = ((610.0 / cell) as i32, (345.0 / cell) as i32);
         let at = |i: i32, k: i32| Vec3::new(x0 + i as f32 * cell, 0.1, z0 + k as f32 * cell);
-        let idx = |i: i32, k: i32| (k * nx + i) as usize;
+        let idx = move |i: i32, k: i32| (k * nx + i) as usize;
         let mut seen = vec![false; (nx * nz) as usize];
         let start = spawn_point(0);
         let s = (((start.x - x0) / cell).round() as i32, ((start.z - z0) / cell).round() as i32);
@@ -411,19 +406,31 @@ mod tests {
                     continue;
                 }
                 let p = at(a, c);
-                if level.ground_height(p.x, p.z) < 0.3 && free(&level, p) {
+                if level.ground_height(p.x, p.z) < 0.3 && free(level, p) {
                     seen[idx(a, c)] = true;
                     queue.push_back((a, c));
                 }
             }
         }
-        let reached = |p: Vec3| {
+        move |p: Vec3| {
             let (i, k) = (((p.x - x0) / cell).round() as i32, ((p.z - z0) / cell).round() as i32);
-            (-1..=1).any(|di| (-1..=1).any(|dk| {
-                let (a, c) = (i + di, k + dk);
-                a >= 0 && c >= 0 && a < nx && c < nz && seen[idx(a, c)]
-            }))
-        };
+            (-1..=1).any(|di| {
+                (-1..=1).any(|dk| {
+                    let (a, c) = (i + di, k + dk);
+                    a >= 0 && c >= 0 && a < nx && c < nz && seen[idx(a, c)]
+                })
+            })
+        }
+    }
+
+    /// Заливка проходимого пола города от агоры: к каждому месту
+    /// внутри стен и на набережной можно дойти — лавки, кабинеты и мастерские не замурованы.
+    #[test]
+    fn places_inside_walls_are_reachable() {
+        let level = level();
+        // Двери открыты: проверяем, что комнаты не замурованы мебелью и жителями.
+        level.set_all_doors(true);
+        let reached = reachable_from_agora(&level);
         let mut lost = Vec::new();
         for p in places::places().iter().filter(|p| p.pos.y < 0.5 && p.pos.z < 166.0) {
             if !reached(p.pos) {
@@ -436,6 +443,99 @@ mod tests {
             }
         }
         assert!(lost.is_empty(), "не дойти: {lost:?}");
+    }
+
+    /// Места появления: на открытой мостовой внутри стен, с простором вокруг, не у прилавков
+    /// и не на постах стражи; до каждого можно дойти от агоры, и они разбросаны по городу.
+    #[test]
+    fn spawn_spots_are_open_streets_across_the_city() {
+        let level = level();
+        level.set_all_doors(true);
+        let reached = reachable_from_agora(&level);
+        let spots = crate::level::spawn_spots();
+        assert!(spots.len() >= 12, "мест появления: {}", spots.len());
+        let mut stalls: Vec<Vec3> = Vec::new();
+        for id in ["agora", "port_market"] {
+            for s in places::stall_slots(id) {
+                stalls.push(s.pos);
+                stalls.push(s.pos + s.facing * places::SELLER_BEHIND);
+            }
+        }
+        let posts: Vec<Vec3> = places::npc_posts().iter().map(|p| p.pos).collect();
+        let mut bad = Vec::new();
+        for s in spots {
+            let p = s.pos;
+            let mut why = Vec::new();
+            if !terrain::inside_city(p.x, p.z) {
+                why.push("за стенами".to_string());
+            }
+            if !free(&level, p) {
+                why.push("в стене".into());
+            }
+            // Простор: шаг в любую сторону свободен.
+            for k in 0..8 {
+                let a = k as f32 * std::f32::consts::FRAC_PI_4;
+                if !free(&level, p + Vec3::new(a.cos(), 0.0, a.sin()) * 1.2) {
+                    why.push(format!("тесно на {}°", k * 45));
+                }
+            }
+            if !reached(p) {
+                why.push("не дойти от агоры".into());
+            }
+            if let Some(q) = stalls.iter().find(|q| q.xz().distance(p.xz()) < 2.5) {
+                why.push(format!("у прилавка {q}"));
+            }
+            if let Some(q) = posts.iter().find(|q| q.xz().distance(p.xz()) < 2.0) {
+                why.push(format!("на посту {q}"));
+            }
+            if !why.is_empty() {
+                bad.push(format!("{} {}: {}", s.id, p, why.join(", ")));
+            }
+        }
+        assert!(bad.is_empty(), "плохие места появления:\n{}", bad.join("\n"));
+        for (i, a) in spots.iter().enumerate() {
+            for b in &spots[i + 1..] {
+                assert!(a.pos.xz().distance(b.pos.xz()) > 15.0, "{} и {} слишком близко", a.id, b.id);
+                assert_ne!(a.id, b.id);
+            }
+        }
+        // Город велик: места от западной стены до порта.
+        let xs: Vec<f32> = spots.iter().map(|s| s.pos.x).collect();
+        let span = xs.iter().cloned().fold(f32::MIN, f32::max) - xs.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(span > 300.0, "места появления жмутся друг к другу: {span} м");
+    }
+
+    /// Выбор места: случайный, разный, подальше от других, точка всегда свободна.
+    #[test]
+    fn picking_spawns_spreads_players() {
+        use crate::level::{SpawnChoice, pick_spawn};
+        let level = level();
+        let mut seed = 7u64;
+        let mut rand = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 40) as f32 / (1u64 << 24) as f32
+        };
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..200 {
+            let (id, p, _) = pick_spawn(&SpawnChoice::Random, &level, &[], None, &mut rand);
+            assert!(free(&level, p), "{id} {p}");
+            seen.insert(id);
+        }
+        assert!(seen.len() >= crate::level::spawn_spots().len() - 1, "выпадают не все места: {seen:?}");
+        // Прошлое место не повторяется; рядом с другим игроком не ставим.
+        let first = &crate::level::spawn_spots()[0];
+        for _ in 0..50 {
+            let (id, p, _) = pick_spawn(&SpawnChoice::Random, &level, &[first.pos], Some("main_middle"), &mut rand);
+            assert_ne!(id, "main_middle");
+            assert!(p.xz().distance(first.pos.xz()) > 12.0);
+        }
+        // Выбранное место — ровно оно.
+        let (id, p, yaw) = pick_spawn(&SpawnChoice::At("port_market".into()), &level, &[], None, &mut rand);
+        let spot = crate::level::spawn_spot("port_market").unwrap();
+        assert_eq!(id, "port_market");
+        assert!(p.distance(spot.pos) < 1.7 && yaw == spot.yaw);
     }
 
     #[test]

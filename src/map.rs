@@ -190,9 +190,9 @@ impl Default for MapView {
 }
 
 #[derive(Resource)]
-struct MarkerArt {
-    arrow: Handle<Image>,
-    pin: Handle<Image>,
+pub(crate) struct MarkerArt {
+    pub arrow: Handle<Image>,
+    pub pin: Handle<Image>,
 }
 
 pub struct MapClientPlugin;
@@ -326,7 +326,7 @@ fn polygon_depth(pts: &[(f32, f32)], u: f32, v: f32) -> f32 {
     if inside { dmin } else { -dmin }
 }
 
-fn setup_marker_art(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+pub(crate) fn setup_marker_art(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     // Наконечник стрелы остриём вверх, с вырезом сзади.
     let arrow = stamp(64, |u, v| polygon_depth(&[(0.0, -0.95), (0.72, 0.85), (0.0, 0.42), (-0.72, 0.85)], u, v));
     // Метка: равноконечный крест с расширенными концами (как на печатях и надгробиях того времени).
@@ -379,7 +379,7 @@ fn label_tier(kind: crate::level::PlaceKind) -> f32 {
     }
 }
 
-fn text(fonts: &crate::inventory_ui::UiFonts, s: &str, size: f32, color: Color, bold: bool) -> (Text, TextFont, TextColor) {
+pub(crate) fn text(fonts: &crate::inventory_ui::UiFonts, s: &str, size: f32, color: Color, bold: bool) -> (Text, TextFont, TextColor) {
     (Text::new(s), TextFont { font: if bold { fonts.bold.clone() } else { fonts.regular.clone() }.into(), font_size: FontSize::Px(size), ..default() }, TextColor(color))
 }
 
@@ -635,7 +635,7 @@ fn layout_map(
 
 /// Что рисуем поверх карты, на компасе и над головами — по ключу.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-enum MarkerKey {
+pub(crate) enum MarkerKey {
     Player(u64),
     Mark(u64),
 }
@@ -648,22 +648,22 @@ struct MarkerPool {
 }
 
 /// Сводка о товарище: где он, куда смотрит, как зовут, цвет.
-struct Mate {
-    key: MarkerKey,
-    pos: Vec3,
+pub(crate) struct Mate {
+    pub key: MarkerKey,
+    pub pos: Vec3,
     /// Поворот вокруг Y (как `LocalPlayer::yaw`); у меток — нет.
-    yaw: Option<f32>,
-    label: String,
-    color: Color,
-    me: bool,
+    pub yaw: Option<f32>,
+    pub label: String,
+    pub color: Color,
+    pub me: bool,
 }
 
-fn yaw_of(t: &Transform) -> f32 {
+pub(crate) fn yaw_of(t: &Transform) -> f32 {
     let f = t.rotation * Vec3::NEG_Z;
     (-f.x).atan2(-f.z)
 }
 
-fn gather(net: &NetState, party: &Party, local: &Query<(&LocalPlayer, &Transform)>, remotes: &Query<(&RemoteActor, &Transform)>, ground: &crate::collision::LevelColliders) -> Vec<Mate> {
+pub(crate) fn gather(net: &NetState, party: &Party, local: &Query<(&LocalPlayer, &Transform)>, remotes: &Query<(&RemoteActor, &Transform)>, ground: &crate::collision::LevelColliders) -> Vec<Mate> {
     let mut out = Vec::new();
     let my_id = net.my_id.unwrap_or(0);
     if let Ok((p, t)) = local.single() {
