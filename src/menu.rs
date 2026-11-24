@@ -156,7 +156,11 @@ const CONNECT_TOKEN_EXPIRE_SECS: u64 = 3600;
 /// Профиль с диска (ключ хозяина) с ником из меню.
 fn profile_with_name(name: &str, look: (Look, StartKit)) -> crate::estates::Profile {
     let mut p = crate::estates::local_profile();
-    (p.look, p.kit) = look;
+    p.look = look.0;
+    // `MRPG_START_KIT` (для снимков) важнее набора из настроек.
+    if std::env::var("MRPG_START_KIT").is_err() {
+        p.kit = look.1;
+    }
     let nick = crate::protocol::clean_name(name);
     if !nick.is_empty() {
         p.name = nick;

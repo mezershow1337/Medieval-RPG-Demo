@@ -42,9 +42,13 @@ pub struct PlayerCamera;
 
 pub struct PlayerPlugin;
 
+/// Ходьба и поворот своего персонажа (после них ставится поза своего тела).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PlayerMoveSet;
+
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (grab_cursor, (mouse_look, movement, update_camera).chain()));
+        app.add_systems(Update, (grab_cursor, (mouse_look, movement, update_camera).chain().in_set(PlayerMoveSet)));
     }
 }
 

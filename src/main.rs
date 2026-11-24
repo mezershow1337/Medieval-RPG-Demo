@@ -76,6 +76,7 @@ mod props_server;
 mod protocol;
 mod residents;
 mod rig;
+mod self_body;
 mod server;
 mod settings;
 mod skill_book;
