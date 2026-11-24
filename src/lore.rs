@@ -552,6 +552,14 @@ pub enum Lore {
     /// Знать свойства вещества.
     Properties(Substance),
     Technique(Technique),
+    /// Азбука: буквы (они же цифры) — первая ступень грамоты.
+    Alphabet,
+    /// Письмо: выводить буквы и слова стилем по воску и каламом по пергаменту.
+    Write(Language),
+    /// Счёт: греческие цифры, счёт на камешках (абаке), доли и проценты.
+    Reckon,
+    /// Грамматика: части речи, склонения, чтение Гомера с толкованием (Дионисий Фракиец).
+    Grammar,
 }
 
 impl Lore {
@@ -561,6 +569,43 @@ impl Lore {
             Lore::Identify(s) => format!("Узнавать: {}", s.info().item.to_lowercase()),
             Lore::Properties(s) => format!("Свойства: {}", s.info().item.to_lowercase()),
             Lore::Technique(t) => format!("Приём: {}", t.name().to_lowercase()),
+            Lore::Alphabet => "Грамота: азбука".into(),
+            Lore::Write(l) => format!("Письмо: {}", l.name()),
+            Lore::Reckon => "Счёт и цифры".into(),
+            Lore::Grammar => "Грамматика".into(),
+        }
+    }
+
+    /// Предмет школьной науки (грамота, письмо, счёт, грамматика).
+    pub fn is_letters(self) -> bool {
+        matches!(self, Lore::Read(_) | Lore::Alphabet | Lore::Write(_) | Lore::Reckon | Lore::Grammar)
+    }
+
+    /// Короткое название предмета для школьного окна.
+    pub fn subject(self) -> String {
+        match self {
+            Lore::Alphabet => "Азбука".into(),
+            Lore::Read(Language::Greek) => "Чтение".into(),
+            Lore::Read(Language::Latin) => "Латынь: чтение".into(),
+            Lore::Write(Language::Greek) => "Письмо".into(),
+            Lore::Write(Language::Latin) => "Латынь: письмо".into(),
+            Lore::Reckon => "Счёт".into(),
+            Lore::Grammar => "Грамматика".into(),
+            other => other.name(),
+        }
+    }
+
+    /// Чем занимаются на уроке (для окна школы).
+    pub fn subject_about(self) -> &'static str {
+        match self {
+            Lore::Alphabet => "Двадцать четыре буквы: учитель выводит образец на воске, вы повторяете стилем. Буквы — они же и цифры.",
+            Lore::Read(Language::Greek) => "Слоги, потом слова, потом Псалтирь: вести указку за строкой и читать вслух.",
+            Lore::Read(Language::Latin) => "Латинские буквы и слова по Вергилию и законам. Язык претории и старых книг.",
+            Lore::Write(Language::Greek) => "Слова и строки: стилем по воску, потом каламом и чернилами. Без письма не переписать книгу.",
+            Lore::Write(Language::Latin) => "Латинское письмо: прошения и грамоты на языке закона.",
+            Lore::Reckon => "Греческие цифры и счёт камешками на абаке: сотни, десятки, единицы.",
+            Lore::Grammar => "Части речи, склонения, разбор Гомера. Без грамматики латыни не выучить.",
+            _ => "",
         }
     }
 
@@ -568,7 +613,13 @@ impl Lore {
     pub fn lesson_hours(self) -> f32 {
         use Technique::*;
         match self {
-            Lore::Read(_) => 8.0,
+            Lore::Alphabet => 2.0,
+            Lore::Read(Language::Greek) => 6.0,
+            Lore::Read(Language::Latin) => 8.0,
+            Lore::Write(Language::Greek) => 4.0,
+            Lore::Write(Language::Latin) => 3.0,
+            Lore::Reckon => 3.0,
+            Lore::Grammar => 6.0,
             Lore::Identify(_) => 0.5,
             Lore::Properties(_) => 1.0,
             Lore::Technique(t) => match t {
@@ -593,7 +644,12 @@ impl Lore {
     pub fn requires(self) -> Vec<Lore> {
         use Technique::*;
         match self {
-            Lore::Read(Language::Latin) => vec![Lore::Read(Language::Greek)],
+            Lore::Read(Language::Greek) => vec![Lore::Alphabet],
+            Lore::Write(Language::Greek) => vec![Lore::Read(Language::Greek)],
+            Lore::Reckon => vec![Lore::Alphabet],
+            Lore::Grammar => vec![Lore::Write(Language::Greek)],
+            Lore::Read(Language::Latin) => vec![Lore::Grammar],
+            Lore::Write(Language::Latin) => vec![Lore::Read(Language::Latin)],
             Lore::Technique(Theriac) => vec![Lore::Technique(Dosage), Lore::Technique(Decoction), Lore::Properties(Substance::Opium)],
             Lore::Technique(Sublimation) | Lore::Technique(Calcination) => vec![Lore::Technique(Distillation)],
             Lore::Technique(VatDyeing) => vec![Lore::Technique(Mordanting)],
@@ -610,7 +666,7 @@ impl Lore {
     /// Каким навыком подкрепляется практика этого знания.
     pub fn skill(self) -> Option<Skill> {
         match self {
-            Lore::Read(_) => Some(Skill::Letters),
+            Lore::Read(_) | Lore::Alphabet | Lore::Write(_) | Lore::Reckon | Lore::Grammar => Some(Skill::Letters),
             Lore::Identify(_) | Lore::Properties(_) => Some(Skill::Herbalism),
             Lore::Technique(t) => Some(t.skill()),
         }
@@ -636,6 +692,12 @@ pub enum Book {
     Theophrastus,
     Celsus,
     Pliny,
+    /// Псалтирь: по ней учатся читать. Знающий азбуку осилит её сам — по слогам, долго.
+    Psalter,
+    /// Дионисий Фракиец, «Искусство грамматики» — школьный учебник со II в. до н. э.
+    DionysiusThrax,
+    /// Никомах Герасский, «Введение в арифметику».
+    Nicomachus,
 }
 
 pub struct BookInfo {
@@ -649,9 +711,9 @@ pub struct BookInfo {
 }
 
 impl Book {
-    pub const ALL: [Book; 13] = {
+    pub const ALL: [Book; 16] = {
         use Book::*;
-        [HerbalFragment, Dioscorides, IllustratedHerbal, HippocratesUlcers, GalenSimples, GalenAntidotes, Oribasius, Zosimos, DyerBook, Aeneas, Theophrastus, Celsus, Pliny]
+        [HerbalFragment, Dioscorides, IllustratedHerbal, HippocratesUlcers, GalenSimples, GalenAntidotes, Oribasius, Zosimos, DyerBook, Aeneas, Theophrastus, Celsus, Pliny, Psalter, DionysiusThrax, Nicomachus]
     };
 
     pub fn info(self) -> BookInfo {
@@ -689,7 +751,33 @@ impl Book {
                 240.0,
                 "Плиний Старший о металлах: как плавят руду, как калят железо в воде и масле, сколько олова класть в бронзу.",
             ),
+            Psalter => t(
+                "Псалтирь",
+                Language::Greek,
+                "пергаментный кодекс",
+                420.0,
+                "Сто пятьдесят псалмов. По ней в школе учат читать: знающий одни буквы разберёт её сам, по слогам — и выучится читать.",
+            ),
+            DionysiusThrax => t(
+                "Дионисий Фракиец. Искусство грамматики",
+                Language::Greek,
+                "свиток",
+                200.0,
+                "Тонкий учебник, по которому грамматики учат уже семь веков: буквы, слоги, восемь частей речи, склонения. Нужно уметь писать.",
+            ),
+            Nicomachus => t(
+                "Никомах. Введение в арифметику",
+                Language::Greek,
+                "свиток",
+                180.0,
+                "Никомах Герасский о числах: чётные и нечётные, доли, отношения. С ним и цифры на абаке пойдут.",
+            ),
         }
+    }
+
+    /// Сколько тетрадей пергамента уходит на список (переписку).
+    pub fn quires(self) -> u16 {
+        ((self.info().read_secs / 60.0).ceil() as u16).max(1)
     }
 
     pub fn from_item(base: ItemBaseId) -> Option<Book> {
@@ -702,6 +790,7 @@ impl Book {
         match self {
             Book::GalenAntidotes => vec![Lore::Technique(Technique::Decoction)],
             Book::Zosimos => vec![Lore::Technique(Technique::Decoction)],
+            Book::DionysiusThrax => vec![Lore::Write(Language::Greek)],
             _ => vec![],
         }
     }
@@ -767,6 +856,9 @@ impl Book {
             }
             // Только теория: руками это всё равно придётся делать самому.
             Book::Pliny => vec![Lore::Technique(Smelting), Lore::Technique(Quenching), Lore::Technique(Casting)],
+            Book::Psalter => vec![Lore::Read(Language::Greek)],
+            Book::DionysiusThrax => vec![Lore::Grammar],
+            Book::Nicomachus => vec![Lore::Reckon],
         }
     }
 }
@@ -805,6 +897,16 @@ pub enum Teacher {
     GothSmith,
     /// Кочевой кузнец степняков: наконечники стрел, литьё бронзовых бляшек.
     SteppeSmith,
+    /// Грамматист — школьный учитель в дидаскалионе: азбука, чтение, счёт, письмо. Дёшево, но в классе.
+    Grammatist,
+    /// Нотарий городской канцелярии: пишет договоры и завещания, считает подати.
+    Notary,
+    /// Книгописец (каллиграф): переписывает книги — лучше всех учит письму.
+    Copyist,
+    /// Философ: грамматика и арифметика по Никомаху, недёшево и не всякому.
+    Philosopher,
+    /// Сочинитель (логограф) на агоре: пишет письма и прошения неграмотным, учит слогу.
+    Logograph,
 }
 
 /// Как учится игрок.
@@ -836,7 +938,7 @@ impl LessonMode {
 }
 
 impl Teacher {
-    pub const ALL: [Teacher; 15] = [
+    pub const ALL: [Teacher; 20] = [
         Teacher::Iatros,
         Teacher::Rhizotomos,
         Teacher::Wisewoman,
@@ -852,7 +954,31 @@ impl Teacher {
         Teacher::Armourer,
         Teacher::GothSmith,
         Teacher::SteppeSmith,
+        Teacher::Grammatist,
+        Teacher::Notary,
+        Teacher::Copyist,
+        Teacher::Philosopher,
+        Teacher::Logograph,
     ];
+
+    /// Наставник грамоты (окно школы, а не просто урок).
+    pub fn teaches_letters(self) -> bool {
+        self.curriculum().iter().any(|l| l.is_letters())
+    }
+
+    /// Как быстро идёт урок этого предмета у этого учителя (1 — как у частного наставника).
+    /// В классе с двумя десятками мальчишек выходит медленнее, книгописец лучше всех ставит руку.
+    pub fn pace(self, lore: Lore) -> f32 {
+        match (self, lore) {
+            (Teacher::Grammatist, _) => 0.75,
+            (Teacher::Scribe, _) => 0.9,
+            (Teacher::Copyist, Lore::Write(_)) => 1.4,
+            (Teacher::Notary, Lore::Reckon | Lore::Write(_)) => 1.2,
+            (Teacher::Philosopher, Lore::Grammar | Lore::Reckon) => 1.35,
+            (Teacher::Logograph, Lore::Grammar) => 1.15,
+            _ => 1.0,
+        }
+    }
 
     pub fn name(self) -> &'static str {
         match self {
@@ -871,6 +997,11 @@ impl Teacher {
             Teacher::Armourer => "Оружейник",
             Teacher::GothSmith => "Готский кузнец",
             Teacher::SteppeSmith => "Кочевой кузнец",
+            Teacher::Grammatist => "Грамматист",
+            Teacher::Notary => "Нотарий",
+            Teacher::Copyist => "Книгописец",
+            Teacher::Philosopher => "Философ",
+            Teacher::Logograph => "Сочинитель",
         }
     }
 
@@ -881,7 +1012,7 @@ impl Teacher {
             Teacher::Rhizotomos | Teacher::Wisewoman | Teacher::Apothecary | Teacher::SteppeHealer => Some(Skill::Herbalism),
             Teacher::Alchemist | Teacher::Dyer | Teacher::Glassblower | Teacher::Potter => Some(Skill::Alchemy),
             Teacher::Smith | Teacher::Armourer | Teacher::GothSmith | Teacher::SteppeSmith => Some(Skill::Smithing),
-            Teacher::Scribe | Teacher::Grammarian => Some(Skill::Letters),
+            Teacher::Scribe | Teacher::Grammarian | Teacher::Grammatist | Teacher::Notary | Teacher::Copyist | Teacher::Philosopher | Teacher::Logograph => Some(Skill::Letters),
         }
     }
 
@@ -894,8 +1025,21 @@ impl Teacher {
         let t = Lore::Technique;
         let mut v = Vec::new();
         match self {
-            Teacher::Scribe => v.push(Lore::Read(Language::Greek)),
-            Teacher::Grammarian => v.extend([Lore::Read(Language::Greek), Lore::Read(Language::Latin)]),
+            // Грамота у всех начинается с азбуки: учитель не учит через голову.
+            Teacher::Scribe => v.extend([Lore::Alphabet, Lore::Read(Language::Greek), Lore::Write(Language::Greek)]),
+            Teacher::Grammatist => v.extend([Lore::Alphabet, Lore::Read(Language::Greek), Lore::Reckon, Lore::Write(Language::Greek)]),
+            Teacher::Grammarian => v.extend([
+                Lore::Alphabet,
+                Lore::Read(Language::Greek),
+                Lore::Write(Language::Greek),
+                Lore::Grammar,
+                Lore::Read(Language::Latin),
+                Lore::Write(Language::Latin),
+            ]),
+            Teacher::Notary => v.extend([Lore::Alphabet, Lore::Read(Language::Greek), Lore::Write(Language::Greek), Lore::Reckon]),
+            Teacher::Copyist => v.extend([Lore::Alphabet, Lore::Read(Language::Greek), Lore::Write(Language::Greek)]),
+            Teacher::Philosopher => v.extend([Lore::Alphabet, Lore::Reckon, Lore::Read(Language::Greek), Lore::Write(Language::Greek), Lore::Grammar]),
+            Teacher::Logograph => v.extend([Lore::Alphabet, Lore::Read(Language::Greek), Lore::Write(Language::Greek), Lore::Grammar]),
             Teacher::Rhizotomos => {
                 v.push(t(Gathering));
                 v.extend(
@@ -984,7 +1128,7 @@ pub enum CannotRead {
 impl CannotRead {
     pub fn message(&self) -> String {
         match self {
-            CannotRead::Illiterate(Language::Greek) => "Для вас это непонятные закорючки. Сначала нужно выучить грамоту.".into(),
+            CannotRead::Illiterate(Language::Greek) => "Для вас это непонятные закорючки. Сначала нужно выучить грамоту: в школе-дидаскалионе, у писца или книгописца.".into(),
             CannotRead::Illiterate(Language::Latin) => "Это латынь. Ей учит только грамматик.".into(),
             CannotRead::NeedsLore(l) => format!("Ничего не понятно. Сначала нужно знать: {}", l.name().to_lowercase()),
         }
@@ -1001,6 +1145,9 @@ pub struct Knowledge {
     pub lessons: BTreeMap<Lore, f32>,
     /// Сколько прочитано: доля 0..1.
     pub read: BTreeMap<Book, f32>,
+    /// Сколько переписано (начатые списки книг): доля 0..1.
+    #[serde(default)]
+    pub copied: BTreeMap<Book, f32>,
 }
 
 impl Knowledge {
@@ -1045,6 +1192,10 @@ impl Knowledge {
     /// Можно ли читать текст.
     pub fn can_read(&self, text: Book) -> Result<(), CannotRead> {
         let lang = text.info().language;
+        // Псалтирь осилит и тот, кто знает одни буквы: по ней и учатся читать.
+        if text == Book::Psalter && self.knows(Lore::Alphabet) {
+            return Ok(());
+        }
         if !self.knows(Lore::Read(lang)) {
             return Err(CannotRead::Illiterate(lang));
         }
@@ -1061,6 +1212,17 @@ impl Knowledge {
 
     /// Час урока. Возвращает выученное за этот час (обычно пусто или одно знание).
     pub fn study(&mut self, teacher: Teacher, mode: LessonMode, hours: f32) -> Vec<Lore> {
+        self.study_subject(teacher, None, mode, hours)
+    }
+
+    /// Можно ли сейчас учить этот предмет у этого учителя.
+    pub fn can_study(&self, teacher: Teacher, lore: Lore) -> bool {
+        !self.knows(lore) && self.prerequisites_met(lore) && teacher.curriculum().contains(&lore)
+    }
+
+    /// Урок выбранного предмета (`subject`; None — что учитель даст по порядку). Остаток часа —
+    /// дальше по программе.
+    pub fn study_subject(&mut self, teacher: Teacher, subject: Option<Lore>, mode: LessonMode, hours: f32) -> Vec<Lore> {
         if let Some(skill) = teacher.skill() {
             self.practice(skill, mode.skill_per_hour() * hours);
         }
@@ -1068,8 +1230,9 @@ impl Knowledge {
         let mut budget = hours * mode.knowledge_rate() * crate::skill_tree::Mods::of(self).lessons;
         let mut learned = Vec::new();
         while budget > 1e-4 {
-            let Some(lore) = self.next_lesson(teacher) else { break };
-            let need = lore.lesson_hours();
+            let chosen = subject.filter(|l| self.can_study(teacher, *l));
+            let Some(lore) = chosen.or_else(|| self.next_lesson(teacher)) else { break };
+            let need = lore.lesson_hours() / teacher.pace(lore);
             let done = self.lessons.get(&lore).copied().unwrap_or(0.0);
             let left = (1.0 - done) * need;
             if budget >= left {
@@ -1139,6 +1302,11 @@ impl Knowledge {
                             lines.push(format!("Прочитано {:.0}%", done * 100.0));
                         }
                         lines.push(format!("Чтение около {} · F или ПКМ", fmt_secs(info.read_secs * (1.0 - done))));
+                    }
+                    if self.knows(Lore::Write(info.language)) && t != Book::HerbalFragment {
+                        let copied = self.copied.get(&t).copied().unwrap_or(0.0);
+                        let begun = if copied > 0.0 { format!(" (переписано {:.0}%)", copied * 100.0) } else { String::new() };
+                        lines.push(format!("C — переписать{begun}: калам, чернила, тетрадей пергамента: {}", t.quires()));
                     }
                 }
                 Err(e) => lines.push(e.message()),
@@ -1247,11 +1415,60 @@ mod tests {
         let mut k = Knowledge::default();
         let learned = k.study(Teacher::Scribe, LessonMode::Paid, 1.0);
         assert!(learned.is_empty());
-        assert!(k.lessons.get(&Lore::Read(Language::Greek)).is_some_and(|p| *p > 0.0 && *p < 1.0));
-        for _ in 0..8 {
+        // Сначала азбука.
+        assert!(k.lessons.get(&Lore::Alphabet).is_some_and(|p| *p > 0.0 && *p < 1.0));
+        for _ in 0..9 {
             k.study(Teacher::Scribe, LessonMode::Paid, 1.0);
         }
+        assert!(k.knows(Lore::Alphabet));
         assert!(k.knows(Lore::Read(Language::Greek)));
+    }
+
+    #[test]
+    fn school_ladder_goes_step_by_step() {
+        let k = Knowledge::default();
+        // Не зная букв, ни читать, ни считать не начнёшь.
+        assert!(!k.can_study(Teacher::Grammatist, Lore::Read(Language::Greek)));
+        assert!(!k.can_study(Teacher::Grammatist, Lore::Reckon));
+        assert!(k.can_study(Teacher::Grammatist, Lore::Alphabet));
+        // Латыни учит только грамматик и только знающего грамматику.
+        for t in Teacher::ALL {
+            if t != Teacher::Grammarian {
+                assert!(!t.curriculum().contains(&Lore::Read(Language::Latin)), "{t:?}");
+            }
+        }
+        assert_eq!(Lore::Read(Language::Latin).requires(), vec![Lore::Grammar]);
+        // Выбранный предмет идёт первым: счёт раньше чтения.
+        let mut k = Knowledge::default();
+        k.learn(Lore::Alphabet);
+        k.study_subject(Teacher::Grammatist, Some(Lore::Reckon), LessonMode::Paid, 1.0);
+        assert!(k.lessons.contains_key(&Lore::Reckon));
+        assert!(!k.lessons.contains_key(&Lore::Read(Language::Greek)));
+        // В классе медленнее, чем у книгописца с глазу на глаз.
+        let mut school = Knowledge::default();
+        let mut copyist = Knowledge::default();
+        for k in [&mut school, &mut copyist] {
+            k.learn(Lore::Alphabet);
+            k.learn(Lore::Read(Language::Greek));
+        }
+        school.study_subject(Teacher::Grammatist, Some(Lore::Write(Language::Greek)), LessonMode::Paid, 1.0);
+        copyist.study_subject(Teacher::Copyist, Some(Lore::Write(Language::Greek)), LessonMode::Paid, 1.0);
+        let p = |k: &Knowledge| k.lessons.get(&Lore::Write(Language::Greek)).copied().unwrap_or(0.0);
+        assert!(p(&copyist) > p(&school) * 1.5);
+    }
+
+    #[test]
+    fn psalter_teaches_reading_to_who_knows_letters() {
+        let mut k = Knowledge::default();
+        assert!(k.can_read(Book::Psalter).is_err());
+        k.learn(Lore::Alphabet);
+        assert!(k.can_read(Book::Psalter).is_ok());
+        assert!(k.can_read(Book::Dioscorides).is_err());
+        assert_eq!(Book::Psalter.teaches(), vec![Lore::Read(Language::Greek)]);
+        // Грамматику по Дионисию поймёт только пишущий.
+        k.learn(Lore::Read(Language::Greek));
+        assert!(matches!(k.can_read(Book::DionysiusThrax), Err(CannotRead::NeedsLore(Lore::Write(Language::Greek)))));
+        assert!(Book::Dioscorides.quires() >= 2);
     }
 
     #[test]

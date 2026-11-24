@@ -117,10 +117,18 @@ pub fn teachers(skill: Skill) -> Vec<String> {
             out.push(format!("{} ({}, {}) — {}", m.name, m.title, place_name(m.place), modes.join(" и ")));
         }
     }
-    // Мастера вне лавок (стоят сами по себе, см. knowledge.rs).
-    for (teacher, place) in [(Teacher::Scribe, "church_west"), (Teacher::Wisewoman, "goth_village")] {
+    // Мастера вне лавок (стоят сами по себе или живут в городе, см. knowledge.rs и school.rs).
+    let schooling = [
+        (Teacher::Grammatist, "didaskaleion", "школа с рассвета до полудня: азбука, чтение, счёт, письмо — дёшево"),
+        (Teacher::Grammarian, "library", "письмо, грамматика и латынь — дорого"),
+        (Teacher::Scribe, "church_west", "азбука, чтение и письмо по Псалтири"),
+        (Teacher::Notary, "praetorium", "письмо и счёт"),
+        (Teacher::Logograph, "agora", "письмо и грамматика"),
+        (Teacher::Wisewoman, "goth_village", "уроки и работа подмастерьем"),
+    ];
+    for (teacher, place, what) in schooling {
         if teacher.skill() == Some(skill) {
-            out.push(format!("{} ({}) — уроки и работа подмастерьем", teacher.name(), place_name(place)));
+            out.push(format!("{} ({}) — {}", teacher.name(), place_name(place), what));
         }
     }
     out

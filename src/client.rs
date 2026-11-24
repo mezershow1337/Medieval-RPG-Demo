@@ -191,7 +191,7 @@ pub fn run(start: crate::menu::Start) {
         .add_plugins(crate::audio::GameAudioPlugin)
         .add_plugins(crate::towns_client::TownClientPlugin)
         .add_plugins(crate::ui_theme::UiThemePlugin)
-        .add_plugins((crate::skill_book::SkillBookPlugin, crate::hints::HintsPlugin))
+        .add_plugins((crate::skill_book::SkillBookPlugin, crate::hints::HintsPlugin, crate::school_client::SchoolClientPlugin, crate::tablet_view::TabletViewPlugin))
         .add_plugins(crate::work_client::WorkClientPlugin)
         .add_plugins(crate::console::ConsolePlugin)
         .add_systems(Update, (hide_ui_for_shots, mute_player_camera_for_shots).run_if(|| std::env::var("MRPG_CAM").is_ok()))

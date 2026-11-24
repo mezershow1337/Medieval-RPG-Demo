@@ -21,9 +21,13 @@ impl Plugin for WorkClientPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(MyWork::default())
             .add_systems(Startup, (setup_work_hud.after(crate::inventory_ui::setup_fonts), setup_tool_assets))
-            .add_systems(Update, (demo_work, drive_meter, update_work_hud, spawn_tool, animate_tool).chain());
+            .add_systems(Update, (demo_work, drive_meter, update_work_hud, spawn_tool, animate_tool).chain().in_set(WorkSet));
     }
 }
+
+/// Системы работы руками (табличка рисуется после них).
+#[derive(SystemSet, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct WorkSet;
 
 /// Через какое окно идёт работа: занятия знаний или урок/смена у торговца-мастера.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -48,7 +52,7 @@ pub struct MyWork {
     demo: bool,
 }
 
-/// `MRPG_WORK_DEMO=grind|stir|pump|rhythm|track|tension|mimic` — для снимков экрана: сразу
+/// `MRPG_WORK_DEMO=grind|stir|pump|rhythm|track|tension|mimic|trace|scribe|count` — для снимков экрана: сразу
 /// взяться за работу, и руки сами делают её (сервер ничего не знает).
 fn demo_work(mut work: ResMut<MyWork>, mut done: Local<bool>, time: Res<Time>) {
     if *done || time.elapsed_secs() < 2.0 {
@@ -64,6 +68,9 @@ fn demo_work(mut work: ResMut<MyWork>, mut done: Local<bool>, time: Res<Time>) {
         "track" => (Drill::Track, "Чтение"),
         "tension" => (Drill::Tension, "Перевязываете рану"),
         "mimic" => (Drill::Mimic, "Урок: отвары — повторяйте за мастером"),
+        "trace" => (Drill::Trace, "Урок: азбука — выводите буквы на воске"),
+        "scribe" => (Drill::Scribe, "Урок: письмо — пишите слово на табличке"),
+        "count" => (Drill::Count, "Урок: счёт — откладывайте камешки на абаке"),
         _ => return,
     };
     work.begin(Some(drill), 0.3, Via::Lore, verb, 0.0);
@@ -92,6 +99,24 @@ fn demo_input(m: &Meter, dt: f32) -> Input {
         Drill::Rhythm => inp.lmb_pressed = m.swing().abs() < 0.08,
         Drill::Track => inp.delta.x = ((m.target - m.cursor) * 0.25 + 0.002) * 320.0,
         Drill::Tension => inp.lmb_held = m.tension < m.tension_center() + 0.03,
+        Drill::Trace | Drill::Scribe => {
+            // Рука идёт за образцом, чуть дрожа.
+            if let Some(goal) = m.nib_goal() {
+                let wobble = Vec2::new((t * 7.0).sin(), (t * 5.3).cos()) * 0.01;
+                let d = (goal + wobble - m.nib).clamp_length_max(0.55 * dt);
+                inp.delta = Vec2::new(d.x, -d.y) * crate::work::NIB_PX;
+            }
+        }
+        Drill::Count => {
+            let want = m.digits();
+            if m.col < 3 {
+                if m.pebbles[m.col] < want[m.col] {
+                    inp.delta.y = -crate::work::PEBBLE_PX * 4.0 * dt;
+                } else if (t * 1.2) as i32 != (m.t * 1.2) as i32 {
+                    inp.lmb_pressed = true;
+                }
+            }
+        }
         Drill::Mimic => {
             if !m.showing && (t * 2.5) as i32 != (m.t * 2.5) as i32 {
                 let v = m.seq.get(m.seq_i).map(|d| d.vec()).unwrap_or_default() * 120.0;
@@ -183,6 +208,10 @@ const GAUGE_H: f32 = 130.0;
 #[derive(Component)]
 struct WorkHud;
 
+/// Поле шкалы (у письма и счёта его нет — там табличка).
+#[derive(Component)]
+struct GaugeBox;
+
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum Part {
     Title,
@@ -211,6 +240,7 @@ fn setup_work_hud(mut commands: Commands, fonts: Res<UiFonts>) {
     commands
         .spawn((
             WorkHud,
+            crate::civil_client::ShotKeep,
             Node {
                 position_type: PositionType::Absolute,
                 display: Display::None,
@@ -231,7 +261,7 @@ fn setup_work_hud(mut commands: Commands, fonts: Res<UiFonts>) {
                 .with_children(|b| {
                     b.spawn((Part::Bar, Node { width: percent(0), height: percent(100), ..default() }, BackgroundColor(Color::srgb(0.85, 0.68, 0.32))));
                 });
-            p.spawn((Node { width: px(GAUGE_W), height: px(GAUGE_H), ..default() }, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.25))))
+            p.spawn((GaugeBox, Node { width: px(GAUGE_W), height: px(GAUGE_H), ..default() }, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.25))))
                 .with_children(|g| {
                     let abs = || Node { position_type: PositionType::Absolute, ..default() };
                     g.spawn((Part::Track, abs(), BackgroundColor(Color::srgba(0.32, 0.27, 0.2, 0.9))));
@@ -279,8 +309,9 @@ fn dot_at(cx: f32, cy: f32, r: f32) -> Placed {
 fn update_work_hud(
     work: Res<MyWork>,
     knowledge: Option<Res<crate::lore_client::MyKnowledge>>,
-    mut hud: Single<&mut Node, With<WorkHud>>,
-    mut parts: Query<(&Part, &mut Node, Option<&mut Text>, Option<&mut TextColor>, Option<&mut BackgroundColor>), Without<WorkHud>>,
+    mut hud: Single<&mut Node, (With<WorkHud>, Without<GaugeBox>)>,
+    mut gauge_box: Single<&mut Node, (With<GaugeBox>, Without<WorkHud>)>,
+    mut parts: Query<(&Part, &mut Node, Option<&mut Text>, Option<&mut TextColor>, Option<&mut BackgroundColor>), (Without<WorkHud>, Without<GaugeBox>)>,
 ) {
     let _ = knowledge;
     let Some(m) = work.meter.as_ref() else {
@@ -288,6 +319,7 @@ fn update_work_hud(
         return;
     };
     hud.display = Display::Flex;
+    gauge_box.display = if m.drill.tablet() { Display::None } else { Display::Flex };
     let (w, h) = (GAUGE_W, GAUGE_H);
     let (cx, cy) = (w / 2.0, h / 2.0);
     // Кольцо для кругов: радиус 0.9 по шкале.
@@ -414,6 +446,8 @@ struct ToolAssets {
     ink: Handle<StandardMaterial>,
     skin: Handle<StandardMaterial>,
     leather: Handle<StandardMaterial>,
+    wax: Handle<StandardMaterial>,
+    pebble: Handle<StandardMaterial>,
     cylinder: Handle<Mesh>,
     cube: Handle<Mesh>,
     capsule: Handle<Mesh>,
@@ -433,6 +467,8 @@ fn setup_tool_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
         ink: mat(0.12, 0.09, 0.07, 0.9),
         skin: mat(0.72, 0.53, 0.42, 0.7),
         leather: mat(0.35, 0.22, 0.13, 0.8),
+        wax: mat(0.2, 0.12, 0.05, 0.55),
+        pebble: mat(0.84, 0.82, 0.76, 0.7),
         cylinder: meshes.add(Cylinder::new(0.5, 1.0)),
         cube: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
         capsule: meshes.add(Capsule3d::new(0.5, 1.0)),
@@ -461,6 +497,10 @@ enum ToolPart {
     Strip,
     /// Рука ученика (повторяет движения).
     Hand,
+    /// Стиль: кончик ходит по воску за мышью.
+    Stylus,
+    /// Камешек на счётной доске: столбец и номер.
+    Pebble(u8, u8),
 }
 
 fn spawn_tool(
@@ -535,6 +575,25 @@ fn spawn_tool(
             Drill::Mimic => {
                 r.spawn((ToolPart::Hand, part(&a.cube, &a.skin, Transform::from_scale(Vec3::new(0.08, 0.05, 0.11)))));
             }
+            Drill::Trace | Drill::Scribe => {
+                // Восковая табличка в рамке на коленях и стиль (железный, с лопаточкой на другом конце).
+                let tilt = Quat::from_rotation_x(0.75);
+                r.spawn(part(&a.cube, &a.wood, Transform::from_xyz(0.0, -0.02, -0.06).with_rotation(tilt).with_scale(Vec3::new(0.34, 0.012, 0.2))));
+                r.spawn(part(&a.cube, &a.wax, Transform::from_xyz(0.0, -0.013, -0.054).with_rotation(tilt).with_scale(Vec3::new(0.3, 0.006, 0.165))));
+                r.spawn((ToolPart::Stylus, Transform::default(), Visibility::default())).with_children(|s| {
+                    s.spawn(part(&a.cylinder, &a.iron, Transform::from_xyz(0.0, 0.065, 0.0).with_scale(Vec3::new(0.006, 0.13, 0.006))));
+                    s.spawn(part(&a.cube, &a.iron, Transform::from_xyz(0.0, 0.135, 0.0).with_scale(Vec3::new(0.016, 0.012, 0.003))));
+                });
+            }
+            Drill::Count => {
+                // Счётная доска и горсть камешков.
+                r.spawn(part(&a.cube, &a.wood, Transform::from_xyz(0.0, -0.05, -0.06).with_rotation(Quat::from_rotation_x(0.6)).with_scale(Vec3::new(0.4, 0.015, 0.22))));
+                for col in 0..3u8 {
+                    for i in 0..9u8 {
+                        r.spawn((ToolPart::Pebble(col, i), part(&a.capsule, &a.pebble, Transform::from_scale(Vec3::splat(0.012)))));
+                    }
+                }
+            }
         })
         .id();
     commands.entity(cam).add_child(root);
@@ -577,6 +636,23 @@ fn animate_tool(work: Res<MyWork>, mut parts: Query<(&ToolPart, &mut Transform)>
                 let y = 0.11 - line * 0.03;
                 tf.translation = Vec3::new((m.target - 0.5) * 0.42, y + 0.002, -0.05 - (0.11 - y) * 0.8 + 0.008);
                 tf.rotation = Quat::from_rotation_x(0.9);
+            }
+            ToolPart::Stylus => {
+                // Кончик — на воске там, куда ведёт мышь; рука сзади-справа.
+                let tilt = Quat::from_rotation_x(0.75);
+                let local = Vec3::new((m.nib.x - 0.5) * 0.22, 0.004, -(m.nib.y - 0.5) * 0.14);
+                let tip = Vec3::new(0.0, -0.013, -0.054) + tilt * local;
+                tf.translation = tip;
+                tf.rotation = Quat::from_rotation_arc(Vec3::Y, Vec3::new(0.35, 0.8, 0.5).normalize());
+            }
+            ToolPart::Pebble(col, i) => {
+                let n = m.pebbles.get(*col as usize).copied().unwrap_or(0);
+                let shown = *i < n;
+                let tilt = Quat::from_rotation_x(0.6);
+                let (row, k) = (*i / 5, *i % 5);
+                let local = Vec3::new((*col as f32 - 1.0) * 0.12 + (k as f32 - 2.0) * 0.018, 0.012, 0.07 - row as f32 * 0.025);
+                tf.translation = Vec3::new(0.0, -0.05, -0.06) + tilt * local;
+                tf.scale = if shown { Vec3::new(0.012, 0.006, 0.012) } else { Vec3::ZERO };
             }
             ToolPart::Strip => {
                 strip_seen = true;

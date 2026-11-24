@@ -194,6 +194,15 @@ const HIDES: &[&str] = &["Сырая шкура", "Овчина", "Войлок"
 const FOOD: &[&str] = &["Солёная рыба", "Мешок соли", "Воск", "Горшок мёда", "Каравай хлеба", "Головка сыра", "Сушёные смоквы"];
 /// Серебро, кость и бронза для себя: ложки, гребни, зеркальца, энколпионы.
 const JEWELS: &[&str] = &["Серебряная ложка", "Костяной гребень", "Бронзовое зеркальце", "Энколпион"];
+/// Школьные книги и письменный прибор — товар книжника.
+const WRITING: &[&str] = &[
+    "Псалтирь",
+    "Дионисий Фракиец. Искусство грамматики",
+    "Никомах. Введение в арифметику",
+    "Восковая табличка",
+    "Тростниковое перо",
+    "Тетрадь пергамента",
+];
 
 /// К какому виду товаров относится предмет.
 pub fn category(base: ItemBaseId) -> Category {
@@ -207,6 +216,9 @@ pub fn category(base: ItemBaseId) -> Category {
     }
     if is(HERBS) {
         return Category::Herb;
+    }
+    if is(WRITING) {
+        return Category::Book;
     }
     if is(STEPPE) {
         return Category::SteppeGood;
@@ -285,6 +297,8 @@ pub enum TeacherKind {
     Armourer,
     GothSmith,
     SteppeSmith,
+    Copyist,
+    Philosopher,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -574,7 +588,7 @@ pub const MERCHANTS: &[MerchantDef] = &[
         title: "переписчик и продавец книг",
         faction: Faction::Citizens,
         place: "agora",
-        greeting: "Диоскорид, Гален, Гиппократ — переписаны в Константинополе, без ошибок. Грамоте учу тоже.",
+        greeting: "Диоскорид, Гален, Гиппократ — переписаны моей рукой, без ошибок. Научу и письму, а умеющему писать дам работу: переписывать.",
         stock: &[
             s("Обрывок травника", 1, 2, 1.0),
             s("Гиппократ. О язвах", 0, 1, 1.0),
@@ -585,6 +599,12 @@ pub const MERCHANTS: &[MerchantDef] = &[
             s("Эней Тактик. Об обороне городов", 0, 1, 1.0),
             s("Феофраст. О камнях", 0, 1, 1.0),
             s("Чернила", 2, 6, 1.0),
+            s("Псалтирь", 1, 2, 1.0),
+            s("Дионисий Фракиец. Искусство грамматики", 0, 1, 1.0),
+            s("Никомах. Введение в арифметику", 0, 1, 1.0),
+            s("Восковая табличка", 2, 5, 1.0),
+            s("Тростниковое перо", 3, 10, 1.0),
+            s("Тетрадь пергамента", 8, 30, 1.0),
         ],
         buys: &[(Category::Book, 1.0)],
         money: MoneyPolicy::Coins,
@@ -606,15 +626,26 @@ pub const MERCHANTS: &[MerchantDef] = &[
                 min: Standing::Friendly,
             },
         ],
-        lessons: &[LessonDef {
-            title: "Урок грамоты и греческого письма",
-            teacher: TeacherKind::Grammarian,
-            mode: LessonMode::Paid,
-            hours: 2.0,
-            secs: 60.0,
-            money: 40 * 6,
-            min: Standing::Neutral,
-        }],
+        lessons: &[
+            LessonDef {
+                title: "Урок письма у книгописца",
+                teacher: TeacherKind::Copyist,
+                mode: LessonMode::Paid,
+                hours: 2.0,
+                secs: 60.0,
+                money: 40 * 6,
+                min: Standing::Neutral,
+            },
+            LessonDef {
+                title: "Работа в скриптории: линовать, растирать чернила, переписывать",
+                teacher: TeacherKind::Copyist,
+                mode: LessonMode::Apprentice,
+                hours: 1.5,
+                secs: 60.0,
+                money: 40 * 2,
+                min: Standing::Neutral,
+            },
+        ],
         services: &[],
         look: Look {
             tunic: [0.2, 0.24, 0.35],
@@ -1144,7 +1175,7 @@ pub const MERCHANTS: &[MerchantDef] = &[
         title: "сосланный александрийский философ",
         faction: Faction::Exiles,
         place: "exiles_house",
-        greeting: "Зосим писал о печах и приборах, но книга без рук ничего не даст. Учу немногих и недёшево.",
+        greeting: "Зосим писал о печах и приборах, но книга без рук ничего не даст. Учу немногих и недёшево: и числам по Никомаху, и грамматике.",
         stock: &[
             s("Зосим. О приборах и печах", 0, 1, 1.0),
             s("Ртуть", 0, 2, 1.1),
@@ -1154,15 +1185,26 @@ pub const MERCHANTS: &[MerchantDef] = &[
         vigilance: 0.5,
         cash: 7200 * 3,
         orders: &[],
-        lessons: &[LessonDef {
-            title: "Беседа о перегонке и печах",
-            teacher: TeacherKind::Alchemist,
-            mode: LessonMode::Paid,
-            hours: 3.0,
-            secs: 90.0,
-            money: 7200 / 2,
-            min: Standing::Friendly,
-        }],
+        lessons: &[
+            LessonDef {
+                title: "Беседа о перегонке и печах",
+                teacher: TeacherKind::Alchemist,
+                mode: LessonMode::Paid,
+                hours: 3.0,
+                secs: 90.0,
+                money: 7200 / 2,
+                min: Standing::Friendly,
+            },
+            LessonDef {
+                title: "Беседа о числах и грамматике",
+                teacher: TeacherKind::Philosopher,
+                mode: LessonMode::Paid,
+                hours: 3.0,
+                secs: 90.0,
+                money: 40 * 30,
+                min: Standing::Neutral,
+            },
+        ],
         services: &[],
         look: Look {
             tunic: [0.85, 0.82, 0.75],

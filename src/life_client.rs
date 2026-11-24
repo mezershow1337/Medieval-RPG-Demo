@@ -400,6 +400,14 @@ pub fn merchant_pose(t: f32, phase: f32) -> PoseInput {
     look_for(0, Role::Shopkeeper, &s, t, phase, false, 0.0).input
 }
 
+/// Учитель на своём месте (писец, нотарий, сочинитель): объясняет руками и ждёт учеников.
+pub fn teacher_pose(t: f32, phase: f32) -> PoseInput {
+    let cycle = ((t + phase * 7.0) / 24.0).fract();
+    let act = if cycle < 0.45 { Act::Teach } else { Act::Idle };
+    let s = NpcState { pos: Vec3::ZERO, yaw: 0.0, act, walking: false, walked: 0.0, carry: false, patrol: false, partner: None, lie: None };
+    look_for(0, Role::Scholar, &s, t, phase, false, 0.0).input
+}
+
 /// Кто из пары сейчас говорит: собеседники по очереди, по 5 с.
 fn speaking(me: usize, partner: Option<u16>, t: f32) -> bool {
     let Some(p) = partner else { return false };
