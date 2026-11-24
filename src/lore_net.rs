@@ -99,7 +99,7 @@ pub enum BurstFx {
     Hiss,
 }
 
-/// Временный мастер, пока в городе нет настоящих NPC.
+/// Мастер, у которого учатся (учитель школы — житель города, остальные стоят на своих местах).
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MasterView {
     pub id: u32,
@@ -110,6 +110,15 @@ pub struct MasterView {
     pub price: u32,
     /// Сколько нуммиев платит подмастерью за час работы.
     pub wage: u32,
+    /// Учитель — житель города (номер в раскладке уровня): его водит распорядок дня, модель
+    /// рисует `life_client`, а не мы.
+    pub resident: Option<u32>,
+    /// Часы работы (игровые).
+    pub hours: (f32, f32),
+    /// Сейчас на месте и учит.
+    pub present: bool,
+    /// Ключ места (`level::places()`).
+    pub place: String,
 }
 
 /// Клиент -> сервер.
@@ -141,6 +150,12 @@ pub enum LoreClientMessage {
     Stop,
     /// Движение руками закончено (см. work.rs): качество 0..1.
     Stroke { q: f32 },
+    /// Платный урок выбранного предмета (окно школы).
+    Study { master: u32, lore: crate::lore::Lore },
+    /// Переписать книгу из сумки (нужны письмо, калам, чернила и пергамент).
+    Copy { uid: ItemUid },
+    /// Упражняться в письме на своей восковой табличке.
+    Practice { uid: ItemUid },
     /// Рудник, болото, угольная куча, кострище для обжига (см. mining_server.rs).
     Mine(crate::mining_net::MineAct),
 }

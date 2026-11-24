@@ -2,6 +2,9 @@
 //!
 //! Управление:
 //! - E у куста — собрать; E у мастера — платный урок; R у мастера — поработать подмастерьем.
+//!   E у учителя грамоты (школа, писец, нотарий, сочинитель) — окно школы с предметами.
+//! - C по книге в сумке — переписать (нужны письмо, калам, чернила, пергамент);
+//!   F по восковой табличке — упражняться в письме.
 //! - F или ПКМ по книге в сумке — читать; по лекарству — на рану или внутрь.
 //!   Шаг в сторону или удар прерывают занятие.
 //! - F по жаровне или столу в сумке — поставить перед собой; E у поставленной — забрать,
@@ -28,7 +31,7 @@ impl Plugin for LoreClientPlugin {
             .insert_resource(LoreView::default())
             .add_systems(Startup, (setup_lore_assets, setup_lore_ui).after(crate::inventory_ui::setup_fonts))
             .add_systems(Update, (receive_lore, lore_input).chain().run_if(client_connected))
-            .add_systems(Update, (aim_lore_target, update_lore_prompt, update_patch_looks, update_tending_hud).chain());
+            .add_systems(Update, (aim_lore_target, update_lore_prompt, update_patch_looks, update_tending_hud, pose_masters).chain());
     }
 }
 
@@ -53,6 +56,28 @@ pub enum LoreTarget {
     Station(u32),
 }
 
+impl LoreView {
+    /// Мастер по номеру.
+    pub fn master(&self, id: u32) -> Option<&MasterView> {
+        self.masters.get(&id).map(|(m, _)| m)
+    }
+
+    /// Для снимков без сервера: мастер только в списке, без тела.
+    pub fn insert_demo_master(&mut self, m: MasterView) {
+        self.masters.insert(m.id, (m, Entity::PLACEHOLDER));
+    }
+
+    /// Все мастера, о которых сказал сервер.
+    pub fn masters_iter(&self) -> impl Iterator<Item = &MasterView> {
+        self.masters.values().map(|(m, _)| m)
+    }
+
+    /// Учит ли житель с этим номером (учитель школы): номер мастера.
+    pub fn master_of_resident(&self, resident: usize) -> Option<u32> {
+        self.masters.iter().find(|(_, (m, _))| m.resident == Some(resident as u32)).map(|(id, _)| *id)
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct LoreView {
     patches: HashMap<u32, (PatchView, Entity)>,
@@ -72,6 +97,10 @@ pub fn try_use(client: &mut RenetClient, item: &Item, body: Option<&crate::medic
         return true;
     }
     let name = item.info().name;
+    if name == crate::knowledge::TABLET {
+        send(client, &LoreClientMessage::Practice { uid: item.uid });
+        return true;
+    }
     if StationKind::from_item(name).is_some() {
         send(client, &LoreClientMessage::PlaceStation { uid: item.uid });
         return true;
@@ -91,7 +120,7 @@ pub fn try_use(client: &mut RenetClient, item: &Item, body: Option<&crate::medic
 /// Можно ли «использовать» предмет (для подсказок и ПКМ в сумке).
 pub fn usable(base: ItemBaseId) -> bool {
     let name = base.base().name;
-    Book::from_item(base).is_some() || crate::medicine::is_remedy(name) || crate::brewing::Vessel::from_item(name).is_some() || StationKind::from_item(name).is_some()
+    Book::from_item(base).is_some() || name == crate::knowledge::TABLET || crate::medicine::is_remedy(name) || crate::brewing::Vessel::from_item(name).is_some() || StationKind::from_item(name).is_some()
 }
 
 // ---------------------------------------------------------------------------
@@ -105,10 +134,6 @@ struct LoreAssets {
     stem: Handle<Mesh>,
     leaf_mat: Handle<StandardMaterial>,
     flower_mats: HashMap<Substance, Handle<StandardMaterial>>,
-    body: Handle<Mesh>,
-    head: Handle<Mesh>,
-    skin: Handle<StandardMaterial>,
-    robes: HashMap<Teacher, Handle<StandardMaterial>>,
     bronze: Handle<StandardMaterial>,
     coals: Handle<StandardMaterial>,
     wood: Handle<StandardMaterial>,
@@ -164,6 +189,12 @@ fn robe_color(t: Teacher) -> Color {
         Teacher::Glassblower | Teacher::Potter => Color::srgb(0.5, 0.35, 0.22),
         Teacher::SteppeHealer => Color::srgb(0.5, 0.4, 0.3),
         Teacher::Smith | Teacher::Armourer | Teacher::GothSmith | Teacher::SteppeSmith => Color::srgb(0.3, 0.26, 0.22),
+        Teacher::Grammatist => Color::srgb(0.72, 0.66, 0.52),
+        // Чиновник претории — в крашеной тунике, сочинитель — в небелёной шерсти.
+        Teacher::Notary => Color::srgb(0.32, 0.36, 0.5),
+        Teacher::Logograph => Color::srgb(0.58, 0.5, 0.36),
+        Teacher::Copyist => Color::srgb(0.2, 0.24, 0.35),
+        Teacher::Philosopher => Color::srgb(0.85, 0.82, 0.75),
         Teacher::Miner => Color::srgb(0.42, 0.3, 0.2),
         Teacher::CharcoalBurner => Color::srgb(0.2, 0.18, 0.16),
     }
@@ -171,17 +202,12 @@ fn robe_color(t: Teacher) -> Color {
 
 fn setup_lore_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
     let flower_mats = Substance::ALL.into_iter().filter(|s| s.is_wild()).map(|s| (s, materials.add(StandardMaterial { base_color: bloom_color(s), perceptual_roughness: 0.8, ..default() }))).collect();
-    let robes = Teacher::ALL.into_iter().map(|t| (t, materials.add(StandardMaterial { base_color: robe_color(t), perceptual_roughness: 0.95, ..default() }))).collect();
     commands.insert_resource(LoreAssets {
         leaf: meshes.add(Cuboid::new(0.07, 0.32, 0.015)),
         flower: meshes.add(Sphere::new(0.035)),
         stem: meshes.add(Cylinder::new(0.008, 0.4)),
         leaf_mat: materials.add(StandardMaterial { base_color: Color::srgb(0.22, 0.42, 0.18), perceptual_roughness: 0.9, double_sided: true, cull_mode: None, ..default() }),
         flower_mats,
-        body: meshes.add(Capsule3d::new(0.26, 1.05)),
-        head: meshes.add(Sphere::new(0.13)),
-        skin: materials.add(StandardMaterial { base_color: Color::srgb(0.72, 0.55, 0.42), perceptual_roughness: 0.8, ..default() }),
-        robes,
         bronze: materials.add(StandardMaterial { base_color: Color::srgb(0.55, 0.36, 0.18), metallic: 0.85, perceptual_roughness: 0.42, ..default() }),
         coals: materials.add(StandardMaterial {
             base_color: Color::srgb(0.12, 0.06, 0.04),
@@ -298,15 +324,49 @@ fn spawn_station(commands: &mut Commands, assets: &LoreAssets, s: &StationView) 
         .id()
 }
 
-fn spawn_master(commands: &mut Commands, assets: &LoreAssets, m: &MasterView) -> Entity {
+/// Мастер на своём месте: живой человек в одежде по ремеслу (скелет, лицо, одежда — как у
+/// жителей). Ушедшего домой (вне часов работы) не видно.
+fn spawn_master(commands: &mut Commands, m: &MasterView) -> Entity {
     let pos: Vec3 = m.pos.into();
+    let shown = if m.present { Visibility::Inherited } else { Visibility::Hidden };
     commands
-        .spawn((Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(m.yaw)), Visibility::default()))
+        .spawn((MasterBody(m.teacher), Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(m.yaw)), shown))
         .with_children(|c| {
-            c.spawn((Mesh3d(assets.body.clone()), MeshMaterial3d(assets.robes[&m.teacher].clone()), Transform::from_xyz(0.0, 0.79, 0.0)));
-            c.spawn((Mesh3d(assets.head.clone()), MeshMaterial3d(assets.skin.clone()), Transform::from_xyz(0.0, 1.72, 0.0)));
+            c.spawn((crate::rig::NeedsRig(master_outfit(m.teacher, m.id)), Transform::default(), Visibility::default()));
         })
         .id()
+}
+
+/// Мастера на местах дышат, переминаются и объясняют что-то руками.
+fn pose_masters(time: Res<Time>, masters: Query<(&MasterBody, &Children)>, mut poses: Query<&mut crate::rig::RigPose>) {
+    let t = time.elapsed_secs();
+    for (m, children) in &masters {
+        for child in children.iter() {
+            if let Ok(mut pose) = poses.get_mut(child) {
+                let phase = m.0 as u32 as f32 * 0.37;
+                *pose = crate::rig::solve_pose(&crate::life_client::teacher_pose(t, phase)).pose;
+            }
+        }
+    }
+}
+
+/// Тело мастера (поза стоящего на месте).
+#[derive(Component)]
+pub struct MasterBody(pub Teacher);
+
+/// Одежда мастера: писцы и учителя — в светлой тунике и паллии, знахарка — по-готски.
+fn master_outfit(t: Teacher, id: u32) -> crate::rig::Outfit {
+    use crate::level::Role;
+    let role = match t {
+        Teacher::Scribe => Role::Monk,
+        Teacher::Wisewoman => Role::Housewife,
+        Teacher::Notary | Teacher::Logograph | Teacher::Grammarian | Teacher::Grammatist | Teacher::Copyist | Teacher::Philosopher => Role::Scholar,
+        Teacher::Iatros => Role::Physician,
+        _ => Role::Craftsman,
+    };
+    let mut o = crate::residents::outfit(role, 9000 + id as u64);
+    o.tunic_color = robe_color(t);
+    o
 }
 
 // ---------------------------------------------------------------------------
@@ -373,7 +433,8 @@ fn receive_lore(
                     commands.entity(e).despawn();
                 }
                 for m in list {
-                    let e = spawn_master(&mut commands, &assets, &m);
+                    // Учитель-житель уже ходит по городу (life_client) — своё тело ему не нужно.
+                    let e = if m.resident.is_some() { commands.spawn(Transform::from_translation(m.pos.into())).id() } else { spawn_master(&mut commands, &m) };
                     view.masters.insert(m.id, (m, e));
                 }
             }
@@ -439,7 +500,10 @@ fn aim_lore_target(mut view: ResMut<LoreView>, loot: Res<LootState>, camera: Que
             test(Vec3::from(s.pos) + Vec3::Y * h, r, LoreTarget::Station(*id));
         }
         for (id, (m, _)) in &view.masters {
-            test(Vec3::from(m.pos) + Vec3::Y * 1.1, 0.6, LoreTarget::Master(*id));
+            // Жителя-учителя наводит residents.rs; ушедшего домой мастера не видно.
+            if m.resident.is_none() && m.present {
+                test(Vec3::from(m.pos) + Vec3::Y * 1.1, 0.6, LoreTarget::Master(*id));
+            }
         }
         best.or(zone).map(|(_, t)| t)
     })();
@@ -448,7 +512,14 @@ fn aim_lore_target(mut view: ResMut<LoreView>, loot: Res<LootState>, camera: Que
     }
 }
 
-fn lore_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, view: Res<LoreView>, loot: Res<LootState>, tending: Res<MyTending>) {
+fn lore_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut client: ResMut<RenetClient>,
+    view: Res<LoreView>,
+    loot: Res<LootState>,
+    tending: Res<MyTending>,
+    mut school: ResMut<crate::school_client::SchoolUi>,
+) {
     // Огонь под сосудом: 1 — мехи, 2 — заслонка, 3 — мокрая тряпица на купол.
     if loot.using.is_some() && tending.0.is_some() {
         for (key, action) in [(KeyCode::Digit1, TendAction::Bellows), (KeyCode::Digit2, TendAction::Damper), (KeyCode::Digit3, TendAction::CoolDome)] {
@@ -464,8 +535,13 @@ fn lore_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, 
     if loot.using.is_some() && [KeyCode::KeyW, KeyCode::KeyA, KeyCode::KeyS, KeyCode::KeyD, KeyCode::Space].iter().any(|k| keys.just_pressed(*k)) {
         send(&mut client, &LoreClientMessage::Stop);
     }
+    if school.open() {
+        return;
+    }
+    let letters = |id: u32| view.master(id).is_some_and(|m| m.teacher.teaches_letters());
     match view.target {
         Some(LoreTarget::Patch(patch)) if keys.just_pressed(KeyCode::KeyE) => send(&mut client, &LoreClientMessage::Gather { patch }),
+        Some(LoreTarget::Master(master)) if keys.just_pressed(KeyCode::KeyE) && letters(master) => school.show(master),
         Some(LoreTarget::Master(master)) if keys.just_pressed(KeyCode::KeyE) => send(&mut client, &LoreClientMessage::PaidLesson { master }),
         Some(LoreTarget::Master(master)) if keys.just_pressed(KeyCode::KeyR) => send(&mut client, &LoreClientMessage::Apprentice { master }),
         Some(LoreTarget::Station(id)) if keys.just_pressed(KeyCode::KeyE) => send(&mut client, &LoreClientMessage::TakeStation { id }),
@@ -609,6 +685,9 @@ fn update_lore_prompt(view: Res<LoreView>, knowledge: Res<MyKnowledge>, mut text
             let name = p.substance.item().map(|b| knowledge.0.item_name(b)).unwrap_or_default();
             if p.charges == 0 { format!("{name} (всё собрано, отрастает)") } else { format!("[E] Собрать: {name}") }
         }),
+        Some(LoreTarget::Master(id)) if view.master(id).is_some_and(|m| m.teacher.teaches_letters()) => {
+            view.master(id).map(|m| format!("{}\n[E] Учиться: азбука, чтение, письмо, счёт", crate::school::tutor_title(m.teacher)))
+        }
         Some(LoreTarget::Master(id)) => view.masters.get(&id).map(|(m, _)| {
             let next = knowledge.0.next_lesson(m.teacher);
             match next {

@@ -120,6 +120,7 @@ pub enum Perk {
     Literate,
     Bookman,
     Rhetor,
+    Calligrapher,
     // Торговля
     KnowsPrice,
     Haggler,
@@ -198,12 +199,12 @@ use Need as N;
 use Skill as S;
 
 impl Perk {
-    pub const ALL: [Perk; 36] = {
+    pub const ALL: [Perk; 37] = {
         use Perk::*;
         [
             PortersBack, HeavyHand, Hammerman, SecondWind, ArmourHabit, ForcedMarch, Drill, TurnTheBlade, Veteran, Bucellarius, SteadyAim, SteppeBow, Sagittarius, ForgeEye, Temperer,
             Bladesmith, MasterSmith, Stoker, Zosimian, Colourman, FireMaster, Rhizotomist, HerbKnower, Pharmacist, Dresser, HerbHealer, Surgeon, Archiatros, Literate, Bookman, Rhetor,
-            KnowsPrice, Haggler, Merchant, SweetWords, Advocate,
+            KnowsPrice, Haggler, Merchant, SweetWords, Advocate, Calligrapher,
         ]
     };
 
@@ -463,6 +464,14 @@ impl Perk {
                 "Чтение +15%, уроки +10%, торг +2%.",
                 &[N::Skill(S::Letters, 55.0), N::Lore(Lore::Read(Language::Latin)), N::Perk(Bookman)],
             ),
+            Calligrapher => p(
+                "Каллиграф",
+                S::Letters,
+                3,
+                "Твёрдая рука книгописца: ровные строки унциала, ни одной пропущенной строки.",
+                "Переписка +30% быстрее, чтение +10%.",
+                &[N::Skill(S::Letters, 65.0), N::Lore(Lore::Write(Language::Greek)), N::Lore(Lore::Grammar), N::Perk(Rhetor)],
+            ),
             KnowsPrice => p(
                 "Знает цену",
                 S::Trade,
@@ -478,7 +487,7 @@ impl Perk {
                 2,
                 "Ведёт счета на табличках и знает, куда что везти.",
                 "Покупка −4%, продажа +4%.",
-                &[N::Skill(S::Trade, 60.0), N::Skill(S::Letters, 25.0), N::Perk(Haggler)],
+                &[N::Skill(S::Trade, 60.0), N::Skill(S::Letters, 25.0), N::Lore(Lore::Reckon), N::Perk(Haggler)],
             ),
             SweetWords => p(
                 "Ласковое слово",
@@ -604,6 +613,8 @@ pub struct Mods {
     pub reading: f32,
     /// Скорость учения у мастера.
     pub lessons: f32,
+    /// Скорость письма (переписка книг).
+    pub writing: f32,
     /// Прибавка к удаче уговорить стражу (0.1 = +10%).
     pub persuade: f32,
 }
@@ -625,6 +636,7 @@ impl Default for Mods {
             sell: 1.0,
             reading: 1.0,
             lessons: 1.0,
+            writing: 1.0,
             persuade: 0.0,
         }
     }
@@ -647,6 +659,7 @@ impl Mods {
         m.sell *= 1.0 + s(S::Trade) * 0.0006;
         m.reading *= 1.0 + s(S::Letters) * 0.005;
         m.lessons *= 1.0 + s(S::Letters) * 0.002;
+        m.writing *= 1.0 + s(S::Letters) * 0.003;
         for p in earned(k) {
             use Perk::*;
             match p {
@@ -698,6 +711,10 @@ impl Mods {
                     m.buy *= 0.98;
                     m.sell *= 1.02;
                     m.persuade += 0.04;
+                }
+                Calligrapher => {
+                    m.writing *= 1.3;
+                    m.reading *= 1.1;
                 }
                 SweetWords => m.persuade += 0.08,
                 Advocate => {
@@ -822,8 +839,9 @@ mod tests {
         for t in Technique::ALL {
             k.learn(Lore::Technique(t));
         }
-        k.learn(Lore::Read(Language::Greek));
-        k.learn(Lore::Read(Language::Latin));
+        for l in [Lore::Alphabet, Lore::Read(Language::Greek), Lore::Write(Language::Greek), Lore::Reckon, Lore::Grammar, Lore::Read(Language::Latin), Lore::Write(Language::Latin)] {
+            k.learn(l);
+        }
         for s in Substance::ALL {
             k.learn(Lore::Identify(s));
         }

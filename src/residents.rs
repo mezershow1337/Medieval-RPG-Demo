@@ -217,11 +217,18 @@ fn talk(
     clock: Res<crate::world_clock::WorldClock>,
     mut speech: ResMut<Speech>,
     mut said: Local<u32>,
+    lore: Option<Res<crate::lore_client::LoreView>>,
+    mut school: Option<ResMut<crate::school_client::SchoolUi>>,
 ) {
-    if loot.ui_open || !keys.just_pressed(KeyCode::KeyE) {
+    if loot.ui_open || !keys.just_pressed(KeyCode::KeyE) || school.as_ref().is_some_and(|s| s.open()) {
         return;
     }
     let Some((i, role)) = aim.0 else { return };
+    // Учитель школы: окно с предметами (там же он скажет, если сейчас не учит).
+    if let (Some(id), Some(school)) = (lore.as_ref().and_then(|l| l.master_of_resident(i)), school.as_mut()) {
+        school.show(id);
+        return;
+    }
     *said += 1;
     let act = acts.0.get(i).copied().unwrap_or(crate::daily_life::Act::Idle);
     speech.line = match busy_line(act, clock.night(), *said as usize + i) {
@@ -255,6 +262,11 @@ fn busy_line(act: crate::daily_life::Act, night: bool, k: usize) -> Option<&'sta
     }
 }
 
+/// Кто учит (учитель-житель).
+fn l_master(lore: Option<&crate::lore_client::LoreView>, id: u32) -> Option<crate::lore::Teacher> {
+    lore?.master(id).map(|m| m.teacher)
+}
+
 #[derive(Component)]
 struct SpeechText;
 
@@ -280,9 +292,23 @@ fn setup_speech(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
         });
 }
 
-fn update_speech(time: Res<Time>, aim: Res<ResidentAim>, speech: Res<Speech>, acts: Res<crate::life_client::LiveActs>, mut text: Single<&mut Text, With<SpeechText>>) {
+fn update_speech(
+    time: Res<Time>,
+    aim: Res<ResidentAim>,
+    speech: Res<Speech>,
+    acts: Res<crate::life_client::LiveActs>,
+    lore: Option<Res<crate::lore_client::LoreView>>,
+    school: Option<Res<crate::school_client::SchoolUi>>,
+    mut text: Single<&mut Text, With<SpeechText>>,
+) {
+    let teacher = aim.0.and_then(|(i, _)| lore.as_ref().and_then(|l| l.master_of_resident(i)).and_then(|id| l_master(lore.as_deref(), id)));
     let line = if time.elapsed_secs() < speech.until {
         speech.line.clone()
+    } else if school.is_some_and(|s| s.open()) {
+        String::new()
+    } else if let (Some((i, _)), Some(t)) = (aim.0, teacher) {
+        let busy = acts.0.get(i).filter(|a| **a != crate::daily_life::Act::Idle).map(|a| format!(" ({})", a.name())).unwrap_or_default();
+        format!("{}{busy}\n[E] Учиться: азбука, чтение, письмо, счёт", crate::school::tutor_title(t))
     } else if let Some((i, role)) = aim.0 {
         // Видно, чем человек занят: «Ремесленник (куёт)».
         match acts.0.get(i) {

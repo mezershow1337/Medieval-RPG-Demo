@@ -29,11 +29,22 @@ pub enum Drill {
     Tension,
     /// Урок: мастер показывает движения — повторите их мышью.
     Mimic,
+    /// Азбука: вести стиль по образцу буквы на воске, черта за чертой.
+    Trace,
+    /// Письмо: выводить слово буква за буквой (табличка или калам по пергаменту).
+    Scribe,
+    /// Счёт: прочесть греческое число и разложить камешки на абаке по разрядам.
+    Count,
 }
 
 impl Drill {
     #[allow(dead_code)] // в тестах
-    pub const ALL: [Drill; 7] = [Drill::Grind, Drill::Stir, Drill::Pump, Drill::Rhythm, Drill::Track, Drill::Tension, Drill::Mimic];
+    pub const ALL: [Drill; 10] = [Drill::Grind, Drill::Stir, Drill::Pump, Drill::Rhythm, Drill::Track, Drill::Tension, Drill::Mimic, Drill::Trace, Drill::Scribe, Drill::Count];
+
+    /// Работа на табличке (рисуется восковой табличкой или абаком, а не шкалой).
+    pub fn tablet(self) -> bool {
+        matches!(self, Drill::Trace | Drill::Scribe | Drill::Count)
+    }
 
     /// Сколько секунд в среднем между мазками у умелого работника.
     pub fn period(self) -> f32 {
@@ -44,6 +55,8 @@ impl Drill {
             Drill::Rhythm => 0.6,
             Drill::Track | Drill::Tension => WINDOW,
             Drill::Mimic => 3.2,
+            Drill::Trace | Drill::Scribe => 2.2,
+            Drill::Count => 4.5,
         }
     }
 
@@ -57,6 +70,9 @@ impl Drill {
             Drill::Track => "Ведите указку мышью за словом",
             Drill::Tension => "Держите ЛКМ — натяжение в светлой зоне, не порвите",
             Drill::Mimic => "Смотрите, что показывает мастер, и повторите мышью",
+            Drill::Trace => "Ведите стиль мышью по образцу: черта за чертой, не сходя с линии",
+            Drill::Scribe => "Выводите слово буква за буквой: стиль — по образцу",
+            Drill::Count => "Мышь вверх-вниз — камешки в столбце, ЛКМ — следующий разряд",
         }
     }
 }
@@ -266,6 +282,27 @@ pub struct Meter {
     /// Последний мазок — для подсказки на экране.
     pub last: Option<Stroke>,
     pub last_t: f32,
+    /// Письмо: какие буквы выводим (номера знаков `letters.rs`), какая сейчас, какая черта
+    /// и сколько её пройдено (по дуге).
+    pub letters: Vec<usize>,
+    pub letter_i: usize,
+    pub stroke_i: usize,
+    pub along: f32,
+    /// Кончик стиля в клетке буквы (0..1, y вверх).
+    pub nib: Vec2,
+    /// Процарапанное: по буквам слова, по чертам, точки.
+    pub scratch: Vec<Vec<Vec<Vec2>>>,
+    /// Какое слово (`letters::WORDS`) пишем.
+    pub word: usize,
+    letter_t: f32,
+    moving_t: f32,
+    off_t: f32,
+    fixes: u32,
+    /// Счёт: загаданное число, разложенные камешки (сотни, десятки, единицы), текущий разряд.
+    pub number: u32,
+    pub pebbles: [u8; 3],
+    pub col: usize,
+    acc: f32,
 }
 
 impl Meter {
@@ -301,9 +338,34 @@ impl Meter {
             rng: seed | 1,
             last: None,
             last_t: -10.0,
+            letters: Vec::new(),
+            letter_i: 0,
+            stroke_i: 0,
+            along: 0.0,
+            nib: Vec2::ZERO,
+            scratch: Vec::new(),
+            word: 0,
+            letter_t: 0.0,
+            moving_t: 0.0,
+            off_t: 0.0,
+            fixes: 0,
+            number: 0,
+            pebbles: [0; 3],
+            col: 0,
+            acc: 0.0,
         };
-        if drill == Drill::Mimic {
-            m.new_sequence();
+        match drill {
+            Drill::Mimic => m.new_sequence(),
+            Drill::Trace => {
+                let first = (m.rand() >> 5) as usize % 6;
+                m.new_letters(vec![first]);
+            }
+            Drill::Scribe => {
+                m.word = (m.rand() >> 5) as usize % crate::letters::WORDS.len();
+                m.new_letters(crate::letters::WORDS[m.word].0.to_vec());
+            }
+            Drill::Count => m.new_number(),
+            _ => {}
         }
         m
     }
@@ -384,6 +446,8 @@ impl Meter {
             Drill::Track => self.track(inp, dt),
             Drill::Tension => self.pull(inp, dt),
             Drill::Mimic => self.mimic(inp, dt),
+            Drill::Trace | Drill::Scribe => self.trace(inp, dt),
+            Drill::Count => self.count(inp, dt),
         };
         if let Some(s) = &s {
             self.last = Some(s.clone());
@@ -607,6 +671,223 @@ impl Meter {
 }
 
 // ---------------------------------------------------------------------------
+// Письмо и счёт
+// ---------------------------------------------------------------------------
+
+/// Пикселей мыши на клетку буквы.
+pub const NIB_PX: f32 = 210.0;
+/// Пикселей мыши на камешек.
+pub const PEBBLE_PX: f32 = 36.0;
+
+impl Meter {
+    fn new_letters(&mut self, letters: Vec<usize>) {
+        self.letters = letters;
+        self.letter_i = 0;
+        self.scratch = vec![Vec::new(); self.letters.len()];
+        self.start_letter();
+    }
+
+    fn start_letter(&mut self) {
+        self.stroke_i = 0;
+        self.along = 0.0;
+        self.letter_t = 0.0;
+        self.moving_t = 0.0;
+        self.on_t = 0.0;
+        self.off_t = 0.0;
+        self.fixes = 0;
+        if let Some(first) = self.glyph().and_then(|g| g.strokes.first()).and_then(|s| s.first()) {
+            self.nib = *first;
+            if let Some(sc) = self.scratch.get_mut(self.letter_i) {
+                sc.clear();
+                sc.push(vec![*first]);
+            }
+        }
+    }
+
+    /// Буква, которую выводим сейчас.
+    pub fn glyph(&self) -> Option<&'static crate::letters::Glyph> {
+        self.letters.get(self.letter_i).map(|i| crate::letters::glyph(*i))
+    }
+
+    /// Допуск: насколько можно сойти с черты (в долях буквы).
+    pub fn nib_tolerance(&self) -> f32 {
+        0.085 + 0.06 * self.skill
+    }
+
+    /// За сколько секунд умелый выводит букву.
+    fn letter_ideal(g: &crate::letters::Glyph) -> f32 {
+        0.6 + 0.8 * g.strokes.iter().map(crate::letters::stroke_len).sum::<f32>()
+    }
+
+    /// Куда вести стиль дальше (для показа и подсказки): точка чуть впереди на черте.
+    pub fn nib_goal(&self) -> Option<Vec2> {
+        let g = self.glyph()?;
+        let s = g.strokes.get(self.stroke_i)?;
+        Some(crate::letters::point_at(s, self.along + 0.12))
+    }
+
+    fn trace(&mut self, inp: Input, dt: f32) -> Option<Stroke> {
+        use crate::letters::{nearest_in, point_at, stroke_len};
+        let g = self.glyph()?;
+        let tol = self.nib_tolerance();
+        let d = Vec2::new(inp.delta.x, -inp.delta.y) / NIB_PX;
+        let moving = d.length_squared() > 1e-10;
+        self.nib = (self.nib + d).clamp(Vec2::splat(-0.4), Vec2::splat(1.4));
+        self.letter_t += dt;
+        let s = &g.strokes[self.stroke_i];
+        let len = stroke_len(s);
+        let (proj, dist) = nearest_in(s, self.nib, self.along, (self.along + 0.3).min(len));
+        if dist <= tol && proj > self.along {
+            self.along = proj;
+        }
+        if moving {
+            self.moving_t += dt;
+            if dist <= tol {
+                self.on_t += dt;
+            } else if dist > tol * 3.0 {
+                self.off_t += dt;
+            }
+            let nib = self.nib;
+            if let Some(line) = self.scratch.get_mut(self.letter_i).and_then(|sc| sc.last_mut())
+                && line.last().is_none_or(|p| p.distance(nib) > 0.012)
+            {
+                line.push(nib);
+            }
+        }
+        // Далеко ушли с черты: учитель берёт руку и ставит стиль на место.
+        if self.off_t > 0.9 {
+            self.off_t = 0.0;
+            self.fixes += 1;
+            self.nib = point_at(s, self.along);
+            let nib = self.nib;
+            if let Some(sc) = self.scratch.get_mut(self.letter_i) {
+                sc.push(vec![nib]);
+            }
+            let note = if self.drill == Drill::Scribe { "сбились — начните с того места" } else { "учитель поправил руку" };
+            // Не мазок: только подсказка на экране.
+            self.last = Some(Stroke { q: 0.3, note });
+            self.last_t = self.t;
+            return None;
+        }
+        let ideal = Self::letter_ideal(g);
+        if self.along >= len - 0.035 {
+            // Черта готова: стиль поднимают и ставят в начало следующей.
+            self.stroke_i += 1;
+            self.along = 0.0;
+            if let Some(next) = g.strokes.get(self.stroke_i) {
+                self.nib = next[0];
+                let nib = self.nib;
+                if let Some(sc) = self.scratch.get_mut(self.letter_i) {
+                    sc.push(vec![nib]);
+                }
+                return None;
+            }
+            let acc = (self.on_t / self.moving_t.max(0.01)).clamp(0.0, 1.0);
+            let speed = closeness_ratio(self.letter_t, ideal, 3.0);
+            let raw = (0.72 * acc + 0.28 * speed - 0.12 * self.fixes as f32).clamp(0.0, 1.0);
+            let q = with_skill(raw, self.skill);
+            let note = if self.fixes > 0 && acc < 0.6 {
+                "криво — держите стиль на черте"
+            } else if acc < 0.55 {
+                "буква пляшет — ровнее по образцу"
+            } else if self.letter_t < ideal * 0.45 {
+                "торопитесь — буква вышла небрежной"
+            } else if self.letter_t > ideal * 2.2 {
+                "верно, но медленно"
+            } else if self.drill == Drill::Scribe {
+                "чисто выведено"
+            } else {
+                "ровная буква — учитель кивает"
+            };
+            self.next_letter();
+            return Some(Stroke { q, note });
+        }
+        // Слишком долго: учитель стирает табличку и даёт следующую букву.
+        if self.letter_t > ideal * 4.0 + 3.0 {
+            let total: f32 = g.strokes.iter().map(stroke_len).sum();
+            let done: f32 = g.strokes[..self.stroke_i].iter().map(stroke_len).sum::<f32>() + self.along;
+            let q = if done <= 0.02 { 0.0 } else { with_skill(0.35 * done / total.max(0.01), self.skill) };
+            self.next_letter();
+            return Some(Stroke { q, note: "не успели — учитель стёр табличку" });
+        }
+        None
+    }
+
+    fn next_letter(&mut self) {
+        match self.drill {
+            Drill::Trace => {
+                let next = (self.letters.first().copied().unwrap_or(0) + 1) % crate::letters::ALPHABET_LEN;
+                self.new_letters(vec![next]);
+            }
+            _ => {
+                self.letter_i += 1;
+                if self.letter_i >= self.letters.len() {
+                    let words = crate::letters::WORDS.len();
+                    self.word = (self.word + 1 + (self.rand() >> 7) as usize % (words - 1)) % words;
+                    self.new_letters(crate::letters::WORDS[self.word].0.to_vec());
+                } else {
+                    self.start_letter();
+                }
+            }
+        }
+    }
+
+    fn new_number(&mut self) {
+        let r = self.rand() >> 3;
+        // Сперва двузначные, потом и сотни.
+        self.number = if self.rounds < 2 { 10 + r % 90 } else { 100 + r % 900 };
+        self.pebbles = [0; 3];
+        // Без сотен — сразу к десяткам.
+        self.col = if self.number < 100 { 1 } else { 0 };
+        self.acc = 0.0;
+        self.show_t = 0.0;
+    }
+
+    /// Цифры загаданного числа: сотни, десятки, единицы.
+    pub fn digits(&self) -> [u8; 3] {
+        [(self.number / 100) as u8, ((self.number / 10) % 10) as u8, (self.number % 10) as u8]
+    }
+
+    fn count(&mut self, inp: Input, dt: f32) -> Option<Stroke> {
+        self.show_t += dt;
+        let ideal = self.drill.period();
+        if self.col < 3 {
+            self.acc = (self.acc - inp.delta.y / PEBBLE_PX).clamp(0.0, 9.45);
+            self.pebbles[self.col] = self.acc.round() as u8;
+            if inp.lmb_pressed {
+                self.col += 1;
+                self.acc = 0.0;
+            }
+        }
+        if self.col >= 3 {
+            let want = self.digits();
+            let first = if self.number < 100 { 1 } else { 0 };
+            let total = (3 - first) as f32;
+            let right = (first..3).filter(|k| self.pebbles[*k] == want[*k]).count() as f32;
+            // Быстрый счёт не грех; медленный — учитель ждёт.
+            let speed = closeness_ratio(self.show_t.max(ideal), ideal, 3.0);
+            let q = with_skill(right / total * (0.75 + 0.25 * speed), self.skill);
+            let note = if right == total {
+                "верно — учитель доволен"
+            } else if right > 0.0 {
+                "ошиблись в разряде — пересчитайте"
+            } else {
+                "не то число — учитель качает головой"
+            };
+            self.rounds += 1;
+            self.new_number();
+            return Some(Stroke { q, note });
+        }
+        if self.show_t > ideal * 4.0 {
+            self.rounds += 1;
+            self.new_number();
+            return Some(Stroke { q: 0.0, note: "учитель не дождался" });
+        }
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Какое занятие каким движением
 // ---------------------------------------------------------------------------
 
@@ -619,7 +900,7 @@ pub fn chore_drill(teacher: crate::lore::Teacher) -> Drill {
         // Обрывать листья, вязать пучки — щипок в такт.
         T::Rhizotomos | T::Wisewoman | T::SteppeHealer => Drill::Rhythm,
         // Толочь корни, растирать чернила.
-        T::Apothecary | T::Scribe | T::Grammarian => Drill::Grind,
+        T::Apothecary | T::Scribe | T::Grammarian | T::Grammatist | T::Notary | T::Copyist | T::Philosopher | T::Logograph => Drill::Grind,
         // Топить печь, качать мехи, носить дрова.
         T::Alchemist | T::Glassblower | T::Potter => Drill::Pump,
         // Мешать чан.
@@ -628,6 +909,29 @@ pub fn chore_drill(teacher: crate::lore::Teacher) -> Drill {
         T::Smith | T::Armourer | T::GothSmith | T::SteppeSmith => Drill::Rhythm,
         // Таскать корзины, кидать землю на кучу.
         T::Miner | T::CharcoalBurner => Drill::Pump,
+    }
+}
+
+/// Подручный у пишущего мастера: неграмотный растирает чернила, а умеющий писать — переписывает.
+pub fn chore_drill_for(teacher: crate::lore::Teacher, can_write: bool) -> Drill {
+    use crate::lore::Teacher as T;
+    match teacher {
+        T::Scribe | T::Notary | T::Copyist | T::Logograph if can_write => Drill::Scribe,
+        // В школе помогают с малышами: показывают буквы на табличке.
+        T::Grammatist | T::Grammarian if can_write => Drill::Trace,
+        t => chore_drill(t),
+    }
+}
+
+/// Каким движением идёт урок этого предмета.
+pub fn lesson_drill(lore: crate::lore::Lore) -> Drill {
+    use crate::lore::Lore;
+    match lore {
+        Lore::Alphabet => Drill::Trace,
+        Lore::Write(_) => Drill::Scribe,
+        Lore::Read(_) => Drill::Track,
+        Lore::Reckon => Drill::Count,
+        _ => Drill::Mimic,
     }
 }
 
@@ -794,6 +1098,88 @@ mod tests {
         let s = got.expect("урок засчитан");
         assert!(s.q > 0.95, "{s:?}");
         assert!(m.showing, "мастер показывает новое");
+    }
+
+    /// Ведёт стиль к точке чуть впереди на черте с умеренной скоростью (как умелый ученик).
+    fn tracing_input(m: &Meter, dt: f32) -> Input {
+        let Some(goal) = m.nib_goal() else { return Input { dt, ..Input::default() } };
+        let to = goal - m.nib;
+        let step = to.clamp_length_max(1.3 * dt);
+        Input { dt, delta: Vec2::new(step.x, -step.y) * NIB_PX, ..Input::default() }
+    }
+
+    #[test]
+    fn tracing_letters_along_the_model() {
+        for drill in [Drill::Trace, Drill::Scribe] {
+            let mut m = Meter::new(drill, 0.0, 5);
+            let mut out = Vec::new();
+            for _ in 0..(60 * 40) {
+                let inp = tracing_input(&m, 1.0 / 60.0);
+                if let Some(s) = m.update(inp) {
+                    out.push(s);
+                }
+            }
+            assert!(out.len() >= 8, "{drill:?}: букв {}", out.len());
+            let avg = out.iter().map(|s| s.q).sum::<f32>() / out.len() as f32;
+            assert!(avg > 0.75, "{drill:?}: {avg} {out:?}");
+        }
+        // Азбука идёт по порядку.
+        let mut m = Meter::new(Drill::Trace, 0.0, 5);
+        let first = m.letters[0];
+        while m.letters[0] == first {
+            let inp = tracing_input(&m, 1.0 / 60.0);
+            m.update(inp);
+            assert!(m.t < 30.0);
+        }
+        assert_eq!(m.letters[0], (first + 1) % crate::letters::ALPHABET_LEN);
+    }
+
+    #[test]
+    fn scribbling_off_the_line_is_bad() {
+        let mut m = Meter::new(Drill::Trace, 0.0, 9);
+        let mut out = Vec::new();
+        for i in 0..(60 * 40) {
+            // Водит мышью кругами, не глядя на образец.
+            let a = i as f32 * 0.15;
+            let inp = Input { dt: 1.0 / 60.0, delta: Vec2::new(a.cos(), a.sin()) * 9.0, ..Input::default() };
+            if let Some(s) = m.update(inp) {
+                out.push(s.q);
+            }
+        }
+        assert!(!out.is_empty());
+        assert!(out.iter().all(|q| *q < 0.45), "{out:?}");
+    }
+
+    #[test]
+    fn counting_pebbles() {
+        let mut m = Meter::new(Drill::Count, 0.0, 3);
+        let mut out = Vec::new();
+        for _ in 0..12 {
+            // Разложить ровно столько, сколько загадано, и перейти к следующему разряду.
+            let want = m.digits();
+            let mut s = None;
+            while s.is_none() {
+                let col = m.col;
+                for _ in 0..30 {
+                    m.update(Input { dt: 1.0 / 60.0, ..Input::default() });
+                }
+                let dy = -(want[col] as f32) * PEBBLE_PX;
+                m.update(Input { dt: 1.0 / 60.0, delta: Vec2::new(0.0, dy), ..Input::default() });
+                s = m.update(Input { dt: 1.0 / 60.0, lmb_pressed: true, ..Input::default() });
+            }
+            out.push(s.unwrap());
+        }
+        assert!(out.iter().all(|s| s.q > 0.9), "{out:?}");
+        assert!(m.number >= 100, "после первых раундов — сотни");
+        // Наугад — плохо.
+        let mut m = Meter::new(Drill::Count, 0.0, 3);
+        let mut s = None;
+        while s.is_none() {
+            s = m.update(Input { dt: 0.05, lmb_pressed: true, ..Input::default() });
+        }
+        let want = m.digits();
+        let _ = want;
+        assert!(s.unwrap().q < 0.7);
     }
 
     #[test]

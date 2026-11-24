@@ -1,9 +1,9 @@
-//! Карта Херсона и окрестностей на клавишу M, компас вверху экрана и имена товарищей над головой.
+//! Карта Херсона и окрестностей на клавишу M и имена товарищей над головой (мини-карта — `minimap.rs`).
 //!
 //! Карту рисует «писец» в отдельном потоке по геометрии уровня (см. `map_render.rs`): лист
 //! пергамента с морем, стенами, кровлями и дорогами. Поверх — подписи мест (из `level::places`),
 //! стрелки всех игроков (куда смотрят) с именами и метки: ПКМ по карте ставит свою метку,
-//! её видят все товарищи — на карте, на компасе и в мире.
+//! её видят все товарищи — на карте, на мини-карте и в мире.
 //!
 //! Сеть — свой канал [`CH_MAP`]: клиент называет себя (`Hello`) и ставит/снимает метку,
 //! сервер рассылает список имён и меток. Позиции игроков уже приходят в снимках мира.
@@ -202,11 +202,11 @@ impl Plugin for MapClientPlugin {
         app.insert_resource(Party::default())
             .insert_resource(MapView::default())
             .insert_resource(MarkerPool::default())
-            .add_systems(Startup, (start_drawing_map, (setup_marker_art, setup_map_ui, setup_compass).chain().after(crate::inventory_ui::setup_fonts)))
+            .add_systems(Startup, (start_drawing_map, (setup_marker_art, setup_map_ui).chain().after(crate::inventory_ui::setup_fonts)))
             .add_systems(Update, (say_hello, receive_map).run_if(bevy_renet::client_connected))
             .add_systems(Update, finish_map_sheet)
             .add_systems(Update, (toggle_map, free_cursor_while_open, map_input, update_map_markers, layout_map).chain())
-            .add_systems(Update, (update_compass, update_name_tags));
+            .add_systems(Update, update_name_tags);
     }
 }
 
@@ -643,7 +643,6 @@ pub(crate) enum MarkerKey {
 #[derive(Resource, Default)]
 struct MarkerPool {
     map: HashMap<MarkerKey, Entity>,
-    compass: HashMap<MarkerKey, Entity>,
     tags: HashMap<MarkerKey, Entity>,
 }
 
@@ -782,156 +781,6 @@ fn update_map_markers(
 }
 
 // ---------------------------------------------------------------------------
-// Компас
-// ---------------------------------------------------------------------------
-
-#[derive(Component)]
-struct CompassRoot;
-#[derive(Component)]
-struct CompassStrip;
-/// Деление компаса: направление в градусах от севера по часовой стрелке.
-#[derive(Component)]
-struct CompassTick {
-    deg: f32,
-    half_w: f32,
-}
-
-const COMPASS_W: f32 = 440.0;
-const COMPASS_H: f32 = 30.0;
-/// Сколько градусов видно от центра до края.
-const COMPASS_SPAN: f32 = 95.0;
-
-fn setup_compass(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>, theme: Res<UiTheme>) {
-    let root = commands
-        .spawn((CompassRoot, Node { position_type: PositionType::Absolute, top: px(6), width: percent(100), justify_content: JustifyContent::Center, ..default() }, Visibility::Hidden))
-        .id();
-    // Кожаная плашка темы, внутри — полоса с делениями.
-    let plaque = commands.spawn((Node { padding: Skin::Leather.padding(), ..default() }, theme.skin(Skin::Leather), ChildOf(root))).id();
-    let strip = commands
-        .spawn((CompassStrip, Node { width: px(COMPASS_W), height: px(COMPASS_H), overflow: Overflow::clip(), ..default() }, ChildOf(plaque)))
-        .id();
-    // Центральная риска (бронза).
-    commands.spawn((
-        Node { position_type: PositionType::Absolute, left: px(COMPASS_W / 2.0 - 1.0), top: px(0), width: px(2), height: px(6), ..default() },
-        BackgroundColor(ink::GOLD),
-        ChildOf(strip),
-    ));
-    let names = [(0.0, "С"), (45.0, "СВ"), (90.0, "В"), (135.0, "ЮВ"), (180.0, "Ю"), (225.0, "ЮЗ"), (270.0, "З"), (315.0, "СЗ")];
-    for (deg, name) in names {
-        let main = (deg as i32) % 90 == 0;
-        let half_w = 20.0;
-        let color = if deg == 0.0 { ink::BAD } else if main { ink::TITLE } else { ink::DIM };
-        commands.spawn((
-            CompassTick { deg, half_w },
-            text(&fonts, name, if main { 19.0 } else { 14.0 }, color, main),
-            TextLayout::justify(Justify::Center),
-            Node { position_type: PositionType::Absolute, width: px(half_w * 2.0), top: px(if main { 3.0 } else { 6.0 }), ..default() },
-            ChildOf(strip),
-        ));
-    }
-    for k in 0..24 {
-        let deg = k as f32 * 15.0;
-        if (deg as i32) % 45 == 0 {
-            continue;
-        }
-        commands.spawn((
-            CompassTick { deg, half_w: 0.5 },
-            Node { position_type: PositionType::Absolute, width: px(1), height: px(8), top: px(COMPASS_H - 14.0), ..default() },
-            BackgroundColor(ink::DIM.with_alpha(0.7)),
-            ChildOf(strip),
-        ));
-    }
-}
-
-/// Пеленг точки: градусы от севера (−Z) по часовой стрелке (восток — +X).
-fn bearing(from: Vec3, to: Vec3) -> f32 {
-    let d = to - from;
-    d.x.atan2(-d.z).to_degrees()
-}
-
-fn wrap180(a: f32) -> f32 {
-    (a + 540.0).rem_euclid(360.0) - 180.0
-}
-
-#[allow(clippy::too_many_arguments)]
-fn update_compass(
-    mut commands: Commands,
-    (net, party): (Res<NetState>, Res<Party>),
-    view: Res<MapView>,
-    art: Res<MarkerArt>,
-    fonts: Res<crate::inventory_ui::UiFonts>,
-    level: Res<crate::collision::LevelColliders>,
-    mut pool: ResMut<MarkerPool>,
-    mut root: Single<&mut Visibility, (With<CompassRoot>, Without<CompassTick>)>,
-    strip: Single<Entity, With<CompassStrip>>,
-    mut ticks: Query<(&CompassTick, &mut Node, &mut Visibility), Without<CompassRoot>>,
-    local: Query<(&LocalPlayer, &Transform)>,
-    remotes: Query<(&RemoteActor, &Transform)>,
-    children: Query<&Children>,
-    mut nodes: Query<&mut Node, Without<CompassTick>>,
-    mut icons: Query<&mut ImageNode>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
-) {
-    let Ok((me, me_t)) = local.single() else {
-        **root = Visibility::Hidden;
-        return;
-    };
-    **root = if view.open { Visibility::Hidden } else { Visibility::Inherited };
-    let heading = (-me.yaw).to_degrees();
-    let scale = (COMPASS_W / 2.0) / COMPASS_SPAN;
-    for (tick, mut node, mut vis) in &mut ticks {
-        let rel = wrap180(tick.deg - heading);
-        *vis = if rel.abs() < COMPASS_SPAN + 10.0 { Visibility::Inherited } else { Visibility::Hidden };
-        node.left = px(COMPASS_W / 2.0 + rel * scale - tick.half_w);
-    }
-    // Товарищи и метки на полосе компаса, с расстоянием.
-    let mates: Vec<Mate> = gather(&net, &party, &local, &remotes, &level).into_iter().filter(|m| !(m.me && m.yaw.is_some())).collect();
-    pool.compass.retain(|k, e| {
-        let keep = mates.iter().any(|m| m.key == *k);
-        if !keep {
-            commands.entity(*e).despawn();
-        }
-        keep
-    });
-    for m in &mates {
-        let size = 14.0;
-        let entity = *pool.compass.entry(m.key).or_insert_with(|| {
-            let img = if m.yaw.is_some() { art.arrow.clone() } else { art.pin.clone() };
-            let e = spawn_marker(&mut commands, &fonts, *strip, img, size, 11.0);
-            commands.entity(e).insert(Visibility::Hidden);
-            e
-        });
-        let Ok(kids) = children.get(entity) else { continue };
-        let rel = wrap180(bearing(me_t.translation, m.pos) - heading);
-        let dist = me_t.translation.xz().distance(m.pos.xz());
-        let visible = rel.abs() < COMPASS_SPAN;
-        commands.entity(entity).insert(if visible { Visibility::Inherited } else { Visibility::Hidden });
-        if let Ok(mut node) = nodes.get_mut(entity) {
-            node.left = px(COMPASS_W / 2.0 + rel * scale - size / 2.0);
-            node.top = px(COMPASS_H - size - 3.0);
-        }
-        if let Some(&icon) = kids.first()
-            && let Ok(mut img) = icons.get_mut(icon)
-        {
-            img.color = m.color;
-        }
-        if let Some(&label) = kids.get(1) {
-            if let Ok(mut n) = nodes.get_mut(label) {
-                n.left = px(size + 1.0);
-                n.top = px(-2.0);
-            }
-            if let Ok((mut t, mut c)) = texts.get_mut(label) {
-                let s = format!("{:.0} м", dist);
-                if t.0 != s {
-                    t.0 = s;
-                }
-                c.0 = ink::TEXT;
-            }
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Имена над головами и метки в мире
 // ---------------------------------------------------------------------------
 
@@ -1017,16 +866,8 @@ mod tests {
     }
 
     #[test]
-    fn bearings_follow_the_map() {
-        let o = Vec3::ZERO;
-        // Север — к морю (−Z), восток — к Карантинной бухте (+X).
-        assert!(bearing(o, Vec3::new(0.0, 0.0, -10.0)).abs() < 1e-3);
-        assert!((bearing(o, Vec3::new(10.0, 0.0, 0.0)) - 90.0).abs() < 1e-3);
-        assert!((bearing(o, Vec3::new(-10.0, 0.0, 0.0)) + 90.0).abs() < 1e-3);
-        // Курс игрока совпадает с пеленгом точки прямо перед ним.
+    fn yaw_of_matches_player_yaw() {
         for yaw in [0.0f32, 0.7, -2.0, 3.0] {
-            let fwd = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
-            assert!(wrap180(bearing(o, fwd) - (-yaw).to_degrees()).abs() < 1e-2, "yaw {yaw}");
             assert!((yaw_of(&Transform::from_rotation(Quat::from_rotation_y(yaw))) - yaw).abs() < 1e-4);
         }
     }

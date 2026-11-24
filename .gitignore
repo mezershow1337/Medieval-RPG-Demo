@@ -1,3 +1,4 @@
 /target
 *.blend1
 __pycache__/
+/mrpg_hints.txt

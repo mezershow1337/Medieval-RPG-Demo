@@ -686,6 +686,14 @@ fn handle_input(
     let lore_usable = mine.as_ref().is_some_and(|it| crate::lore_client::usable(it.base));
     let consumable = mine.as_ref().is_some_and(|it| it.base.consumable().is_some());
     let use_pressed = keys.just_pressed(KeyCode::KeyF) || (state.container.is_none() && mouse.just_pressed(MouseButton::Right));
+    // C над своей книгой — переписать её (нужны письмо, калам, чернила и пергамент).
+    if keys.just_pressed(KeyCode::KeyC)
+        && let Some(item) = mine.as_ref()
+        && crate::lore::Book::from_item(item.base).is_some()
+    {
+        crate::lore_client::send(client, &crate::lore_net::LoreClientMessage::Copy { uid: item.uid });
+        return;
+    }
     // Горшок, котелок, ступка — окно варки.
     if lore_usable
         && use_pressed

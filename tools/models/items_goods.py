@@ -1041,6 +1041,10 @@ BOOKS = [
     ("aeneas", "Эней Тактик. Об обороне городов", (1, 2), "scroll", None, dict(length=0.21, tag="tag_red")),
     ("theophrastus", "Феофраст. О камнях", (1, 2), "scroll", None, dict(length=0.18, tag="tag_black")),
     ("celsus", "Цельс. О медицине", (2, 2), "codex", (112, 88, 60), dict(w=0.2, h=0.24, t=0.06, clasp="iron")),
+    # Школьные книги: Псалтирь — азбука церковной школы, Дионисий — грамматика, Никомах — арифметика.
+    ("psalter", "Псалтирь", (1, 2), "codex", (92, 30, 52), dict(w=0.12, h=0.19, t=0.045, clasp="gilt", cross=True, seed=3)),
+    ("dionysius_thrax", "Дионисий Фракиец. Искусство грамматики", (1, 2), "scroll", None, dict(length=0.19, tag="tag_black")),
+    ("nicomachus", "Никомах. Введение в арифметику", (1, 2), "codex", (70, 64, 92), dict(w=0.13, h=0.2, t=0.04, boss=False)),
 ]
 
 
@@ -1169,6 +1173,82 @@ def ink():
     K.rot(pen, "Y", 28)
     K.move(pen, -0.004, 0, 0.022)
     K.mesh_obj("pen", pen, "reed", subsurf=1)
+
+
+@item("wax_tablet", (2, 1), name="Восковая табличка", pose="flat", azimuth=22, elevation=34, margin=0.9)
+def wax_tablet():
+    """Школьная табличка: деревянная рамка, тёмный воск с процарапанными буквами, стиль."""
+    M()
+    K.organic_mat("wax_dark", (66, 40, 20), (40, 24, 12), rough=(0.25, 0.45), bump=0.25, bump_scale=120.0, dirt=0.3)
+    K.organic_mat("wax_scratch", (176, 140, 92), (140, 108, 66), rough=(0.5, 0.7), bump=0.1)
+    w, h, t = 0.2, 0.13, 0.012
+    # Доска с выбранным углублением: четыре бруска рамки и дно.
+    K.mesh_obj("base", K.cbox(0, 0, -t / 2 + 0.002, w, h, 0.004), "wood", bevel=0.0015)
+    for x0, x1, y0, y1 in ((-w / 2, w / 2, h / 2 - 0.014, h / 2), (-w / 2, w / 2, -h / 2, -h / 2 + 0.014), (-w / 2, -w / 2 + 0.014, -h / 2, h / 2), (w / 2 - 0.014, w / 2, -h / 2, h / 2)):
+        K.mesh_obj("frame", K.box(x0, x1, y0, y1, -t / 2, t / 2), "wood", bevel=0.0018)
+    K.mesh_obj("wax", K.cbox(0, 0, 0.0005, w - 0.028, h - 0.028, 0.006), "wax_dark", bevel=0.0008)
+    # Процарапанные строки: несколько коротких черт (буквы ученика).
+    import random
+    rnd = random.Random(7)
+    for row in range(3):
+        y = 0.03 - row * 0.028
+        x = -w / 2 + 0.024
+        while x < w / 2 - 0.03:
+            n = rnd.randint(1, 3)
+            for _ in range(n):
+                ln = rnd.uniform(0.004, 0.011)
+                bar = K.cbox(0, 0, 0, ln, 0.0012, 0.0006)
+                K.rot(bar, "Z", rnd.choice((0, 90, 60, -60, 30)))
+                K.move(bar, x + rnd.uniform(0, 0.004), y + rnd.uniform(-0.003, 0.003), 0.0036)
+                K.mesh_obj("scratch", bar, "wax_scratch")
+            x += rnd.uniform(0.009, 0.013)
+    # Отверстия для шнура на левом краю и сам шнур.
+    for yy in (-0.03, 0.03):
+        K.mesh_obj("tie", K.torus((-w / 2 + 0.007, yy, 0.0), 0.0045, 0.0009, plane="XZ"), "cord")
+    # Стиль: острый конец пишет, лопаточка стирает.
+    st = K.lathe([(0.0, 0.0001), (0.012, 0.0016), (0.15, 0.0018), (0.156, 0.0012)], 10)
+    K.rot(st, "Y", 90)
+    K.rot(st, "Z", 14)
+    K.move(st, -0.075, -h / 2 - 0.004, t / 2 + 0.002)
+    K.mesh_obj("stylus", st, "bronze", subsurf=1)
+    sp = K.cbox(0, 0, 0, 0.012, 0.009, 0.0016)
+    K.rot(sp, "Z", 14)
+    K.move(sp, -0.075 + 0.156 * math.cos(math.radians(14)), -h / 2 - 0.004 + 0.156 * math.sin(math.radians(14)), t / 2 + 0.002)
+    K.mesh_obj("spatula", sp, "bronze", bevel=0.0006)
+
+
+@item("reed_pen", (1, 1), name="Тростниковое перо", pose="flat", azimuth=14, elevation=12, margin=0.88, roll=-34)
+def reed_pen():
+    """Калам: срезанный наискось тростник с расщепом, кончик в чернилах."""
+    M()
+    K.organic_mat("reed", (196, 170, 110), (150, 120, 70), rough=(0.4, 0.6), grain="Z", grain_scale=3.0, bump=0.3)
+    K.liquid_mat("ink_l", (16, 12, 12))
+    body = K.lathe([(-0.08, 0.0035), (0.06, 0.0038), (0.064, 0.0042), (0.068, 0.0038), (0.08, 0.0036)], 14, axis="Z")
+    K.mesh_obj("reed", body, "reed", subsurf=1, smooth_angle=60)
+    nib = K.lathe([(-0.1, 0.0003), (-0.092, 0.0016), (-0.08, 0.0035)], 14, axis="Z")
+    K.scale(nib, 1.0, 0.45, 1.0)
+    K.mesh_obj("nib", nib, "reed", subsurf=1)
+    tip = K.lathe([(-0.1, 0.0002), (-0.094, 0.0013), (-0.09, 0.0014)], 12, axis="Z")
+    K.scale(tip, 1.05, 0.5, 1.0)
+    K.mesh_obj("ink", tip, "ink_l", subsurf=1)
+
+
+@item("parchment_quire", (1, 1), name="Тетрадь пергамента", pose="upright", azimuth=24, elevation=36, margin=0.86)
+def parchment_quire():
+    """Тетрадь: четыре сложенных листа пергамента, перевязанные бечёвкой."""
+    M()
+    book_mats()
+    w, h = 0.13, 0.17
+    for i in range(8):
+        sheet = K.cbox(0, 0, 0, w - i * 0.0006, h - i * 0.0004, 0.0011)
+        K.rot(sheet, "Z", (i % 3 - 1) * 0.9)
+        K.move(sheet, (i % 2) * 0.0012, -(i % 3) * 0.0008, i * 0.0012)
+        K.mesh_obj("sheet", sheet, "parchment", bevel=0.0004)
+    # Сгиб — по левому краю.
+    K.mesh_obj("fold", K.lathe([(-h / 2, 0.005), (h / 2, 0.005)], 16, axis="Y"), "parchment", subsurf=1)
+    for yy in (-0.04, 0.04):
+        band = K.cbox(0, yy, 0.005, w + 0.004, 0.003, 0.0125)
+        K.mesh_obj("string", band, "cord", bevel=0.0012)
 
 
 @item("poultice", (1, 1), name="Кровоостанавливающая припарка", pose="upright", azimuth=24, elevation=30, margin=0.86)
