@@ -150,8 +150,18 @@ struct ViewGlow;
 
 pub fn spawn_view_sword(parent: &mut ChildSpawnerCommands, assets: &CharacterAssets) {
     parent.spawn((ViewGlow, crate::client::riposte_glow_bundle(assets)));
-    parent.spawn((ViewSword, ShownViewWeapon(combat::WeaponKind::Spatha, None), crate::rig::NeedsWeapon(combat::WeaponKind::Spatha), Transform::default(), Visibility::default()));
-    parent.spawn((ViewArmRoot, crate::rig::NeedsViewArm(None), Transform::default(), Visibility::default()));
+    parent.spawn((
+        ViewSword,
+        ShownViewWeapon(combat::WeaponKind::Spatha, None),
+        crate::rig::NeedsWeapon(combat::WeaponKind::Spatha),
+        Transform::default(),
+        Visibility::default(),
+        crate::self_body::Shade::NoShadow,
+    ));
+    // Правая рука держит оружие всегда, левая — второй хват (копьё) или кулак в стойке.
+    for left in [false, true] {
+        parent.spawn((ViewArmRoot, crate::rig::NeedsViewArm(None, left), Transform::default(), Visibility::default(), crate::self_body::Shade::NoShadow));
+    }
 }
 
 /// Какое оружие показано от первого лица.
@@ -184,7 +194,7 @@ struct ViewArmRoot;
 fn refresh_view_arm(
     mut commands: Commands,
     local: Query<&LocalFighter>,
-    arms: Query<Entity, (With<ViewArmRoot>, With<crate::rig::ViewArm>)>,
+    arms: Query<(Entity, &crate::rig::ViewArm), With<ViewArmRoot>>,
     net: Option<Res<NetState>>,
     mut shown: Local<crate::gear_look::Gear>,
 ) {
@@ -192,12 +202,16 @@ fn refresh_view_arm(
     if f.gear == *shown {
         return;
     }
-    // Ждём, пока рука соберётся (у неё уже есть суставы), иначе переодевать нечего.
-    let Ok(e) = arms.single() else { return };
+    // Ждём, пока обе руки соберутся (у них уже есть суставы), иначе переодевать нечего.
+    if arms.iter().len() < 2 {
+        return;
+    }
     *shown = f.gear;
     let id = net.as_ref().and_then(|n| n.my_id).unwrap_or(0);
     let outfit = crate::rig::Outfit::for_actor(ActorKind::Player, id).with_gear(&f.gear);
-    commands.entity(e).despawn_related::<Children>().remove::<crate::rig::ViewArm>().insert(crate::rig::NeedsViewArm(Some(outfit)));
+    for (e, arm) in &arms {
+        commands.entity(e).despawn_related::<Children>().remove::<crate::rig::ViewArm>().insert(crate::rig::NeedsViewArm(Some(outfit), arm.left));
+    }
 }
 
 fn setup_sparks(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
@@ -355,7 +369,7 @@ fn animate_view_sword(
     }
     let Ok((mut st, mut vis, children)) = sword.single_mut() else { return };
     *vis = if f.fighter.is_dead() || crate::work_client::hands_busy(work.as_deref()) { Visibility::Hidden } else { Visibility::Inherited };
-    let (hilt, dir) = combat::weapon_pose(&f.fighter.action, f.fighter.weapon, time.elapsed_secs());
+    let (hilt, dir) = combat::view_weapon_pose(&f.fighter.action, f.fighter.weapon, time.elapsed_secs());
     // Удар в мире наклонён на 0.6 от взгляда, а камера — на весь взгляд; компенсируем разницу.
     let fix = Quat::from_rotation_x(-p.pitch * 0.4);
     // Меч от первого лица чуть приподнят, чтобы в кадре была рука с рукоятью.
@@ -389,12 +403,31 @@ fn animate_view_sword(
             m.0 = if riposte && hints.0 { assets.blade_red.clone() } else { tints.get(&mut materials, &b.0, f.finish) };
         }
     }
-    // Рука держит рукоять.
-    if let Ok((arm, mut arm_vis)) = arm.single_mut() {
+    // Правая рука держит рукоять; левая — древко копья спереди или поднята кулаком
+    // в кулачной стойке; со щитом или одноручным оружием её в кадре нет.
+    let (right_grip, left_grip) = crate::client::weapon_grips(f.fighter.weapon);
+    let axis = st.rotation * Vec3::Y;
+    let fists = f.fighter.weapon == combat::WeaponKind::Fists && !f.fighter.has_shield;
+    for (arm, mut arm_vis) in &mut arm {
+        let target = if !arm.left {
+            Some((st.transform_point(right_grip), axis))
+        } else if let Some(l) = left_grip {
+            Some((st.transform_point(l), axis))
+        } else if fists {
+            let guard = matches!(f.fighter.action, Action::Windup { .. } | Action::Strike { .. } | Action::Recovery { .. });
+            let fist = if guard { Vec3::new(-0.16, -0.08, -0.28) } else { Vec3::new(-0.2, -0.18, -0.3) };
+            let (pos, _) = view_framing(fix * fist, Vec3::NEG_Z);
+            Some((Vec3::new(-0.06, -0.25 + VIEW_LIFT, -0.04) + pos, (fix * Vec3::new(0.15, 0.25, -1.0)).normalize()))
+        } else {
+            None
+        };
+        let Some((grip, axis)) = target else {
+            *arm_vis = Visibility::Hidden;
+            continue;
+        };
         *arm_vis = *vis;
-        let grip = st.transform_point(crate::client::weapon_grips(f.fighter.weapon).0);
-        let axis = st.rotation * Vec3::Y;
-        for (joint, (pos, rot)) in arm.joints().into_iter().zip(crate::rig::view_arm_pose(VIEW_SHOULDER, grip, axis)) {
+        let shoulder = if arm.left { VIEW_SHOULDER * Vec3::new(-1.0, 1.0, 1.0) } else { VIEW_SHOULDER };
+        for (joint, (pos, rot)) in arm.joints().into_iter().zip(crate::rig::view_arm_pose(shoulder, grip, axis, arm.left)) {
             if let Ok(mut t) = joints.get_mut(joint) {
                 t.translation = pos;
                 t.rotation = rot;

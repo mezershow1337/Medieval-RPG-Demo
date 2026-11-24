@@ -173,7 +173,7 @@ pub fn run(start: crate::menu::Start) {
             primary_window: Some(Window { title: "Херсонес, 510 — Medieval RPG".into(), present_mode: bevy::window::PresentMode::AutoVsync, ..default() }),
             ..default()
         }))
-        .add_plugins((RenetClientPlugin, NetcodeClientPlugin, PlayerPlugin, fight::FightPlugin, hud::HudPlugin, graphics::GraphicsPlugin, crate::textures::TexturesPlugin))
+        .add_plugins((RenetClientPlugin, NetcodeClientPlugin, PlayerPlugin, fight::FightPlugin, crate::self_body::SelfBodyPlugin, hud::HudPlugin, graphics::GraphicsPlugin, crate::textures::TexturesPlugin))
         .add_plugins(rig::RigPlugin)
         .add_plugins(crate::vegetation::VegetationPlugin)
         .add_plugins(crate::loot_client::LootClientPlugin)
@@ -1091,6 +1091,97 @@ fn send_state(mut client: ResMut<RenetClient>, mut timer: ResMut<SendTimer>, tim
     client.send_message(CH_UNRELIABLE, encode(&msg));
 }
 
+/// Как движется тело (для позы): присед, шаг, наклон взгляда, время для дыхания.
+pub(crate) struct BodyMotion {
+    pub crouch: f32,
+    pub walk_phase: f32,
+    pub walk: f32,
+    pub speed: f32,
+    pub pitch: f32,
+    pub time: f32,
+}
+
+/// Щит на руке: в стойке — перед собой, иначе — у левого бока. Плавно из `from` (доля `k`).
+pub(crate) fn shield_pose(action: &Action, crouch: f32, from: Transform, k: f32) -> Transform {
+    let (pos, rot) =
+        if matches!(action, Action::Guard { .. } | Action::GuardStagger { .. }) { (Vec3::new(-0.05, 1.25, -0.5), Quat::IDENTITY) } else { (Vec3::new(-0.38, 1.0, -0.22), Quat::from_rotation_y(1.0)) };
+    let pos = pos - Vec3::Y * 0.6 * crouch;
+    let k = k.min(1.0);
+    Transform { translation: from.translation.lerp(pos, k), rotation: from.rotation.slerp(rot, k), scale: from.scale }
+}
+
+/// Поза тела бойца с оружием в положении (`hilt`, `dir`) из `combat::weapon_pose`: корпус
+/// работает вместе с клинком, руки тянутся к рукояти, древку и щиту. Возвращает позу и где
+/// рисовать оружие (если руки не дотянулись, оно придвинуто к ним — бой считается по исходному).
+pub(crate) fn solve_fighter_body(fighter: &Fighter, hilt: Vec3, dir: Vec3, m: &BodyMotion, shield_tf: Option<Transform>, now: f32) -> (RigPose, Transform) {
+    let eye = 1.65 - 0.6 * m.crouch;
+    let aim = Quat::from_rotation_x(m.pitch * 0.6);
+    // Корпус работает вместе с клинком: на замахе торс закручен в сторону удара, в ударе
+    // раскручивается, сверху — наклон вперёд, укол — выпад, отбитый — откинут назад.
+    let d = aim * dir;
+    let (twist, lean) = match fighter.action {
+        Action::Windup { swing, .. } | Action::Strike { swing, .. } | Action::Recovery { swing, .. } => {
+            let striking = matches!(fighter.action, Action::Strike { .. });
+            let lean = match swing.class() {
+                combat::SwingClass::Overhead | combat::SwingClass::Diagonal => -0.25 * d.z.abs().min(1.0),
+                combat::SwingClass::Thrust if striking => -0.22,
+                combat::SwingClass::Rising => 0.04,
+                _ => -0.06,
+            };
+            (-d.x * 0.6, lean)
+        }
+        Action::Recoil { t, dur } => (0.12, 0.3 * (1.0 - t / dur).max(0.0) + (now * 25.0).sin() * 0.03 * (1.0 - t / dur).max(0.0)),
+        Action::ParryRecovery { .. } => (0.08, 0.1),
+        Action::Stagger { t, .. } => (0.0, 0.32 + (now * 25.0).sin() * 0.05 * (1.0 - t).max(0.0)),
+        Action::GuardStagger { .. } => (0.15, 0.12),
+        Action::Flinch { .. } => (0.1, 0.15),
+        Action::Guard { .. } => (0.2, 0.05),
+        _ => (0.0, 0.0),
+    };
+    // Меч и щит ставятся как раньше (по ним считается бой), руки тянутся к ним.
+    let mut sword_tf = Transform::from_translation(Vec3::Y * (eye - 0.25) + aim * hilt).with_rotation(Quat::from_rotation_arc(Vec3::Y, aim * dir));
+    let (right, left) = weapon_grips(fighter.weapon);
+    // Без оружия и без щита левый кулак тоже поднят (стойка кулачного бойца).
+    let fist_l = (fighter.weapon == WeaponKind::Fists && shield_tf.is_none()).then(|| {
+        let guard = matches!(fighter.action, Action::Windup { .. } | Action::Strike { .. } | Action::Recovery { .. });
+        Vec3::Y * (eye - 0.25) + aim * if guard { Vec3::new(-0.16, -0.08, -0.28) } else { Vec3::new(-0.2, -0.18, -0.3) }
+    });
+    let mut input = PoseInput {
+        crouch: m.crouch,
+        walk_phase: m.walk_phase,
+        walk: m.walk,
+        speed: m.speed,
+        pitch: m.pitch,
+        twist,
+        lean,
+        time: m.time,
+        right_grip: Some(sword_tf.transform_point(right)),
+        left_grip: left.map(|l| sword_tf.transform_point(l)).or(shield_tf.map(|s| s.transform_point(SHIELD_GRIP))).or(fist_l),
+        // Кулак обхватывает рукоять/древко по оси оружия, щит — за горизонтальную ручку.
+        right_axis: Some(sword_tf.rotation * Vec3::Y),
+        left_axis: if left.is_some() { Some(sword_tf.rotation * Vec3::Y) } else { shield_tf.map(|s| s.rotation * Vec3::NEG_X).or(fist_l.map(|_| aim * Vec3::new(0.15, 0.25, -1.0).normalize())) },
+    };
+    let mut solved = rig::solve_pose(&input);
+    // Если руки не дотягиваются до рукояти, меч придвигается к ним (только внешний вид,
+    // бой считается по исходному положению).
+    for _ in 0..4 {
+        let mut miss = solved.right_grip - input.right_grip.unwrap_or_default();
+        if left.is_some() {
+            miss = (miss + solved.left_grip - input.left_grip.unwrap_or_default()) * 0.6;
+        }
+        if miss.length() < 0.005 {
+            break;
+        }
+        sword_tf.translation += miss;
+        input.right_grip = Some(sword_tf.transform_point(right));
+        if let Some(l) = left {
+            input.left_grip = Some(sword_tf.transform_point(l));
+        }
+        solved = rig::solve_pose(&input);
+    }
+    (solved.pose, sword_tf)
+}
+
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn animate_remote(
     time: Res<Time>,
@@ -1140,8 +1231,6 @@ fn animate_remote(
         let crouch_target = if r.crouching { 1.0 } else { 0.0 };
         r.crouch += (crouch_target - r.crouch) * (1.0 - (-10.0 * dt).exp());
 
-        let eye = 1.65 - 0.6 * r.crouch;
-        let aim = Quat::from_rotation_x(r.pitch * 0.6);
         let (want_hilt, want_dir) = combat::weapon_pose(&r.fighter.action, r.fighter.weapon, now);
         // Сглаживаем смену фаз (комбо, отбитый удар, снимок сервера пришёл с опозданием).
         let k = 1.0 - (-30.0 * dt).exp();
@@ -1152,28 +1241,6 @@ fn animate_remote(
         r.weapon_smooth = Some((hilt, dir));
         // Ответный удар после парирования подсвечиваем.
         let riposte = matches!(r.fighter.action, Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. }) && hints.as_ref().is_none_or(|h| h.0);
-        // Корпус работает вместе с клинком: на замахе торс закручен в сторону удара, в ударе
-        // раскручивается, сверху — наклон вперёд, укол — выпад, отбитый — откинут назад.
-        let d = aim * dir;
-        let (twist, lean) = match r.fighter.action {
-            Action::Windup { swing, .. } | Action::Strike { swing, .. } | Action::Recovery { swing, .. } => {
-                let striking = matches!(r.fighter.action, Action::Strike { .. });
-                let lean = match swing.class() {
-                    combat::SwingClass::Overhead | combat::SwingClass::Diagonal => -0.25 * d.z.abs().min(1.0),
-                    combat::SwingClass::Thrust if striking => -0.22,
-                    combat::SwingClass::Rising => 0.04,
-                    _ => -0.06,
-                };
-                (-d.x * 0.6, lean)
-            }
-            Action::Recoil { t, dur } => (0.12, 0.3 * (1.0 - t / dur).max(0.0) + (now * 25.0).sin() * 0.03 * (1.0 - t / dur).max(0.0)),
-            Action::ParryRecovery { .. } => (0.08, 0.1),
-            Action::Stagger { t, .. } => (0.0, 0.32 + (now * 25.0).sin() * 0.05 * (1.0 - t).max(0.0)),
-            Action::GuardStagger { .. } => (0.15, 0.12),
-            Action::Flinch { .. } => (0.1, 0.15),
-            Action::Guard { .. } => (0.2, 0.05),
-            _ => (0.0, 0.0),
-        };
 
         let mut sword_entity = None;
         let mut shield_entity = None;
@@ -1191,65 +1258,19 @@ fn animate_remote(
             }
         }
 
-        // Меч и щит ставятся как раньше (по ним считается бой), руки тянутся к ним.
-        let mut sword_tf = Transform::from_translation(Vec3::Y * (eye - 0.25) + aim * hilt).with_rotation(Quat::from_rotation_arc(Vec3::Y, aim * dir));
         let mut shield_tf = None;
         if let Some(e) = shield_entity
             && let Ok(mut shield) = shields.get_mut(e)
         {
-            let (pos, rot) = if matches!(r.fighter.action, Action::Guard { .. } | Action::GuardStagger { .. }) {
-                (Vec3::new(-0.05, 1.25, -0.5), Quat::IDENTITY)
-            } else {
-                (Vec3::new(-0.38, 1.0, -0.22), Quat::from_rotation_y(1.0))
-            };
-            let pos = pos - Vec3::Y * 0.6 * r.crouch;
-            shield.translation = shield.translation.lerp(pos, t * 1.5);
-            shield.rotation = shield.rotation.slerp(rot, t * 1.5);
+            *shield = shield_pose(&r.fighter.action, r.crouch, *shield, t * 1.5);
             shield_tf = Some(*shield);
         }
-        let (right, left) = weapon_grips(r.fighter.weapon);
-        // Без оружия и без щита левый кулак тоже поднят (стойка кулачного бойца).
-        let fist_l = (r.fighter.weapon == WeaponKind::Fists && shield_tf.is_none()).then(|| {
-            let guard = matches!(r.fighter.action, Action::Windup { .. } | Action::Strike { .. } | Action::Recovery { .. });
-            Vec3::Y * (eye - 0.25) + aim * if guard { Vec3::new(-0.16, -0.08, -0.28) } else { Vec3::new(-0.2, -0.18, -0.3) }
-        });
-        let mut input = PoseInput {
-            crouch: r.crouch,
-            walk_phase: r.walk_phase,
-            walk: r.walk,
-            speed: r.speed,
-            pitch: r.pitch,
-            twist,
-            lean,
-            time: now + r.id as f32,
-            right_grip: Some(sword_tf.transform_point(right)),
-            left_grip: left.map(|l| sword_tf.transform_point(l)).or(shield_tf.map(|s| s.transform_point(SHIELD_GRIP))).or(fist_l),
-            // Кулак обхватывает рукоять/древко по оси оружия, щит — за горизонтальную ручку.
-            right_axis: Some(sword_tf.rotation * Vec3::Y),
-            left_axis: if left.is_some() { Some(sword_tf.rotation * Vec3::Y) } else { shield_tf.map(|s| s.rotation * Vec3::NEG_X).or(fist_l.map(|_| aim * Vec3::new(0.15, 0.25, -1.0).normalize())) },
-        };
-        let mut solved = rig::solve_pose(&input);
-        // Если руки не дотягиваются до рукояти, меч придвигается к ним (только внешний вид,
-        // бой считается по исходному положению).
-        for _ in 0..4 {
-            let mut miss = solved.right_grip - input.right_grip.unwrap_or_default();
-            if left.is_some() {
-                miss = (miss + solved.left_grip - input.left_grip.unwrap_or_default()) * 0.6;
-            }
-            if miss.length() < 0.005 {
-                break;
-            }
-            sword_tf.translation += miss;
-            input.right_grip = Some(sword_tf.transform_point(right));
-            if let Some(l) = left {
-                input.left_grip = Some(sword_tf.transform_point(l));
-            }
-            solved = rig::solve_pose(&input);
-        }
+        let motion = BodyMotion { crouch: r.crouch, walk_phase: r.walk_phase, walk: r.walk, speed: r.speed, pitch: r.pitch, time: now + r.id as f32 };
+        let (solved_pose, sword_tf) = solve_fighter_body(&r.fighter, hilt, dir, &motion, shield_tf, now);
         if let Some(e) = rig_entity
             && let Ok(mut pose) = rigs.get_mut(e)
         {
-            *pose = solved.pose;
+            *pose = solved_pose;
         }
         if let Some(e) = glow_entity
             && let Ok((mut gt, mut gv)) = glows.get_mut(e)

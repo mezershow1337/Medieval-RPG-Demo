@@ -58,7 +58,16 @@ pub fn data_dir() -> std::path::PathBuf {
 
 /// Профиль этого компьютера (создаётся при первом запуске). `MRPG_PROFILE=имя` — второй профиль
 /// на том же компьютере (например, чтобы зайти вторым игроком для проверки).
+/// `MRPG_START_KIT=4,2,0,0,0,0` — стартовый набор без меню (для снимков: 4 — пехотное копьё).
 pub fn local_profile() -> Profile {
+    let mut p = stored_profile();
+    if let Some(kit) = std::env::var("MRPG_START_KIT").ok().and_then(|s| crate::start_kit::StartKit::from_text(&s)) {
+        p.kit = kit;
+    }
+    p
+}
+
+fn stored_profile() -> Profile {
     let suffix = std::env::var("MRPG_PROFILE").ok().filter(|s| !s.is_empty());
     let file = data_dir().join(match &suffix {
         Some(s) => format!("profile-{s}.txt"),

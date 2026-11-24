@@ -817,6 +817,8 @@ fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
         CascadeShadowConfigBuilder { num_cascades: 4, first_cascade_far_bound: 12.0, maximum_distance: m.shadow_distance, ..default() }.build(),
         VolumetricLight,
         SunLight,
+        // Солнце видит и слой теней своего тела (камера его не рисует).
+        crate::self_body::sun_layers(),
     ));
     // Лёгкая дымка: в ней видны лучи низкого солнца между домами, из окон и от факелов.
     // В Херсонесе она гуще у земли — вечерний дым очагов и морская мгла, утром бывает туман.

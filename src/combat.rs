@@ -995,6 +995,36 @@ fn rest_dir() -> Vec3 {
     Vec3::new(0.3, 0.7, -0.65).normalize()
 }
 
+/// Копьё от первого лица в покое: не торчит столбом у края экрана, а держится у пояса
+/// острием вперёд и чуть вверх — левая рука впереди на древке, правая сзади у бедра.
+const SPEAR_VIEW_REST_HILT: Vec3 = Vec3::new(0.18, -0.35, -0.46);
+fn spear_view_rest_dir() -> Vec3 {
+    Vec3::new(-0.045, 0.16, -0.986).normalize()
+}
+
+/// Положение оружия для вида от первого лица: как `weapon_pose`, но у копья стойка покоя
+/// своя (см. `SPEAR_VIEW_REST_HILT`); замах и укол плавно выходят из неё и возвращаются.
+pub fn view_weapon_pose(action: &Action, weapon: WeaponKind, time: f32) -> (Vec3, Vec3) {
+    let (hilt, dir) = weapon_pose(action, weapon, time);
+    if weapon != WeaponKind::Spear {
+        return (hilt, dir);
+    }
+    // Насколько поза сейчас — стойка покоя (1 — в ней, 0 — далеко от неё).
+    let near = (1.0 - hilt.distance(REST_HILT) / 0.35).clamp(0.0, 1.0);
+    let along = ((dir.dot(rest_dir()) - 0.75) / 0.25).clamp(0.0, 1.0);
+    let w = near * along;
+    let mut h = hilt + (SPEAR_VIEW_REST_HILT - REST_HILT) * w;
+    let mut d = dir.lerp(spear_view_rest_dir(), w).normalize_or(dir);
+    // Древко поперёк (блок): копьё сдвигаем к острию, чтобы левая рука была слева, а правая
+    // справа — иначе левая тянется через весь экран.
+    h += d * 0.3 * d.x.abs();
+    // Укол и замах: острие чуть вверх, руки ниже — тупой конец уходит под камеру, а не в лицо.
+    let fwd = (-d.z).max(0.0) * (1.0 - w);
+    d = (d + Vec3::Y * 0.25 * fwd).normalize_or(d);
+    h += Vec3::new(0.05, -0.12, 0.0) * fwd;
+    (h, d)
+}
+
 fn mix(a: (Vec3, Vec3), b: (Vec3, Vec3), k: f32) -> (Vec3, Vec3) {
     let k = smooth(k.clamp(0.0, 1.0));
     (a.0.lerp(b.0, k), a.1.lerp(b.1, k).normalize_or(Vec3::Y))

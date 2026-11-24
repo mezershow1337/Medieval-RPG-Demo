@@ -604,12 +604,14 @@ impl ShieldKind {
 pub struct NeedsShield(pub ShieldKind);
 
 /// Рука от первого лица (кости плеча, предплечья и кисти — прямые дети камеры).
+/// Второе поле — левая рука (для оружия в двух руках и кулачной стойки).
 #[derive(Component)]
-pub struct NeedsViewArm(pub Option<Outfit>);
+pub struct NeedsViewArm(pub Option<Outfit>, pub bool);
 
 #[derive(Component)]
 pub struct ViewArm {
     joints: [Entity; 3],
+    pub left: bool,
 }
 
 /// Имя модели оружия в glb (у кулаков модели нет).
@@ -674,7 +676,8 @@ fn attach_rigs(
     for (e, need) in &arms {
         let my_id = net.as_ref().and_then(|n| n.my_id).unwrap_or(0);
         let outfit = need.0.unwrap_or_else(|| Outfit::for_actor(ActorKind::Player, my_id));
-        // Настоящие только плечо, предплечье и кисть правой руки; остальные кости — одна
+        let left = need.1;
+        // Настоящие только плечо, предплечье и кисть своей стороны; остальные кости — одна
         // сущность с нулевым масштабом у плеча, всё, что на них висит, схлопывается в точку.
         let mut arm = [Entity::PLACEHOLDER; 3];
         for i in 0..3 {
@@ -686,9 +689,10 @@ fn attach_rigs(
         let hidden = commands.spawn((Transform::from_scale(Vec3::ZERO), Visibility::default())).id();
         commands.entity(arm[0]).add_child(hidden);
         let mut joints = [hidden; BONES];
-        joints[Bone::UpperArmR as usize] = arm[0];
-        joints[Bone::ForearmR as usize] = arm[1];
-        joints[Bone::HandR as usize] = arm[2];
+        let bones = if left { [Bone::UpperArmL, Bone::ForearmL, Bone::HandL] } else { [Bone::UpperArmR, Bone::ForearmR, Bone::HandR] };
+        for (bone, joint) in bones.into_iter().zip(arm) {
+            joints[bone as usize] = joint;
+        }
         commands.entity(e).with_children(|p| {
             for layer in outfit.layers() {
                 if layer.starts_with("body.hands") || layer.starts_with("tunic") || matches!(layer, "mail" | "lamellar" | "gambeson" | "gloves" | "vambraces") {
@@ -696,7 +700,7 @@ fn attach_rigs(
                 }
             }
         });
-        commands.entity(e).remove::<NeedsViewArm>().insert(ViewArm { joints: arm });
+        commands.entity(e).remove::<NeedsViewArm>().insert(ViewArm { joints: arm, left });
     }
 }
 
@@ -736,12 +740,14 @@ impl ViewArm {
 
 /// Рука от первого лица: локальные (положение, поворот) плеча, локтя и кисти для цепочки
 /// суставов под корнем руки (в пространстве камеры). `axis` — куда смотрит клинок.
-pub fn view_arm_pose(shoulder: Vec3, grip: Vec3, axis: Vec3) -> [(Vec3, Quat); 3] {
+/// `left` — левая рука (плечо и локоть зеркально).
+pub fn view_arm_pose(shoulder: Vec3, grip: Vec3, axis: Vec3, left: bool) -> [(Vec3, Quat); 3] {
     // Плечо «подтягиваем» к рукояти: от первого лица его не видно, а оружие всегда в руке.
     let reach = UPPER_ARM + FOREARM + GRIP_R.length() - 0.03;
     let to = grip - shoulder;
     let shoulder = if to.length() > reach { grip - to.normalize() * reach } else { shoulder };
-    let arm = solve_arm(shoulder, Some((grip, axis)), Vec3::new(1.0, -1.0, 0.6), Vec3::NEG_Z, 0);
+    let (pole, side) = if left { (Vec3::new(-1.0, -1.0, 0.6), 1) } else { (Vec3::new(1.0, -1.0, 0.6), 0) };
+    let arm = solve_arm(shoulder, Some((grip, axis)), pole, Vec3::NEG_Z, side);
     let q_up = arm.rot[0];
     let q_fore = arm.rot[1];
     let q_hand = arm.rot[2];
