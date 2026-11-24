@@ -518,7 +518,10 @@ fn setup_prompt(mut commands: Commands, fonts: Res<UiFonts>) {
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                width: percent(100),
+                // Средняя треть экрана: справа вверху живут часы и «Совет» (390 px),
+                // длинная строка переносится, а не наползает на них.
+                left: percent(33),
+                right: percent(33),
                 top: px(112),
                 justify_content: JustifyContent::Center,
                 ..default()
