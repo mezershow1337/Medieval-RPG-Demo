@@ -25,7 +25,7 @@ pub const CHARCOAL_CAMP: Vec2 = Vec2::new(-560.0, 715.0);
 pub const BOG_Z: (f32, f32) = (440.0, 476.0);
 pub const CLAY_PIT: Vec2 = Vec2::new(101.0, 250.0);
 pub const SAND_BEACH: Vec2 = Vec2::new(-421.0, 203.0);
-pub const QUARRY: Vec2 = Vec2::new(452.0, 300.0);
+pub const QUARRY: Vec2 = Vec2::new(terrain::QUARRY_FACE.0, terrain::QUARRY_FACE.1);
 
 /// Ось западной балки (к Песочной бухте) на широте z.
 pub fn west_ravine_x(z: f32) -> f32 {
@@ -59,8 +59,25 @@ pub fn mine_yard() -> Vec3 {
 /// Высота поверхности в дыре над штольней: перед уступом — площадка, за ним — горка
 /// (уступ отвесный).
 fn inner_y(x: f32, z: f32) -> f32 {
-    let (_, fz) = MINE_FACE;
-    if z < fz { mine_floor() } else { ground_y(x, z.max(fz + 8.0)).max(mine_floor() + ADIT_H + 1.2) }
+    let (mx, fz) = MINE_FACE;
+    let hole = mine_hole();
+    if z < fz {
+        return mine_floor();
+    }
+    // Уступ высотой ~4,5 м над устьем; дальше склон поднимается к вершине горки.
+    let crest = mine_floor() + ADIT_H + 2.2;
+    let k = ((z - fz) / 9.0).clamp(0.0, 1.0);
+    let slope = ground_y(x, z.max(fz + 9.0));
+    let designed = crest + (slope - crest) * k * k * (3.0 - 2.0 * k);
+    // К краям дыры поверхность сходится с рельефом — без отвесных стенок по бокам.
+    let edge = (x - hole.x0).min(hole.x1 - x).min(hole.z1 - z);
+    let e = (edge / 4.0).clamp(0.0, 1.0);
+    let e = e * e * (3.0 - 2.0 * e);
+    let natural = ground_y(x, z);
+    // Ниже пола площадки не опускаемся: иначе меж уступом и площадкой — щель.
+    let y = (natural + (designed - natural) * e).max(mine_floor());
+    // Над штольней — всегда твердь не тоньше метра.
+    if (x - mx).abs() < ADIT_HALF + 1.0 && z < fz + ADIT_LEN + 1.0 { y.max(mine_floor() + ADIT_H + 1.0) } else { y }
 }
 
 /// Шурф с воротом наверху горки.
@@ -260,6 +277,28 @@ pub fn mines(b: &mut Builder) {
     roast_pit(b, p);
 }
 
+/// Плоский круг, лежащий по рельефу (каждая вершина — на земле).
+fn ground_disc(b: &mut Builder, mat: Mat, c: Vec3, r: f32, lift: f32) {
+    let n = 20;
+    let rings = ((r / 1.2).ceil() as usize).max(3);
+    let m = b.mesh(mat);
+    let at = |rr: f32, a: f32| {
+        let (x, z) = (c.x + a.cos() * rr, c.z + a.sin() * rr);
+        Vec3::new(x, ground_y(x, z) + lift, z)
+    };
+    for ring in 0..rings {
+        let (r0, r1) = (r * ring as f32 / rings as f32, r * (ring + 1) as f32 / rings as f32);
+        for k in 0..n {
+            let (a0, a1) = (k as f32 / n as f32 * TAU, (k + 1) as f32 / n as f32 * TAU);
+            if ring == 0 {
+                m.tri(at(0.0, 0.0), at(r1, a1), at(r1, a0), Vec3::Y);
+            } else {
+                m.quad([at(r0, a0), at(r0, a1), at(r1, a1), at(r1, a0)], Vec3::Y);
+            }
+        }
+    }
+}
+
 /// Вертикальная полоса стены от `lo(t)` до `hi(t)` вдоль отрезка `a → c` (по горизонтали).
 fn strip(b: &mut Builder, mat: Mat, a: Vec2, c: Vec2, lo: impl Fn(Vec2) -> f32, hi: impl Fn(Vec2) -> f32, facing: Vec3, step: f32) {
     let n = (a.distance(c) / step).ceil().max(1.0) as usize;
@@ -298,30 +337,39 @@ fn basket(b: &mut Builder, p: Vec3, r: f32, h: f32, fill: Option<Mat>) {
     kit::hidden(b, p - Vec3::new(r, 0.0, r), p + Vec3::new(r, h, r));
 }
 
-/// Кучка комьев (руда, порода, глина): несколько бугорков.
+/// Кучка кусков (руда, порода, глина): низкое ложе и навал угловатых кусков по нему.
 fn lumps(b: &mut Builder, p: Vec3, r: f32, h: f32, mat: Mat, rng: &mut Rng) {
-    mound(b, p, r, h, mat);
-    for _ in 0..5 {
+    mound(b, p - Vec3::Y * 0.03, r * 0.9, h * 0.55, mat);
+    let n = (10.0 + r * 14.0) as usize;
+    for k in 0..n {
         let a = rng.range(0.0, TAU);
-        let d = rng.range(r * 0.5, r * 1.05);
-        let s = rng.range(0.08, 0.18) * (r / 0.8).max(0.6);
-        let c = Vec3::new(p.x + a.cos() * d, 0.0, p.z + a.sin() * d);
-        let c = Vec3::new(c.x, ground_y(c.x, c.z).max(p.y) - 0.02, c.z);
-        b.mesh(mat).obox(c + Vec3::Y * s * 0.5, Vec3::new(s, s * 0.7, s * 0.85), rng.range(0.0, TAU));
+        let d = r * rng.range(0.0, 1.0f32).sqrt() * 1.05;
+        // Ближе к середине — выше (навал конусом).
+        let top = h * (1.0 - (d / r).powf(1.6)).max(0.0);
+        let s = rng.range(0.06, 0.15) * (r / 0.7).clamp(0.7, 1.5) * if k % 5 == 0 { 1.6 } else { 1.0 };
+        let c = Vec3::new(p.x + a.cos() * d, p.y + top * rng.range(0.55, 0.95), p.z + a.sin() * d);
+        // Крупные глыбы пустой породы — сканы камней, мелочь — угловатые куски.
+        if mat == Mat::Bedrock && k % 3 == 0 {
+            b.plant(PlantKind::Rock, c - Vec3::Y * s, s * 3.2, rng.range(0.0, TAU), rng.int(64) as u32);
+            continue;
+        }
+        let s = if mat == Mat::Bedrock { s * 0.7 } else { s };
+        b.mesh(mat).obox(c, Vec3::new(s, s * rng.range(0.55, 0.85), s * rng.range(0.7, 1.0)), rng.range(0.0, TAU));
     }
 }
 
 /// Обжиговое кострище: кольцо камней, зольное ложе.
 fn roast_pit(b: &mut Builder, p: Vec3) {
     let mut rng = Rng::new((p.x * 3.0 + p.z) as i32 as u32);
-    b.mesh(Mat::DarkStone).disc(p + Vec3::Y * 0.04, 1.55, 14, true);
-    for k in 0..14 {
-        let a = k as f32 / 14.0 * TAU + rng.range(-0.1, 0.1);
-        let c = p + Vec3::new(a.cos() * 1.75, 0.08, a.sin() * 1.75);
-        b.mesh(Mat::Rubble).obox(c, Vec3::new(rng.range(0.16, 0.24), rng.range(0.1, 0.18), rng.range(0.14, 0.2)), a);
+    // Зольное ложе (почерневшая земля) и кольцо из полевых камней.
+    b.mesh(Mat::Earth).disc(p + Vec3::Y * 0.04, 1.6, 16, true);
+    for k in 0..12 {
+        let a = k as f32 / 12.0 * TAU + rng.range(-0.12, 0.12);
+        let c = p + Vec3::new(a.cos() * 1.8, -0.12, a.sin() * 1.8);
+        b.plant(PlantKind::Rock, c, rng.range(0.32, 0.5), rng.range(0.0, TAU), rng.int(64) as u32);
     }
     // Рыжая окалина вокруг.
-    b.mesh(Mat::Ochre).disc(p + Vec3::new(1.9, 0.03, 0.6), 0.5, 8, true);
+    b.mesh(Mat::Limonite).disc(p + Vec3::new(1.9, 0.03, 0.6), 0.5, 8, true);
 }
 
 fn mine(b: &mut Builder) {
@@ -365,19 +413,43 @@ fn mine(b: &mut Builder) {
     // Отвесный уступ (с устьем штольни) и бока горки над дырой.
     let face_lo = |_: Vec2| y;
     let face_hi = |p: Vec2| inner_y(p.x, fz + 0.01);
-    strip(b, Mat::Terrain, Vec2::new(x0, fz), Vec2::new(mx - ADIT_HALF - 0.2, fz), face_lo, face_hi, Vec3::NEG_Z, 0.75);
-    strip(b, Mat::Terrain, Vec2::new(mx + ADIT_HALF + 0.2, fz), Vec2::new(x1, fz), face_lo, face_hi, Vec3::NEG_Z, 0.75);
-    strip(b, Mat::Terrain, Vec2::new(mx - ADIT_HALF - 0.2, fz), Vec2::new(mx + ADIT_HALF + 0.2, fz), |_| y + ADIT_H + 0.2, face_hi, Vec3::NEG_Z, 0.75);
-    for (x, n) in [(x0, Vec3::NEG_X), (x1, Vec3::X)] {
+    strip(b, Mat::Bedrock, Vec2::new(x0, fz), Vec2::new(mx - ADIT_HALF - 0.2, fz), face_lo, face_hi, Vec3::NEG_Z, 0.75);
+    strip(b, Mat::Bedrock, Vec2::new(mx + ADIT_HALF + 0.2, fz), Vec2::new(x1, fz), face_lo, face_hi, Vec3::NEG_Z, 0.75);
+    strip(b, Mat::Bedrock, Vec2::new(mx - ADIT_HALF - 0.2, fz), Vec2::new(mx + ADIT_HALF + 0.2, fz), |_| y + ADIT_H + 0.2, face_hi, Vec3::NEG_Z, 0.75);
+    // Стенки дыры смотрят внутрь выемки (на площадку), иначе снаружи видна щель в небо.
+    for (x, n) in [(x0, Vec3::X), (x1, Vec3::NEG_X)] {
         let lo = |p: Vec2| ground_y(p.x, p.y).min(inner_y(p.x, p.y));
         let hi = |p: Vec2| ground_y(p.x, p.y).max(inner_y(p.x, p.y));
-        strip(b, Mat::Terrain, Vec2::new(x, hole.z0), Vec2::new(x, hole.z1), lo, hi, n, 0.75);
+        strip(b, Mat::Bedrock, Vec2::new(x, hole.z0), Vec2::new(x, hole.z1), lo, hi, n, 0.75);
         b.invisible.push(Aabb::new(Vec3::new(x - 0.05, y - 1.0, hole.z0), Vec3::new(x + 0.05, y, fz)));
     }
+    strip(b, Mat::Earth, Vec2::new(x0, hole.z0), Vec2::new(x1, hole.z0), |_| y - 0.2, |p| ground_y(p.x, p.y).max(y - 0.2), Vec3::Z, 0.75);
     // Глыбы у подножия уступа и по углам — скрывают стыки.
     for (dx, dz, s) in [(-8.6, 0.6, 1.9), (8.4, 0.9, 2.1), (-3.6, 0.3, 1.1), (3.9, 0.4, 1.2), (-9.2, 7.0, 2.4), (9.1, 6.5, 2.2), (-6.0, 3.5, 1.4), (6.4, 4.0, 1.5)] {
         let c = Vec3::new(mx + dx, if dz > 1.0 { inner_y(mx + dx, fz + dz) - s * 0.5 } else { y - s * 0.25 }, fz + dz);
         b.plant(PlantKind::Rock, c, s, rng.range(0.0, TAU), rng.int(64) as u32);
+    }
+    // Уступ не ровная стена: навал глыб у подножия и по бровке, кроме устья.
+    let mut x = hole.x0 + 0.8;
+    while x < hole.x1 - 0.8 {
+        if (x - mx).abs() > ADIT_HALF + 1.3 {
+            let top = inner_y(x, fz + 0.01);
+            let s = rng.range(1.3, 2.3);
+            // Жилу (выходы руды) не заслоняем.
+            let vein = ((x - mx).abs() - 6.0).abs() < 2.2;
+            if !vein {
+                b.plant(PlantKind::Rock, Vec3::new(x, y - s * 0.35, fz + rng.range(0.1, 0.6)), s, rng.range(0.0, TAU), rng.int(64) as u32);
+            }
+            if top - y > 2.5 {
+                let s2 = rng.range(1.2, 2.0);
+                b.plant(PlantKind::Rock, Vec3::new(x + rng.range(-0.5, 0.5), top - s2 * 0.55, fz + rng.range(0.3, 0.9)), s2, rng.range(0.0, TAU), rng.int(64) as u32);
+            }
+        } else {
+            // Над устьем — бровка из камней поменьше.
+            let top = inner_y(x, fz + 0.01);
+            b.plant(PlantKind::Rock, Vec3::new(x, top - 0.45, fz + 0.7), rng.range(0.8, 1.1), rng.range(0.0, TAU), rng.int(64) as u32);
+        }
+        x += rng.range(1.6, 2.4);
     }
     // Жила бурого железняка в уступе: охристые желваки по обе стороны устья.
     for side in [-1.0f32, 1.0] {
@@ -385,32 +457,32 @@ fn mine(b: &mut Builder) {
             let x = mx + side * rng.range(4.2, 7.8);
             let yy = y + rng.range(0.25, 2.3);
             let s = rng.range(0.12, 0.32);
-            b.mesh(Mat::Ochre).obox(Vec3::new(x, yy, fz - s * 0.4 + k as f32 * 0.001), Vec3::new(s * 1.3, s, s * 0.7), rng.range(-0.4, 0.4));
+            b.mesh(Mat::Limonite).obox(Vec3::new(x, yy, fz - s * 0.55 + k as f32 * 0.001), Vec3::new(s * 1.4, s, s * 1.1), rng.range(-0.5, 0.5));
         }
         // Отбитая руда у подножия.
-        lumps(b, Vec3::new(mx + side * 6.0, y, fz - 1.1), 0.55, 0.35, Mat::Ochre, &mut rng);
+        lumps(b, Vec3::new(mx + side * 6.0, y, fz - 1.1), 0.55, 0.35, Mat::Limonite, &mut rng);
     }
     // Штольня: стены, свод, забой — рваная порода.
     let (l, r) = (mx - ADIT_HALF, mx + ADIT_HALF);
     let end = fz + ADIT_LEN;
-    let m = b.mesh(Mat::Rubble);
+    let m = b.mesh(Mat::Bedrock);
     m.quad([Vec3::new(l, y, end), Vec3::new(l, y, fz), Vec3::new(l, y + ADIT_H, fz), Vec3::new(l, y + ADIT_H, end)], Vec3::X);
     m.quad([Vec3::new(r, y, fz), Vec3::new(r, y, end), Vec3::new(r, y + ADIT_H, end), Vec3::new(r, y + ADIT_H, fz)], Vec3::NEG_X);
     m.quad([Vec3::new(l, y + ADIT_H, fz), Vec3::new(r, y + ADIT_H, fz), Vec3::new(r, y + ADIT_H, end), Vec3::new(l, y + ADIT_H, end)], Vec3::NEG_Y);
-    b.mesh(Mat::Ochre).quad([Vec3::new(l, y, end), Vec3::new(r, y, end), Vec3::new(r, y + ADIT_H, end), Vec3::new(l, y + ADIT_H, end)], Vec3::NEG_Z);
+    b.mesh(Mat::Limonite).quad([Vec3::new(l, y, end), Vec3::new(r, y, end), Vec3::new(r, y + ADIT_H, end), Vec3::new(l, y + ADIT_H, end)], Vec3::NEG_Z);
     // Выступы породы на стенах и в забое.
     for k in 0..26 {
         let zz = rng.range(fz + 0.3, end - 0.2);
         let (x, n) = if k % 2 == 0 { (l, 1.0) } else { (r, -1.0) };
         let s = rng.range(0.08, 0.2);
-        let mat = if rng.chance(0.3) { Mat::Ochre } else { Mat::Rubble };
+        let mat = if rng.chance(0.3) { Mat::Limonite } else { Mat::Bedrock };
         b.mesh(mat).obox(Vec3::new(x + n * s * 0.35, rng.range(y + 0.2, y + ADIT_H - 0.3), zz), Vec3::new(s * 0.6, s, s * 1.4), rng.range(-0.3, 0.3));
     }
     for _ in 0..10 {
         let s = rng.range(0.1, 0.24);
-        b.mesh(Mat::Ochre).obox(Vec3::new(rng.range(l + 0.2, r - 0.2), rng.range(y + 0.3, y + 2.0), end - s * 0.3), Vec3::new(s * 1.2, s, s * 0.7), rng.range(-0.5, 0.5));
+        b.mesh(Mat::Limonite).obox(Vec3::new(rng.range(l + 0.2, r - 0.2), rng.range(y + 0.3, y + 2.0), end - s * 0.3), Vec3::new(s * 1.2, s, s * 0.7), rng.range(-0.5, 0.5));
     }
-    lumps(b, Vec3::new(mx + 0.4, y, end - 0.7), 0.5, 0.3, Mat::Ochre, &mut rng);
+    lumps(b, Vec3::new(mx + 0.4, y, end - 0.7), 0.5, 0.3, Mat::Limonite, &mut rng);
     // Крепь: каждые 1,2 м — две стойки и верхняк, между окладами — затяжка из жердей.
     let wood = b.mesh(Mat::Wood);
     let mut zz = fz + 0.5;
@@ -458,7 +530,8 @@ fn mine(b: &mut Builder) {
     // Отвал пустой породы под горку.
     let sp = g(mx + 11.0, fz - 8.0);
     b.at(sp.x, sp.z);
-    b.mesh(Mat::Rubble).lathe(sp - Vec3::Y * 0.3, &[(5.0, 0.0), (4.2, 0.6), (2.6, 1.7), (1.2, 2.3), (0.0, 2.45)], 14);
+    lumps(b, sp - Vec3::Y * 0.2, 4.6, 2.4, Mat::Bedrock, &mut rng);
+    lumps(b, sp + Vec3::new(-3.4, -0.05, -3.0), 1.3, 0.7, Mat::Bedrock, &mut rng);
     for _ in 0..7 {
         let a = rng.range(0.0, TAU);
         let d = rng.range(1.0, 4.6);
@@ -472,9 +545,9 @@ fn mine(b: &mut Builder) {
     b.at(so.x, so.z);
     b.mesh(Mat::Limestone).obox(so + Vec3::new(0.0, 0.18, -1.0), Vec3::new(0.7, 0.2, 0.5), 0.2);
     kit::hidden(b, so + Vec3::new(-0.7, 0.0, -1.5), so + Vec3::new(0.7, 0.38, -0.5));
-    lumps(b, so + Vec3::new(-1.6, -0.05, -0.4), 0.9, 0.55, Mat::Ochre, &mut rng);
+    lumps(b, so + Vec3::new(-1.6, -0.05, -0.4), 0.9, 0.55, Mat::Limonite, &mut rng);
     lumps(b, so + Vec3::new(1.7, -0.05, -0.2), 0.8, 0.45, Mat::Rubble, &mut rng);
-    basket(b, so + Vec3::new(-0.6, 0.0, 0.9), 0.28, 0.55, Some(Mat::Ochre));
+    basket(b, so + Vec3::new(-0.6, 0.0, 0.9), 0.28, 0.55, Some(Mat::Limonite));
     basket(b, so + Vec3::new(0.3, 0.0, 1.2), 0.28, 0.55, None);
     // Инструмент у уступа: кайла и заступы.
     let tr = Vec3::new(mx - 2.6, y, fz - 0.35);
@@ -488,7 +561,7 @@ fn mine(b: &mut Builder) {
     }
     let rp = roast_pits()[0];
     b.at(rp.x, rp.z);
-    lumps(b, rp + Vec3::new(-2.4, -0.05, 1.4), 0.7, 0.4, Mat::Ochre, &mut rng);
+    lumps(b, rp + Vec3::new(-2.4, -0.05, 1.4), 0.7, 0.4, Mat::Limonite, &mut rng);
     let wp = g(mx - 19.0, fz - 17.0);
     b.placed(wp, |t| kit::woodpile(t, Rect::new(-1.4, -0.4, 1.4, 0.4), 0.9));
     // Сыродутный горн рудника.
@@ -560,8 +633,8 @@ fn shaft(b: &mut Builder, p: Vec3, rng: &mut Rng) {
     m.beam(drum_b + Vec3::new(0.25, -0.4, 0.0), drum_b + Vec3::new(0.5, -0.4, 0.0), 0.028, 0.028, Vec3::Y);
     // Верёвка в колодец и бадья у края.
     b.mesh(Mat::Canvas).beam(Vec3::new(p.x, top - 0.13, p.z + 0.05), Vec3::new(p.x, p.y - 0.4, p.z + 0.05), 0.012, 0.012, Vec3::X);
-    basket(b, p + Vec3::new(-1.7, 0.0, 0.7), 0.3, 0.45, Some(Mat::Ochre));
-    lumps(b, p + Vec3::new(1.6, -0.05, 1.3), 0.7, 0.4, Mat::Ochre, rng);
+    basket(b, p + Vec3::new(-1.7, 0.0, 0.7), 0.3, 0.45, Some(Mat::Limonite));
+    lumps(b, p + Vec3::new(1.6, -0.05, 1.3), 0.7, 0.4, Mat::Limonite, rng);
 }
 
 /// Мочажина в западной балке: рыжая вода с плёнкой, кочки, копанки, кучи болотной руды.
@@ -575,8 +648,10 @@ fn bog(b: &mut Builder) {
         b.at(p.x, p.z);
         let r = rng.range(1.3, 2.6);
         // Рыжий ил по краю и вода.
-        b.mesh(Mat::Ochre).disc(p + Vec3::Y * 0.035, r + 0.5, 14, true);
-        b.mesh(Mat::Water).disc(p + Vec3::Y * 0.06, r, 14, true);
+        ground_disc(b, Mat::Limonite, p, r + 0.6, 0.03);
+        // Вода стоит по нижнему краю ямы.
+        let low = (0..8).map(|k| { let a = k as f32 / 8.0 * TAU; ground_y(p.x + a.cos() * r * 0.6, p.z + a.sin() * r * 0.6) }).fold(p.y, f32::min);
+        b.mesh(Mat::Water).disc(Vec3::new(p.x, low + 0.07, p.z), r * 0.8, 14, true);
         // Осока и рогоз по берегам.
         for _ in 0..6 {
             let a = rng.range(0.0, TAU);
@@ -587,24 +662,24 @@ fn bog(b: &mut Builder) {
     for (i, p) in bog_spots().into_iter().enumerate() {
         b.at(p.x, p.z);
         // Копанка: снятый дёрн, рыжее дно, куча комьев.
-        b.mesh(Mat::Earth).disc(p + Vec3::Y * 0.05, 1.3, 10, true);
-        b.mesh(Mat::Ochre).disc(p + Vec3::Y * 0.07, 0.8, 10, true);
+        ground_disc(b, Mat::Earth, p, 1.3, 0.05);
+        ground_disc(b, Mat::Limonite, p, 0.8, 0.07);
         for k in 0..4 {
             let a = k as f32 / 4.0 * TAU + 0.5;
             b.mesh(Mat::Grass).obox(p + Vec3::new(a.cos() * 1.7, 0.12, a.sin() * 1.7), Vec3::new(0.3, 0.1, 0.22), a);
         }
-        lumps(b, p + Vec3::new(1.8, 0.0, -0.8), 0.6, 0.35, Mat::Ochre, &mut rng);
+        lumps(b, p + Vec3::new(1.8, 0.0, -0.8), 0.6, 0.35, Mat::Limonite, &mut rng);
         if i == 1 {
             spade_tool(b, p + Vec3::new(1.5, 0.15, -0.5), p + Vec3::new(1.8, 1.4, -0.4), Vec3::Z);
-            basket(b, p + Vec3::new(-1.6, 0.0, 0.6), 0.28, 0.5, Some(Mat::Ochre));
+            basket(b, p + Vec3::new(-1.6, 0.0, 0.6), 0.28, 0.5, Some(Mat::Limonite));
         }
     }
     // Сушат болотную руду на плетне, прежде чем нести к горну.
     let bz = (BOG_Z.0 + BOG_Z.1) / 2.0;
     let d = g(west_ravine_x(bz) + 9.0, bz + 2.0);
     b.at(d.x, d.z);
-    lumps(b, d, 1.1, 0.6, Mat::Ochre, &mut rng);
-    lumps(b, d + Vec3::new(2.4, 0.0, 0.8), 0.8, 0.45, Mat::Ochre, &mut rng);
+    lumps(b, d, 1.1, 0.6, Mat::Limonite, &mut rng);
+    lumps(b, d + Vec3::new(2.4, 0.0, 0.8), 0.8, 0.45, Mat::Limonite, &mut rng);
     kit::hidden(b, d - Vec3::new(0.8, 0.0, 0.8), d + Vec3::new(0.8, 0.5, 0.8));
 }
 
@@ -634,12 +709,13 @@ fn charcoal_camp(b: &mut Builder) {
     // Угольные площадки: чёрная земля, обугленные колья, лопаты.
     for p in clamp_spots() {
         b.at(p.x, p.z);
-        b.mesh(Mat::DarkStone).disc(p + Vec3::Y * 0.03, 3.6, 18, true);
+        ground_disc(b, Mat::Soot, p, 3.6, 0.03);
         b.mesh(Mat::Coals).disc(p + Vec3::new(2.9, 0.045, -2.0), 0.4, 8, true);
         for _ in 0..3 {
             let ang = rng.range(0.0, TAU);
             let q = p + Vec3::new(ang.cos(), 0.0, ang.sin()) * rng.range(3.9, 4.6);
-            b.mesh(Mat::Earth).obox(q + Vec3::Y * 0.1, Vec3::new(0.35, 0.12, 0.25), ang);
+            let q = g(q.x, q.z);
+            b.mesh(Mat::Grass).obox(q, Vec3::new(0.2, 0.05, 0.14), ang);
         }
     }
     // Поленницы (полуторааршинные дубовые поленья) и козлы для пилки.
@@ -674,13 +750,34 @@ fn charcoal_camp(b: &mut Builder) {
     b.mesh(Mat::Wood).beam(rk, rk + Vec3::new(0.3, 1.5, 0.5), 0.02, 0.02, Vec3::X);
     b.mesh(Mat::Wood).beam(rk + Vec3::new(-0.25, 0.0, -0.05), rk + Vec3::new(0.25, 0.0, 0.05), 0.02, 0.05, Vec3::Y);
     campfire(b, g(c.x - 3.0, c.y - 3.5));
+    // Дубовый лес вокруг поляны (уголь жгут там, где рубят), просвет — к тропе.
+    let road = Vec2::new(6.0, -16.0).normalize();
+    let mut k = 0;
+    while k < 70 {
+        k += 1;
+        let a = k as f32 * 2.399;
+        let r = 27.0 + (k as f32 * 7.31).sin().abs() * 16.0;
+        let d = Vec2::new(a.cos(), a.sin());
+        if d.dot(road) > 0.93 {
+            continue;
+        }
+        let q = c + d * r + Vec2::new(rng.range(-2.0, 2.0), rng.range(-2.0, 2.0));
+        b.at(q.x, q.y);
+        let p = g(q.x, q.y) - Vec3::Y * 0.1;
+        if rng.chance(0.78) {
+            kit::oak(b, p, rng.range(7.0, 11.0), &mut rng);
+        } else {
+            kit::pine(b, p, rng.range(9.0, 13.0), &mut rng);
+        }
+    }
     // Делянка: поваленные дубы с обрубленными сучьями, пни, щепа, колода для колки.
     for (root, a) in felled() {
         let dir = Vec2::new(a.cos(), a.sin());
         let p0 = g(root.x, root.y);
         let p1 = g(root.x + dir.x * 7.5, root.y + dir.y * 7.5);
         b.at(p0.x, p0.z);
-        b.mesh(Mat::Wood).beam(p0 + Vec3::Y * 0.32, p1 + Vec3::Y * 0.22, 0.3, 0.3, Vec3::Y);
+        b.mesh(Mat::Wood).ridge_pipe(p0 + Vec3::Y * 0.3, p1 + Vec3::Y * 0.2, 0.3, 9);
+        b.mesh(Mat::Wood).ridge_pipe(p1 + Vec3::Y * 0.2, p1 + Vec3::new(dir.x * 2.0, 0.15, dir.y * 2.0), 0.2, 7);
         kit::hidden(b, p0.min(p1) - Vec3::new(0.3, 0.0, 0.3), p0.max(p1) + Vec3::new(0.3, 0.55, 0.3));
         let stump = g(root.x - dir.x * 1.2, root.y - dir.y * 1.2);
         b.mesh(Mat::Wood).lathe(stump - Vec3::Y * 0.1, &[(0.42, 0.0), (0.36, 0.25), (0.34, 0.55), (0.0, 0.58)], 10);
@@ -706,10 +803,10 @@ fn clay_pit(b: &mut Builder) {
     let mut rng = Rng::new(3307);
     let p = g(c.x, c.y);
     b.at(p.x, p.z);
-    b.mesh(Mat::Ochre).disc(p + Vec3::new(0.0, 0.04, 1.0), 5.0, 18, true);
+    b.mesh(Mat::Earth).disc(p + Vec3::new(0.0, 0.04, 1.0), 5.0, 18, true);
     b.mesh(Mat::Earth).lathe(p - Vec3::Y * 0.1, &[(6.2, 0.0), (6.0, 0.45), (5.4, 0.6), (5.1, 0.2)], 20);
     b.mesh(Mat::Water).disc(p + Vec3::new(1.5, 0.08, 2.4), 1.2, 12, true);
-    lumps(b, g(c.x - 4.0, c.y - 3.0), 0.8, 0.5, Mat::Ochre, &mut rng);
+    lumps(b, g(c.x - 4.0, c.y - 3.0), 0.8, 0.5, Mat::Earth, &mut rng);
     lumps(b, g(c.x + 5.0, c.y - 2.0), 0.7, 0.45, Mat::Earth, &mut rng);
     // Корыто для отмучивания.
     let t = g(c.x - 4.5, c.y + 3.5);
@@ -718,7 +815,7 @@ fn clay_pit(b: &mut Builder) {
         t.decor([-0.92, 0.3, -0.28], [0.92, 0.42, 0.28], Mat::Water);
     });
     spade_tool(b, p + Vec3::new(-1.5, 0.1, -2.6), p + Vec3::new(-1.3, 1.35, -2.4), Vec3::X);
-    basket(b, g(c.x + 3.5, c.y + 4.0), 0.28, 0.5, Some(Mat::Ochre));
+    basket(b, g(c.x + 3.5, c.y + 4.0), 0.28, 0.5, Some(Mat::Earth));
 }
 
 /// Песок у Песочной бухты: насыпанная куча и мешки.
@@ -727,8 +824,8 @@ fn sand(b: &mut Builder) {
     for (dx, dz) in [(0.0f32, 0.0f32), (-2.0, 9.0)] {
         let p = g(SAND_BEACH.x + dx, SAND_BEACH.y + dz);
         b.at(p.x, p.z);
-        b.mesh(Mat::Paving).disc(p + Vec3::Y * 0.03, 3.2, 16, true);
-        mound(b, p + Vec3::new(1.6, -0.05, 1.0), 1.1, 0.55, Mat::Limestone);
+        ground_disc(b, Mat::Shingle, p, 3.2, 0.03);
+        mound(b, p + Vec3::new(1.6, -0.05, 1.0), 1.1, 0.55, Mat::Shingle);
     }
     let p = g(SAND_BEACH.x + 3.0, SAND_BEACH.y + 4.0);
     for k in 0..3 {
@@ -748,7 +845,16 @@ fn quarry(b: &mut Builder) {
     let top = ground_y(c.x, c.y + 6.0).max(y + 2.4);
     for (k, (z0, h)) in [(0.0f32, 1.2f32), (1.4, 2.2), (2.8, top - y)].into_iter().enumerate() {
         let w = 7.5 - k as f32 * 0.4;
-        b.solid([c.x - w, y - 0.5, c.y + z0], [c.x + w, y + h, c.y + 6.0], Mat::Limestone);
+        b.solid([c.x - w, y - 0.5, c.y + z0], [c.x + w, y + h, c.y + 6.0], Mat::Bedrock);
+    }
+    // Срезанный склон: за уступами — земля к рельефу, по краям — глыбы.
+    let (gb, gl, gr) = (ground_y(c.x, c.y + 14.0), ground_y(c.x - 10.5, c.y + 3.0), ground_y(c.x + 10.5, c.y + 3.0));
+    let m = b.mesh(Mat::Terrain);
+    m.quad([Vec3::new(c.x + 6.7, top, c.y + 6.0), Vec3::new(c.x - 6.7, top, c.y + 6.0), Vec3::new(c.x - 9.5, gb.min(top), c.y + 14.0), Vec3::new(c.x + 9.5, gb.min(top), c.y + 14.0)], Vec3::Y);
+    m.quad([Vec3::new(c.x - 6.7, top, c.y + 6.0), Vec3::new(c.x - 6.7, top, c.y + 2.8), Vec3::new(c.x - 10.5, gl.min(top), c.y + 2.0), Vec3::new(c.x - 9.5, gb.min(top), c.y + 14.0)], Vec3::Y);
+    m.quad([Vec3::new(c.x + 6.7, top, c.y + 2.8), Vec3::new(c.x + 6.7, top, c.y + 6.0), Vec3::new(c.x + 9.5, gb.min(top), c.y + 14.0), Vec3::new(c.x + 10.5, gr.min(top), c.y + 2.0)], Vec3::Y);
+    for (dx, dz, s) in [(-7.6f32, 0.6f32, 1.6f32), (-8.2, 2.6, 2.0), (7.8, 0.8, 1.7), (8.3, 2.8, 2.1), (-3.0, 6.4, 1.2), (2.5, 6.6, 1.4), (-6.0, 7.5, 1.6), (6.2, 7.2, 1.5)] {
+        b.plant(PlantKind::Rock, Vec3::new(c.x + dx, y + if dz > 5.0 { top - y - 0.5 } else { -0.2 }, c.y + dz), s, rng.range(0.0, TAU), rng.int(64) as u32);
     }
     // Следы клиньев на гранях блоков.
     for k in 0..14 {
@@ -762,8 +868,8 @@ fn quarry(b: &mut Builder) {
             b.solid((p + Vec3::new(-0.6, 0.0, -0.45)).to_array(), (p + Vec3::new(0.6, rng.range(0.7, 0.9), 0.45)).to_array(), Mat::Limestone);
         }
     }
-    b.mesh(Mat::Rubble).lathe(Vec3::new(c.x + 6.5, y - 0.1, c.y - 4.0), &[(2.4, 0.0), (1.6, 0.7), (0.0, 1.1)], 12);
-    b.solid([c.x - 8.0, y - 0.6, c.y - 8.0], [c.x + 8.0, y, c.y], Mat::Earth);
+    lumps(b, Vec3::new(c.x + 6.5, y - 0.05, c.y - 4.0), 2.0, 1.0, Mat::Bedrock, &mut rng);
+    ground_disc(b, Mat::Shingle, Vec3::new(c.x, y, c.y - 2.5), 6.0, 0.04);
     // Тренога для подъёма блоков.
     let t = Vec3::new(c.x + 3.0, y, c.y - 3.5);
     let apex = t + Vec3::Y * 3.6;

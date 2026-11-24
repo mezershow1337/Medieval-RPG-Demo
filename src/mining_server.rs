@@ -57,6 +57,8 @@ pub struct MineWorld {
     pub piles: HashMap<u32, PileState>,
     rng: Rng,
     send_in: f32,
+    /// Для снимков: кучи стоят в своих стадиях (не горят дальше).
+    frozen: bool,
 }
 
 impl MineWorld {
@@ -75,7 +77,12 @@ impl MineWorld {
             p.pile.heat = 0.85;
             p.pile.set_vents(2);
         }
-        MineWorld { sites, piles, rng: Rng::from_time(), send_in: 0.0 }
+        // Для снимков: `MRPG_MINE_DEMO=1` — кучи во всех стадиях сразу (и замирают в них).
+        let frozen = std::env::var("MRPG_MINE_DEMO").is_ok();
+        if frozen {
+            demo_piles(&mut piles);
+        }
+        MineWorld { sites, piles, rng: Rng::from_time(), send_in: 0.0, frozen }
     }
 
     fn view(&self, id: u32) -> Option<PileView> {
@@ -95,6 +102,35 @@ impl MineWorld {
         {
             p.pile.stirred();
         }
+    }
+}
+
+/// Кучи в разных стадиях (только для снимков).
+fn demo_piles(piles: &mut HashMap<u32, PileState>) {
+    let mut ids: Vec<(u32, PileKind)> = piles.iter().map(|(id, p)| (*id, p.pile.kind)).collect();
+    ids.sort_by_key(|(id, _)| *id);
+    let clamps: Vec<u32> = ids.iter().filter(|(_, k)| *k == PileKind::Clamp).map(|(id, _)| *id).collect();
+    let roasts: Vec<u32> = ids.iter().filter(|(_, k)| *k == PileKind::Roast).map(|(id, _)| *id).collect();
+    // Вторая куча: наполовину укрыта; третья — кладут поленья.
+    if let Some(p) = clamps.get(1).and_then(|id| piles.get_mut(id)) {
+        p.pile.add_wood(34, 0.9);
+        p.pile.add_cover(0.1);
+        p.pile.stage = Stage::Cover;
+    }
+    if let Some(p) = clamps.get(2).and_then(|id| piles.get_mut(id)) {
+        p.pile.add_wood(18, 0.9);
+    }
+    // Первое кострище рудника горит, второе — сложено с рудой.
+    if let Some(p) = roasts.first().and_then(|id| piles.get_mut(id)) {
+        p.pile.add_wood(8, 0.9);
+        p.pile.add_ore(12, 0);
+        let _ = p.pile.light();
+        p.pile.heat = 0.95;
+        p.pile.roast = 0.35;
+    }
+    if let Some(p) = roasts.get(1).and_then(|id| piles.get_mut(id)) {
+        p.pile.add_wood(6, 0.9);
+        p.pile.add_ore(10, 0);
     }
 }
 
@@ -530,7 +566,8 @@ fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, w
 
 fn tick_mines(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMut<MineWorld>, game: Res<crate::server::GameWorld>) {
     let dt = time.delta_secs();
-    let MineWorld { sites, piles, rng, send_in } = &mut *world;
+    let MineWorld { sites, piles, rng, send_in, frozen } = &mut *world;
+    let dt_piles = if *frozen { 0.0 } else { dt };
     for (id, s) in sites.iter_mut() {
         let info = s.kind.info();
         if s.charges >= info.charges {
@@ -547,7 +584,7 @@ fn tick_mines(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMu
     let mut notes: Vec<(Vec3, &'static str)> = Vec::new();
     for ps in piles.values_mut() {
         let before = (ps.pile.stage, ps.pile.smoke(), ps.pile.vents, (ps.pile.cracks * 4.0) as i32, ps.pile.out);
-        for e in ps.pile.step(dt, rng.f32()) {
+        for e in ps.pile.step(dt_piles, rng.f32()) {
             let line = match (ps.pile.kind, e) {
                 (_, PileEvent::Crack) => "В кровле угольной кучи прогар — оттуда пламя!",
                 (_, PileEvent::WentOut) => "Куча угасла",

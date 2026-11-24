@@ -11,7 +11,7 @@
 use crate::graphics::{Billboard, FlameMaterial, SurfaceMaterial, surface_material};
 use crate::level::Mat;
 use crate::inventory_ui::UiFonts;
-use crate::level::{Role, WorkSpots, mine_sites, mine_work_spots, pile_spots};
+use crate::level::{MeshBuilder, Role, WorkSpots, mine_sites, mine_work_spots, pile_spots};
 use crate::loot_client::LootState;
 use crate::lore::{Lore, Technique};
 use crate::lore_client::{LoreView, MyKnowledge};
@@ -303,7 +303,10 @@ fn update_mine_prompt(view: Res<MineView>, knowledge: Res<MyKnowledge>, mut text
 struct MineAssets {
     log: Handle<Mesh>,
     ball: Handle<Mesh>,
-    lump: Handle<Mesh>,
+    /// Купол кучи (бугристый), навал кусков, кольца поленьев угольной кучи.
+    dome: Handle<Mesh>,
+    heap: Handle<Mesh>,
+    rings: Vec<Handle<Mesh>>,
     flame_mesh: Handle<Mesh>,
     wood: Handle<SurfaceMaterial>,
     charred: Handle<SurfaceMaterial>,
@@ -312,6 +315,7 @@ struct MineAssets {
     coal: Handle<SurfaceMaterial>,
     ore: Handle<SurfaceMaterial>,
     roasted: Handle<SurfaceMaterial>,
+    soot: Handle<SurfaceMaterial>,
     ember: Handle<StandardMaterial>,
     flame: Handle<FlameMaterial>,
     /// Предметы в руках работников.
@@ -351,9 +355,10 @@ fn setup_mine_assets(
     let charred = surf(Mat::Wood, Some((Color::srgb(0.05, 0.045, 0.04), 1.0)));
     let earth = surf(Mat::Earth, Some((Color::srgb(0.3, 0.24, 0.17), 0.85)));
     let sod = surf(Mat::Grass, None);
-    let coal = surf(Mat::Rubble, Some((Color::srgb(0.035, 0.035, 0.04), 1.0)));
-    let ore = surf(Mat::Rubble, Some((Color::srgb(0.46, 0.24, 0.12), 0.9)));
-    let roasted = surf(Mat::Rubble, Some((Color::srgb(0.17, 0.1, 0.08), 0.95)));
+    let coal = surf(Mat::Bedrock, Some((Color::srgb(0.03, 0.03, 0.035), 1.0)));
+    let ore = surf(Mat::Limonite, None);
+    let roasted = surf(Mat::Limonite, Some((Color::srgb(0.16, 0.1, 0.08), 0.95)));
+    let soot = surf(Mat::Soot, None);
     let iron = surf(Mat::Iron, None);
     let wicker = surf(Mat::Wood, Some((Color::srgb(0.62, 0.5, 0.3), 0.85)));
     let clay = surf(Mat::Plaster, Some((Color::srgb(0.6, 0.36, 0.22), 1.0)));
@@ -398,7 +403,9 @@ fn setup_mine_assets(
     commands.insert_resource(MineAssets {
         log: m(Cylinder::new(0.09, 1.0).into()),
         ball: m(Sphere::new(1.0).mesh().uv(24, 14)),
-        lump: m(Sphere::new(1.0).mesh().ico(1).unwrap()),
+        dome: m(dome_mesh(11)),
+        heap: m(heap_mesh(5)),
+        rings: (0..CLAMP_RINGS).map(|k| m(clamp_ring(k))).collect(),
         flame_mesh: m(Rectangle::new(0.42, 0.75).into()),
         wood,
         charred,
@@ -407,10 +414,115 @@ fn setup_mine_assets(
         coal,
         ore,
         roasted,
+        soot,
         ember,
         flame,
         tools,
     });
+}
+
+/// Колец поленьев в угольной куче (от кола наружу).
+const CLAMP_RINGS: usize = 5;
+
+/// Полено: восьмигранный цилиндр от `a` до `b` с торцом сверху.
+fn add_log(mb: &mut MeshBuilder, a: Vec3, b: Vec3, r: f32) {
+    let d = (b - a).normalize();
+    let u = d.any_orthonormal_vector();
+    let v = d.cross(u);
+    let n = 8;
+    let base = (0..=n)
+        .map(|k| {
+            let t = k as f32 / n as f32 * TAU;
+            let o = u * t.cos() + v * t.sin();
+            let len = (b - a).length();
+            (mb.vert(a + o * r, o, Vec2::new(k as f32 / n as f32, 0.0)), mb.vert(b + o * r, o, Vec2::new(k as f32 / n as f32, len)))
+        })
+        .collect::<Vec<_>>();
+    for k in 0..n {
+        let (a0, b0) = base[k];
+        let (a1, b1) = base[k + 1];
+        mb.index_tri(a0, a1, b1);
+        mb.index_tri(a0, b1, b0);
+    }
+    let c = mb.vert(b, d, Vec2::splat(0.5));
+    let cap: Vec<u32> = (0..n).map(|k| {
+        let t = k as f32 / n as f32 * TAU;
+        mb.vert(b + (u * t.cos() + v * t.sin()) * r, d, Vec2::new(0.5 + 0.5 * t.cos(), 0.5 + 0.5 * t.sin()))
+    }).collect();
+    for k in 0..n {
+        mb.index_tri(c, cap[k], cap[(k + 1) % n]);
+    }
+}
+
+/// Кольцо поленьев угольной кучи: стоймя, плотно, с наклоном к колу; середина выше.
+fn clamp_ring(k: usize) -> Mesh {
+    let mut mb = MeshBuilder::default();
+    let r = 0.22 + k as f32 * 0.33;
+    let n = ((TAU * r) / 0.2).ceil().max(5.0) as usize;
+    for i in 0..n {
+        let a = (i as f32 + 0.5 * (k % 2) as f32) / n as f32 * TAU;
+        let h = 1.85 - 0.22 * k as f32 - 0.05 * ((i * 7 + k * 3) % 4) as f32;
+        let dir = Vec3::new(a.cos(), 0.0, a.sin());
+        let foot = dir * r;
+        let top = dir * (r - 0.1 - 0.05 * k as f32) + Vec3::Y * h;
+        add_log(&mut mb, foot, top, 0.085 + 0.012 * ((i + k) % 3) as f32);
+    }
+    // Сверху на внутренних кольцах — уложенные поперёк короткие поленья (кровля кучи).
+    if k == 0 {
+        for i in 0..6 {
+            let a = i as f32 / 6.0 * PI;
+            let d = Vec3::new(a.cos(), 0.0, a.sin()) * 0.55;
+            add_log(&mut mb, -d + Vec3::Y * 1.9, d + Vec3::Y * 1.86, 0.08);
+        }
+    }
+    mb.build()
+}
+
+/// Плавный шум для бугров (детерминированный).
+fn bump(p: Vec3) -> f32 {
+    ((p.x * 3.1 + p.z * 1.7).sin() * (p.z * 2.3 - p.y * 1.3).cos() + (p.x * 7.3 - p.z * 5.9 + p.y * 4.1).sin() * 0.45) * 0.5
+}
+
+/// Бугристый купол радиуса 1, высотой 1 (земляной колпак угольной кучи).
+fn dome_mesh(lat: usize) -> Mesh {
+    let mut mb = MeshBuilder::default();
+    let lon = lat * 3;
+    let mut grid = vec![vec![0u32; lon + 1]; lat + 1];
+    for i in 0..=lat {
+        let phi = i as f32 / lat as f32 * PI / 2.0;
+        for j in 0..=lon {
+            let th = j as f32 / lon as f32 * TAU;
+            let n = Vec3::new(phi.cos() * th.cos(), phi.sin(), phi.cos() * th.sin());
+            // Комья дёрна и земли; к подошве — шире, растекается.
+            let k = 1.0 + 0.07 * bump(n * 2.0) * (1.0 - (i as f32 / lat as f32).powi(3)) + if i == 0 { 0.08 } else { 0.0 };
+            grid[i][j] = mb.vert(n * k, n, Vec2::new(j as f32 / lon as f32 * 6.0, i as f32 / lat as f32 * 2.0));
+        }
+    }
+    for i in 0..lat {
+        for j in 0..lon {
+            let (a, b, c, d) = (grid[i][j], grid[i][j + 1], grid[i + 1][j + 1], grid[i + 1][j]);
+            mb.index_tri(a, c, b);
+            mb.index_tri(a, d, c);
+        }
+    }
+    mb.build()
+}
+
+/// Навал угловатых кусков (руда, уголь) в радиусе 1, высотой ~0.7.
+fn heap_mesh(seed: u32) -> Mesh {
+    let mut mb = MeshBuilder::default();
+    let mut rng = crate::items::Rng::new(seed as u64);
+    for k in 0..70 {
+        let a = rng.f32() * TAU;
+        let d = rng.f32().sqrt();
+        let top = 0.7 * (1.0 - d.powf(1.5)).max(0.0);
+        let s = (0.07 + rng.f32() * 0.09) * if k % 7 == 0 { 1.5 } else { 1.0 };
+        let c = Vec3::new(a.cos() * d, top * (0.5 + 0.45 * rng.f32()), a.sin() * d);
+        mb.obox(c, Vec3::new(s, s * (0.55 + 0.3 * rng.f32()), s * (0.7 + 0.3 * rng.f32())), rng.f32() * TAU);
+    }
+    // Ложе под кусками.
+    mb.lathe(Vec3::ZERO, &[(0.0, 0.0), (0.95, 0.0), (0.7, 0.25), (0.3, 0.45), (0.0, 0.5)], 10);
+    mb.build()
 }
 
 /// Модель кучи и её части (чтобы менять, не пересоздавая).
@@ -431,8 +543,7 @@ struct PileModel {
     shown: Option<(Stage, u16, u16, u8, i32, Smoke, bool)>,
 }
 
-/// Сколько поленьев рисовать в полной угольной куче (3 кольца) и в клетке кострища.
-const CLAMP_LOGS: usize = 26;
+/// Сколько поленьев рисовать в клетке кострища.
 const ROAST_LOGS: usize = 10;
 
 fn spawn_piles(mut commands: Commands, assets: Res<MineAssets>, mut meshes: ResMut<Assets<Mesh>>, mut smokes: ResMut<Assets<SmokeMaterial>>) {
@@ -443,16 +554,9 @@ fn spawn_piles(mut commands: Commands, assets: Res<MineAssets>, mut meshes: ResM
         let mut logs = Vec::new();
         match spot.kind {
             PileKind::Clamp => {
-                // Поленья стоймя вокруг кола, кольцами, с наклоном внутрь.
-                let rings = [(0.35, 6), (0.8, 9), (1.25, 11)];
-                for (r, n) in rings {
-                    for k in 0..n {
-                        let a = k as f32 / n as f32 * TAU + r;
-                        let p = Vec3::new(a.cos() * r, 0.5, a.sin() * r);
-                        let tilt = Quat::from_axis_angle(Vec3::new(-a.sin(), 0.0, a.cos()), -0.12 * r);
-                        let h = 1.25 - r * 0.28;
-                        logs.push(commands.spawn((Mesh3d(assets.log.clone()), MeshMaterial3d(assets.wood.clone()), Transform::from_translation(p.with_y(h / 2.0)).with_rotation(tilt).with_scale(Vec3::new(1.0, h, 1.0)), Visibility::Hidden)).id());
-                    }
+                // Поленья стоймя вокруг кола, плотными кольцами (одно кольцо — одна сущность).
+                for ring in &assets.rings {
+                    logs.push(commands.spawn((Mesh3d(ring.clone()), MeshMaterial3d(assets.wood.clone()), Transform::default(), Visibility::Hidden)).id());
                 }
             }
             PileKind::Roast => {
@@ -468,9 +572,10 @@ fn spawn_piles(mut commands: Commands, assets: Res<MineAssets>, mut meshes: ResM
             }
         }
         kids.extend(logs.iter().copied());
-        let mound = commands.spawn((Mesh3d(assets.ball.clone()), MeshMaterial3d(assets.earth.clone()), Transform::from_scale(Vec3::new(1.9, 1.2, 1.9)), Visibility::Hidden)).id();
-        let coal = commands.spawn((Mesh3d(assets.ball.clone()), MeshMaterial3d(assets.coal.clone()), Transform::from_scale(Vec3::new(1.7, 0.45, 1.7)), Visibility::Hidden)).id();
-        let ore = commands.spawn((Mesh3d(assets.lump.clone()), MeshMaterial3d(assets.ore.clone()), Transform::from_xyz(0.0, 0.9, 0.0).with_scale(Vec3::new(0.75, 0.32, 0.75)), Visibility::Hidden)).id();
+        let mound = commands.spawn((Mesh3d(assets.dome.clone()), MeshMaterial3d(assets.earth.clone()), Transform::from_scale(Vec3::new(1.9, 1.2, 1.9)), Visibility::Hidden)).id();
+        // Разгребённый уголь по краю остывшей кучи.
+        let coal = commands.spawn((Mesh3d(assets.heap.clone()), MeshMaterial3d(assets.coal.clone()), Transform::from_xyz(1.9, 0.0, 0.4).with_scale(Vec3::new(0.9, 0.6, 0.7)), Visibility::Hidden)).id();
+        let ore = commands.spawn((Mesh3d(assets.heap.clone()), MeshMaterial3d(assets.ore.clone()), Transform::from_xyz(0.0, 0.9, 0.0).with_scale(Vec3::new(0.75, 0.5, 0.75)), Visibility::Hidden)).id();
         let mut vents = Vec::new();
         for k in 0..VENTS {
             let a = k as f32 / VENTS as f32 * TAU + 0.3;
@@ -555,7 +660,7 @@ fn update_piles(
         let burnt = matches!(p.stage, Stage::Cooling | Stage::Done) || (p.stage == Stage::Burning && p.charred > 0.3);
         match m.kind {
             PileKind::Clamp => {
-                let n_logs = ((p.wood as f32 / CLAMP_WOOD.1 as f32) * CLAMP_LOGS as f32).ceil() as usize;
+                let n_logs = ((p.wood as f32 / CLAMP_WOOD.1 as f32) * CLAMP_RINGS as f32).ceil() as usize;
                 let logs_seen = matches!(p.stage, Stage::Stack | Stage::Cover) || (p.stage == Stage::Burning && p.cover < 0.5);
                 for (k, e) in m.logs.clone().into_iter().enumerate() {
                     show(e, logs_seen && k < n_logs, &mut vis);
@@ -572,16 +677,16 @@ fn update_piles(
                 show(m.mound, covered, &mut vis);
                 if let Ok(mut tf) = tfs.get_mut(m.mound) {
                     let h = 1.35 * size * if p.stage == Stage::Burning { 1.0 - 0.35 * p.charred } else { 1.0 };
-                    *tf = Transform::from_xyz(0.0, -0.15, 0.0).with_scale(Vec3::new(1.85 * size, h * p.cover.max(0.3), 1.85 * size));
+                    *tf = Transform::from_xyz(0.0, -0.05, 0.0).with_scale(Vec3::new(1.95 * size, h * 1.15 * p.cover.max(0.35), 1.95 * size));
                 }
+                show(m.coal, p.stage == Stage::Done && p.wood > 0, &mut vis);
                 if let Ok(mut mm) = mats.get_mut(m.mound) {
-                    // Сверху свежий дёрн, пока не почернело.
-                    let want = if p.cover < 0.6 { assets.sod.clone() } else { assets.earth.clone() };
+                    // Тлеет — земля чернеет от сажи.
+                    let want = if matches!(p.stage, Stage::Cooling | Stage::Done) || (p.stage == Stage::Burning && p.charred > 0.5) { assets.soot.clone() } else if p.cover < 0.6 { assets.sod.clone() } else { assets.earth.clone() };
                     if mm.0 != want {
                         mm.0 = want;
                     }
                 }
-                show(m.coal, p.stage == Stage::Done && p.wood > 0, &mut vis);
                 for (k, e) in m.vents.clone().into_iter().enumerate() {
                     show(e, lit && (k as u8) < p.vents, &mut vis);
                 }
@@ -607,8 +712,8 @@ fn update_piles(
                 show(m.ore, ore > 0, &mut vis);
                 if let Ok(mut tf) = tfs.get_mut(m.ore) {
                     let s = 0.35 + 0.5 * (ore as f32 / ROAST_ORE as f32).sqrt();
-                    let y = if p.stage == Stage::Done || burning_down { 0.2 } else { 0.25 + 0.16 * (n_logs as f32 / 2.0).ceil().min(5.0) };
-                    *tf = Transform::from_xyz(0.0, y, 0.0).with_scale(Vec3::new(s, 0.42 * s, s));
+                    let y = if p.stage == Stage::Done || burning_down { 0.02 } else { 0.1 + 0.16 * (n_logs as f32 / 2.0).ceil().min(5.0) };
+                    *tf = Transform::from_xyz(0.0, y, 0.0).with_scale(Vec3::new(s, 0.85 * s, s));
                 }
                 if let Ok(mut mm) = mats.get_mut(m.ore) {
                     let want = if p.roast > 0.5 { assets.roasted.clone() } else { assets.ore.clone() };
@@ -959,7 +1064,7 @@ fn drive_workers(
     time: Res<Time>,
     clock: Res<WorldClock>,
     defs: Option<Res<Workers>>,
-    camera: Query<&GlobalTransform, With<Camera3d>>,
+    camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     mut workers: Query<(&mut Worker, &mut Transform, &mut Visibility, &Children)>,
     mut poses: Query<&mut RigPose>,
     mut slots: Query<(&mut Transform, &mut Visibility), Without<Worker>>,
@@ -969,7 +1074,7 @@ fn drive_workers(
     *frame = frame.wrapping_add(1);
     let t = time.elapsed_secs();
     let h = clock.hour();
-    let cam = camera.iter().next().map(|c| c.translation());
+    let cam = camera.iter().find(|(c, _)| c.is_active).map(|(_, t)| t.translation());
     for (mut w, mut tf, mut vis, children) in &mut workers {
         let Some(def) = defs.0.get(w.idx) else { continue };
         let (pos, yaw, job, walking, walked) = worker_state(def, h, t);
@@ -1109,5 +1214,23 @@ mod tests {
         assert!(noon.iter().filter(|j| **j == Job::Eat).count() >= 6);
         let work: Vec<Job> = defs.iter().map(|d| worker_state(d, 9.5, 0.0).2).collect();
         assert!(work.contains(&Job::Hew) && work.contains(&Job::Crank));
+    }
+
+    /// Где что (для снимков): `cargo test print_mine_spots -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn print_mine_spots() {
+        for s in mine_sites() {
+            println!("site {:2} {:?} {:?}", s.id, s.kind, s.pos);
+        }
+        for p in pile_spots() {
+            println!("pile {:2} {:?} {:?}", p.id, p.kind, p.pos);
+        }
+        let w = mine_work_spots().unwrap();
+        println!("face {:?} windlass {:?} sorting {:?} roast {:?} fire {:?} hut {:?}", w.face, w.windlass, w.sorting, w.roast, w.mine_fire, w.mine_hut);
+        println!("camp fire {:?} hut {:?} stack {:?} wood {:?} bog {:?}", w.camp_fire, w.camp_hut, w.stack, w.woodlot, w.bog);
+        for (x, z) in [(-239.0, 680.0), (-262.0, 676.0), (-545.0, 700.0), (-600.0, 450.0), (440.0, 285.0), (101.0, 238.0), (-410.0, 195.0), (-230.0, 715.0)] {
+            println!("ground {x} {z} = {}", crate::level::ground_y(x, z));
+        }
     }
 }

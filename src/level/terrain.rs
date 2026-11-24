@@ -140,6 +140,18 @@ fn knoll(x: f32, z: f32) -> f32 {
     9.0 * side * north * south
 }
 
+/// Каменоломня у Карантинной бухты: известняковый взлобок, срезанный уступами с севера.
+pub const QUARRY_FACE: (f32, f32) = (452.0, 300.0);
+
+/// Насколько взлобок каменоломни поднимает землю (м).
+fn quarry_rise(x: f32, z: f32) -> f32 {
+    let (qx, qz) = QUARRY_FACE;
+    let side = 1.0 - smoothstep(11.0, 26.0, (x - qx).abs());
+    let north = smoothstep(qz - 1.0, qz + 6.0, z);
+    let south = 1.0 - smoothstep(qz + 14.0, qz + 34.0, z);
+    4.0 * side * north * south
+}
+
 /// Высота суши без учёта моря.
 fn land(x: f32, z: f32) -> f32 {
     let d = city_distance(x, z);
@@ -155,7 +167,7 @@ fn land(x: f32, z: f32) -> f32 {
     };
     let east = (-((x - balka_x(z)) / 26.0).powi(2)).exp();
     let r = ravine(-480.0, -0.25, 30.0) * 12.0 + east * smoothstep(320.0, 420.0, z) * 10.0;
-    k * (hills + rise - r - 4.0 + knoll(x, z)).max(-k * 2.0) + (1.0 - k) * 0.0
+    k * (hills + rise - r - 4.0 + knoll(x, z) + quarry_rise(x, z)).max(-k * 2.0) + (1.0 - k) * 0.0
 }
 
 /// Аналитическая высота земли.
