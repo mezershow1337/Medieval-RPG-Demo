@@ -6,6 +6,7 @@
 #![allow(deprecated)] // Interaction: в Bevy 0.20 помечен устаревшим, но работает и проще.
 
 use crate::appearance::{Folk, Look, LookField};
+use crate::start_kit::{KitField, StartKit};
 use crate::client::NetState;
 use crate::inventory_ui::UiFonts;
 use crate::ui_theme::{Appear, Skin, ink, theme};
@@ -64,6 +65,8 @@ pub struct MenuState {
     pending_address: String,
     /// В окне облика камера показывает лицо крупно.
     look_zoom: bool,
+    /// Открыта вкладка стартового набора (`MRPG_KIT=1` — сразу на ней).
+    kit_tab: bool,
 }
 
 impl MenuState {
@@ -86,6 +89,7 @@ impl Plugin for MenuPlugin {
             resolving: None,
             pending_address: String::new(),
             look_zoom: std::env::var("MRPG_LOOK_ZOOM").is_ok(),
+            kit_tab: std::env::var("MRPG_KIT").is_ok(),
         })
         .add_systems(Startup, begin.after(crate::inventory_ui::setup_fonts))
         .add_systems(PreUpdate, escape_key.after(bevy::input::InputSystems))
@@ -110,16 +114,16 @@ fn begin(mut commands: Commands, start: Res<Start>, mut menu: ResMut<MenuState>,
                 _ => Screen::Main,
             }
         }
-        Start::Host(port) => host(&mut commands, &mut menu, &mut net, &time, port, &name, settings.look),
+        Start::Host(port) => host(&mut commands, &mut menu, &mut net, &time, port, &name, (settings.look, settings.kit)),
         Start::Join(addr) => {
             menu.screen = Screen::Join;
-            connect(&mut commands, &mut menu, &mut net, &time, addr, &name, settings.look);
+            connect(&mut commands, &mut menu, &mut net, &time, addr, &name, (settings.look, settings.kit));
         }
     }
 }
 
 /// Запустить сервер в этом процессе и подключиться к нему.
-fn host(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time: &Time, port: u16, name: &str, look: Look) {
+fn host(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time: &Time, port: u16, name: &str, look: (Look, StartKit)) {
     if !menu.hosting {
         match crate::server::bind_socket(port) {
             Ok(socket) => {
@@ -149,9 +153,9 @@ const CONNECTION_TIMEOUT_SECS: i32 = 60;
 const CONNECT_TOKEN_EXPIRE_SECS: u64 = 3600;
 
 /// Профиль с диска (ключ хозяина) с ником из меню.
-fn profile_with_name(name: &str, look: Look) -> crate::estates::Profile {
+fn profile_with_name(name: &str, look: (Look, StartKit)) -> crate::estates::Profile {
     let mut p = crate::estates::local_profile();
-    p.look = look;
+    (p.look, p.kit) = look;
     let nick = crate::protocol::clean_name(name);
     if !nick.is_empty() {
         p.name = nick;
@@ -159,7 +163,7 @@ fn profile_with_name(name: &str, look: Look) -> crate::estates::Profile {
     p
 }
 
-fn connect(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time: &Time, addr: SocketAddr, name: &str, look: Look) {
+fn connect(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time: &Time, addr: SocketAddr, name: &str, look: (Look, StartKit)) {
     let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
     let client_id = now.as_nanos() as u64;
     let transport = UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string()).and_then(|socket| {
@@ -228,7 +232,7 @@ fn poll_resolve(mut commands: Commands, mut menu: ResMut<MenuState>, mut net: Re
             }
             menu.back = Screen::Join;
             let name = settings.nickname.clone();
-            connect(&mut commands, &mut menu, &mut net, &time, addr, &name, settings.look);
+            connect(&mut commands, &mut menu, &mut net, &time, addr, &name, (settings.look, settings.kit));
         }
         Err(e) => menu.error = Some(format!("Не получилось: {e}. Проверьте адрес.")),
     }
@@ -357,6 +361,9 @@ enum Act {
     LookStep(LookField, i32),
     LookRandom,
     LookZoom,
+    /// Вкладка окна персонажа: облик или стартовый набор.
+    LookTab(bool),
+    KitStep(KitField, i32),
 }
 
 #[derive(Component)]
@@ -398,7 +405,7 @@ fn handle_buttons(
             Act::Host => {
                 settings.save();
                 let name = settings.nickname.clone();
-                host(&mut commands, &mut menu, &mut net, &time, DEFAULT_PORT, &name, settings.look);
+                host(&mut commands, &mut menu, &mut net, &time, DEFAULT_PORT, &name, (settings.look, settings.kit));
             }
             Act::OpenJoin => {
                 settings.save();
@@ -467,6 +474,16 @@ fn handle_buttons(
                 settings.save();
             }
             Act::LookZoom => menu.look_zoom = !menu.look_zoom,
+            Act::LookTab(kit) => {
+                menu.kit_tab = kit;
+                if kit {
+                    menu.look_zoom = false;
+                }
+            }
+            Act::KitStep(f, d) => {
+                settings.kit.step(f, d);
+                settings.save();
+            }
         }
     }
 }
@@ -588,10 +605,10 @@ fn rebuild(
     net: Res<NetState>,
     fonts: Option<Res<UiFonts>>,
     roots: Query<Entity, With<MenuRoot>>,
-    mut built: Local<Option<(Screen, Option<String>, bool)>>,
+    mut built: Local<Option<(Screen, Option<String>, bool, bool, bool)>>,
 ) {
     let Some(fonts) = fonts else { return };
-    let key = (menu.screen, menu.error.clone(), menu.resolving.is_some() || menu.look_zoom);
+    let key = (menu.screen, menu.error.clone(), menu.resolving.is_some(), menu.look_zoom, menu.kit_tab);
     let settings_changed = matches!(menu.screen, Screen::Settings | Screen::Look) && settings.is_changed();
     if built.as_ref() == Some(&key) && !settings_changed {
         return;
@@ -682,13 +699,13 @@ fn rebuild(
             button(p, &fonts, "Выйти из игры", Act::Quit);
         }),
         Screen::Settings => center_panel(&mut commands, &fonts, "Настройки", 1000.0, |p| settings_body(p, &fonts, &settings)),
-        Screen::Look => side_panel(&mut commands, &fonts, |p| look_body(p, &fonts, &settings.look, menu.look_zoom)),
+        Screen::Look => side_panel(&mut commands, &fonts, |p| if menu.kit_tab { kit_body(p, &fonts, &settings.kit) } else { look_body(p, &fonts, &settings.look, menu.look_zoom) }),
     }
 }
 
 /// Окно облика: причёска, борода, цвет волос и кожи, сложение, лицо. Справа — сам персонаж.
 fn look_body(p: &mut ChildSpawnerCommands, fonts: &UiFonts, look: &Look, zoom: bool) {
-    p.spawn((Text::new("Облик"), font(fonts, true, 24.0), TextColor(GOLD)));
+    tabs(p, fonts, false);
     for f in LookField::ALL {
         p.spawn(Node { width: percent(100), height: px(34), align_items: AlignItems::Center, column_gap: px(8), ..default() }).with_children(|r| {
             r.spawn((Text::new(f.title()), font(fonts, false, 17.0), TextColor(PARCHMENT), Node { width: px(112), ..default() }));
@@ -704,6 +721,38 @@ fn look_body(p: &mut ChildSpawnerCommands, fonts: &UiFonts, look: &Look, zoom: b
         small_button(r, fonts, if zoom { "Во весь рост" } else { "Лицо крупно" }, Act::LookZoom, 187.0);
     });
     label(p, fonts, "Так вас увидят другие игроки. Облик сохраняется и при следующем запуске.", 14.0, INK_SOFT);
+    p.spawn(Node { flex_grow: 1.0, ..default() });
+    button(p, fonts, "Готово", Act::Back);
+}
+
+/// Вкладки окна персонажа: «Облик» и «Снаряжение».
+fn tabs(p: &mut ChildSpawnerCommands, fonts: &UiFonts, kit: bool) {
+    p.spawn(Node { width: percent(100), column_gap: px(10), align_items: AlignItems::Center, margin: UiRect::bottom(px(4)), ..default() }).with_children(|r| {
+        for (title, on) in [("Облик", false), ("Снаряжение", true)] {
+            if on == kit {
+                r.spawn((Text::new(title), font(fonts, true, 24.0), TextColor(GOLD), Node { width: px(187), ..default() }));
+            } else {
+                small_button(r, fonts, title, Act::LookTab(on), 187.0);
+            }
+        }
+    });
+}
+
+/// Стартовый набор: оружие и доспех на выбор (по два простых варианта), и всем — бинт, уксус и деньги.
+fn kit_body(p: &mut ChildSpawnerCommands, fonts: &UiFonts, kit: &StartKit) {
+    tabs(p, fonts, true);
+    for f in KitField::ALL {
+        p.spawn(Node { width: percent(100), height: px(34), align_items: AlignItems::Center, column_gap: px(8), ..default() }).with_children(|r| {
+            r.spawn((Text::new(f.title()), font(fonts, false, 17.0), TextColor(PARCHMENT), Node { width: px(80), ..default() }));
+            small_button(r, fonts, "‹", Act::KitStep(f, -1), 34.0);
+            r.spawn(Node { flex_grow: 1.0, justify_content: JustifyContent::Center, ..default() }).with_children(|v| {
+                v.spawn((Text::new(kit.choice(f).1), font(fonts, true, 16.0), TextColor(GOLD)));
+            });
+            small_button(r, fonts, "›", Act::KitStep(f, 1), 34.0);
+        });
+    }
+    label(p, fonts, "Всем в дорогу: кожаные сапоги, бинт, винный уксус промыть рану и 5 фоллисов.", 15.0, PARCHMENT);
+    label(p, fonts, "Нищий старт: вещи простые, остальное — добыть, купить или заработать. Набор выдаётся при входе и после смерти.", 14.0, INK_SOFT);
     p.spawn(Node { flex_grow: 1.0, ..default() });
     button(p, fonts, "Готово", Act::Back);
 }
@@ -828,7 +877,7 @@ fn row(p: &mut ChildSpawnerCommands, fonts: &UiFonts, s: &Settings, title: &str,
 /// Персонаж в окне облика: стоит на площади лицом к закатному солнцу.
 #[derive(Component)]
 struct LookPreview {
-    shown: Look,
+    shown: (Look, Option<StartKit>),
 }
 
 #[derive(Component)]
@@ -861,12 +910,26 @@ fn look_preview(
         return;
     }
     let (spot, face) = preview_spot(level.as_deref());
-    let outfit = |look: Look| crate::rig::Outfit::for_actor(crate::protocol::ActorKind::Player, 0).with_gear(&crate::gear_look::Gear { look, ..default() });
+    // На вкладке снаряжения персонаж одет и вооружён по выбранному набору.
+    let shown = (settings.look, menu.kit_tab.then_some(settings.kit));
+    let outfit = |(look, kit): (Look, Option<StartKit>)| {
+        // Оружие убрано (на поясе или за спиной), щит — в левой руке.
+        let gear = kit.map(|k| crate::gear_look::Gear { holstered: true, ..k.gear(look) }).unwrap_or(crate::gear_look::Gear { look, ..default() });
+        let shield = crate::client::shield_of(crate::protocol::ActorKind::Player, false, &gear);
+        (crate::rig::Outfit::for_actor(crate::protocol::ActorKind::Player, 0).with_gear(&gear), crate::worn::Worn::new(crate::worn::Extras::of(&gear)), shield)
+    };
+    let spawn_body = |p: &mut ChildSpawnerCommands, shown: (Look, Option<StartKit>)| {
+        let (outfit, worn, shield) = outfit(shown);
+        p.spawn((LookPreviewBody, worn, crate::rig::NeedsRig(outfit), Transform::default(), Visibility::default()));
+        if let Some(kind) = shield {
+            p.spawn((LookPreviewBody, crate::rig::NeedsShield(kind), Transform::from_xyz(-0.36, 1.0, -0.12).with_rotation(Quat::from_rotation_y(1.2)), Visibility::default()));
+        }
+    };
     let Ok((root, mut preview, mut tf)) = previews.single_mut() else {
         commands
-            .spawn((LookPreview { shown: settings.look }, Transform::from_translation(spot), Visibility::default()))
+            .spawn((LookPreview { shown }, Transform::from_translation(spot), Visibility::default()))
             .with_children(|p| {
-                p.spawn((LookPreviewBody, crate::rig::NeedsRig(outfit(settings.look)), Transform::default(), Visibility::default()));
+                spawn_body(p, shown);
             });
         return;
     };
@@ -874,13 +937,13 @@ fn look_preview(
     // Медленно поворачивается, чтобы было видно и профиль.
     let yaw = f32::atan2(-face.x, -face.z) + 0.45 * (t * 0.35).sin();
     *tf = Transform::from_translation(spot).with_rotation(Quat::from_rotation_y(yaw));
-    if preview.shown != settings.look && models.is_some() {
-        preview.shown = settings.look;
+    if preview.shown != shown && models.is_some() {
+        preview.shown = shown;
         for e in &shells {
             commands.entity(e).despawn();
         }
         commands.entity(root).with_children(|p| {
-            p.spawn((LookPreviewBody, crate::rig::NeedsRig(outfit(settings.look)), Transform::default(), Visibility::default()));
+            spawn_body(p, shown);
         });
         return;
     }

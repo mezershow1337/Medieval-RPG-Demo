@@ -427,7 +427,7 @@ fn on_connection(
     match &event.0 {
         ServerEvent::ClientConnected { client_id } => {
             let id = *client_id;
-            let profile = transport.as_ref().and_then(|t| t.0.user_data(id)).and_then(|d| unpack_profile(&d)).unwrap_or_else(|| Profile { key: id ^ 0x5EED_0000_0000_0000, name: "Путник".into(), look: Default::default() });
+            let profile = transport.as_ref().and_then(|t| t.0.user_data(id)).and_then(|d| unpack_profile(&d)).unwrap_or_else(|| Profile { key: id ^ 0x5EED_0000_0000_0000, name: "Путник".into(), look: Default::default(), kit: Default::default() });
             info!("Игрок {id}: профиль «{}»", profile.name);
             tw.players.insert(id, profile);
             let cat = estates();
@@ -925,8 +925,8 @@ mod tests {
         let json = serde_json::to_string(&file).unwrap();
         let back: SaveFile = serde_json::from_str(&json).unwrap();
         assert_eq!(back.estates[0], tw.estates[0]);
-        tw.players.insert(7, Profile { key: 42, name: "Феодор".into(), look: Default::default() });
-        tw.players.insert(8, Profile { key: 43, name: "Гость".into(), look: Default::default() });
+        tw.players.insert(7, Profile { key: 42, name: "Феодор".into(), look: Default::default(), kit: Default::default() });
+        tw.players.insert(8, Profile { key: 43, name: "Гость".into(), look: Default::default(), kit: Default::default() });
         assert!(tw.is_owner(0, 7));
         assert!(!tw.is_owner(0, 8));
         assert_eq!(tw.access(0), vec![7]);
