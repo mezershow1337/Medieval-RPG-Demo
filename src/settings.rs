@@ -55,6 +55,8 @@ pub struct Settings {
     pub last_address: String,
     /// Ник игрока (виден другим вместо числового номера).
     pub nickname: String,
+    /// Облик персонажа (окно «Облик» в главном меню).
+    pub look: crate::appearance::Look,
 }
 
 /// Готовые наборы графики.
@@ -110,6 +112,7 @@ impl Default for Settings {
             last_address: String::new(),
             // Для начала — имя пользователя Windows; его можно сменить в главном меню.
             nickname: crate::protocol::clean_name(&std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default()),
+            look: crate::appearance::Look::PLAYER_DEFAULT,
         };
         // По умолчанию — средние: игра должна идти плавно и на обычной видеокарте.
         s.apply_preset(Preset::Medium);
@@ -184,7 +187,7 @@ impl Settings {
         format!(
             "# Настройки Medieval RPG. Можно править руками; неизвестные строки пропускаются.\n\
              draw_distance = {}\nshadows = {}\nwater = {}\neffects = {}\ntextures = {}\nrender_scale = {}\n\
-             vsync = {}\nwindow_mode = {}\nfov = {}\nsensitivity = {}\nvolume = {}\nmusic = {}\nsfx = {}\nambient = {}\nshow_fps = {}\nlast_address = {}\nnickname = {}\n",
+             vsync = {}\nwindow_mode = {}\nfov = {}\nsensitivity = {}\nvolume = {}\nmusic = {}\nsfx = {}\nambient = {}\nshow_fps = {}\nlast_address = {}\nnickname = {}\nlook = {}\n",
             self.draw_distance,
             self.shadows,
             self.water,
@@ -202,6 +205,7 @@ impl Settings {
             b(self.show_fps),
             self.last_address,
             self.nickname,
+            self.look.to_text(),
         )
     }
 
@@ -239,6 +243,7 @@ impl Settings {
                 "show_fps" => s.show_fps = b(s.show_fps),
                 "last_address" => s.last_address = v.to_string(),
                 "nickname" => s.nickname = crate::protocol::clean_name(v),
+                "look" => s.look = crate::appearance::Look::from_text(v).unwrap_or(s.look),
                 _ => {}
             }
         }
@@ -620,6 +625,8 @@ mod tests {
         s.vsync = false;
         s.last_address = "abc.at.ply.gg:12345".into();
         s.nickname = "Феодор".into();
+        s.look.step(crate::appearance::LookField::Beard, 2);
+        s.look.step(crate::appearance::LookField::Build, -1);
         let back = Settings::from_text(&s.to_text());
         assert_eq!(s, back);
         assert_eq!(back.preset(), Some(Preset::Low));

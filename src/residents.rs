@@ -5,6 +5,7 @@
 //! (`daily_life.rs`, рисует и двигает их `life_client.rs`) и отвечают парой слов на «E».
 
 use crate::level::{Resident, Role};
+use crate::appearance::{Folk, Look, Shape};
 use crate::rig::{Beard, FootGear, Hair, HeadGear, LegGear, NeedsRig, Outfit, Tunic};
 use bevy::prelude::*;
 
@@ -113,20 +114,42 @@ fn lines(role: Role) -> &'static [&'static str] {
 
 /// Облик по роли. Детей потом уменьшаем масштабом.
 pub fn outfit(role: Role, seed: u64) -> Outfit {
-    let base = Outfit::for_actor(crate::protocol::ActorKind::Player, seed.wrapping_mul(2_654_435_761) ^ 0x51);
     let h = |k: u64| ((seed.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(k * 7919) >> 40) % 1000) as f32 / 1000.0;
+    // Город многолюдный: кроме ромеев — готы из предместий и заморские моряки и купцы.
+    let folk = match role {
+        Role::Sailor if h(5) < 0.55 => Folk::Overseas,
+        Role::Farmer | Role::Servant if h(5) < 0.4 => Folk::Goths,
+        Role::Householder | Role::Craftsman | Role::Shopkeeper if h(5) < 0.12 => Folk::Overseas,
+        Role::Householder | Role::Craftsman if h(5) < 0.22 => Folk::Goths,
+        _ => Folk::Romaioi,
+    };
+    let look_seed = seed.wrapping_mul(2_654_435_761) ^ 0x51;
+    let base = Outfit::for_actor(crate::protocol::ActorKind::Player, look_seed).with_look(Look::random(look_seed, folk));
     // Некрашеная шерсть и лён, крашеное — у богатых и клира.
     let wool = Color::srgb(0.55 + 0.2 * h(1), 0.48 + 0.17 * h(1), 0.38 + 0.12 * h(1));
     let dyed = [Color::srgb(0.45, 0.15, 0.12), Color::srgb(0.2, 0.28, 0.45), Color::srgb(0.32, 0.4, 0.22), Color::srgb(0.6, 0.48, 0.2)][(h(2) * 4.0) as usize % 4];
     let plain = Outfit { head: HeadGear::Bare, tunic: Tunic::Byzantine, legs: LegGear::Wrapped, feet: FootGear::Shoes, tunic_color: wool, ..base };
     match role {
         // Риг пока один на всех: женщин отличают длинные волосы, бритое лицо и крашеная туника.
-        Role::Housewife | Role::Weaver | Role::Cook => Outfit { hair: Hair::Long, beard: Beard::None, tunic_color: dyed, ..plain },
-        Role::Child | Role::Student => Outfit { beard: Beard::None, ..plain },
+        Role::Housewife | Role::Weaver | Role::Cook => Outfit {
+            hair: Hair::Long,
+            beard: Beard::None,
+            tunic_color: dyed,
+            // Мягкие черты, тоньше кость.
+            shape: Shape { rugged: -0.8, longnose: plain.shape.longnose.min(0.3) - 0.3, heavy: plain.shape.heavy * 0.5, ..plain.shape },
+            ..plain
+        },
+        Role::Child => Outfit { beard: Beard::None, hair: if plain.hair == Hair::Balding { Hair::Short } else { plain.hair }, shape: Shape { heavy: 0.0, ..plain.shape }, ..plain },
+        // Ученики — юноши: в лучшем случае пушок над губой.
+        Role::Student => Outfit { beard: if h(6) < 0.3 { Beard::Moustache } else { Beard::None }, hair: Hair::Short, ..plain },
+        // Клир по обычаю носит бороду и длинные волосы.
         Role::Priest => Outfit { beard: Beard::Full, hair: Hair::Long, tunic_color: Color::srgb(0.85, 0.82, 0.74), ..plain },
-        Role::Monk => Outfit { beard: Beard::Full, hair: Hair::Shaved, tunic_color: Color::srgb(0.16, 0.13, 0.12), ..plain },
-        Role::Physician | Role::Scholar => Outfit { beard: Beard::Full, tunic_color: Color::srgb(0.78, 0.74, 0.62), ..plain },
-        Role::Noble => Outfit { beard: Beard::Short, tunic_color: dyed, feet: FootGear::Boots, legs: LegGear::Trousers, ..plain },
+        // Монахи: борода и тонзура (выбритая макушка).
+        Role::Monk => Outfit { beard: Beard::Full, hair: Hair::Balding, tunic_color: Color::srgb(0.16, 0.13, 0.12), ..plain },
+        // Учёные и врачи — люди в летах, по-философски бородатые.
+        Role::Physician | Role::Scholar => Outfit { beard: if h(6) < 0.7 { Beard::Full } else { Beard::Short }, tunic_color: Color::srgb(0.78, 0.74, 0.62), ..plain },
+        // Знать бреется по столичной моде (как Анастасий на солидах) или носит холёную бородку.
+        Role::Noble => Outfit { beard: if h(6) < 0.6 { Beard::None } else { Beard::Short }, tunic_color: dyed, feet: FootGear::Boots, legs: LegGear::Trousers, ..plain },
         Role::Soldier => Outfit { head: HeadGear::Spangenhelm, legs: LegGear::Trousers, feet: FootGear::Boots, tunic_color: Color::srgb(0.6, 0.55, 0.45), ..plain },
         Role::Officer => Outfit { legs: LegGear::Trousers, feet: FootGear::Boots, tunic_color: Color::srgb(0.55, 0.12, 0.1), ..plain },
         Role::Sailor => Outfit { head: HeadGear::FeltCap, legs: LegGear::Trousers, ..plain },

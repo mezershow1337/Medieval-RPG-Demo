@@ -13,7 +13,8 @@ use crate::inventory_ui::UiFonts;
 use crate::loot_client::LootState;
 use crate::player::PlayerCamera;
 use crate::protocol::{ActorKind, decode, encode};
-use crate::rig::{Beard, FootGear, Hair, HeadGear, LegGear, NeedsRig, Outfit, RigPose, Tunic};
+use crate::appearance::{Folk, Look};
+use crate::rig::{FootGear, HeadGear, LegGear, NeedsRig, Outfit, RigPose, Tunic};
 use crate::trade::MerchantId;
 use crate::trade_net::*;
 use bevy::prelude::*;
@@ -96,18 +97,19 @@ pub fn outfit_for(info: &MerchantInfo) -> Outfit {
     use crate::factions::Faction;
     let c = |v: [f32; 3]| Color::srgb(v[0], v[1], v[2]);
     // Облик по народу: ромеи в туниках, готы с длинными волосами, аланы и кочевники в кафтанах.
-    let base = Outfit::for_actor(ActorKind::Player, info.id.0 as u64);
-    let (tunic, hair, head) = match info.faction {
-        Faction::Goths => (Tunic::Gothic, Hair::Long, HeadGear::Spangenhelm),
-        Faction::Alans => (Tunic::Kaftan, Hair::Short, HeadGear::Conical),
-        Faction::Nomads => (Tunic::Kaftan, Hair::Shaved, HeadGear::FeltCap),
-        _ => (Tunic::Byzantine, Hair::Short, HeadGear::Spangenhelm),
+    let seed = info.id.0 as u64;
+    let (tunic, folk, head) = match info.faction {
+        Faction::Goths => (Tunic::Gothic, Folk::Goths, HeadGear::Spangenhelm),
+        Faction::Alans => (Tunic::Kaftan, Folk::Alans, HeadGear::Conical),
+        Faction::Nomads => (Tunic::Kaftan, Folk::Nomads, HeadGear::FeltCap),
+        // Среди купцов порта много заморских: сирийцы, египтяне, понтийцы.
+        Faction::Merchants if seed % 3 == 1 => (Tunic::Byzantine, Folk::Overseas, HeadGear::Spangenhelm),
+        _ => (Tunic::Byzantine, Folk::Romaioi, HeadGear::Spangenhelm),
     };
+    let base = Outfit::for_actor(ActorKind::Player, seed).with_look(Look::random(seed.wrapping_mul(31) ^ 0xA11CE, folk));
     Outfit {
         head: if info.look.helmet { head } else { HeadGear::Bare },
         tunic,
-        hair,
-        beard: if info.id.0.is_multiple_of(3) { Beard::Short } else { Beard::Full },
         legs: if info.id.0.is_multiple_of(2) { LegGear::Wrapped } else { LegGear::Trousers },
         feet: if info.look.helmet { FootGear::Boots } else { FootGear::Shoes },
         tunic_color: c(info.look.tunic),

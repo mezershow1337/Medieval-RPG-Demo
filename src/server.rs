@@ -244,7 +244,9 @@ fn on_server_event(
             let id = *client_id;
             let spawn = level::spawn_point(world.joined_count);
             world.joined_count += 1;
-            let name = transport.user_data(id).and_then(|d| crate::estates::unpack_profile(&d)).map(|p| p.name).filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Странник {}", id % 1000));
+            let profile = transport.user_data(id).and_then(|d| crate::estates::unpack_profile(&d));
+            let look = profile.as_ref().map(|p| p.look).unwrap_or_default();
+            let name = profile.map(|p| p.name).filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Странник {}", id % 1000));
             info!("Игрок «{name}» ({id}) подключился");
             server.send_message(id, CH_RELIABLE, encode(&ServerMessage::Welcome { your_id: id, spawn: spawn.into() }));
             // Новичку — имена всех, кто уже в игре; всем — имя новичка.
@@ -278,7 +280,7 @@ fn on_server_event(
                     skill_mods: Default::default(),
                     cheats: Default::default(),
                     holstered: false,
-                    gear: Default::default(),
+                    gear: crate::gear_look::Gear { look, ..Default::default() },
                 },
             );
         }
@@ -450,8 +452,10 @@ fn sync_equipment(world: &mut GameWorld, loot: Option<&LootWorld>) {
                 actor.fighter.set_guard(false);
             }
         }
+        let look = actor.gear.look;
         actor.gear = inv.map(crate::gear_look::Gear::from_inventory).unwrap_or_default();
         actor.gear.holstered = actor.holstered;
+        actor.gear.look = look;
         let e = gear_effects(&stats);
         let m = actor.body_mods;
         actor.fighter.action_speed = e.action_speed * m.action_speed * sk.action_speed;

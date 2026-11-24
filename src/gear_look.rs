@@ -26,6 +26,8 @@ pub struct Gear {
     pub ring: Option<u16>,
     /// Стрелы в сумке — колчан у пояса.
     pub quiver: Option<u16>,
+    /// Облик игрока (причёска, борода, кожа, сложение) — из профиля подключения.
+    pub look: crate::appearance::Look,
 }
 
 impl Gear {
@@ -43,6 +45,7 @@ impl Gear {
             neck: id(EquipSlot::Necklace),
             ring: id(EquipSlot::Ring),
             quiver: inv.all_items().find(|i| crate::archery::arrow_type(i.info().name).is_some()).map(|i| i.base.0),
+            look: Default::default(),
         }
     }
 

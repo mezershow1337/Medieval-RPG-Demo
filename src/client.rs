@@ -33,6 +33,8 @@ pub struct RemoteActor {
     crouching: bool,
     /// Для анимации: фаза и сила шага, доля приседа, прошлое положение.
     walk_phase: f32,
+    /// Сглаженная скорость, м/с.
+    speed: f32,
     walk: f32,
     crouch: f32,
     last_pos: Vec3,
@@ -216,6 +218,7 @@ pub fn run(start: crate::menu::Start) {
         .add_systems(Update, (fly_arrows, refresh_remote_weapons, refresh_remote_gear, worn::attach_worn, attach_riposte_glow))
         .add_systems(Update, gear_showcase.run_if(|| std::env::var("MRPG_GEAR_SHOWCASE").is_ok()))
         .add_systems(Update, pose_showcase.in_set(rig::PoseSet).run_if(|| std::env::var("MRPG_GEAR_SHOWCASE").is_ok()))
+        .add_systems(Update, (people_showcase, pose_people).chain().in_set(rig::PoseSet).run_if(|| std::env::var("MRPG_PEOPLE_SHOWCASE").is_ok()))
         .add_systems(Update, duel_showcase.run_if(|| std::env::var("MRPG_DUEL_SHOWCASE").is_ok()))
         .add_systems(
             Update,
@@ -392,6 +395,7 @@ fn spawn_remote(commands: &mut Commands, index: &mut RemoteIndex, snap: &ActorSn
                 crouching: snap.crouching,
                 walk_phase: 0.0,
                 walk: 0.0,
+                speed: 0.0,
                 crouch: if snap.crouching { 1.0 } else { 0.0 },
                 last_pos: pos,
                 finish: snap.finish,
@@ -781,6 +785,56 @@ fn gear_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<Wa
     }
 }
 
+/// `MRPG_PEOPLE_SHOWCASE=x,y,z` (или пусто — у агоры): для снимков ряд горожан разного облика
+/// (бороды, усы, бритые, кожа, сложение), лицом к +Z. `MRPG_PEOPLE_WALK=1` — шагают на месте,
+/// `MRPG_PEOPLE_FOCUS=x` — камера крупно у фигуры x, `MRPG_PEOPLE_SEED` — другой набор людей.
+#[derive(Component)]
+struct ShowcasePerson(usize);
+
+fn people_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<WaitingCamera>>, mut done: Local<bool>) {
+    if *done {
+        return;
+    }
+    let Ok(mut cam) = cams.single_mut() else { return };
+    *done = true;
+    let v: Vec<f32> = std::env::var("MRPG_PEOPLE_SHOWCASE").unwrap_or_default().split(',').filter_map(|s| s.trim().parse().ok()).collect();
+    let o = if v.len() == 3 { Vec3::new(v[0], v[1], v[2]) } else { crate::level::place_pos("agora").unwrap_or_default() + Vec3::new(4.0, 0.0, 4.0) };
+    let seed: u64 = std::env::var("MRPG_PEOPLE_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+    use crate::level::Role;
+    let roles = [Role::Householder, Role::Craftsman, Role::Sailor, Role::Noble, Role::Farmer, Role::Priest, Role::Shopkeeper, Role::Servant];
+    const GAP: f32 = 0.85;
+    if std::env::var("MRPG_CAM").is_err() {
+        let mid = (roles.len() - 1) as f32 * 0.5;
+        *cam = match std::env::var("MRPG_PEOPLE_FOCUS").ok().and_then(|s| s.parse::<f32>().ok()) {
+            Some(f) => Transform::from_translation(o + Vec3::new(f * GAP, 1.6, 1.25)).looking_at(o + Vec3::new(f * GAP, 1.5, 0.0), Vec3::Y),
+            None => Transform::from_translation(o + Vec3::new(mid * GAP, 1.3, 4.4)).looking_at(o + Vec3::new(mid * GAP, 0.95, 0.0), Vec3::Y),
+        };
+    }
+    for (i, role) in roles.iter().enumerate() {
+        let outfit = crate::residents::outfit(*role, 100 + i as u64 * 7 + seed * 131);
+        commands
+            .spawn((Transform::from_translation(o + Vec3::X * (i as f32 * GAP)).with_rotation(Quat::from_rotation_y(std::f32::consts::PI)), Visibility::default()))
+            .with_children(|c| {
+                c.spawn((BodyRig, ShowcasePerson(i), NeedsRig(outfit), Transform::default(), Visibility::default()));
+            });
+    }
+}
+
+fn pose_people(time: Res<Time>, mut rigs: Query<(&ShowcasePerson, &mut RigPose)>) {
+    let walk = std::env::var("MRPG_PEOPLE_WALK").is_ok();
+    // Для снимков походки: `MRPG_PEOPLE_PHASE` — доля цикла шага (одинаковая у всех фигур).
+    let phase: Option<f32> = std::env::var("MRPG_PEOPLE_PHASE").ok().and_then(|s| s.parse().ok());
+    let now = time.elapsed_secs();
+    for (p, mut pose) in &mut rigs {
+        let k = p.0 as f32;
+        let walk_phase = match phase {
+            Some(u) => (u + k * 0.13) * std::f32::consts::TAU,
+            None => now * 1.3 / rig::step_cycle(1.3) * std::f32::consts::TAU + k,
+        };
+        *pose = rig::solve_pose(&PoseInput { time: now + k * 3.7, walk: if walk { 1.0 } else { 0.0 }, walk_phase, ..default() }).pose;
+    }
+}
+
 /// Фигура витрины и вид оружия у неё в руке. `MRPG_GEAR_POSE=присед,взгляд,наклон` — поза
 /// (для проверки одежды на изгибах).
 #[derive(Component)]
@@ -1016,8 +1070,11 @@ fn animate_remote(
         let local = transform.rotation.inverse() * flat;
         let speed = if dt > 0.0 { flat.length() / dt } else { 0.0 };
         let back = if local.z > 0.3 * flat.length() { -1.0 } else { 1.0 };
-        r.walk_phase += back * flat.length() / 1.5 * std::f32::consts::TAU;
-        let walk_target = (speed / crate::player::WALK_SPEED).min(1.2);
+        // Скорость сглаживаем (снимки приходят рывками); шаг или бег выбирается по ней.
+        r.speed += (speed.min(9.0) - r.speed) * (1.0 - (-6.0 * dt).exp());
+        r.walk_phase += back * flat.length() / rig::step_cycle(r.speed) * std::f32::consts::TAU;
+        // Вес походки: уже от медленного шага ноги идут полным шагом (иначе стопы скользят).
+        let walk_target = (speed / 0.9).min(1.0);
         r.walk += (walk_target - r.walk) * (1.0 - (-8.0 * dt).exp());
         let crouch_target = if r.crouching { 1.0 } else { 0.0 };
         r.crouch += (crouch_target - r.crouch) * (1.0 - (-10.0 * dt).exp());
@@ -1099,6 +1156,7 @@ fn animate_remote(
             crouch: r.crouch,
             walk_phase: r.walk_phase,
             walk: r.walk,
+            speed: r.speed,
             pitch: r.pitch,
             twist,
             lean,

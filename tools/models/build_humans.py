@@ -65,6 +65,56 @@ def as3(val, shape):
     return val if val.ndim == 3 else val[..., None]
 
 
+# =============================================================================================
+# Цели формы (морфы): телосложение и черты лица из целей MakeHuman (CC0).
+# Игра смешивает их весами по облику персонажа (src/appearance.rs): худой/крепкий/здоровый,
+# грубые/тонкие черты, длинный/курносый нос, степные скулы.
+
+MH_T = "data/targets/"
+# Имя -> список (файл цели, вес). Отрицательный вес — цель в обратную сторону.
+MORPH_SOURCES = {
+    "thin": [(MH_T + "macrodetails/universal-male-young-averagemuscle-minweight.target", 1.0),
+             (MH_T + "macrodetails/universal-male-young-maxmuscle-averageweight.target", -0.35)],
+    "heavy": [(MH_T + "macrodetails/universal-male-young-maxmuscle-maxweight.target", 0.85),
+              (MH_T + "macrodetails/universal-male-young-averagemuscle-maxweight.target", 0.35)],
+    "rugged": [(MH_T + "chin/chin-prominent-incr.target", 0.7), (MH_T + "chin/chin-width-incr.target", 0.8),
+               (MH_T + "chin/chin-bones-incr.target", 0.7),
+               (MH_T + "cheek/l-cheek-bones-incr.target", 0.7), (MH_T + "cheek/r-cheek-bones-incr.target", 0.7),
+               (MH_T + "nose/nose-volume-incr.target", 0.4), (MH_T + "nose/nose-width2-incr.target", 0.5),
+               (MH_T + "eyebrows/eyebrows-trans-forward.target", 0.6)],
+    "longnose": [(MH_T + "nose/nose-scale-vert-incr.target", 0.6), (MH_T + "nose/nose-hump-incr.target", 0.8),
+                 (MH_T + "nose/nose-trans-forward.target", 0.4), (MH_T + "chin/chin-height-incr.target", 0.5),
+                 (MH_T + "cheek/l-cheek-volume-decr.target", 0.5), (MH_T + "cheek/r-cheek-volume-decr.target", 0.5)],
+    "steppe": [(MH_T + "macrodetails/asian-male-young.target", 0.9), (MH_T + "macrodetails/caucasian-male-young.target", -0.6)],
+}
+MORPHS = tuple(MORPH_SOURCES)
+BODY_MORPHS = ("thin", "heavy")
+
+
+def make_morphs(base, rest):
+    """Сдвиги всех вершин базы для каждой цели (в позе привязки). Телосложение не трогает свод
+    черепа (на нём шлемы и волосы), черты лица — только лицо спереди."""
+    y, z = rest[:, 1], rest[:, 2]
+    body_mask = 1 - smooth(1.62, 1.7, y)
+    face_mask = smooth(1.47, 1.53, y) * (1 - smooth(1.69, 1.735, y)) * smooth(0.01, -0.05, z)
+    out = {}
+    for name, src in MORPH_SOURCES.items():
+        d = np.zeros_like(base.v)
+        for rel, w in src:
+            try:
+                d += base.target_delta(rel, w)
+            except Exception as e:  # noqa: BLE001
+                print("нет цели", rel, e)
+        if name not in BODY_MORPHS:
+            # Цели народности двигают и всю голову (другой рост) — оставляем только форму лица.
+            head = (y > 1.5) & (np.abs(rest[:, 0]) < 0.12)
+            d = d - d[head].mean(0)
+        m = body_mask if name in BODY_MORPHS else face_mask
+        out[name] = d * m[:, None]
+        print(f"  морф {name}: до {np.abs(out[name]).max() * 100:.1f} см")
+    return out
+
+
 class Part:
     """Кусок скинованного меша: исходные индексы вершин MakeHuman + свои UV и треугольники."""
 
@@ -85,6 +135,12 @@ class Builder:
         self.glb = glbwrite.Glb()
         self.skin = None
         self.normals = self._normals()
+        self.morphs = make_morphs(self.base, self.rest)
+
+    def morph_names(self, src):
+        """Какие цели формы нужны детали: лицевые — только у деталей головы."""
+        head = (self.rest[np.unique(src), 1] > 1.47).mean() > 0.5
+        return [n for n in MORPHS if head or n in BODY_MORPHS]
 
     def _normals(self):
         tris = []
@@ -219,10 +275,26 @@ class Builder:
             w4 = np.take_along_axis(W, order, axis=1)
             w4 /= np.maximum(w4.sum(1, keepdims=True), 1e-9)
             prims.append({"v": pos, "n": n, "uv": part.uv, "tris": part.tris, "material": mat, "joints": order, "weights": w4})
+        # Цели формы: телосложение (у всех деталей) и черты лица (у деталей головы). Оболочки одежды
+        # и волос сдвигаются вместе с кожей под ними (по исходной вершине MakeHuman).
+        names = self.morph_names(np.concatenate([np.asarray(part.src) for part, _ in items]))
+        for (part, _), prim in zip(items, prims):
+            targets = []
+            for nm in names:
+                d = self.morphs[nm][part.src]
+                n1 = glbwrite.vertex_normals(prim["v"] + d, part.tris)
+                acc = np.zeros((len(self.v), 3))
+                np.add.at(acc, part.src, n1)
+                n1 = acc[part.src]
+                n1 /= np.maximum(np.linalg.norm(n1, axis=1, keepdims=True), 1e-9)
+                targets.append({"POSITION": d, "NORMAL": n1 - prim["n"]})
+            prim["targets"] = targets
+            prim["target_names"] = names
         self.glb.mesh(name, prims, skin=self.skin)
 
-    def emit_rigid(self, name, items, bone=None):
-        """Жёсткий меш. bone — привязать целиком к кости (шлем к голове), иначе — без скина (оружие)."""
+    def emit_rigid(self, name, items, bone=None, follow=False):
+        """Жёсткий меш. bone — привязать целиком к кости (шлем к голове), иначе — без скина (оружие).
+        follow — деталь сдвигается вместе с лицом (глаза): цели формы берутся с ближайшей кожи."""
         prims = []
         for (v, tris, uv), mat in items:
             n = glbwrite.vertex_normals(v, tris)
@@ -234,6 +306,14 @@ class Builder:
                 p["n"] = glbwrite.vertex_normals(v_bind, tris)
                 p["joints"] = np.tile([B[bone], 0, 0, 0], (len(v), 1))
                 p["weights"] = np.tile([1.0, 0, 0, 0], (len(v), 1))
+            if follow:
+                # Каждое глазное яблоко целиком едет за средним сдвигом век вокруг него.
+                body = self.base.group_verts("body")
+                skin = self.rest[body]
+                d2 = ((v[:, None, :] - skin[None, :, :]) ** 2).sum(-1)
+                near = np.argsort(d2, axis=1)[:, :24]
+                p["target_names"] = list(MORPHS)
+                p["targets"] = [{"POSITION": self.morphs[nm][body][near].mean(1), "NORMAL": np.zeros_like(v)} for nm in MORPHS]
             prims.append(p)
         self.glb.mesh(name, prims, skin=self.skin if bone is not None else None)
 
@@ -266,10 +346,18 @@ def face_dist(P, c, sx, sy):
 
 
 def beard_mask(P, N, style):
-    """1 там, где растёт борода. style: 'stubble', 'short', 'full'."""
+    """1 там, где растёт борода. style: 'stubble', 'short', 'full', 'moustache'."""
     x, y, z = P[..., 0], P[..., 1], P[..., 2]
     ax = np.abs(x)
     front = smooth(-0.02, -0.08, z)
+    if style == "moustache":
+        # Усы: от носа над верхней губой, концы опущены ниже углов рта.
+        top = MOUTH[1] + 0.024 - 0.3 * np.maximum(ax - 0.01, 0)
+        bot = MOUTH[1] + 0.0045 - 0.6 * np.maximum(ax - 0.017, 0)
+        m = smooth(top + 0.004, top - 0.003, y) * smooth(bot - 0.004, bot + 0.0015, y) * smooth(0.043, 0.033, ax)
+        # Под самым носом (ноздри) — реже.
+        m *= 1 - 0.5 * np.exp(-((ax / 0.012) ** 2 + ((y - top) / 0.004) ** 2))
+        return np.clip(m * smooth(-0.1, -0.13, z), 0, 1)
     # Линия скул: от уха вниз к углу рта.
     cheek_top = 1.612 - 0.55 * np.maximum(0.047 - ax, 0)
     # Края широкие и мягкие: в шейдере по ним редеют отдельные волоски, а не режется контур.
@@ -292,10 +380,23 @@ def beard_mask(P, N, style):
     return m
 
 
+def brow_mask(P):
+    """Брови: дуги над глазами, к вискам тоньше."""
+    x, y, z = P[..., 0], P[..., 1], P[..., 2]
+    brow = np.zeros_like(x)
+    for s in (-1, 1):
+        xb = (x - s * 0.033) * s
+        yc = 1.664 + 0.004 * np.cos(xb / 0.025 * 1.3) - 0.003 * (xb > 0.012) * (xb - 0.012) / 0.01
+        d = np.abs(y - yc) / (0.0045 - 0.0018 * smooth(0.0, 0.025, xb))
+        brow = np.maximum(brow, smooth(1.2, 0.6, d) * smooth(0.032, 0.022, np.abs(xb)) * smooth(-0.13, -0.15, z))
+    return brow
+
+
 def skin_shader(P, N, hit):
     x, y, z = P[..., 0], P[..., 1], P[..., 2]
     ax = np.abs(x)
-    base = srgb(0.74, 0.55, 0.43)
+    # Светлее прежнего: смуглость и загар задаёт оттенок кожи в игре (appearance::SKIN_TONES).
+    base = srgb(0.80, 0.60, 0.48)
     n1 = fbm(P, 9.0, 4, 1)
     n2 = fbm(P, 60.0, 3, 2)
     col = base[None, None, :] * (0.9 + 0.2 * n1[..., None])
@@ -323,10 +424,11 @@ def skin_shader(P, N, hit):
         d = np.abs(y - yc) / (0.0045 - 0.0018 * smooth(0.0, 0.025, xb))
         brow = np.maximum(brow, smooth(1.2, 0.6, d) * smooth(0.032, 0.022, np.abs(xb)) * smooth(-0.13, -0.15, z))
     brow *= 0.75 + 0.25 * value_noise(P, 900.0, 5)
-    col = col * (1 - 0.8 * brow[..., None]) + srgb(0.16, 0.11, 0.08) * 0.8 * brow[..., None]
+    # Сами брови — отдельная оболочка цвета волос (brows), на коже только лёгкая тень.
+    col = col * (1 - 0.22 * brow[..., None]) + srgb(0.3, 0.2, 0.15) * 0.22 * brow[..., None]
     # Щетина там, где бреют бороду.
     st = beard_mask(P, N, "short") * (0.6 + 0.4 * value_noise(P, 1500.0, 9))
-    col = col * (1 - 0.28 * st[..., None]) + srgb(0.32, 0.27, 0.24) * 0.28 * st[..., None]
+    col = col * (1 - 0.13 * st[..., None]) + srgb(0.32, 0.27, 0.24) * 0.13 * st[..., None]
     # Веки и тени вокруг глаз.
     for s in (-1, 1):
         e = face_dist(P, EYE_R * [s, 1, 1], 0.02, 0.012)
@@ -513,6 +615,9 @@ def lamellar_shader(P, N, hit):
     return {"color": col, "rough": rough, "metal": metal, "height": plate * 2.0 - lace * 0.5 + 0.3 * (1 - fv) * plate}
 
 
+BEARDS = ("beard", "beard_short", "moustache", "stubble")
+
+
 def hair_shader(style, color=(0.2, 0.13, 0.08), layer=0, layers=1):
     """Волосы и борода. Причёска — несколько оболочек-«слоёв» (layer 0 — у кожи): внутренние
     гуще и темнее (в глубине пряди тень), внешние реже — так появляются объём и рваный край."""
@@ -527,17 +632,21 @@ def hair_shader(style, color=(0.2, 0.13, 0.08), layer=0, layers=1):
         # Средняя яркость текстуры ~1: цвет задаёт оттенок в игре (Outfit::hair_color),
         # иначе тёмные волосы уходят в сплошной чёрный.
         col = srgb(*color) * ((0.75 + 0.6 * strands) * (0.85 + 0.3 * depth))[..., None]
-        if style in ("beard", "beard_short"):
-            m = beard_mask(P, N, "full" if style == "beard" else "short")
-            edge = m * (1.0 if style == "beard" else 0.8)
+        if style in BEARDS:
+            m = beard_mask(P, N, {"beard": "full", "beard_short": "short", "moustache": "moustache", "stubble": "short"}[style])
+            edge = m * (1.0 if style in ("beard", "moustache") else 0.8)
         else:
             # Линия роста волос: лоб, виски, затылок.
             fore = 1.705 + 0.012 * np.cos(x / 0.05)
             temple = smooth(0.055, 0.07, ax)
             hl = fore * (1 - temple) + 1.655 * temple
             front = smooth(-0.04, -0.09, z)
-            line = hl * front + (1.58 if style == "short" else 1.53) * (1 - front)
+            line = hl * front + (1.53 if style == "long" else 1.58) * (1 - front)
             edge = smooth(line - 0.004, line + 0.012, y)
+            if style == "balding":
+                # Лысина ото лба до макушки, остаётся венчик над ушами и на затылке.
+                bald = smooth(1.685, 1.715, y) * smooth(0.06, 0.0, z) + smooth(0.035, 0.012, z) * smooth(1.69, 1.72, y)
+                edge *= 1 - np.clip(bald, 0, 1)
             # Над ушами — выемка.
             ear = np.exp(-(((ax - 0.075) / 0.012) ** 2 + ((y - 1.635) / 0.025) ** 2 + ((z + 0.035) / 0.03) ** 2))
             edge *= 1 - smooth(0.3, 0.6, ear)
@@ -545,7 +654,20 @@ def hair_shader(style, color=(0.2, 0.13, 0.08), layer=0, layers=1):
         if layers > 1:
             # Внешние слои — отдельные пряди: вырезаем по вытянутому шуму.
             cover *= np.clip(0.55 + 1.6 * (strands - 0.5) * depth + (1 - depth) * 0.45, 0, 1.2)
-        if style in ("beard", "beard_short"):
+        if style == "brows":
+            # Брови: волоски наискосок к вискам, по краю редеют.
+            m = brow_mask(P)
+            hairs = fbm(np.stack([x * 1.0 + np.abs(x) * 0.0, y * 2.5 + np.abs(x) * 1.2, z], -1), 1400.0, 2, 95)
+            alpha = smooth(0.25, 0.45, m * (0.7 + 0.6 * hairs))
+            col = srgb(*color) * (0.75 + 0.5 * hairs)[..., None]
+            return {"color": col, "alpha": alpha, "rough": 0.5 + 0 * hairs, "height": hairs}
+        if style == "stubble":
+            # Щетина: отдельные точки-волоски, без прядей и слоёв.
+            follicle = value_noise(P, 2600.0, 93)
+            alpha = smooth(0.06, 0.0, follicle - edge * 0.62)
+            col = srgb(*color) * (0.7 + 0.3 * strands)[..., None]
+            return {"color": col, "alpha": alpha, "rough": 0.6 + 0 * strands, "height": strands * 0.3}
+        if style in BEARDS:
             # Каждый «волосок» со своим порогом: к краю бороды они редеют по одному,
             # сквозь них видна кожа — нет тёмной маски с ровным контуром.
             # Внутри (edge = 1) нижний слой сплошной, редеют только края и внешние пряди.
@@ -649,21 +771,31 @@ def build():
         return {"color": col, "rough": np.full_like(cosang, 0.08), "height": iris * 0.0}
 
     eye_mat = bld.rigid_bake(eye_mesh, 256, eye_shader, "eyes", metallic=0.0)
-    bld.emit_rigid("eyes", [(eye_mesh, eye_mat)], bone="head")
+    bld.emit_rigid("eyes", [(eye_mesh, eye_mat)], bone="head", follow=True)
 
     # --- Волосы и борода (оболочки над кожей головы).
-    def head_shell(keep, off, iters):
-        part = bld.extract("body", keep)
+    def head_shell(keep, off, iters, uv_box=None):
+        part = bld.extract("body", keep, uv_box=uv_box)
         return bld.shell(part, off, iters)
 
-    for style, color in (("short", (1.0, 0.97, 0.93)), ("long", (1.0, 0.97, 0.93))):
-        keep = lambda c: c[1] > (1.56 if style == "short" else 1.50) and (c[2] > -0.11 or c[1] > 1.69) and not (c[1] < 1.62 and c[2] < -0.04)
-        thick = (lambda r: 0.004 + 0.006 * smooth(1.6, 1.76, r[:, 1])) if style == "short" else (lambda r: 0.008 + 0.012 * smooth(1.66, 1.76, r[:, 1]) + 0.01 * smooth(1.6, 1.5, r[:, 1]))
+    thick_of = {
+        "short": lambda r: 0.004 + 0.006 * smooth(1.6, 1.76, r[:, 1]),
+        "long": lambda r: 0.008 + 0.012 * smooth(1.66, 1.76, r[:, 1]) + 0.01 * smooth(1.6, 1.5, r[:, 1]),
+        # Под машинку: ёжик в несколько миллиметров.
+        "cropped": lambda r: 0.0022 + 0.0008 * smooth(1.6, 1.76, r[:, 1]),
+        # Лысеющий: венчик короткой стрижки.
+        "balding": lambda r: 0.003 + 0.003 * smooth(1.6, 1.7, r[:, 1]),
+    }
+    for style in ("short", "long", "cropped", "balding"):
+        color = (1.0, 0.97, 0.93)
+        keep = lambda c: c[1] > (1.50 if style == "long" else 1.56) and (c[2] > -0.11 or c[1] > 1.69) and not (c[1] < 1.62 and c[2] < -0.04)
+        thick = thick_of[style]
+        layers = HAIR_LAYERS if style in ("short", "long") else HAIR_LAYERS[:2]
         prims = []
-        for layer, k in enumerate(HAIR_LAYERS):
+        for layer, k in enumerate(layers):
             part = head_shell(keep, lambda r, k=k: thick(r) * k, 2)
             tex = TEX if layer == 0 else TEX // 2
-            mat = bld.material(f"hair_{style}" if layer == 0 else f"hair_{style}.l{layer}", bld.bake(part, tex, hair_shader(style, color, layer, len(HAIR_LAYERS))), normal_strength=3.0, alpha_cutoff=0.5, double=True, metallic=0.0)
+            mat = bld.material(f"hair_{style}" if layer == 0 else f"hair_{style}.l{layer}", bld.bake(part, tex, hair_shader(style, color, layer, len(layers))), normal_strength=3.0, alpha_cutoff=0.5, double=True, metallic=0.0)
             prims.append((part, mat))
         bld.emit(f"hair.{style}", prims)
 
@@ -675,6 +807,22 @@ def build():
             mat = bld.material(f"beard_{style}" if layer == 0 else f"beard_{style}.l{layer}", bld.bake(part, TEX // 2, hair_shader("beard" if style == "full" else "beard_short", (1.0, 0.97, 0.93), layer, len(HAIR_LAYERS))), normal_strength=3.0, alpha_cutoff=0.5, double=True, metallic=0.0)
             prims.append((part, mat))
         bld.emit(f"beard.{style}", prims)
+
+    # Усы (своя развёртка на всю текстуру — мелкие волоски) и щетина (один слой точек).
+    face_keep = lambda c: 1.49 < c[1] < 1.63 and c[2] < -0.02 and abs(c[0]) < 0.085
+    prims = []
+    for layer, k in enumerate(HAIR_LAYERS):
+        part = head_shell(face_keep, lambda r, k=k: 0.0045 * k * (0.6 + 0.4 * smooth(1.55, 1.585, r[:, 1])) + 0.0012, 2, uv_box=True)
+        mat = bld.material("beard_moustache" if layer == 0 else f"beard_moustache.l{layer}", bld.bake(part, TEX // 2, hair_shader("moustache", (1.0, 0.97, 0.93), layer, len(HAIR_LAYERS))), normal_strength=3.0, alpha_cutoff=0.5, double=True, metallic=0.0)
+        prims.append((part, mat))
+    bld.emit("beard.moustache", prims)
+    part = head_shell(face_keep, 0.0009, 2, uv_box=True)
+    mat = bld.material("beard_stubble", bld.bake(part, TEX, hair_shader("stubble", (1.0, 0.97, 0.93))), normal_strength=1.0, alpha_cutoff=0.5, double=True, metallic=0.0)
+    bld.emit("beard.stubble", [(part, mat)])
+    # Брови — цвета волос (у светловолосых светлые, у седых седые).
+    part = head_shell(lambda c: 1.64 < c[1] < 1.69 and c[2] < -0.07 and abs(c[0]) < 0.075, 0.0011, 1, uv_box=True)
+    mat = bld.material("beard_brows", bld.bake(part, TEX // 2, hair_shader("brows", (1.0, 0.97, 0.93))), normal_strength=1.0, alpha_cutoff=0.5, double=True, metallic=0.0)
+    bld.emit("brows", [(part, mat)])
 
     # --- Одежда поверх колготок MakeHuman.
     def tights(keep, off, iters=2):
@@ -701,10 +849,10 @@ def build():
         bld.emit(f"tunic.{style}", [(top, m_top), (sk, m_sk)])
 
     trousers = tights(lambda c: 0.06 < c[1] < 1.0 and abs(c[0]) < 0.17, 0.004, 1)
-    bld.emit("trousers", [(trousers, bld.material("trousers", bld.bake(trousers, TEX, trousers_shader), metallic=0.0))])
+    bld.emit("trousers", [(trousers, bld.material("trousers", bld.bake(trousers, TEX, trousers_shader), double=True, metallic=0.0))])
 
     wraps = tights(lambda c: 0.07 < c[1] < 0.47 and abs(c[0]) < 0.17, lambda r: 0.009 + 0.004 * smooth(0.12, 0.3, r[:, 1]), 2)
-    bld.emit("wraps", [(wraps, bld.material("wraps", bld.bake(wraps, TEX, wraps_shader), normal_strength=2.0, metallic=0.0))])
+    bld.emit("wraps", [(wraps, bld.material("wraps", bld.bake(wraps, TEX, wraps_shader), normal_strength=2.0, double=True, metallic=0.0))])
 
     def flatten_sole(part, off):
         pos = part.pos.copy()
