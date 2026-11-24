@@ -47,6 +47,8 @@ pub struct Actor {
     shoot: bool,
     /// Как раны, боль и яды меняют бойца (ведёт medicine_server.rs).
     pub body_mods: crate::medicine::BodyMods,
+    /// Что дают навыки и умения игрока (ведёт skills_server.rs).
+    pub skill_mods: crate::skill_tree::Mods,
     /// Читы из консоли разработчика.
     pub cheats: crate::console_net::Cheats,
     /// Игрок убрал оружие (хотбар, слот «Руки»): дерётся кулаками.
@@ -155,19 +157,43 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .insert_resource(transport)
         .insert_resource(level)
         .insert_resource(world)
+        .insert_resource(PlayerNames::default())
         .insert_resource(civil)
         .add_plugins(crate::civil_server::CivilServerPlugin)
+        .add_plugins(crate::world_clock::ClockServerPlugin)
+        .add_plugins(crate::daily_life::LifeServerPlugin)
         .insert_resource(SnapshotTimer { timer: Timer::from_seconds((1.0 / SNAPSHOT_RATE_HZ) as f32, TimerMode::Repeating), tick: 0 })
         .add_observer(on_server_event)
         .add_plugins(crate::loot_server::LootServerPlugin)
         .add_plugins(crate::doors::DoorServerPlugin)
+        .add_plugins(crate::map::MapServerPlugin)
         .add_plugins(crate::trade_server::TradeServerPlugin)
         .add_plugins(crate::knowledge::KnowledgeServerPlugin)
         .add_plugins(crate::smithing_server::SmithingServerPlugin)
+        .add_plugins(crate::towns_server::TownServerPlugin)
         .add_plugins(crate::console_server::ConsoleServerPlugin)
         .add_systems(Update, (receive_client_messages, run_npcs, combat_tick, respawns, send_snapshots).chain());
     info!("Сервер слушает {addr}");
     app.run();
+}
+
+impl GameWorld {
+    /// Налётчик (набег на селение): не возвращается после смерти. Возвращает номер.
+    pub fn spawn_raider(&mut self, level: &LevelColliders, spawn: NpcSpawn, now: f64) -> u64 {
+        let id = spawn_npc(self, level, spawn, now);
+        if let Some(a) = self.actors.get_mut(&id) {
+            a.forget_spawn();
+        }
+        id
+    }
+
+    /// Убрать NPC из мира (налётчики ушли в степь).
+    pub fn remove_npc(&mut self, server: &mut RenetServer, id: u64) {
+        if self.actors.get(&id).is_some_and(|a| a.kind.is_npc()) {
+            self.actors.remove(&id);
+            server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::PlayerLeft { id }));
+        }
+    }
 }
 
 pub(crate) fn spawn_npc(world: &mut GameWorld, level: &LevelColliders, spawn: NpcSpawn, now: f64) -> u64 {
@@ -192,6 +218,7 @@ pub(crate) fn spawn_npc(world: &mut GameWorld, level: &LevelColliders, spawn: Np
             finish: 200,
             shoot: false,
             body_mods: Default::default(),
+            skill_mods: Default::default(),
             cheats: Default::default(),
             holstered: false,
             gear: Default::default(),
@@ -200,14 +227,32 @@ pub(crate) fn spawn_npc(world: &mut GameWorld, level: &LevelColliders, spawn: Np
     id
 }
 
-fn on_server_event(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, time: Res<Time>) {
+/// Ники игроков на сервере (из `user_data` подключения).
+#[derive(Resource, Default)]
+pub struct PlayerNames(pub HashMap<u64, String>);
+
+fn on_server_event(
+    event: On<RenetServerEvent>,
+    mut server: ResMut<RenetServer>,
+    mut world: ResMut<GameWorld>,
+    time: Res<Time>,
+    transport: Res<NetcodeServerTransport>,
+    mut names: ResMut<PlayerNames>,
+) {
     match &event.0 {
         ServerEvent::ClientConnected { client_id } => {
             let id = *client_id;
             let spawn = level::spawn_point(world.joined_count);
             world.joined_count += 1;
-            info!("Игрок {id} подключился");
+            let name = transport.user_data(id).and_then(|d| crate::estates::unpack_profile(&d)).map(|p| p.name).filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Странник {}", id % 1000));
+            info!("Игрок «{name}» ({id}) подключился");
             server.send_message(id, CH_RELIABLE, encode(&ServerMessage::Welcome { your_id: id, spawn: spawn.into() }));
+            // Новичку — имена всех, кто уже в игре; всем — имя новичка.
+            for (other, n) in &names.0 {
+                server.send_message(id, CH_RELIABLE, encode(&ServerMessage::PlayerName { id: *other, name: n.clone() }));
+            }
+            server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::PlayerName { id, name: name.clone() }));
+            names.0.insert(id, name);
             for c in world.corpses.iter().filter(|c| c.civ.is_none()) {
                 let msg = ServerMessage::CorpseSpawned { corpse_id: c.id, kind: c.kind, pos: c.pos.into(), yaw: c.yaw, gear: c.gear };
                 server.send_message(id, CH_RELIABLE, encode(&msg));
@@ -230,6 +275,7 @@ fn on_server_event(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>,
                     finish: 200,
                     shoot: false,
                     body_mods: Default::default(),
+                    skill_mods: Default::default(),
                     cheats: Default::default(),
                     holstered: false,
                     gear: Default::default(),
@@ -237,7 +283,8 @@ fn on_server_event(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>,
             );
         }
         ServerEvent::ClientDisconnected { client_id, reason } => {
-            info!("Игрок {client_id} отключился: {reason}");
+            let name = names.0.remove(client_id).unwrap_or_default();
+            info!("Игрок «{name}» ({client_id}) отключился: {reason}");
             world.actors.remove(client_id);
             server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::PlayerLeft { id: *client_id }));
         }
@@ -263,10 +310,13 @@ fn receive_client_messages(mut server: ResMut<RenetServer>, mut world: ResMut<Ga
                 continue;
             }
             match msg {
-                ClientMessage::Attack { yaw, pitch } => {
+                ClientMessage::Attack { yaw, pitch, swing } => {
                     actor.pose.yaw = yaw;
                     actor.pose.pitch = pitch.clamp(-1.6, 1.6);
-                    actor.fighter.try_attack();
+                    actor.fighter.try_attack(swing);
+                }
+                ClientMessage::Feint => {
+                    actor.fighter.feint();
                 }
                 ClientMessage::Guard { on, yaw, pitch } => {
                     actor.pose.yaw = yaw;
@@ -383,7 +433,8 @@ fn sync_equipment(world: &mut GameWorld, loot: Option<&LootWorld>) {
             actor.fighter.hp = (max_hp * k).min(max_hp);
         }
         let inv = loot.inventories.get(id);
-        actor.fighter.riposte_bonus = stats.get(Stat::ParryWindow) / 1000.0;
+        let sk = actor.skill_mods;
+        actor.fighter.riposte_bonus = stats.get(Stat::ParryWindow) / 1000.0 + sk.riposte;
         actor.fighter.has_shield = inv.and_then(|inv| inv.equipped(EquipSlot::OffHand)).is_some_and(|item| item.info().shape == ItemShape::Shield);
         // Оружие в руке определяет темп, длину и силу ударов. Менять можно только вне удара.
         actor.finish = inv.and_then(|inv| inv.equipped(EquipSlot::MainHand)).map_or(200, |item| (item.look() * 255.0) as u8);
@@ -400,17 +451,18 @@ fn sync_equipment(world: &mut GameWorld, loot: Option<&LootWorld>) {
             }
         }
         actor.gear = inv.map(crate::gear_look::Gear::from_inventory).unwrap_or_default();
+        actor.gear.holstered = actor.holstered;
         let e = gear_effects(&stats);
         let m = actor.body_mods;
-        actor.fighter.action_speed = e.action_speed * m.action_speed;
-        actor.fighter.block_stability = e.block_stability;
-        actor.fighter.stamina_regen_mult = e.stamina_regen * m.stamina_regen;
-        actor.fighter.max_stamina = e.max_stamina * m.max_stamina;
+        actor.fighter.action_speed = e.action_speed * m.action_speed * sk.action_speed;
+        actor.fighter.block_stability = (e.block_stability + sk.block_stability).clamp(0.0, 0.8);
+        actor.fighter.stamina_regen_mult = e.stamina_regen * m.stamina_regen * sk.stamina_regen;
+        actor.fighter.max_stamina = (e.max_stamina + sk.max_stamina) * m.max_stamina;
         actor.fighter.stamina = actor.fighter.stamina.min(actor.fighter.max_stamina);
         // Ноша: сверх грузоподъёмности идёшь медленнее (вес — `weight.rs`).
         let load = inv.map(crate::weight::inventory_weight).unwrap_or(0.0);
-        let burden = crate::weight::encumbrance(load, crate::weight::carry_capacity(stats.get(Stat::Strength)));
-        actor.move_mult = e.move_mult * m.move_mult * burden;
+        let burden = crate::weight::encumbrance(load, crate::weight::carry_capacity(stats.get(Stat::Strength)) + sk.carry);
+        actor.move_mult = e.move_mult * m.move_mult * burden * sk.move_speed;
     }
 }
 
@@ -441,13 +493,15 @@ fn base_damage(world: &GameWorld, loot: Option<&LootWorld>, attacker: u64) -> f3
     let Some(a) = world.actors.get(&attacker) else { return 0.0 };
     if a.kind == ActorKind::Player {
         let stats = loot.map(|l| l.equipped_stats(attacker)).unwrap_or_default();
+        // Навыки: сила и выучка для ближнего боя, тугой лук и глаз для стрельбы.
+        let skill = if a.fighter.weapon.ranged() { a.skill_mods.bow_damage } else { a.skill_mods.melee_damage };
         if a.fighter.weapon == combat::WeaponKind::Fists {
             // Кулак: урон от силы, а не от оружия в сумке.
-            return combat::FIST_DAMAGE + stats.get(Stat::Strength).max(0.0) * 0.4 + stats.get(Stat::BonusDamage) * 0.5;
+            return (combat::FIST_DAMAGE + stats.get(Stat::Strength).max(0.0) * 0.4 + stats.get(Stat::BonusDamage) * 0.5) * skill;
         }
         let weapon = stats.get(Stat::WeaponDamage);
         let weapon = if weapon > 0.0 { weapon * PLAYER_WEAPON_DAMAGE_SCALE } else { a.fighter.weapon.stats().damage };
-        weapon + stats.get(Stat::BonusDamage)
+        (weapon + stats.get(Stat::BonusDamage)) * skill
     } else {
         a.fighter.weapon.stats().damage * npc::damage_mult(a.kind)
     }
@@ -529,6 +583,7 @@ fn combat_tick(
     loot: Option<Res<LootWorld>>,
     mut trade: Option<ResMut<crate::trade_server::TradeWorld>>,
     mut civil: ResMut<crate::civil_server::CivilWorld>,
+    mut practice: Option<ResMut<crate::skills_server::PracticeQueue>>,
     time: Res<Time>,
 ) {
     let dt = time.delta_secs().min(0.1);
@@ -639,9 +694,10 @@ fn combat_tick(
         }
         let a = &world.actors[&id];
         let mut pose = a.pose;
-        // Небольшой разброс: стрелы не летят в одну точку.
-        pose.yaw += (world.rng.next_f32() - 0.5) * 0.04;
-        pose.pitch += (world.rng.next_f32() - 0.5) * 0.03;
+        // Небольшой разброс: стрелы не летят в одну точку (у опытного стрелка — кучнее).
+        let spread = a.skill_mods.bow_spread;
+        pose.yaw += (world.rng.next_f32() - 0.5) * 0.04 * spread;
+        pose.pitch += (world.rng.next_f32() - 0.5) * 0.03 * spread;
         let (pos, vel) = combat::arrow_launch(&pose);
         let arrow_id = world.next_arrow_id;
         world.next_arrow_id += 1;
@@ -710,6 +766,9 @@ fn combat_tick(
             world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon: combat::WeaponKind::Bow, amount, head, part });
         }
         server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: arrow.owner, target: tid, outcome, at: point.into() }));
+        if let Some(q) = practice.as_mut() {
+            q.arrow(&world, arrow.owner, tid, outcome);
+        }
         let killed = matches!(outcome, HitOutcome::Damage { killed: true, .. });
         on_player_attacks(&mut world, trade.as_deref_mut(), &mut civil, arrow.owner, tid, killed);
         if killed {
@@ -739,10 +798,8 @@ fn combat_tick(
                 if head {
                     damage *= combat::HEAD_MULT;
                 }
-                if let Some(a) = world.actors.get(&attacker)
-                    && a.fighter.is_riposte_strike()
-                {
-                    damage *= combat::RIPOSTE_DAMAGE_MULT;
+                if let Some(a) = world.actors.get(&attacker) {
+                    damage *= a.fighter.strike_damage_mult();
                 }
                 world.gear_wear.push((attacker, crate::smithing_server::Wear::Weapon(1.0)));
                 crate::civil_server::hurt(&mut server, &mut world, &mut civil, &level, trade.as_deref_mut(), person, attacker, damage, point, head, now);
@@ -771,6 +828,9 @@ fn combat_tick(
                     world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon, amount, head, part });
                 }
                 server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: aid, target: tid, outcome, at: point.into() }));
+                if let Some(q) = practice.as_mut() {
+                    q.melee(&world, aid, tid, outcome);
+                }
                 let killed = matches!(outcome, HitOutcome::Damage { killed: true, .. });
                 on_player_attacks(&mut world, trade.as_deref_mut(), &mut civil, aid, tid, killed);
                 if killed {
@@ -812,6 +872,14 @@ fn record_wear(world: &mut GameWorld, attacker: u64, target: u64, outcome: HitOu
                 push(target, Wear::Shield(1.2));
             }
         }
+        HitOutcome::Chambered => {
+            if a {
+                push(attacker, Wear::Weapon(1.2));
+            }
+            if t {
+                push(target, Wear::Weapon(1.2));
+            }
+        }
         HitOutcome::Bounced => {}
     }
 }
@@ -820,14 +888,16 @@ pub(crate) fn kill(server: &mut RenetServer, world: &mut GameWorld, id: u64, kil
     let Some(actor) = world.actors.get_mut(&id) else { return };
     actor.alive = false;
     actor.fighter.action = combat::Action::Dead;
-    let (kind, pos, yaw, gear) = (actor.kind, actor.pose.feet, actor.pose.yaw, actor.gear);
+    let (kind, pos, yaw, mut gear) = (actor.kind, actor.pose.feet, actor.pose.yaw, actor.gear);
+    // Оружие убитого остаётся при теле (в ножнах), пока его не заберут при обыске.
+    gear.holstered = true;
     if kind == ActorKind::Player {
         actor.respawn_at = Some(now + PLAYER_RESPAWN_SECS);
     } else if let Some(spawn) = actor.spawn {
         world.actors.remove(&id);
         world.npc_respawns.push((now + NPC_RESPAWN_SECS, spawn));
     } else {
-        // Вызванный консолью враг: тело остаётся, сам он не возвращается.
+        // Налётчик или вызванный консолью враг: тело остаётся, сам он не возвращается.
         world.actors.remove(&id);
     }
     info!("{kind:?} {id} погиб");

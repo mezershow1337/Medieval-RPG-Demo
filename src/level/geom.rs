@@ -265,6 +265,49 @@ impl MeshBuilder {
         );
     }
 
+    /// Коньковый ряд калиптеров: полутруба над отрезком a→b (радиус `r`, чуть приплюснута).
+    /// UV — под фото черепицы: u в узкой полосе вокруг оси калиптера (0.5 м развёртки),
+    /// v — вдоль конька, поэтому видны стыки и нахлёсты калиптеров через каждые полметра.
+    pub fn ridge_pipe(&mut self, a: Vec3, b: Vec3, r: f32, segs: usize) {
+        let len = (b - a).length();
+        let dir = (b - a).normalize_or_zero();
+        if len < 1e-4 || segs == 0 {
+            return;
+        }
+        let side = dir.cross(Vec3::Y).normalize_or(Vec3::X);
+        let ring = |ang: f32| (side * ang.cos() * r + Vec3::Y * ang.sin() * r * 0.75, (side * ang.cos() + Vec3::Y * ang.sin()).normalize());
+        let mut ids = Vec::with_capacity((segs + 1) * 2);
+        for i in 0..=segs {
+            let ang = std::f32::consts::PI * i as f32 / segs as f32;
+            let (o, n) = ring(ang);
+            let u = 0.5 + ang.cos() * 0.1;
+            ids.push((self.vert(a + o, n, Vec2::new(u, 0.0)), self.vert(b + o, n, Vec2::new(u, len))));
+        }
+        for i in 0..segs {
+            let (a0, b0) = ids[i];
+            let (a1, b1) = ids[i + 1];
+            // Лицом наружу: от a к b вдоль `dir`, по дуге от `side` вверх.
+            self.idx.extend_from_slice(&[a0, b0, b1, a0, b1, a1]);
+        }
+        // Торцы забиты раствором — полукруглые заглушки той же черепицы.
+        for (p, out) in [(a, -dir), (b, dir)] {
+            let c = self.vert(p, out, Vec2::new(0.5, 0.25));
+            let rim: Vec<u32> = (0..=segs)
+                .map(|i| {
+                    let ang = std::f32::consts::PI * i as f32 / segs as f32;
+                    self.vert(p + ring(ang).0, out, Vec2::new(0.5 + ang.cos() * 0.1, 0.25 + ang.sin() * 0.05))
+                })
+                .collect();
+            for w in rim.windows(2) {
+                if out.dot(dir) > 0.0 {
+                    self.idx.extend_from_slice(&[c, w[1], w[0]]);
+                } else {
+                    self.idx.extend_from_slice(&[c, w[0], w[1]]);
+                }
+            }
+        }
+    }
+
     /// Вершина с явной нормалью (для гладких тел вращения и рельефа).
     pub fn vert(&mut self, p: Vec3, n: Vec3, uv: Vec2) -> u32 {
         self.pos.push(p.to_array());
@@ -277,12 +320,75 @@ impl MeshBuilder {
         self.idx.extend_from_slice(&[a, b, c]);
     }
 
+    /// Границы вершин (None — пусто).
+    pub fn bounds(&self) -> Option<(Vec3, Vec3)> {
+        let mut it = self.pos.iter().map(|p| Vec3::from(*p));
+        let first = it.next()?;
+        Some(it.fold((first, first), |(lo, hi), p| (lo.min(p), hi.max(p))))
+    }
+
+    /// Сдвинуть все вершины.
+    pub fn shifted(mut self, d: Vec3) -> MeshBuilder {
+        for p in &mut self.pos {
+            *p = (Vec3::from(*p) + d).into();
+        }
+        self
+    }
+
     pub fn append(&mut self, other: MeshBuilder) {
         let base = self.pos.len() as u32;
         self.pos.extend(other.pos);
         self.nrm.extend(other.nrm);
         self.uv.extend(other.uv);
         self.idx.extend(other.idx.into_iter().map(|i| i + base));
+    }
+
+    /// Часть геометрии, где `keep(p) >= 0` (например, `h - p.y` — всё ниже высоты `h`).
+    /// Треугольники, пересекающие границу, режутся по ней (с интерполяцией нормалей и UV).
+    pub fn clipped(&self, keep: impl Fn(Vec3) -> f32) -> MeshBuilder {
+        let mut out = MeshBuilder::default();
+        for t in self.idx.chunks_exact(3) {
+            let v: [(Vec3, Vec3, Vec2, f32); 3] = [0, 1, 2].map(|k| {
+                let i = t[k] as usize;
+                let p = Vec3::from(self.pos[i]);
+                (p, Vec3::from(self.nrm[i]), Vec2::from(self.uv[i]), keep(p))
+            });
+            if v.iter().all(|x| x.3 >= 0.0) {
+                let base = out.pos.len() as u32;
+                for x in v {
+                    out.vert(x.0, x.1, x.2);
+                }
+                out.idx.extend_from_slice(&[base, base + 1, base + 2]);
+                continue;
+            }
+            if v.iter().all(|x| x.3 < 0.0) {
+                continue;
+            }
+            // Сазерленд — Ходжмен для одного треугольника.
+            let mut poly: Vec<(Vec3, Vec3, Vec2)> = Vec::with_capacity(4);
+            for k in 0..3 {
+                let a = v[k];
+                let b = v[(k + 1) % 3];
+                if a.3 >= 0.0 {
+                    poly.push((a.0, a.1, a.2));
+                }
+                if (a.3 >= 0.0) != (b.3 >= 0.0) {
+                    let s = a.3 / (a.3 - b.3);
+                    poly.push((a.0.lerp(b.0, s), a.1.lerp(b.1, s).normalize_or_zero(), a.2.lerp(b.2, s)));
+                }
+            }
+            if poly.len() < 3 {
+                continue;
+            }
+            let base = out.pos.len() as u32;
+            for (p, n, uv) in &poly {
+                out.vert(*p, *n, *uv);
+            }
+            for k in 1..poly.len() as u32 - 1 {
+                out.idx.extend_from_slice(&[base, base + k, base + k + 1]);
+            }
+        }
+        out
     }
 
     /// Сдвигает всю геометрию.

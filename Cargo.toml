@@ -8,6 +8,11 @@ bevy = { version = "0.20.1", features = ["jpeg"] }  # jpeg — текстуры 
 bevy_renet = "6.0.0"
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", default-features = false, features = ["alloc"] }
+serde_json = "1"
+
+# Системный буфер обмена (Ctrl+V адреса в меню). Только Windows: в Linux он тянет wayland-библиотеки.
+[target.'cfg(windows)'.dependencies]
+bevy = { version = "0.20.1", features = ["system_clipboard"] }
 
 # Собираем зависимости с оптимизацией даже в debug, иначе Bevy очень медленный.
 [profile.dev]

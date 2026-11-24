@@ -53,6 +53,9 @@ pub enum Category {
 }
 
 impl Category {
+    /// Сколько видов товара (размер таблиц по `Category as usize`).
+    pub const COUNT: usize = 17;
+
     #[allow(dead_code)] // для подсказок
     pub fn name(self) -> &'static str {
         match self {

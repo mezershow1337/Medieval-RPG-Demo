@@ -169,6 +169,10 @@ fn hits(time: Res<Time>, mut events: MessageReader<CombatFeedback>, mut out: Mes
                     HitOutcome::Parried => {
                         out.write(Sfx::at("parry", at).gain(1.0).range(3.0, 60.0).spread(0.08));
                     }
+                    // Встречный удар: клинки сшиблись в полёте — звон выше и резче.
+                    HitOutcome::Chambered => {
+                        out.write(Sfx::at("parry", at).gain(1.0).pitch(1.12).range(3.0, 60.0).spread(0.08));
+                    }
                     HitOutcome::Blocked { tier } => {
                         let g = match tier {
                             ImpactTier::Weak => 0.6,

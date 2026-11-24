@@ -3,6 +3,7 @@
 //! на глине, углы и проёмы — тёсаный известняк; крыши черепичные, скаты — во двор (вода стекает
 //! в цистерну). На главной улице первые этажи — лавки с широкими проёмами.
 
+use super::estate;
 use super::interior;
 use super::kit::{self, Op, Rect, Rng, Side};
 use super::*;
@@ -94,8 +95,100 @@ pub fn block_houses(b: &mut Builder, i: i32, j: i32, seed: u32) {
         let main_street = (j == -1 && front == Side::S) || (j == 1 && front == Side::N);
         let shop = special_shop(i, j, front);
         let f = Frame { r: lot, front, mirror: rng.chance(0.5) };
-        house(b, f, main_street || shop != Shop::None, shop, &mut rng);
+        match lot_mode(i, j, k, shop) {
+            LotMode::Lived => {
+                house(b, f, main_street || shop != Shop::None, shop, &mut rng, LotMode::Lived);
+            }
+            LotMode::Vacant => {
+                let (d0, c0, bl0) = (b.doors.len(), b.containers.len(), b.blocks.len());
+                let info = house(b, f, false, Shop::None, &mut rng, LotMode::Vacant);
+                let (d1, c1) = (b.doors.len(), b.containers.len());
+                let name = estate_name(&f, info.two_storey);
+                estate::register(b, name, crate::towns::TownId::Herson, f.r, info.top, info.entrance, d0..d1, c0..c1, bl0, info.rooms, info.two_storey, None);
+            }
+            LotMode::Site => site(b, f, &mut rng),
+        }
     }
+}
+
+/// Что стоит на участке.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LotMode {
+    /// Живут люди (обычная усадьба).
+    Lived,
+    /// Пустует: продаётся или сдаётся (выморочный дом, хозяева уехали).
+    Vacant,
+    /// Пепелище: его отстраивает город (стройплощадка).
+    Site,
+}
+
+/// Какие участки пустуют и какие сгорели (одинаково на сервере и у клиентов).
+pub fn lot_mode(i: i32, j: i32, k: usize, shop: Shop) -> LotMode {
+    if shop != Shop::None {
+        return LotMode::Lived;
+    }
+    match (i, j, k) {
+        // Пепелища — после пожара в квартале у главной улицы и в портовой части.
+        (14, 1, 1) | (10, -2, 0) | (6, 1, 1) | (15, -3, 1) => LotMode::Site,
+        // Пустующие дома: у агоры, у терм, у западной церкви, в порту.
+        (17, -3, 1) | (16, 2, 0) | (11, -1, 1) | (9, 1, 0) | (4, -2, 1) | (13, 3, 0) | (7, -1, 0) => LotMode::Vacant,
+        _ => LotMode::Lived,
+    }
+}
+
+/// «Усадьба у терм», «Двухэтажный дом у агоры».
+fn estate_name(f: &Frame, two_storey: bool) -> String {
+    let c = f.r.center(0.0);
+    let near = crate::level::places::places()
+        .iter()
+        .filter(|p| crate::level::inside_city(p.pos.x, p.pos.z))
+        .min_by(|a, b| a.pos.distance_squared(c).total_cmp(&b.pos.distance_squared(c)))
+        .map(|p| p.name)
+        .unwrap_or("Главная улица");
+    let what = if two_storey { "Двухэтажная усадьба" } else { "Усадьба" };
+    // Ближнее место — как адрес: «Усадьба · Западная церковь».
+    format!("{what} · {near}")
+}
+
+/// Сгоревшая усадьба: двор с цистерной есть всегда, а дом — по стадиям стройки.
+fn site(b: &mut Builder, f: Frame, rng: &mut Rng) {
+    let s = b.sites;
+    b.sites += 1;
+    let mut t = Builder::new();
+    t.chunk = b.chunk;
+    let near = f.r.inset(-3.0);
+    t.keep_clear = b.keep_clear.iter().filter(|p| p.x > near.x0 && p.x < near.x1 && p.z > near.z0 && p.z < near.z1).copied().collect();
+    let info = house(&mut t, f, false, Shop::None, rng, LotMode::Site);
+    // Двор (цистерна, пифосы, деревья) пережил пожар — он в общей геометрии.
+    courtyard(b, &f, info.court.0, info.court.1, info.back_wing, rng);
+    // Двери и сундуки готового дома — в общих списках (номера постоянные), пока дом не достроен,
+    // сервер держит двери открытыми, а клиент не рисует створки.
+    let (d0, c0) = (b.doors.len(), b.containers.len());
+    b.doors.extend(t.doors.iter().copied());
+    b.containers.extend(t.containers.iter().cloned());
+    let (d1, c1) = (b.doors.len(), b.containers.len());
+    let front_out = f.front_side().out();
+    estate::site_stages(b, s, &t, f.r, front_out, f.front.along_x(), info.top - 1.0, rng);
+    // Обстановку готового дома собираем по его же стенам и дверям.
+    let bl0 = b.blocks.len();
+    b.blocks.extend(t.blocks.iter().copied());
+    let name = estate_name(&f, info.two_storey);
+    let mut chars = name.chars();
+    let name = format!("Новая {}{}", chars.next().map(|c| c.to_lowercase().to_string()).unwrap_or_default(), chars.as_str());
+    estate::register(b, name, crate::towns::TownId::Herson, f.r, info.top, info.entrance, d0..d1, c0..c1, bl0, info.rooms, info.two_storey, Some(s));
+    // Блоки дома живут только в группах стадий.
+    b.blocks.truncate(bl0);
+}
+
+/// Что известно о построенном доме.
+pub struct HouseInfo {
+    pub rooms: Vec<estate::RoomPlan>,
+    pub entrance: Vec3,
+    pub two_storey: bool,
+    /// Высота конька (для границ усадьбы).
+    pub top: f32,
+    pub court: ((f32, f32), (f32, f32)),
+    pub back_wing: bool,
 }
 
 /// Особые лавки у агоры и у главных ворот.
@@ -123,6 +216,16 @@ pub fn shop_point(i: i32, j: i32, front: Side) -> Vec3 {
     f.p((u0 + u1) / 2.0, 0.0, FRONT_D * 0.55)
 }
 
+/// Прилавок особой лавки: середина стола и куда он обращён (к двери на улицу). Стол стоит
+/// в глубине комнаты, чтобы у входа оставалось место покупателю.
+pub fn shop_counter(i: i32, j: i32, front: Side) -> (Vec3, Vec3) {
+    let p = shop_point(i, j, front);
+    let facing = if front == Side::N { Vec3::NEG_Z } else { Vec3::Z };
+    // `shop_point` — на 0.55 глубины корпуса (3.1 м от улицы): стол на 0.3 м ближе к двери,
+    // продавец — за ним, у задней стены лавки; у входа остаётся 1.8 м.
+    (p + facing * 0.3, facing)
+}
+
 const SHOP_ROOM: usize = 1;
 
 /// Комнаты фасадного крыла (u0, u1 между перегородками).
@@ -135,7 +238,9 @@ fn front_rooms(f: &Frame) -> Vec<(f32, f32)> {
     (0..n).map(|k| (inner0 + step * k as f32 + if k > 0 { INNER_T / 2.0 } else { 0.0 }, inner0 + step * (k + 1) as f32 - if k + 1 < n { INNER_T / 2.0 } else { 0.0 })).collect()
 }
 
-fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng) {
+fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, mode: LotMode) -> HouseInfo {
+    let lived = mode == LotMode::Lived;
+    let mut entrance = f.p(f.w() / 2.0, 0.0, -1.2);
     let (w, d) = (f.w(), f.d());
     let mat = if rng.chance(0.35) { Mat::Plaster } else { Mat::Rubble };
     let two_storey = rng.chance(0.45);
@@ -153,10 +258,13 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng) {
     // ---- Фасадное крыло ----
     let mut front_ops = Vec::new();
     let mut inner_ops = Vec::new();
+    // Окна фасада (u, ширина, подоконник, верх) — для ставней и подоконных плит.
+    let mut windows: Vec<(f32, f32, f32, f32)> = Vec::new();
     for (k, &(u0, u1)) in rooms.iter().enumerate() {
         let uc = (u0 + u1) / 2.0;
         let is_shop = shops && k != vestibule && (special == Shop::None || k == SHOP_ROOM || rng.chance(0.6));
         if k == vestibule {
+            entrance = f.p(uc, 0.0, -1.2);
             front_ops.push(Op::Door { s: uc, w: 1.5, h: 2.6 });
             inner_ops.push(Op::Door { s: uc, w: 1.3, h: 2.4 });
             // Мощёный проход.
@@ -167,11 +275,13 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng) {
             shop_rooms.push((u0, u1, if k == SHOP_ROOM { special } else { Shop::None }));
         } else {
             front_ops.push(Op::Window { s: uc, w: 0.7, sill: 1.9, top: 2.5 });
+            windows.push((uc, 0.7, 1.9, 2.5));
             inner_ops.push(Op::Door { s: uc, w: 1.1, h: 2.2 });
             plan.push(f.rect(u0, u1, OUTER_T, FRONT_D - INNER_T / 2.0));
         }
         if two_storey {
             front_ops.push(Op::Window { s: uc, w: 0.8, sill: H1 + 1.0, top: H1 + 2.0 });
+            windows.push((uc, 0.8, H1 + 1.0, H1 + 2.0));
         }
     }
     f.wall_u(b, OUTER_T / 2.0, 0.0, w, OUTER_T, h_front, &front_ops, mat);
@@ -231,14 +341,20 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng) {
         kit::quoins(b, p.x + sx * OUTER_T / 2.0, p.z + sz * OUTER_T / 2.0, h_front, OUTER_T);
     }
     // Навесы над лавками.
+    let mut frng = Rng::new((f.r.x0 * 7.0 + f.r.z0 * 131.0) as i32 as u32 ^ 0x5eed);
     if shops {
         for (k, &(u0, u1)) in rooms.iter().enumerate() {
             if k != vestibule && rng.chance(0.7) {
                 let out = f.front_side().out();
-                kit::awning(b, f.p(u0 + 0.2, 0.0, -0.02), f.p(u1 - 0.2, 0.0, -0.02), out, 1.6, 2.9);
+                let cloth = [Mat::Canvas, Mat::Canvas, Mat::Canvas, Mat::Rug, Mat::Felt, Mat::Cloth][frng.int(6)];
+                kit::awning_of(b, f.p(u0 + 0.2, 0.0, -0.02), f.p(u1 - 0.2, 0.0, -0.02), out, 1.6, 2.9, cloth);
+                shop_front(b, &f, u0, u1, &mut frng);
             }
         }
     }
+
+    // Своё зерно (`frng`), чтобы мелочи фасада не сдвигали остальную планировку усадьбы.
+    facade_details(b, &f, &windows, rooms[vestibule], shops, two_storey, &mut frng);
 
     // ---- Боковое крыло вдоль боковой улицы (u = 0) ----
     let side_v0 = FRONT_D;
@@ -292,7 +408,31 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng) {
     b.mesh(Mat::Tile).gable_roof_slopes(Vec2::new(top.x0 - 0.08, top.z0), Vec2::new(top.x1 + 0.08, top.z1), yard_wall_h, yard_wall_h + 0.22, !f.front.along_x());
 
     // ---- Двор ----
-    courtyard(b, &f, (SIDE_D, w - OUTER_T), (FRONT_D, d - back_d - 0.3), has_back_wing, rng);
+    let court = ((SIDE_D, w - OUTER_T), (FRONT_D, d - back_d - 0.3));
+    if mode != LotMode::Site {
+        courtyard(b, &f, court.0, court.1, has_back_wing, rng);
+    }
+    let top = h_front + 1.4;
+    if !lived {
+        // Пустой дом: голые стены, сундук в первой комнате и ларь в кладовой — их отопрёт хозяин.
+        let mut rooms: Vec<estate::RoomPlan> = plan.iter().map(|r| estate::RoomPlan { r: *r, floor: 0.0, kinds: estate::GROUND_KINDS.to_vec() }).collect();
+        if has_back_wing {
+            let v0 = d - back_d;
+            rooms.push(estate::RoomPlan { r: f.rect(SIDE_D, w - OUTER_T, v0 + INNER_T, d - 0.15), floor: 0.0, kinds: vec![crate::level::FurnishKind::Storeroom, crate::level::FurnishKind::Kitchen, crate::level::FurnishKind::Workshop] });
+        }
+        if two_storey {
+            rooms.push(estate::RoomPlan { r: f.rect(OUTER_T, w - OUTER_T, OUTER_T, iv - INNER_T / 2.0), floor: H1 + 0.12, kinds: estate::UPPER_KINDS.to_vec() });
+        }
+        for (n, name) in [(0usize, "Сундук"), (1, "Ларь")] {
+            let Some(room) = rooms.get(n) else { continue };
+            let r = room.r.inset(0.15);
+            // В углу комнаты.
+            let along_x = r.w() > r.d();
+            let chest = if along_x { Rect::new(r.x1 - 1.1, r.z0, r.x1 - 0.1, r.z0 + 0.6) } else { Rect::new(r.x0, r.z1 - 1.1, r.x0 + 0.6, r.z1 - 0.1) };
+            interior::chest(b, chest, name);
+        }
+        return HouseInfo { rooms, entrance, two_storey, top, court, back_wing: has_back_wing };
+    }
 
     // ---- Обстановка ----
     let mut people = interior::Household::new();
@@ -334,6 +474,147 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng) {
     let yard = f.rect(SIDE_D, w - OUTER_T, FRONT_D, d - back_d - 0.3);
     let _ = stair_rect;
     interior::yard_extras(b, yard, stair_rect, &mut people, rng);
+    HouseInfo { rooms: Vec::new(), entrance, two_storey, top, court, back_wing: has_back_wing }
+}
+
+/// Мелочи фасада, без которых стена выглядит макетом: распахнутые ставни, подоконные плиты,
+/// карниз между этажами, у входа — каменная скамья и пара амфор.
+fn facade_details(b: &mut Builder, f: &Frame, windows: &[(f32, f32, f32, f32)], (vu0, vu1): (f32, f32), shops: bool, two_storey: bool, rng: &mut Rng) {
+    let dec = |b: &mut Builder, r: Rect, y0: f32, y1: f32, mat: Mat| b.decor([r.x0, y0, r.z0], [r.x1, y1, r.z1], mat);
+    for &(u, w, sill, top) in windows {
+        // Подоконная плита из известняка чуть выступает из стены.
+        dec(b, f.rect(u - w / 2.0 - 0.1, u + w / 2.0 + 0.1, -0.09, 0.02), sill - 0.09, sill, Mat::Limestone);
+        // Перемычка над окном — деревянный брус.
+        dec(b, f.rect(u - w / 2.0 - 0.18, u + w / 2.0 + 0.18, -0.05, 0.02), top, top + 0.16, Mat::Wood);
+        // Ставни: чаще распахнуты к стене, иногда одной створкой.
+        if rng.chance(0.8) {
+            let leaf = w / 2.0 + 0.04;
+            for side in [-1.0f32, 1.0] {
+                if side > 0.0 && rng.chance(0.15) {
+                    continue;
+                }
+                let inner = u + side * (w / 2.0 + 0.05);
+                let outer = inner + side * leaf;
+                dec(b, f.rect(inner.min(outer), inner.max(outer), -0.07, -0.02), sill + 0.02, top - 0.02, Mat::Wood);
+                // Две поперечные планки.
+                for y in [sill + 0.12, top - 0.14] {
+                    dec(b, f.rect(inner.min(outer) + 0.03, inner.max(outer) - 0.03, -0.095, -0.07), y, y + 0.07, Mat::Wood);
+                }
+            }
+        }
+    }
+    // Тяга между этажами.
+    if two_storey {
+        dec(b, f.rect(0.05, f.w() - 0.05, -0.07, 0.02), H1 - 0.06, H1 + 0.1, Mat::Limestone);
+    }
+    // Скамья у входа и амфоры (у лавок — свои прилавки).
+    if !shops {
+        let door = (vu0 + vu1) / 2.0;
+        if rng.chance(0.55) && door + 2.3 < f.w() - 0.3 {
+            let r = f.rect(door + 1.0, door + 2.3, -0.42, -0.02);
+            b.solid([r.x0, 0.0, r.z0], [r.x1, 0.42, r.z1], Mat::Limestone);
+        }
+        if rng.chance(0.45) && door - 1.6 > 0.4 {
+            for k in 0..(1 + rng.int(2)) {
+                kit::amphora(b, f.p(door - 1.1 - k as f32 * 0.42, 0.0, -0.28), 1.0, rng.int(3) as u32);
+            }
+        }
+    }
+}
+
+/// Товар, выставленный под навесом по бокам от входа: корзины, мешки, кувшины, амфоры.
+/// Только декор у самой стены (проход в лавку и улица свободны), зерно — своё.
+fn shop_front(b: &mut Builder, f: &Frame, u0: f32, u1: f32, rng: &mut Rng) {
+    for (u, dir) in [(u0 + 0.45, 1.0f32), (u1 - 0.45, -1.0)] {
+        if rng.chance(0.1) {
+            continue;
+        }
+        let at = |du: f32, dv: f32| f.p(u + du * dir, 0.0, -0.35 - dv);
+        match rng.int(4) {
+            0 => {
+                // Корзины с зерном, бобами, луком.
+                for k in 0..2 {
+                    let fill = [Mat::Thatch, Mat::Earth, Mat::HerbGreen][rng.int(3)];
+                    basket(b, at(0.0, k as f32 * 0.55), rng.range(0.18, 0.24), fill);
+                }
+            }
+            1 => {
+                // Мешки, один на другом.
+                sack(b, at(0.0, 0.0), 0.62);
+                sack(b, at(0.05, 0.5), 0.55);
+                if rng.chance(0.5) {
+                    basket(b, at(0.0, 1.0), 0.2, Mat::Thatch);
+                }
+            }
+            2 => {
+                // Кувшины и миски на низкой подставке.
+                let c = at(0.0, 0.35);
+                let m = b.mesh(Mat::Wood);
+                m.cuboid(c - Vec3::new(0.32, 0.0, 0.32), c + Vec3::new(0.32, 0.42, 0.32));
+                for k in 0..3 {
+                    let q = c + Vec3::new(-0.18 + k as f32 * 0.18, 0.42, if k == 1 { 0.1 } else { -0.08 });
+                    kit::jug(b, q, rng.range(0.2, 0.32), Mat::Ceramic);
+                }
+            }
+            _ => {
+                // Амфоры, прислонённые к стене.
+                for k in 0..2 {
+                    kit::amphora(b, at(k as f32 * 0.4, 0.0), 0.95, rng.int(3) as u32);
+                }
+            }
+        }
+    }
+}
+
+/// Плетёная корзина с насыпанным товаром.
+fn basket(b: &mut Builder, p: Vec3, r: f32, fill: Mat) {
+    let h = r * 1.1;
+    b.mesh(Mat::Thatch).lathe(p, &[(0.0, 0.0), (r * 0.8, 0.0), (r, h * 0.85), (r * 1.04, h), (r * 0.94, h), (r * 0.86, h * 0.3), (0.0, h * 0.3)], 12);
+    b.mesh(fill).lathe(p + Vec3::Y * h * 0.82, &[(r * 0.95, 0.0), (r * 0.6, r * 0.22), (0.0, r * 0.3)], 12);
+}
+
+/// Мешок из грубого холста, завязанный у горла.
+fn sack(b: &mut Builder, p: Vec3, h: f32) {
+    let r = h * 0.36;
+    b.mesh(Mat::Felt).lathe(p, &[(0.0, 0.0), (r * 0.9, 0.0), (r * 1.05, h * 0.3), (r, h * 0.62), (r * 0.55, h * 0.85), (r * 0.18, h * 0.9), (r * 0.3, h), (0.0, h)], 10);
+}
+
+/// Настенная полка на кронштейнах (без коллизии) с кувшинами, мисками и кружками.
+fn wall_shelf(b: &mut Builder, a: Vec3, c: Vec3, n: Vec3, rng: &mut Rng) {
+    let along = (c - a).normalize_or_zero();
+    let len = (c - a).length();
+    b.mesh(Mat::Wood).beam(a + n * 0.14, c + n * 0.14, 0.13, 0.02, Vec3::Y);
+    for t in [0.12, 0.88] {
+        let q = a + (c - a) * t;
+        b.mesh(Mat::Wood).beam(q + n * 0.02 - Vec3::Y * 0.25, q + n * 0.24 - Vec3::Y * 0.02, 0.02, 0.02, along);
+    }
+    let k = (len / 0.2) as usize;
+    for i in 0..k {
+        if rng.chance(0.3) {
+            continue;
+        }
+        let q = a + along * (0.1 + i as f32 * 0.2) + n * 0.14 + Vec3::Y * 0.02;
+        if rng.chance(0.4) {
+            // Миска.
+            b.mesh(Mat::Ceramic).lathe(q, &[(0.0, 0.0), (0.04, 0.0), (0.08, 0.06), (0.07, 0.06), (0.0, 0.02)], 9);
+        } else {
+            kit::jug(b, q, rng.range(0.1, 0.24), Mat::Ceramic);
+        }
+    }
+}
+
+/// Шест под потолком с подвешенными связками (лук, чеснок, травы, колбасы).
+fn hanging_wares(b: &mut Builder, a: Vec3, c: Vec3, mats: &[Mat], rng: &mut Rng) {
+    b.mesh(Mat::Wood).beam(a, c, 0.025, 0.025, Vec3::Y);
+    let len = (c - a).length();
+    let n = (len / 0.35) as usize;
+    for i in 0..n {
+        let q = a + (c - a) * ((i as f32 + 0.5) / n as f32);
+        let drop = rng.range(0.18, 0.34);
+        b.mesh(Mat::Wood).beam(q, q - Vec3::Y * 0.12, 0.004, 0.004, Vec3::X);
+        let m = mats[rng.int(mats.len())];
+        b.mesh(m).lathe(q - Vec3::Y * (0.12 + drop), &[(0.0, 0.0), (0.035, 0.04), (0.045, drop * 0.5), (0.03, drop), (0.0, drop)], 7);
+    }
 }
 
 fn shop_fittings(b: &mut Builder, f: &Frame, u0: f32, u1: f32, kind: Shop, rng: &mut Rng) {
@@ -345,6 +626,35 @@ fn shop_fittings(b: &mut Builder, f: &Frame, u0: f32, u1: f32, kind: Shop, rng: 
     // Полки у задней стены.
     let back = f.rect(u0 + 0.1, u1 - 0.1, FRONT_D - INNER_T / 2.0 - 0.45, FRONT_D - INNER_T / 2.0 - 0.1);
     let p = counter.center(1.0);
+    // Мелочи, которые делают лавку обжитой: полка на боковой стене и связки под потолком.
+    // Своё зерно — чтобы не сдвинуть выбор товара и обстановку.
+    {
+        let mut drng = Rng::new((r.x0 * 3.0 + r.z0 * 17.0) as i32 as u32 ^ 0xdec0);
+        let n = (f.p(u0 + 1.0, 0.0, 1.0) - f.p(u0, 0.0, 1.0)).normalize();
+        let (v0, v1) = (OUTER_T + 1.8, FRONT_D - INNER_T / 2.0 - 0.6);
+        if v1 - v0 > 0.6 {
+            wall_shelf(b, f.p(u0 + 0.02, 1.55, v0), f.p(u0 + 0.02, 1.55, v1), n, &mut drng);
+        }
+        let mats: &[Mat] = match kind {
+            Shop::Apothecary => &[Mat::HerbGreen, Mat::HerbSilver],
+            Shop::Tavern => &[Mat::Thatch, Mat::Earth, Mat::Wood],
+            Shop::Bookseller => &[],
+            Shop::None => &[Mat::Thatch, Mat::HerbGreen, Mat::Earth],
+        };
+        if !mats.is_empty() && kind != Shop::Apothecary {
+            let v = (OUTER_T + FRONT_D) / 2.0 + 0.3;
+            hanging_wares(b, f.p(u0 + 0.4, H1 - 0.35, v), f.p(u1 - 0.4, H1 - 0.35, v), mats, &mut drng);
+        }
+        if kind == Shop::Tavern {
+            // Кружки и кувшинчики на прилавке, штабель амфор в углу.
+            for k in 0..4 {
+                kit::jug(b, f.p(u0 + 0.5 + k as f32 * 0.35, 1.0, OUTER_T + 1.15), drng.range(0.1, 0.16), Mat::Ceramic);
+            }
+            for k in 0..3 {
+                kit::amphora(b, f.p(u0 + 0.35 + k as f32 * 0.4, 0.0, FRONT_D - 1.3), 1.0, drng.int(3) as u32);
+            }
+        }
+    }
     match kind {
         Shop::Apothecary => {
             // Аптекарь: склянки, ступка, весы, пучки сушёных трав под потолком.

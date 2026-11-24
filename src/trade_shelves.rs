@@ -124,7 +124,10 @@ fn price_info(tw: &TradeWorld, player: u64, id: MerchantId, uid: ItemUid) -> Opt
     let normal = def.stock.iter().find(|st| st.item == item.info().name).map(|st| st.max).unwrap_or(1);
     let count: u16 = m.shelf.iter().filter(|i| i.base == item.base).map(|i| i.count).sum();
     let (w, h) = item.size();
-    Some((ask_price(def, item.base, item.quality, standing, count, normal), item.count, w * h <= MAX_STEAL_CELLS))
+    let price = ask_price(def, item.base, item.quality, standing, count, normal);
+    // Умение торговаться — та же скидка, что в окне лавки.
+    let price = ((price as f32 * tw.haggle(player).0).round() as u32).max(price.min(1));
+    Some((price, item.count, w * h <= MAX_STEAL_CELLS))
 }
 
 /// Товар унесли с прилавка в руках: заметил ли торговец.
@@ -330,6 +333,8 @@ mod tests {
                 thefts: vec![],
                 stall: stall_layout(def.faction.outside_walls(), i % 2 == 0),
                 dead: false,
+                market: [1.0; Category::COUNT],
+                supply: [1.0; Category::COUNT],
             };
             restock(&mut m, &mut rng, &mut uids, true);
             let placed = layout(&m);

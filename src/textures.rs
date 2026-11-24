@@ -8,7 +8,7 @@
 //!
 //! Для фотоматериалов уровня (камень, дерево, земля…) см. `surface_textures`.
 
-use bevy::asset::AssetEvent;
+use bevy::asset::{AssetEvent, RenderAssetUsages};
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
@@ -53,8 +53,46 @@ fn mip_model_images(mut events: MessageReader<AssetEvent<Image>>, server: Res<As
         // Карты нормалей и шероховатости из glTF не отличить по имени (метки вида «Texture3»),
         // поэтому линейные картинки просто усредняются: нормали вдали чуть сглаживаются — это и нужно.
         generate_mips(&mut img, false);
+        // Настройка «Текстуры»: лишние верхние уровни не грузим в видеопамять.
+        cap_size(&mut img, crate::settings::startup().texture_cap());
         img.sampler = quality_sampler(repeat);
+        // Копия в оперативной памяти больше не нужна — после загрузки в видеокарту её отпускаем.
+        img.asset_usage = RenderAssetUsages::RENDER_WORLD;
     }
+}
+
+/// Отбрасывает верхние мип-уровни, пока большая сторона не станет не больше `cap`
+/// (0 — без ограничения). Картинка должна уже иметь мип-уровни (`generate_mips`).
+pub fn cap_size(img: &mut Image, cap: u32) {
+    if cap == 0 {
+        return;
+    }
+    let size = img.texture_descriptor.size;
+    let (w, h, layers) = (size.width, size.height, size.depth_or_array_layers as usize);
+    let levels = img.texture_descriptor.mip_level_count;
+    let mut drop = 0;
+    while drop + 1 < levels && (w >> drop).max(h >> drop) > cap {
+        drop += 1;
+    }
+    if drop == 0 {
+        return;
+    }
+    let Some(data) = img.data.take() else { return };
+    let level_bytes = |l: u32| (((w >> l).max(1)) * ((h >> l).max(1)) * 4) as usize;
+    let per_layer: usize = (0..levels).map(level_bytes).sum();
+    if data.len() != per_layer * layers {
+        img.data = Some(data);
+        return;
+    }
+    let skip: usize = (0..drop).map(level_bytes).sum();
+    let mut out = Vec::with_capacity((per_layer - skip) * layers);
+    for layer in 0..layers {
+        out.extend_from_slice(&data[layer * per_layer + skip..(layer + 1) * per_layer]);
+    }
+    img.data = Some(out);
+    img.texture_descriptor.size.width = (w >> drop).max(1);
+    img.texture_descriptor.size.height = (h >> drop).max(1);
+    img.texture_descriptor.mip_level_count = levels - drop;
 }
 
 // sRGB <-> линейное через таблицу (на мип-уровнях усредняем свет, а не байты).
@@ -160,7 +198,6 @@ fn downsample(src: &[u8], w: u32, h: u32, srgb: bool, normal: bool) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::asset::RenderAssetUsages;
     use bevy::render::render_resource::{Extent3d, TextureDimension};
 
     #[test]
@@ -173,5 +210,20 @@ mod tests {
         assert_eq!(img.data.as_ref().unwrap().len(), (32 + 8 + 2 + 1) * 4 * 3);
         // Ровный цвет не меняется на мип-уровнях.
         assert!(img.data.as_ref().unwrap().iter().all(|&v| v == 200));
+    }
+
+    #[test]
+    fn cap_drops_top_levels_of_every_layer() {
+        let size = Extent3d { width: 8, height: 8, depth_or_array_layers: 2 };
+        let mut data = vec![10u8; 8 * 8 * 4 * 2];
+        data[8 * 8 * 4..].fill(90);
+        let mut img = Image::new(size, TextureDimension::D2, data, TextureFormat::Rgba8Unorm, RenderAssetUsages::default());
+        generate_mips(&mut img, false);
+        cap_size(&mut img, 2);
+        assert_eq!(img.texture_descriptor.size.width, 2);
+        assert_eq!(img.texture_descriptor.mip_level_count, 2);
+        let d = img.data.as_ref().unwrap();
+        assert_eq!(d.len(), (4 + 1) * 4 * 2);
+        assert!(d[..20].iter().all(|&v| v == 10) && d[20..].iter().all(|&v| v == 90));
     }
 }

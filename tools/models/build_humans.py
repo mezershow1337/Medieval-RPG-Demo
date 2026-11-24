@@ -28,6 +28,8 @@ from humanrig import B, BONES  # noqa: E402
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 FAST = "--fast" in sys.argv
 TEX = 512 if FAST else 1024
+# Оболочки причёски и бороды: доля полной толщины для каждого слоя (от кожи наружу).
+HAIR_LAYERS = (0.45, 0.75, 1.0)
 TEX_HI = 1024 if FAST else 2048
 
 
@@ -270,15 +272,20 @@ def beard_mask(P, N, style):
     front = smooth(-0.02, -0.08, z)
     # Линия скул: от уха вниз к углу рта.
     cheek_top = 1.612 - 0.55 * np.maximum(0.047 - ax, 0)
-    m = smooth(cheek_top + 0.004, cheek_top - 0.008, y) * front
+    # Края широкие и мягкие: в шейдере по ним редеют отдельные волоски, а не режется контур.
+    m = smooth(cheek_top + 0.012, cheek_top - 0.022, y) * front
     # Снизу — по шее, под подбородком.
     lower = 1.50 if style == "full" else 1.515
-    m *= smooth(lower - 0.01, lower + 0.012, y)
+    m *= smooth(lower - 0.02, lower + 0.016, y)
     # Сзади до ушей.
-    m *= smooth(0.075, 0.062, ax) + smooth(-0.07, -0.12, z)
+    m *= smooth(0.079, 0.06, ax) + smooth(-0.07, -0.12, z)
     m = np.clip(m, 0, 1)
     # Губы и полоса под нижней губой — без волос (у короткой бороды).
-    lips = face_dist(P, MOUTH, 0.03, 0.011)
+    # Рот: у полной бороды усы закрывают верхнюю губу, видна только нижняя.
+    if style == "full":
+        lips = face_dist(P, MOUTH + [0, -0.005, 0], 0.019, 0.0055)
+    else:
+        lips = face_dist(P, MOUTH, 0.03, 0.011)
     m *= smooth(0.85, 1.15, lips)
     if style != "full":
         m *= 1 - smooth(1.4, 0.9, face_dist(P, MOUTH + [0, -0.018, 0], 0.012, 0.006)) * 0.7
@@ -307,7 +314,7 @@ def skin_shader(P, N, hit):
     # Губы.
     lips = face_dist(P, MOUTH, 0.026, 0.0085) * smooth(-0.135, -0.15, z)[..., None][..., 0] ** 0
     lipm = smooth(1.05, 0.75, lips) * smooth(-0.13, -0.15, z)
-    col = col * (1 - 0.55 * lipm[..., None]) + srgb(0.6, 0.33, 0.3) * 0.55 * lipm[..., None]
+    col = col * (1 - 0.4 * lipm[..., None]) + srgb(0.58, 0.34, 0.31) * 0.4 * lipm[..., None]
     # Брови.
     brow = np.zeros_like(x)
     for s in (-1, 1):
@@ -506,14 +513,20 @@ def lamellar_shader(P, N, hit):
     return {"color": col, "rough": rough, "metal": metal, "height": plate * 2.0 - lace * 0.5 + 0.3 * (1 - fv) * plate}
 
 
-def hair_shader(style, color=(0.2, 0.13, 0.08)):
+def hair_shader(style, color=(0.2, 0.13, 0.08), layer=0, layers=1):
+    """Волосы и борода. Причёска — несколько оболочек-«слоёв» (layer 0 — у кожи): внутренние
+    гуще и темнее (в глубине пряди тень), внешние реже — так появляются объём и рваный край."""
+    depth = layer / max(layers - 1, 1)
+
     def f(P, N, hit):
         x, y, z = P[..., 0], P[..., 1], P[..., 2]
         ax = np.abs(x)
         # Пряди: шум, вытянутый вдоль направления роста (от макушки вниз и назад).
         q = np.stack([x * 1.0, y * 0.15, z * 1.0], -1)
-        strands = fbm(q, 900.0, 3, 61)
-        col = srgb(*color) * (0.6 + 0.7 * strands)[..., None]
+        strands = fbm(q, 900.0, 3, 61 + layer * 7)
+        # Средняя яркость текстуры ~1: цвет задаёт оттенок в игре (Outfit::hair_color),
+        # иначе тёмные волосы уходят в сплошной чёрный.
+        col = srgb(*color) * ((0.75 + 0.6 * strands) * (0.85 + 0.3 * depth))[..., None]
         if style in ("beard", "beard_short"):
             m = beard_mask(P, N, "full" if style == "beard" else "short")
             edge = m * (1.0 if style == "beard" else 0.8)
@@ -528,14 +541,65 @@ def hair_shader(style, color=(0.2, 0.13, 0.08)):
             # Над ушами — выемка.
             ear = np.exp(-(((ax - 0.075) / 0.012) ** 2 + ((y - 1.635) / 0.025) ** 2 + ((z + 0.035) / 0.03) ** 2))
             edge *= 1 - smooth(0.3, 0.6, ear)
-        alpha = smooth(0.35, 0.75, edge * (0.75 + 0.5 * fbm(P, 700.0, 2, 62)))
-        return {"color": col, "alpha": alpha, "rough": 0.55 + 0.2 * strands, "height": strands}
+        cover = edge * (0.75 + 0.5 * fbm(P, 700.0, 2, 62 + layer * 7)) * (1.0 - 0.45 * depth)
+        if layers > 1:
+            # Внешние слои — отдельные пряди: вырезаем по вытянутому шуму.
+            cover *= np.clip(0.55 + 1.6 * (strands - 0.5) * depth + (1 - depth) * 0.45, 0, 1.2)
+        if style in ("beard", "beard_short"):
+            # Каждый «волосок» со своим порогом: к краю бороды они редеют по одному,
+            # сквозь них видна кожа — нет тёмной маски с ровным контуром.
+            # Внутри (edge = 1) нижний слой сплошной, редеют только края и внешние пряди.
+            dens = edge * 1.4 * (1.0 - 0.3 * depth)
+            if layers > 1:
+                dens *= np.clip(0.55 + 1.6 * (strands - 0.5) * depth + (1 - depth) * 0.45, 0, 1.2)
+            follicle = value_noise(P, 450.0, 91 + layer * 7)
+            alpha = smooth(follicle - 0.1, follicle + 0.1, dens)
+        else:
+            alpha = smooth(0.35, 0.75, cover)
+        return {"color": col, "alpha": alpha, "rough": 0.42 + 0.2 * strands, "height": strands}
 
     return f
 
 
 # =============================================================================================
 # Сборка
+
+
+def make_skirt(bld, hem, off, narrow=0.78):
+    """Юбка туники/доспеха из юбки MakeHuman: сужена к подолу, не врезается в ноги, висит на бёдрах."""
+    part = bld.extract("helper-skirt", lambda c: c[1] > hem, uv_box=True)
+    part = bld.shell(part, off, 1)
+    # Юбка MakeHuman рассчитана на расставленные ноги: сужаем к подолу и перевешиваем на бёдра.
+    pos = part.pos.copy()
+    y = pos[:, 1]
+    k = 1 - (1 - narrow) * smooth(1.0, hem, y)
+    pos[:, 0] *= k
+    pos[:, 2] = (pos[:, 2] + 0.015) * (0.92 + 0.08 * k) - 0.015
+    # Сужая, не даём подолу врезаться в ноги: держим зазор от колготок (бёдер) по их нормали.
+    legs = np.array(sorted({i for f, g in zip(bld.base.faces, bld.base.fgroups) if g == "helper-tights" for i in f}))
+    legs = legs[(bld.v[legs, 1] < 1.0) & (bld.v[legs, 1] > hem - 0.1)]
+    lp, ln = bld.v[legs], bld.normals[legs]
+    clear = off + 0.012
+    for _ in range(2):
+        for s0 in range(0, len(pos), 512):
+            q = pos[s0:s0 + 512]
+            d2 = ((q[:, None, :] - lp[None, :, :]) ** 2).sum(-1)
+            j = d2.argmin(1)
+            t, n = lp[j], ln[j]
+            d = ((q - t) * n).sum(1)
+            low = (d < clear) & (q[:, 1] < 0.98)
+            q[low] += (clear - d[low])[:, None] * n[low]
+            pos[s0:s0 + 512] = q
+    part.pos = pos
+    W = np.zeros((len(pos), len(BONES)))
+    # У подола юбка идёт почти целиком за бедром — иначе при приседе бедро прорывает её спереди.
+    a = 0.95 * smooth(0.98, hem + 0.05, y)
+    side = 1 / (1 + np.exp(-pos[:, 0] / 0.03))
+    W[:, B["pelvis"]] = 1 - a
+    W[:, B["thigh_r"]] = a * side
+    W[:, B["thigh_l"]] = a * (1 - side)
+    part.W = W
+    return part
 
 
 def build():
@@ -548,8 +612,9 @@ def build():
     wrist_y = rig.rest_world()[B["hand_r"]][1, 3]
 
     def is_head(c):
-        # Голова и шея (под воротом туники кожа заходит на пару сантиметров).
-        return c[1] > 1.5 or (c[1] > 1.405 and abs(c[0]) < 0.075)
+        # Голова и шея. Под ворот кожа заходит с запасом: края выреза у туники и кожи шеи —
+        # «зубцы» по граням, и без запаса между ними видна изнанка одежды.
+        return c[1] > 1.5 or (c[1] > 1.37 and abs(c[0]) < 0.1)
 
     def is_hand(c):
         return c[1] < wrist_y + 0.035 and abs(c[0]) > 0.14 and c[1] > 0.55
@@ -591,17 +656,25 @@ def build():
         part = bld.extract("body", keep)
         return bld.shell(part, off, iters)
 
-    for style, color in (("short", (0.8, 0.78, 0.75)), ("long", (0.85, 0.83, 0.8))):
+    for style, color in (("short", (1.0, 0.97, 0.93)), ("long", (1.0, 0.97, 0.93))):
         keep = lambda c: c[1] > (1.56 if style == "short" else 1.50) and (c[2] > -0.11 or c[1] > 1.69) and not (c[1] < 1.62 and c[2] < -0.04)
-        part = head_shell(keep, (lambda r: 0.004 + 0.006 * smooth(1.6, 1.76, r[:, 1])) if style == "short" else (lambda r: 0.008 + 0.012 * smooth(1.66, 1.76, r[:, 1]) + 0.01 * smooth(1.6, 1.5, r[:, 1])), 2)
-        mat = bld.material(f"hair_{style}", bld.bake(part, TEX, hair_shader(style, color)), normal_strength=3.0, alpha_cutoff=0.5, double=True, metallic=0.0)
-        bld.emit(f"hair.{style}", [(part, mat)])
+        thick = (lambda r: 0.004 + 0.006 * smooth(1.6, 1.76, r[:, 1])) if style == "short" else (lambda r: 0.008 + 0.012 * smooth(1.66, 1.76, r[:, 1]) + 0.01 * smooth(1.6, 1.5, r[:, 1]))
+        prims = []
+        for layer, k in enumerate(HAIR_LAYERS):
+            part = head_shell(keep, lambda r, k=k: thick(r) * k, 2)
+            tex = TEX if layer == 0 else TEX // 2
+            mat = bld.material(f"hair_{style}" if layer == 0 else f"hair_{style}.l{layer}", bld.bake(part, tex, hair_shader(style, color, layer, len(HAIR_LAYERS))), normal_strength=3.0, alpha_cutoff=0.5, double=True, metallic=0.0)
+            prims.append((part, mat))
+        bld.emit(f"hair.{style}", prims)
 
     for style, thick in (("short", 0.0025), ("full", 0.01)):
         keep = lambda c: 1.49 < c[1] < 1.63 and c[2] < -0.02 and abs(c[0]) < 0.085
-        part = head_shell(keep, lambda r: thick * (0.4 + 0.6 * smooth(1.6, 1.53, r[:, 1])) + 0.0015, 2)
-        mat = bld.material(f"beard_{style}", bld.bake(part, TEX // 2, hair_shader("beard" if style == "full" else "beard_short", (0.8, 0.78, 0.75))), normal_strength=3.0, alpha_cutoff=0.5, double=True, metallic=0.0)
-        bld.emit(f"beard.{style}", [(part, mat)])
+        prims = []
+        for layer, k in enumerate(HAIR_LAYERS):
+            part = head_shell(keep, lambda r, k=k: (thick * (0.4 + 0.6 * smooth(1.6, 1.53, r[:, 1]))) * k + 0.0015, 2)
+            mat = bld.material(f"beard_{style}" if layer == 0 else f"beard_{style}.l{layer}", bld.bake(part, TEX // 2, hair_shader("beard" if style == "full" else "beard_short", (1.0, 0.97, 0.93), layer, len(HAIR_LAYERS))), normal_strength=3.0, alpha_cutoff=0.5, double=True, metallic=0.0)
+            prims.append((part, mat))
+        bld.emit(f"beard.{style}", prims)
 
     # --- Одежда поверх колготок MakeHuman.
     def tights(keep, off, iters=2):
@@ -609,23 +682,7 @@ def build():
         return bld.shell(part, off, iters)
 
     def skirt(hem, off, narrow=0.78):
-        part = bld.extract("helper-skirt", lambda c: c[1] > hem, uv_box=True)
-        part = bld.shell(part, off, 1)
-        # Юбка MakeHuman рассчитана на расставленные ноги: сужаем к подолу и перевешиваем на бёдра.
-        pos = part.pos.copy()
-        y = pos[:, 1]
-        k = 1 - (1 - narrow) * smooth(1.0, hem, y)
-        pos[:, 0] *= k
-        pos[:, 2] = (pos[:, 2] + 0.015) * (0.92 + 0.08 * k) - 0.015
-        part.pos = pos
-        W = np.zeros((len(pos), len(BONES)))
-        a = 0.75 * smooth(0.98, hem + 0.05, y)
-        side = 1 / (1 + np.exp(-pos[:, 0] / 0.03))
-        W[:, B["pelvis"]] = 1 - a
-        W[:, B["thigh_r"]] = a * side
-        W[:, B["thigh_l"]] = a * (1 - side)
-        part.W = W
-        return part
+        return make_skirt(bld, hem, off, narrow)
 
     neck = 1.455
 

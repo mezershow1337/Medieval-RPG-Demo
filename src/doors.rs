@@ -75,7 +75,7 @@ fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, l
     }
 }
 
-fn receive_door_messages(mut server: ResMut<RenetServer>, game: Res<crate::server::GameWorld>, level: Res<LevelColliders>) {
+fn receive_door_messages(mut server: ResMut<RenetServer>, game: Res<crate::server::GameWorld>, level: Res<LevelColliders>, mut locks: Option<ResMut<crate::towns_server::Locks>>) {
     for pid in server.clients_id() {
         while let Some(bytes) = server.receive_message(pid, CH_DOOR) {
             let Some(DoorClientMessage::Toggle { id }) = decode::<DoorClientMessage>(&bytes) else { continue };
@@ -87,6 +87,13 @@ fn receive_door_messages(mut server: ResMut<RenetServer>, game: Res<crate::serve
             let eye = actor.pose.feet + Vec3::Y * 1.6;
             // Небольшой запас на задержку сети.
             if distance_to_door(&level, id, eye) > DOOR_REACH + 0.8 {
+                continue;
+            }
+            // Чужой дом заперт, недостроенный — без дверей.
+            if let Some(locks) = locks.as_mut()
+                && !locks.door(id as u32, pid)
+            {
+                server.send_message(pid, CH_DOOR, encode(&DoorServerMessage::Set { id: id as u32, open: level.door_open(id) }));
                 continue;
             }
             let open = !level.door_open(id);
@@ -277,13 +284,20 @@ fn setup_door_prompt(mut commands: Commands, fonts: Res<crate::inventory_ui::UiF
     commands
         .spawn(Node { position_type: PositionType::Absolute, width: percent(100), top: percent(56), justify_content: JustifyContent::Center, ..default() })
         .with_children(|p| {
-            p.spawn((
-                DoorPrompt,
-                Text::new(""),
-                TextFont { font: fonts.bold.clone().into(), font_size: bevy::text::FontSize::Px(20.0), ..default() },
-                TextColor(Color::WHITE),
-                TextShadow::default(),
-            ));
+            crate::ui_theme::theme().plaque(p).with_children(|p| {
+                p.spawn((
+                    DoorPrompt,
+                    Text::new(""),
+                    TextFont {
+                        font: fonts.bold.clone().into(),
+                        font_size: bevy::text::FontSize::Px(20.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    TextShadow::default(),
+                    crate::ui_theme::Plaque,
+                ));
+            });
         });
 }
 
