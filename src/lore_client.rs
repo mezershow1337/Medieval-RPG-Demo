@@ -954,6 +954,12 @@ fn dev_shot(
                 brew.open_vessel(uid, crate::brewing::Vessel::ClayPot);
             }
         }
+        // `MRPG_SHOT_UI=notice` — показать пару сообщений игроку (проверить, что их видно).
+        if ui == "notice" {
+            let now = time.elapsed_secs();
+            loot.notify("Вы изучили: «Об исцелении ран» — теперь знаете перевязку.", now);
+            loot.notify("Подобрано: Тысячелистник ×3", now);
+        }
         if std::env::var("MRPG_SHOT_UI").as_deref() == Ok("inventory") {
             loot.ui_open = true;
             loot.rev += 1;
