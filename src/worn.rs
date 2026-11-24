@@ -124,9 +124,10 @@ pub fn mount(slot: &str, base: ItemBaseId) -> (Bone, Transform) {
 }
 
 /// Повесить вещи на суставы готовых скелетов.
-pub fn attach_worn(mut commands: Commands, models: Option<Res<ItemModels>>, mut rigs: Query<(&Rig, &mut Worn)>) {
+pub fn attach_worn(mut commands: Commands, models: Option<Res<ItemModels>>, mut rigs: Query<(&Rig, &mut Worn, Option<&crate::rig::RigBulk>)>) {
     let Some(models) = models else { return };
-    for (rig, mut worn) in &mut rigs {
+    for (rig, mut worn, bulk) in &mut rigs {
+        let bulk = bulk.map_or(0.0, |b| b.0);
         if worn.built == Some(worn.want) {
             continue;
         }
@@ -138,7 +139,16 @@ pub fn attach_worn(mut commands: Commands, models: Option<Res<ItemModels>>, mut 
         let w = worn.want;
         for (slot, id) in [("sheath", w.sheathed), ("quiver", w.quiver), ("neck", w.neck), ("ring", w.ring)] {
             let Some(base) = id.map(ItemBaseId).filter(|b| (b.0 as usize) < crate::items::ITEM_BASES.len() && has_model(*b)) else { continue };
-            let (bone, tf) = mount(slot, base);
+            let (bone, mut tf) = mount(slot, base);
+            // У плотного телосложения грудь, бока и спина дальше от костей.
+            tf.translation += bulk
+                * match (slot, bone) {
+                    ("neck", _) => Vec3::new(0.0, 0.0, -0.045),
+                    ("quiver", _) => Vec3::new(0.035, 0.0, 0.02),
+                    (_, Bone::Torso) => Vec3::new(0.0, 0.0, 0.05),
+                    ("sheath", _) => Vec3::new(-0.035, 0.0, -0.015),
+                    _ => Vec3::ZERO,
+                };
             let e = commands.spawn((WorldAssetRoot(models.get(base)), tf, ChildOf(rig.joint(bone)))).id();
             worn.spawned.push(e);
         }

@@ -179,7 +179,7 @@ fn look_for(me: usize, role: Role, s: &NpcState, t: f32, phase: f32, night: bool
     i.twist = sway * 0.1;
     if s.walking {
         i.walk = 1.0;
-        i.walk_phase = s.walked / 1.5 * TAU + phase;
+        i.walk_phase = s.walked / crate::rig::step_cycle(1.3) * TAU + phase;
         // В дождь идут, сгорбившись.
         i.lean = -0.12 * rain;
         i.twist = 0.0;

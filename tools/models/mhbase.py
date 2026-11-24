@@ -93,8 +93,16 @@ class Base:
         ground = v[body, 1].min()
         top = v[body, 1].max()
         v[:, 1] -= ground
-        v *= stature / (top - ground)
+        self.scale = stature / (top - ground)
+        v *= self.scale
         self.v = v
+
+    def target_delta(self, rel, w=1.0):
+        """Сдвиги вершин цели формы MakeHuman (в координатах и масштабе игры), умноженные на w."""
+        i, d = load_target(fetch(rel))
+        out = np.zeros_like(self.v)
+        out[i] += np.stack([-d[:, 0], d[:, 1], -d[:, 2]], axis=1) * 0.1 * self.scale * w
+        return out
 
     def group_verts(self, name, v=None):
         s = set()

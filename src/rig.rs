@@ -7,15 +7,17 @@
 //! по оси рукояти), ноги шагают по земле, торс поворачивается за ударом, при оглушении
 //! откидывается назад, после смерти тело падает навзничь.
 
+use crate::appearance::{Folk, Look, Shape};
 use crate::combat::WeaponKind;
 use crate::protocol::ActorKind;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::gltf::{Gltf, GltfMaterial, GltfMesh, GltfSkin};
+use bevy::mesh::morph::MeshMorphWeights;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::pbr::gltf::standard_material_from_gltf_material;
 use bevy::prelude::*;
 use std::collections::HashMap;
-use std::f32::consts::{FRAC_PI_2, PI};
+use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 #[path = "rig_dims.rs"]
 mod dims;
@@ -117,18 +119,24 @@ pub enum FootGear {
     Boots,
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hair {
     Shaved,
+    /// Ёжик под машинку.
+    Cropped,
     Short,
     Long,
+    /// Лысина ото лба до макушки, венчик волос (и тонзура у монахов).
+    Balding,
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Beard {
     None,
+    /// Отросшая за несколько дней щетина.
+    Stubble,
+    /// Только усы.
+    Moustache,
     Short,
     Full,
 }
@@ -153,6 +161,8 @@ pub struct Outfit {
     pub hair_color: Color,
     /// Оттенок кожи (множитель к текстуре).
     pub skin: Color,
+    /// Телосложение и черты лица (веса целей формы модели).
+    pub shape: Shape,
 }
 
 /// Небольшой разброс по номеру персонажа, чтобы одинаковые враги не были близнецами.
@@ -161,11 +171,19 @@ fn jitter(id: u64, salt: u64) -> f32 {
     ((h >> 40) % 1000) as f32 / 1000.0
 }
 
+/// Народ бойца (от него облик: кожа, волосы, борода).
+pub fn folk_of(kind: ActorKind) -> Folk {
+    match kind {
+        ActorKind::GothWarrior => Folk::Goths,
+        ActorKind::AlanLancer => Folk::Alans,
+        ActorKind::HunArcher => Folk::Nomads,
+        _ => Folk::Romaioi,
+    }
+}
+
 impl Outfit {
     pub fn for_actor(kind: ActorKind, id: u64) -> Self {
         let j = |s| jitter(id, s);
-        let brown = |k: f32| Color::srgb(0.17 + 0.3 * k, 0.11 + 0.18 * k, 0.07 + 0.09 * k);
-        let skin_med = Color::srgb(0.97 + 0.03 * j(3), 0.93 + 0.05 * j(3), 0.9 + 0.06 * j(3));
         let base = Outfit {
             head: HeadGear::Bare,
             tunic: Tunic::Byzantine,
@@ -175,12 +193,14 @@ impl Outfit {
             greaves: false,
             feet: FootGear::Boots,
             hair: Hair::Short,
-            beard: if j(1) < 0.5 { Beard::Short } else { Beard::Full },
+            beard: Beard::Short,
             tunic_color: Color::WHITE,
             trousers: Color::srgb(0.45, 0.4, 0.34),
-            hair_color: brown(j(2) * 0.6),
-            skin: skin_med,
-        };
+            hair_color: Color::WHITE,
+            skin: Color::WHITE,
+            shape: Shape::default(),
+        }
+        .with_look(Look::random(id, folk_of(kind)));
         match kind {
             ActorKind::Player => {
                 // Некрашеная шерсть с лёгким оттенком цвета игрока.
@@ -188,7 +208,6 @@ impl Outfit {
                 Outfit {
                     legs: LegGear::Wrapped,
                     feet: FootGear::Shoes,
-                    beard: Beard::Short,
                     tunic_color: Color::hsl(hue, 0.3, 0.82),
                     ..base
                 }
@@ -210,19 +229,14 @@ impl Outfit {
                 tunic: Tunic::Gothic,
                 legs: LegGear::Wrapped,
                 feet: FootGear::Shoes,
-                hair: Hair::Long,
-                beard: Beard::Full,
                 tunic_color: Color::srgb(0.72 + 0.2 * j(4), 0.68 + 0.15 * j(4), 0.55),
                 trousers: Color::srgb(0.5, 0.45, 0.36),
-                hair_color: Color::srgb(0.55 + 0.3 * j(2), 0.42 + 0.25 * j(2), 0.25 + 0.12 * j(2)),
-                skin: Color::srgb(1.0, 0.96, 0.95),
                 ..base
             },
             ActorKind::AlanLancer => Outfit {
                 head: HeadGear::Conical,
                 tunic: Tunic::Kaftan,
                 armor: BodyArmor::Lamellar,
-                beard: Beard::Full,
                 tunic_color: Color::srgb(0.6, 0.45, 0.3),
                 trousers: Color::srgb(0.35, 0.3, 0.25),
                 ..base
@@ -230,20 +244,29 @@ impl Outfit {
             ActorKind::HunArcher => Outfit {
                 head: HeadGear::FeltCap,
                 tunic: Tunic::Kaftan,
-                hair: Hair::Shaved,
-                beard: if j(1) < 0.6 { Beard::Short } else { Beard::None },
                 tunic_color: Color::srgb(0.55 + 0.2 * j(4), 0.5 + 0.15 * j(4), 0.42),
                 trousers: Color::srgb(0.32, 0.27, 0.22),
-                hair_color: Color::srgb(0.08, 0.06, 0.05),
-                skin: Color::srgb(0.93, 0.86, 0.78),
                 ..base
             },
         }
     }
 
+    /// Причёска, борода, цвет волос и кожи, телосложение и лицо — из облика.
+    pub fn with_look(mut self, look: Look) -> Self {
+        self.hair = look.hair_style();
+        self.beard = look.beard_style();
+        self.hair_color = look.hair_tint();
+        self.skin = look.skin_tint();
+        self.shape = look.shape();
+        self
+    }
+
     /// Игрок, одетый в то, что надето у него в инвентаре.
     pub fn with_gear(mut self, gear: &crate::gear_look::Gear) -> Self {
         use crate::gear_look::{ArmPiece, BodyPiece, Helmet};
+        if gear.look.set {
+            self = self.with_look(gear.look);
+        }
         self.head = match gear.helmet() {
             None => HeadGear::Bare,
             Some(Helmet::Spangenhelm) => HeadGear::Spangenhelm,
@@ -273,7 +296,7 @@ impl Outfit {
 
     /// Детали glb (скинованные на весь скелет), из которых собран персонаж.
     pub fn layers(&self) -> Vec<&'static str> {
-        let mut l = vec!["body.head", "body.hands", "eyes", "belt"];
+        let mut l = vec!["body.head", "body.hands", "eyes", "brows", "belt"];
         l.push(match self.tunic {
             Tunic::Byzantine => "tunic.byz",
             Tunic::Gothic => "tunic.goth",
@@ -305,12 +328,16 @@ impl Outfit {
         if self.head == HeadGear::Bare {
             match self.hair {
                 Hair::Shaved => {}
+                Hair::Cropped => l.push("hair.cropped"),
                 Hair::Short => l.push("hair.short"),
                 Hair::Long => l.push("hair.long"),
+                Hair::Balding => l.push("hair.balding"),
             }
         }
         match self.beard {
             Beard::None => {}
+            Beard::Stubble => l.push("beard.stubble"),
+            Beard::Moustache => l.push("beard.moustache"),
             Beard::Short => l.push("beard.short"),
             Beard::Full => l.push("beard.full"),
         }
@@ -330,7 +357,7 @@ impl Outfit {
         match base {
             "tunic_byz" | "tunic_goth" | "tunic_kaftan" => Some(self.tunic_color),
             "trousers" => Some(self.trousers),
-            "hair_short" | "hair_long" | "beard_short" | "beard_full" => Some(self.hair_color),
+            b if b.starts_with("hair_") || b.starts_with("beard_") => Some(self.hair_color),
             "skin" => Some(self.skin),
             _ => None,
         }
@@ -343,8 +370,8 @@ impl Outfit {
 #[derive(Resource)]
 struct ModelsHandle(Vec<Handle<Gltf>>);
 
-/// Примитив детали: меш, материал и имя материала из glb.
-type Primitive = (Handle<Mesh>, Handle<StandardMaterial>, String);
+/// Примитив детали: меш, материал, имя материала из glb и имена целей формы меша (морфов).
+type Primitive = (Handle<Mesh>, Handle<StandardMaterial>, String, Vec<String>);
 
 #[derive(Resource)]
 pub struct CharacterModels {
@@ -425,12 +452,17 @@ impl CharacterModels {
             warn!("в {MODEL_PATH} нет детали {name}");
             return;
         };
-        for (mesh, mat, mat_name) in prims {
+        for (mesh, mat, mat_name, targets) in prims {
             let mat = match outfit.and_then(|o| o.tint(&mat_name)) {
                 Some(c) => self.tint(materials, &mat_name, &mat, c),
                 None => mat,
             };
             let mut e = parent.spawn((Mesh3d(mesh), MeshMaterial3d(mat.clone()), Transform::default()));
+            // Телосложение и черты лица: веса целей формы по облику.
+            if !targets.is_empty() {
+                let shape = outfit.map(|o| o.shape).unwrap_or_default();
+                e.insert(MeshMorphWeights::Value { weights: targets.iter().map(|t| shape.weight(t)).collect() });
+            }
             if let Some(joints) = skin {
                 e.insert((SkinnedMesh { inverse_bindposes: self.bindposes.clone(), joints: joints.to_vec() }, NoFrustumCulling));
             }
@@ -466,6 +498,7 @@ fn finish_models(
     gltf_meshes: Res<Assets<GltfMesh>>,
     gltf_materials: Res<Assets<GltfMaterial>>,
     gltf_skins: Res<Assets<GltfSkin>>,
+    meshes: Res<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // Файл доспехов необязателен: если его нет (не собран), загружаем только людей.
@@ -498,7 +531,8 @@ fn finish_models(
                 .iter()
                 .map(|p| {
                     let (mat, mat_name) = p.material.as_ref().and_then(|m| by_handle.get(&m.id()).cloned()).unwrap_or((fallback.clone(), String::new()));
-                    (p.mesh.clone(), mat, mat_name)
+                    let targets = meshes.get(&p.mesh).filter(|m| m.try_has_morph_targets().unwrap_or(true)).and_then(|m| m.try_morph_target_names().ok().flatten()).map(|n| n.to_vec()).unwrap_or_default();
+                    (p.mesh.clone(), mat, mat_name, targets)
                 })
                 .collect();
             parts.insert(name.to_string(), prims);
@@ -528,13 +562,19 @@ pub struct Rig {
 pub struct RigPose {
     pub pelvis: Vec3,
     pub rot: [Quat; BONES],
+    /// Руки (правая, левая) висят свободно — у плотного телосложения их отводим от боков.
+    pub free: [bool; 2],
 }
 
 impl Default for RigPose {
     fn default() -> Self {
-        Self { pelvis: REST[0], rot: [Quat::IDENTITY; BONES] }
+        Self { pelvis: REST[0], rot: [Quat::IDENTITY; BONES], free: [false; 2] }
     }
 }
+
+/// Насколько плотное тело (вес цели `heavy`): свободные руки отводятся от боков.
+#[derive(Component, Clone, Copy)]
+pub struct RigBulk(pub f32);
 
 /// Оружие: под сущностью появятся клинок (с меткой `Blade`) и рукоять.
 #[derive(Component)]
@@ -607,7 +647,7 @@ fn attach_rigs(
                 models.spawn_part(p, &mut materials, layer, Some(&outfit), Some(&joints), false);
             }
         });
-        commands.entity(e).remove::<NeedsRig>().insert((Rig { joints }, RigPose::default()));
+        commands.entity(e).remove::<NeedsRig>().insert((Rig { joints }, RigPose::default(), RigBulk(outfit.shape.heavy)));
     }
     for (e, need) in &weapons {
         let Some(name) = weapon_mesh(need.0) else {
@@ -658,12 +698,22 @@ fn attach_rigs(
     }
 }
 
-fn apply_poses(rigs: Query<(&Rig, &RigPose), Changed<RigPose>>, mut joints: Query<&mut Transform>) {
-    for (rig, pose) in &rigs {
+fn apply_poses(rigs: Query<(&Rig, &RigPose, Option<&RigBulk>), Changed<RigPose>>, mut joints: Query<&mut Transform>) {
+    for (rig, pose, bulk) in &rigs {
+        let bulk = bulk.map_or(0.0, |b| b.0);
         for bone in 0..BONES {
             if let Ok(mut t) = joints.get_mut(rig.joints[bone]) {
                 t.translation = if bone == 0 { pose.pelvis } else { REST[bone] };
                 t.rotation = pose.rot[bone];
+                // Плотному телу свободные руки отводим в стороны, чтобы не уходили в бока.
+                let side = match bone {
+                    3 if pose.free[0] => 1.0,
+                    6 if pose.free[1] => -1.0,
+                    _ => 0.0,
+                };
+                if side != 0.0 && bulk > 0.0 {
+                    t.rotation = Quat::from_rotation_z(0.13 * bulk * side) * t.rotation;
+                }
             }
         }
     }
@@ -719,6 +769,9 @@ pub struct PoseInput {
     pub lean: f32,
     /// Время, для дыхания.
     pub time: f32,
+    /// Скорость, м/с: шаг или бег (0 — обычный шаг, если `walk` > 0). Фазу шага при этом ведут
+    /// по `step_cycle(speed)`.
+    pub speed: f32,
     /// Куда тянется правая/левая рука (центр кулака) в пространстве персонажа.
     pub right_grip: Option<Vec3>,
     pub left_grip: Option<Vec3>,
@@ -807,32 +860,119 @@ fn solve_arm(shoulder: Vec3, target: Option<(Vec3, Vec3)>, pole: Vec3, front: Ve
     Arm { elbow, wrist, rot: [q_up, q_fore, hand], grip: wrist + hand * grip_c }
 }
 
+/// Походка: где стопа (вперёд-назад, подъём), наклон носка и доля опоры в цикле шага.
+/// `u` — доля цикла 0..1 (0 — пятка этой ноги касается земли впереди).
+#[derive(Debug)]
+struct Step {
+    /// Смещение голеностопа вдоль хода (-Z — вперёд) и вверх.
+    z: f32,
+    lift: f32,
+    /// Наклон стопы: + носок вверх (удар пяткой), - носок вниз (толчок).
+    pitch: f32,
+}
+
+/// Сколько метров пути на один цикл шага (два шага) при скорости `speed` м/с. По нему снаружи
+/// ведут фазу: `walk_phase += путь / step_cycle(скорость) · 2π`. Шагом — 1,3 м, бегом шире.
+pub fn step_cycle(speed: f32) -> f32 {
+    1.3 + 0.32 * (speed - 1.4).max(0.0)
+}
+
+/// Насколько это бег, а не шаг (0..1).
+fn run_share(speed: f32) -> f32 {
+    smooth01((speed - 2.0) / 1.8)
+}
+
+/// Доля цикла, когда нога стоит на земле: шагом 0,6 (обе ноги на земле дважды за цикл),
+/// бегом 0,32 (между шагами — полёт).
+fn stance_share(speed: f32) -> f32 {
+    0.6 - 0.28 * run_share(speed)
+}
+
+fn gait(u: f32, speed: f32) -> Step {
+    let u = u.rem_euclid(1.0);
+    let run = run_share(speed);
+    let beta = stance_share(speed);
+    // За опору тело проходит step_cycle·β м — столько же стопа отъезжает назад под телом, она не
+    // скользит по земле. Опора чуть сдвинута назад: пятка ставится ближе, чем носок отталкивается.
+    let half = 0.5 * step_cycle(speed) * beta;
+    let back = 0.045 * (1.0 - run);
+    if u < beta {
+        let s = u / beta;
+        // Опора: удар пяткой (носок поднят), перекат, отрыв пятки перед толчком. Бегом — на носок.
+        let heel_off = smooth01((s - 0.68 + 0.3 * run) / (0.32 - 0.1 * run));
+        let strike = 1.0 - smooth01(s / 0.14);
+        Step {
+            z: -half + 2.0 * half * s + back,
+            lift: 0.09 * heel_off * heel_off + 0.018 * strike * (1.0 - run),
+            pitch: 0.22 * strike * (1.0 - run) - 0.55 * heel_off,
+        }
+    } else {
+        let t = (u - beta) / (1.0 - beta);
+        // Перенос: стопа идёт вперёд по плавной кривой, носок от толчка поднимается к удару пяткой.
+        // Бегом пятка подлетает высоко назад.
+        let e = smooth01(t);
+        // К концу переноса пятка опускается к высоте удара (носок ещё поднят).
+        let lift = (t * PI).sin() * (0.085 + 0.16 * run) + 0.09 * (1.0 - smooth01(t / 0.3)) + 0.018 * (1.0 - run) * smooth01((t - 0.6) / 0.4);
+        let kick = 0.12 * run * (t * PI).sin() * (1.0 - t);
+        Step { z: half - 2.0 * half * e + back + kick, lift, pitch: -0.55 + (0.77 - 0.22 * run) * smooth01((t - 0.1) / 0.9) }
+    }
+}
+
+fn smooth01(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
 pub fn solve_pose(inp: &PoseInput) -> Solved {
     let mut world = [Quat::IDENTITY; BONES];
     let mut local = [Quat::IDENTITY; BONES];
     let walk = inp.walk.clamp(0.0, 1.0);
+    let idle = 1.0 - walk;
+    // Скорость: если не задана — обычный шаг горожанина.
+    let speed = if inp.speed > 0.0 { inp.speed } else { 1.3 };
+    let run = run_share(speed) * walk;
     let crouch = inp.crouch.clamp(0.0, 1.0);
+    let t = inp.time;
+    // Доля цикла шага: правая пятка касается земли при u = 0, левая — при u = 0,5.
+    let u = (inp.walk_phase / TAU).rem_euclid(1.0);
+    let cyc = TAU * u;
 
-    // Таз: проседает при приседе и покачивается при ходьбе.
-    let bob = 0.025 * walk * (1.0 - (2.0 * inp.walk_phase).cos()) * 0.5;
-    let pelvis = Vec3::new(0.0, PELVIS_HEIGHT - 0.5 * crouch - bob, REST[0].z + 0.08 * crouch);
-    local[0] = Quat::from_rotation_y(-inp.twist * 0.3 + 0.08 * walk * inp.walk_phase.sin());
+    // Таз. Шагом: выше всего над опорной ногой, ниже всего, когда обе на земле; бегом наоборот —
+    // ниже всего, когда нога пружинит в опоре, выше всего в полёте. Таз смещается к опорной ноге,
+    // бедро ноги в переносе опускается, таз поворачивается за шагающей ногой.
+    // Стоя: человек не замирает — медленно переносит вес с ноги на ногу.
+    let stance_mid = 0.5 * stance_share(speed);
+    let twice = (2.0 * (cyc - TAU * stance_mid)).cos();
+    let bob = walk * (0.035 * (1.0 - run) * (0.5 - 0.5 * twice) + 0.05 * run * (0.5 + 0.5 * twice)) + 0.05 * run;
+    let sway_walk = (cyc - TAU * stance_mid).cos();
+    let shift = (t * 0.31).sin() * 0.7 + (t * 0.53 + 1.3).sin() * 0.3;
+    let pelvis_x = 0.028 * walk * (1.0 - 0.5 * run) * sway_walk + 0.022 * idle * shift * (1.0 - crouch);
+    let pelvis = Vec3::new(pelvis_x, PELVIS_HEIGHT - 0.5 * crouch - bob - 0.008 * idle * shift.abs(), REST[0].z + 0.08 * crouch);
+    let hip_roll = 0.045 * walk * sway_walk + 0.04 * idle * shift * (1.0 - crouch);
+    let hip_yaw = (0.1 - 0.03 * run) * walk * cyc.cos();
+    local[0] = Quat::from_rotation_y(-inp.twist * 0.3 + hip_yaw) * Quat::from_rotation_z(hip_roll);
     world[0] = local[0];
 
-    // Торс и голова.
-    let breathe = (inp.time * 1.7).sin() * 0.012;
+    // Торс: плечи поворачиваются навстречу тазу и держатся ровно, при ходьбе чуть вперёд.
+    // Дыхание — грудь поднимается раз в 4 с. Стоя торс едва заметно гуляет.
+    let breathe = (t * 1.6).sin() * 0.014;
     // Взгляд вниз/вверх частью уходит в торс: у скелета одна кость на шею и голову, и при сильном
     // наклоне одной головы шея рвётся из ворота.
     let look = (inp.pitch * 0.8).clamp(-1.1, 1.0);
-    let chest = inp.lean - 0.35 * crouch + 0.3 * look;
-    local[1] = Quat::from_rotation_y(inp.twist * 0.7) * Quat::from_rotation_x(chest + breathe);
+    let chest = inp.lean - 0.35 * crouch + 0.3 * look - 0.06 * walk - 0.14 * run;
+    let drift = idle * (0.035 * (t * 0.19 + 0.4).sin() + 0.02 * (t * 0.43).sin());
+    local[1] = Quat::from_rotation_y(inp.twist * 0.7 - 1.7 * hip_yaw + drift) * Quat::from_rotation_z(-0.85 * hip_roll) * Quat::from_rotation_x(chest + breathe);
     world[1] = world[0] * local[1];
-    let head_pitch = (look - chest).clamp(-0.5, 0.5);
-    local[2] = Quat::from_rotation_y(-inp.twist * 0.6) * Quat::from_rotation_x(head_pitch);
+    // Голова держит взгляд: гасит качание плеч, а стоя изредка поглядывает по сторонам.
+    let glance = idle * (0.09 * (t * 0.23).sin() + 0.05 * (t * 0.61 + 2.0).sin()) * (1.0 - crouch * 0.5);
+    let nod = idle * 0.025 * (t * 0.37 + 0.8).sin();
+    let head_pitch = (look - chest - breathe * 0.5 + nod).clamp(-0.5, 0.5);
+    local[2] = Quat::from_rotation_y(-inp.twist * 0.6 + 0.7 * hip_yaw - drift + glance) * Quat::from_rotation_z(-0.15 * hip_roll) * Quat::from_rotation_x(head_pitch);
     world[2] = world[1] * local[2];
 
     let torso_pos = pelvis + world[0] * REST[1];
     let mut grips = [Vec3::ZERO; 2];
+    let mut free = [false; 2];
     // Руки: 0 — правая, 1 — левая.
     for (side, (target, axis)) in [(inp.right_grip, inp.right_axis), (inp.left_grip, inp.left_axis)].into_iter().enumerate() {
         let (ua, fa, hd) = if side == 0 { (3, 4, 5) } else { (6, 7, 8) };
@@ -850,13 +990,18 @@ pub fn solve_pose(inp: &PoseInput) -> Solved {
                 grips[side] = arm.grip;
             }
             None => {
-                // Свободная рука висит и качается в такт шагу.
-                let swing = -0.35 * walk * (inp.walk_phase + side as f32 * PI).sin() * sign;
-                local[ua] = Quat::from_rotation_x(swing + 0.1) * Quat::from_rotation_z(0.1 * sign);
-                local[fa] = Quat::from_rotation_x(0.25 + 0.2 * walk);
+                free[side] = true;
+                // Свободная рука качается навстречу ноге своей стороны (правая вперёд, когда
+                // впереди левая нога), локоть сгибается на махе вперёд; кисть отстаёт от предплечья.
+                // Бегом руки согнуты в локтях почти под прямым углом и машут сильнее.
+                let swing = -(0.42 + 0.25 * run) * walk * cyc.cos() * sign;
+                let rest_hang = 0.06 + 0.03 * (t * 0.7 + side as f32).sin() * idle + 0.15 * run;
+                local[ua] = Quat::from_rotation_x(swing + rest_hang) * Quat::from_rotation_z((0.09 + 0.015 * breathe / 0.014) * sign);
+                local[fa] = Quat::from_rotation_x(0.22 + 0.12 * walk + 0.5 * swing.max(0.0) * (1.0 - run) + 1.15 * run);
+                local[hd] = Quat::from_rotation_x(-0.12 * swing) * Quat::from_rotation_z(0.12 * sign);
                 world[ua] = world[1] * local[ua];
                 world[fa] = world[ua] * local[fa];
-                world[hd] = world[fa];
+                world[hd] = world[fa] * local[hd];
                 let elbow = shoulder + world[ua] * REST[fa];
                 let wrist = elbow + world[fa] * REST[hd];
                 grips[side] = wrist + world[hd] * if side == 0 { GRIP_R } else { GRIP_L };
@@ -867,21 +1012,22 @@ pub fn solve_pose(inp: &PoseInput) -> Solved {
     // Ноги: стопы ставим на землю (IK), колени смотрят вперёд.
     for (side, (th, sh, ft)) in [(9, 10, 11), (12, 13, 14)].into_iter().enumerate() {
         let sign = if side == 0 { 1.0 } else { -1.0 };
-        let phase = inp.walk_phase + side as f32 * PI;
         let hip = pelvis + world[0] * REST[th];
-        let stride = -phase.sin() * 0.24 * walk;
-        let lift = phase.cos().max(0.0) * 0.09 * walk;
+        let step = gait(u + side as f32 * 0.5, speed);
+        // Стоя ноги чуть разные: одна немного впереди, носки врозь.
+        let stand_z = if side == 0 { -0.035 } else { 0.03 };
         // При приседе одна нога выставлена вперёд, другая отставлена.
         let crouch_offset = crouch * if side == 0 { -0.18 } else { 0.2 };
-        let ankle = Vec3::new(0.11 * sign, ANKLE_HEIGHT + lift, stride + crouch_offset);
+        let z = step.z * walk + stand_z * idle + crouch_offset;
+        let ankle = Vec3::new((0.11 + 0.01 * idle) * sign, ANKLE_HEIGHT + step.lift * walk, z);
         let pole = world[0] * Vec3::new(0.15 * sign, 0.0, -1.0);
         let (knee, ankle) = two_bone(hip, ankle, THIGH, SHIN, pole);
         let up = (knee - hip).normalize_or(Vec3::NEG_Y);
         let down = (ankle - knee).normalize_or(Vec3::NEG_Y);
         world[th] = bone_rot(up, -down, world[0] * Vec3::NEG_Z);
         world[sh] = Quat::from_rotation_arc(up, down) * world[th];
-        // Стопы стоят ровно на земле, носки чуть врозь.
-        world[ft] = Quat::from_rotation_y(-0.1 * sign);
+        // Стопа: носок чуть наружу, при ходьбе — перекат с пятки на носок.
+        world[ft] = Quat::from_rotation_y(-(0.1 + 0.05 * idle) * sign) * Quat::from_rotation_x(step.pitch * walk);
     }
 
     // Мировые повороты -> локальные.
@@ -890,7 +1036,7 @@ pub fn solve_pose(inp: &PoseInput) -> Solved {
             local[bone] = (world[p].inverse() * world[bone]).normalize();
         }
     }
-    Solved { pose: RigPose { pelvis, rot: local }, right_grip: grips[0], left_grip: grips[1] }
+    Solved { pose: RigPose { pelvis, rot: local, free }, right_grip: grips[0], left_grip: grips[1] }
 }
 
 /// Поза тела на спине (для смерти): руки раскинуты, ноги чуть согнуты.
@@ -908,7 +1054,7 @@ pub fn dead_pose(seed: u64) -> RigPose {
     rot[12] = Quat::from_rotation_x(0.05 * s) * Quat::from_rotation_z(-0.15);
     rot[13] = Quat::from_rotation_x(-0.15);
     rot[14] = Quat::from_rotation_x(0.9);
-    RigPose { pelvis: REST[0], rot }
+    RigPose { pelvis: REST[0], rot, free: [false; 2] }
 }
 
 /// Смешивает две позы (k = 0 — первая, 1 — вторая).
@@ -917,7 +1063,7 @@ pub fn blend(a: &RigPose, b: &RigPose, k: f32) -> RigPose {
     for (r, t) in rot.iter_mut().zip(b.rot.iter()) {
         *r = r.slerp(*t, k);
     }
-    RigPose { pelvis: a.pelvis.lerp(b.pelvis, k), rot }
+    RigPose { pelvis: a.pelvis.lerp(b.pelvis, k), rot, free: if k < 0.5 { a.free } else { b.free } }
 }
 
 /// Тело падает навзничь: доля 0..1 -> поворот и подъём корня скелета.
@@ -985,6 +1131,53 @@ mod tests {
     }
 
     #[test]
+    fn walking_feet_do_not_slide() {
+        // Пока стопа на земле, она отъезжает назад ровно на столько, сколько проходит тело
+        // (цикл шага — 1,5 м пути): иначе ноги «скользят по льду».
+        for speed in [1.3, 4.0, 6.5] {
+            let beta = stance_share(speed);
+            let a = gait(0.2 * beta, speed);
+            let b = gait(0.6 * beta, speed);
+            let body = step_cycle(speed) * (0.4 * beta);
+            assert!(((b.z - a.z) - body).abs() < 0.01, "стопа {} при пути тела {body}", b.z - a.z);
+            // В переносе стопа поднята.
+            assert!(gait(beta + 0.5 * (1.0 - beta), speed).lift > 0.05);
+            // Цикл непрерывный: конец переноса совпадает с началом опоры.
+            let end = gait(0.9999, speed);
+            let start = gait(0.0, speed);
+            assert!((end.z - start.z).abs() < 0.01 && (end.lift - start.lift).abs() < 0.01 && (end.pitch - start.pitch).abs() < 0.02, "{speed}: {:?} {:?}", (end.z, end.lift, end.pitch), (start.z, start.lift, start.pitch));
+        }
+        // Шагом в середине опоры стопа на земле и ровная.
+        let mid = gait(0.4 * stance_share(1.3), 1.3);
+        assert!(mid.lift < 1e-3 && mid.pitch.abs() < 0.05);
+    }
+
+    #[test]
+    fn walking_legs_reach_the_ground() {
+        // Шагом колено не выпрямляется до отказа: стопа достаёт до земли во всём цикле.
+        for k in 0..40 {
+            let u = k as f32 / 40.0;
+            let s = solve_pose(&PoseInput { walk: 1.0, walk_phase: u * TAU, ..default() });
+            let step = gait(u, 1.3);
+            let hip = s.pose.pelvis + s.pose.rot[0] * REST[9];
+            let ankle = Vec3::new(0.11, ANKLE_HEIGHT + step.lift, step.z);
+            assert!(hip.distance(ankle) < THIGH + SHIN + 0.012, "u = {u}: {}", hip.distance(ankle));
+        }
+    }
+
+    #[test]
+    fn walk_cycle_keeps_feet_on_ground_and_limbs_sane() {
+        for speed in [0.0, 1.3, 4.0, 6.5] {
+            for k in 0..32 {
+                let s = solve_pose(&PoseInput { walk: 1.0, speed, walk_phase: k as f32 / 32.0 * TAU, time: k as f32 * 0.3, ..default() });
+                assert!(s.pose.rot.iter().all(|r| r.is_normalized()));
+                // Таз не проваливается и не взлетает.
+                assert!((s.pose.pelvis.y - PELVIS_HEIGHT).abs() < 0.12, "{}", s.pose.pelvis.y);
+            }
+        }
+    }
+
+    #[test]
     fn bone_rot_identity() {
         let q = bone_rot(Vec3::NEG_Y, Vec3::NEG_Z, Vec3::NEG_Z);
         assert!(q.angle_between(Quat::IDENTITY) < 1e-4);
@@ -1003,6 +1196,13 @@ mod tests {
         for kind in ActorKind::ENEMIES {
             for id in 0..8 {
                 names.extend(Outfit::for_actor(kind, id).layers().iter().map(|s| s.to_string()));
+            }
+        }
+        // Любая причёска и борода из окна облика.
+        for hair in 0..crate::appearance::HAIR_STYLES.len() {
+            for beard in 0..crate::appearance::BEARD_STYLES.len() {
+                let look = Look { hair: hair as u8, beard: beard as u8, ..Look::PLAYER_DEFAULT };
+                names.extend(Outfit::for_actor(ActorKind::Player, 1).with_look(look).layers().iter().map(|s| s.to_string()));
             }
         }
         // Игрок в любой надеваемой вещи.

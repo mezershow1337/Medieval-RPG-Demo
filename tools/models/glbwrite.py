@@ -114,9 +114,30 @@ class Glb:
         self.j["materials"].append(m)
         return len(self.j["materials"]) - 1
 
+    def _two_sided(self, p):
+        """Двусторонний материал у меша с целями формы: Bevy не рисует такие меши (морфы +
+        doubleSided), поэтому изнанку делаем геометрией — копия с обратным обходом и нормалями,
+        а материал становится односторонним."""
+        mat = p["material"]
+        if not p.get("targets") or not self.j["materials"][mat].get("doubleSided"):
+            return p
+        self.j["materials"][mat]["doubleSided"] = False
+        n = len(p["v"])
+        q = dict(p)
+        q["v"] = np.r_[p["v"], p["v"]]
+        q["n"] = np.r_[p["n"], -p["n"]]
+        q["uv"] = np.r_[p["uv"], p["uv"]]
+        q["tris"] = np.r_[p["tris"], p["tris"][:, ::-1] + n]
+        for k in ("joints", "weights"):
+            if p.get(k) is not None:
+                q[k] = np.r_[p[k], p[k]]
+        q["targets"] = [{"POSITION": np.r_[t["POSITION"], t["POSITION"]], "NORMAL": np.r_[t["NORMAL"], -t["NORMAL"]]} for t in p["targets"]]
+        return q
+
     def mesh(self, name, prims, skin=None):
         """prims: список dict(v, n, uv, tris, material, joints?, weights?, tangents?)."""
         out = []
+        prims = [self._two_sided(p) for p in prims]
         for p in prims:
             attrs = {
                 "POSITION": self.accessor(p["v"].astype(np.float32), 5126, "VEC3", 34962, True),
@@ -132,8 +153,18 @@ class Glb:
                 attrs["JOINTS_0"] = self.accessor(p["joints"].astype(np.uint16), 5123, "VEC4", 34962)
                 attrs["WEIGHTS_0"] = self.accessor(p["weights"].astype(np.float32), 5126, "VEC4", 34962)
             idx = self.accessor(p["tris"].astype(np.uint32).ravel(), 5125, "SCALAR", 34963)
-            out.append({"attributes": attrs, "indices": idx, "material": p["material"]})
-        self.j["meshes"].append({"name": name, "primitives": out})
+            prim = {"attributes": attrs, "indices": idx, "material": p["material"]}
+            # Цели формы (морфы): сдвиги позиций и нормалей, имена — в extras.targetNames меша.
+            if p.get("targets"):
+                prim["targets"] = [{"POSITION": self.accessor(t["POSITION"].astype(np.float32), 5126, "VEC3", 34962, True),
+                                    "NORMAL": self.accessor(t["NORMAL"].astype(np.float32), 5126, "VEC3", 34962)} for t in p["targets"]]
+            out.append(prim)
+        mesh = {"name": name, "primitives": out}
+        names = prims[0].get("target_names") if prims else None
+        if names:
+            mesh["weights"] = [0.0] * len(names)
+            mesh["extras"] = {"targetNames": list(names)}
+        self.j["meshes"].append(mesh)
         node = {"name": name, "mesh": len(self.j["meshes"]) - 1}
         if skin is not None:
             node["skin"] = skin

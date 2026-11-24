@@ -5,6 +5,7 @@
 
 #![allow(deprecated)] // Interaction: в Bevy 0.20 помечен устаревшим, но работает и проще.
 
+use crate::appearance::{Folk, Look, LookField};
 use crate::client::NetState;
 use crate::inventory_ui::UiFonts;
 use crate::ui_theme::{Appear, Skin, ink, theme};
@@ -37,6 +38,8 @@ pub enum Screen {
     Join,
     Connecting,
     Settings,
+    /// Облик персонажа (до входа в игру).
+    Look,
     Pause,
     /// Сервер пропал посреди игры.
     Lost,
@@ -59,6 +62,8 @@ pub struct MenuState {
     resolving: Option<Arc<Mutex<Option<Result<SocketAddr, String>>>>>,
     /// Строка адреса, которую сейчас ищем (запомнится при успехе).
     pending_address: String,
+    /// В окне облика камера показывает лицо крупно.
+    look_zoom: bool,
 }
 
 impl MenuState {
@@ -80,10 +85,12 @@ impl Plugin for MenuPlugin {
             connect_started: 0.0,
             resolving: None,
             pending_address: String::new(),
+            look_zoom: std::env::var("MRPG_LOOK_ZOOM").is_ok(),
         })
         .add_systems(Startup, begin.after(crate::inventory_ui::setup_fonts))
         .add_systems(PreUpdate, escape_key.after(bevy::input::InputSystems))
-        .add_systems(Update, (sync_name, handle_buttons, submit_on_enter, poll_resolve, watch_connection, rebuild, orbit_camera, hud_visibility, cursor_in_menu).chain());
+        .add_systems(Update, (sync_name, handle_buttons, submit_on_enter, poll_resolve, watch_connection, rebuild, orbit_camera, hud_visibility, cursor_in_menu).chain())
+        .add_systems(Update, look_preview.in_set(crate::rig::PoseSet));
     }
 }
 
@@ -99,19 +106,20 @@ fn begin(mut commands: Commands, start: Res<Start>, mut menu: ResMut<MenuState>,
             menu.screen = match std::env::var("MRPG_MENU").as_deref() {
                 Ok("settings") => Screen::Settings,
                 Ok("join") => Screen::Join,
+                Ok("look") => Screen::Look,
                 _ => Screen::Main,
             }
         }
-        Start::Host(port) => host(&mut commands, &mut menu, &mut net, &time, port, &name),
+        Start::Host(port) => host(&mut commands, &mut menu, &mut net, &time, port, &name, settings.look),
         Start::Join(addr) => {
             menu.screen = Screen::Join;
-            connect(&mut commands, &mut menu, &mut net, &time, addr, &name);
+            connect(&mut commands, &mut menu, &mut net, &time, addr, &name, settings.look);
         }
     }
 }
 
 /// Запустить сервер в этом процессе и подключиться к нему.
-fn host(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time: &Time, port: u16, name: &str) {
+fn host(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time: &Time, port: u16, name: &str, look: Look) {
     if !menu.hosting {
         match crate::server::bind_socket(port) {
             Ok(socket) => {
@@ -132,7 +140,7 @@ fn host(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time:
         }
     }
     menu.back = Screen::Main;
-    connect(commands, menu, net, time, SocketAddr::from(([127, 0, 0, 1], port)), name);
+    connect(commands, menu, net, time, SocketAddr::from(([127, 0, 0, 1], port)), name, look);
 }
 
 /// Сколько секунд тишины от другой стороны терпим, прежде чем считать связь потерянной.
@@ -141,8 +149,9 @@ const CONNECTION_TIMEOUT_SECS: i32 = 60;
 const CONNECT_TOKEN_EXPIRE_SECS: u64 = 3600;
 
 /// Профиль с диска (ключ хозяина) с ником из меню.
-fn profile_with_name(name: &str) -> crate::estates::Profile {
+fn profile_with_name(name: &str, look: Look) -> crate::estates::Profile {
     let mut p = crate::estates::local_profile();
+    p.look = look;
     let nick = crate::protocol::clean_name(name);
     if !nick.is_empty() {
         p.name = nick;
@@ -150,7 +159,7 @@ fn profile_with_name(name: &str) -> crate::estates::Profile {
     p
 }
 
-fn connect(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time: &Time, addr: SocketAddr, name: &str) {
+fn connect(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time: &Time, addr: SocketAddr, name: &str, look: Look) {
     let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
     let client_id = now.as_nanos() as u64;
     let transport = UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string()).and_then(|socket| {
@@ -166,7 +175,7 @@ fn connect(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, ti
             CONNECTION_TIMEOUT_SECS,
             vec![addr],
             // Постоянный профиль (ключ дома и ник): по ключу сервер узнаёт хозяина усадьбы.
-            Some(&crate::estates::pack_profile(&profile_with_name(name))),
+            Some(&crate::estates::pack_profile(&profile_with_name(name, look))),
             &[0; NETCODE_KEY_BYTES],
         )
         .map_err(|e| e.to_string())?;
@@ -219,7 +228,7 @@ fn poll_resolve(mut commands: Commands, mut menu: ResMut<MenuState>, mut net: Re
             }
             menu.back = Screen::Join;
             let name = settings.nickname.clone();
-            connect(&mut commands, &mut menu, &mut net, &time, addr, &name);
+            connect(&mut commands, &mut menu, &mut net, &time, addr, &name, settings.look);
         }
         Err(e) => menu.error = Some(format!("Не получилось: {e}. Проверьте адрес.")),
     }
@@ -274,7 +283,7 @@ fn escape_key(keys: Res<ButtonInput<KeyCode>>, mut menu: ResMut<MenuState>, curs
         Screen::None if menu.in_game && cursor.grab_mode != CursorGrabMode::None => Screen::Pause,
         Screen::Pause => Screen::None,
         Screen::Settings => menu.back,
-        Screen::Join => Screen::Main,
+        Screen::Join | Screen::Look => Screen::Main,
         other => other,
     };
 }
@@ -344,6 +353,10 @@ enum Act {
     CancelConnect,
     Preset(Preset),
     Adjust(Field, i32),
+    OpenLook,
+    LookStep(LookField, i32),
+    LookRandom,
+    LookZoom,
 }
 
 #[derive(Component)]
@@ -385,7 +398,7 @@ fn handle_buttons(
             Act::Host => {
                 settings.save();
                 let name = settings.nickname.clone();
-                host(&mut commands, &mut menu, &mut net, &time, DEFAULT_PORT, &name);
+                host(&mut commands, &mut menu, &mut net, &time, DEFAULT_PORT, &name, settings.look);
             }
             Act::OpenJoin => {
                 settings.save();
@@ -437,6 +450,23 @@ fn handle_buttons(
                 adjust(&mut settings, f, d);
                 settings.save();
             }
+            Act::OpenLook => {
+                settings.save();
+                menu.error = None;
+                menu.screen = Screen::Look;
+            }
+            Act::LookStep(f, d) => {
+                settings.look.step(f, d);
+                settings.save();
+            }
+            Act::LookRandom => {
+                // Случайный ромей, гот, алан или заморский гость.
+                let seed = time.elapsed().as_nanos() as u64 ^ 0x5EED;
+                let folk = [Folk::Romaioi, Folk::Romaioi, Folk::Goths, Folk::Alans, Folk::Overseas, Folk::Nomads][(seed % 6) as usize];
+                settings.look = Look::random(seed / 6, folk);
+                settings.save();
+            }
+            Act::LookZoom => menu.look_zoom = !menu.look_zoom,
         }
     }
 }
@@ -561,8 +591,8 @@ fn rebuild(
     mut built: Local<Option<(Screen, Option<String>, bool)>>,
 ) {
     let Some(fonts) = fonts else { return };
-    let key = (menu.screen, menu.error.clone(), menu.resolving.is_some());
-    let settings_changed = menu.screen == Screen::Settings && settings.is_changed();
+    let key = (menu.screen, menu.error.clone(), menu.resolving.is_some() || menu.look_zoom);
+    let settings_changed = matches!(menu.screen, Screen::Settings | Screen::Look) && settings.is_changed();
     if built.as_ref() == Some(&key) && !settings_changed {
         return;
     }
@@ -588,6 +618,7 @@ fn rebuild(
                     BackgroundColor(Color::srgba(0.06, 0.03, 0.04, 0.95)),
                 ));
             });
+            small_button(p, &fonts, "Облик персонажа…", Act::OpenLook, 384.0);
             button(p, &fonts, "Создать игру", Act::Host);
             button(p, &fonts, "Подключиться", Act::OpenJoin);
             button(p, &fonts, "Настройки", Act::OpenSettings);
@@ -651,7 +682,30 @@ fn rebuild(
             button(p, &fonts, "Выйти из игры", Act::Quit);
         }),
         Screen::Settings => center_panel(&mut commands, &fonts, "Настройки", 1000.0, |p| settings_body(p, &fonts, &settings)),
+        Screen::Look => side_panel(&mut commands, &fonts, |p| look_body(p, &fonts, &settings.look, menu.look_zoom)),
     }
+}
+
+/// Окно облика: причёска, борода, цвет волос и кожи, сложение, лицо. Справа — сам персонаж.
+fn look_body(p: &mut ChildSpawnerCommands, fonts: &UiFonts, look: &Look, zoom: bool) {
+    p.spawn((Text::new("Облик"), font(fonts, true, 24.0), TextColor(GOLD)));
+    for f in LookField::ALL {
+        p.spawn(Node { width: percent(100), height: px(34), align_items: AlignItems::Center, column_gap: px(8), ..default() }).with_children(|r| {
+            r.spawn((Text::new(f.title()), font(fonts, false, 17.0), TextColor(PARCHMENT), Node { width: px(112), ..default() }));
+            small_button(r, fonts, "‹", Act::LookStep(f, -1), 34.0);
+            r.spawn(Node { flex_grow: 1.0, justify_content: JustifyContent::Center, ..default() }).with_children(|v| {
+                v.spawn((Text::new(look.field(f).2), font(fonts, true, 16.0), TextColor(GOLD)));
+            });
+            small_button(r, fonts, "›", Act::LookStep(f, 1), 34.0);
+        });
+    }
+    p.spawn(Node { width: percent(100), column_gap: px(10), margin: UiRect::top(px(6)), ..default() }).with_children(|r| {
+        small_button(r, fonts, "Случайно", Act::LookRandom, 187.0);
+        small_button(r, fonts, if zoom { "Во весь рост" } else { "Лицо крупно" }, Act::LookZoom, 187.0);
+    });
+    label(p, fonts, "Так вас увидят другие игроки. Облик сохраняется и при следующем запуске.", 14.0, INK_SOFT);
+    p.spawn(Node { flex_grow: 1.0, ..default() });
+    button(p, fonts, "Готово", Act::Back);
 }
 
 /// Левая панель главного меню: заголовок, орнамент, содержимое. Справа виден город.
@@ -771,9 +825,89 @@ fn row(p: &mut ChildSpawnerCommands, fonts: &UiFonts, s: &Settings, title: &str,
 // Фон меню и интерфейс игры
 // ---------------------------------------------------------------------------
 
+/// Персонаж в окне облика: стоит на площади лицом к закатному солнцу.
+#[derive(Component)]
+struct LookPreview {
+    shown: Look,
+}
+
+#[derive(Component)]
+struct LookPreviewBody;
+
+/// Где стоит персонаж окна облика и куда смотрит (единичный вектор по земле).
+fn preview_spot(level: Option<&crate::collision::LevelColliders>) -> (Vec3, Vec3) {
+    let p = crate::level::spawn_point(0);
+    let y = level.map(|l| l.ground_height(p.x, p.z)).filter(|h| h.is_finite()).unwrap_or(0.0);
+    let sun = crate::graphics::SUN_DIR;
+    (Vec3::new(p.x, y, p.z), Vec3::new(sun.x, 0.0, sun.z).normalize())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn look_preview(
+    mut commands: Commands,
+    menu: Res<MenuState>,
+    settings: Res<Settings>,
+    time: Res<Time>,
+    level: Option<Res<crate::collision::LevelColliders>>,
+    models: Option<Res<crate::rig::CharacterModels>>,
+    mut previews: Query<(Entity, &mut LookPreview, &mut Transform)>,
+    mut bodies: Query<(Entity, &mut crate::rig::RigPose), With<LookPreviewBody>>,
+    shells: Query<Entity, With<LookPreviewBody>>,
+) {
+    if menu.screen != Screen::Look || menu.in_game {
+        for (e, _, _) in &previews {
+            commands.entity(e).despawn();
+        }
+        return;
+    }
+    let (spot, face) = preview_spot(level.as_deref());
+    let outfit = |look: Look| crate::rig::Outfit::for_actor(crate::protocol::ActorKind::Player, 0).with_gear(&crate::gear_look::Gear { look, ..default() });
+    let Ok((root, mut preview, mut tf)) = previews.single_mut() else {
+        commands
+            .spawn((LookPreview { shown: settings.look }, Transform::from_translation(spot), Visibility::default()))
+            .with_children(|p| {
+                p.spawn((LookPreviewBody, crate::rig::NeedsRig(outfit(settings.look)), Transform::default(), Visibility::default()));
+            });
+        return;
+    };
+    let t = time.elapsed_secs();
+    // Медленно поворачивается, чтобы было видно и профиль.
+    let yaw = f32::atan2(-face.x, -face.z) + 0.45 * (t * 0.35).sin();
+    *tf = Transform::from_translation(spot).with_rotation(Quat::from_rotation_y(yaw));
+    if preview.shown != settings.look && models.is_some() {
+        preview.shown = settings.look;
+        for e in &shells {
+            commands.entity(e).despawn();
+        }
+        commands.entity(root).with_children(|p| {
+            p.spawn((LookPreviewBody, crate::rig::NeedsRig(outfit(settings.look)), Transform::default(), Visibility::default()));
+        });
+        return;
+    }
+    for (_, mut pose) in &mut bodies {
+        *pose = crate::rig::solve_pose(&crate::rig::PoseInput { time: t, ..default() }).pose;
+    }
+}
+
 /// Пока открыто главное меню, камера медленно облетает город.
-fn orbit_camera(menu: Res<MenuState>, time: Res<Time>, mut cams: Query<&mut Transform, With<crate::client::WaitingCamera>>) {
+#[allow(clippy::too_many_arguments)]
+fn orbit_camera(menu: Res<MenuState>, time: Res<Time>, level: Option<Res<crate::collision::LevelColliders>>, windows: Query<&Window, With<PrimaryWindow>>, mut cams: Query<&mut Transform, With<crate::client::WaitingCamera>>) {
     if menu.in_game || std::env::var_os("MRPG_CAM").is_some() {
+        return;
+    }
+    if menu.screen == Screen::Look {
+        // Камера перед персонажем; он — справа от панели облика.
+        let (spot, face) = preview_spot(level.as_deref());
+        let (dist, height, aim_y) = if menu.look_zoom { (0.95, 1.63, 1.6) } else { (3.0, 1.45, 1.0) };
+        let aspect = windows.single().map(|w| w.width() / w.height().max(1.0)).unwrap_or(16.0 / 9.0);
+        // Сдвиг взгляда влево на четверть ширины кадра (вертикальный угол обзора 70°).
+        let off = dist * (35f32.to_radians()).tan() * aspect * 0.33;
+        let eye = spot + face * dist + Vec3::Y * height;
+        let right = (-face).cross(Vec3::Y).normalize();
+        let target = spot + Vec3::Y * aim_y - right * off;
+        for mut t in &mut cams {
+            *t = Transform::from_translation(eye).looking_at(target, Vec3::Y);
+        }
         return;
     }
     let center = crate::level::spawn_point(0) + Vec3::Y * 4.0;
