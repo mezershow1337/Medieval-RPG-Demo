@@ -1036,8 +1036,9 @@ impl Casting {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SoakKind {
-    /// Сыродутный горн: руда + уголь → крица.
-    Bloomery { ore: u8, charcoal: u8 },
+    /// Сыродутный горн: руда + уголь → крица. `rich` — богатость закладки ×100
+    /// (сырая горная руда 100, обожжённая богаче, болотная беднее; см. mining.rs).
+    Bloomery { ore: u8, charcoal: u8, rich: u8 },
     /// Полоса в угле в запечатанном горшке → сталь.
     Carburize,
 }
@@ -1079,7 +1080,7 @@ impl Soak {
     /// Доля угля к руде по весу (руда и уголь — по штукам, штука угля легче).
     pub fn ratio(&self) -> f32 {
         match self.kind {
-            SoakKind::Bloomery { ore, charcoal } => charcoal as f32 * 0.6 / (ore.max(1) as f32),
+            SoakKind::Bloomery { ore, charcoal, .. } => charcoal as f32 * 0.6 / (ore.max(1) as f32),
             SoakKind::Carburize => 1.0,
         }
     }
@@ -1145,14 +1146,14 @@ impl Soak {
 
 /// Что вышло из сыродутного горна: (сколько криц, их качество, углерод, сколько чугуна).
 pub fn bloomery_yield(s: &Soak) -> (u16, Quality, f32, u16) {
-    let SoakKind::Bloomery { ore, .. } = s.kind else { return (0, Quality::Poor, 0.0, 0) };
+    let SoakKind::Bloomery { ore, rich, .. } = s.kind else { return (0, Quality::Poor, 0.0, 0) };
     let ratio = s.ratio();
     // Мало угля — руда не восстановилась; много — зря сожгли, но железо чище от шлака.
     let reduce = (ratio / 0.9).min(1.0) * s.steadiness().powf(0.7);
-    let iron = ore as f32 * 0.33 * reduce * (1.0 - s.over.min(1.0) * 0.7);
+    let iron = ore as f32 * 0.33 * (rich as f32 / 100.0) * reduce * (1.0 - s.over.min(1.0) * 0.7);
     let blooms = (iron / 1.0).floor() as u16;
     let cast = (ore as f32 * 0.25 * s.over.min(1.0)).round() as u16;
-    let purity = (0.3 + 0.55 * s.steadiness() + 0.15 * (1.0 - ((ratio - 1.1).abs() / 0.8).min(1.0))).clamp(0.0, 1.0);
+    let purity = (0.3 + 0.55 * s.steadiness() + 0.15 * (1.0 - ((ratio - 1.1).abs() / 0.8).min(1.0)) + crate::mining::richness_purity(rich)).clamp(0.0, 1.0);
     let q = match purity {
         p if p < 0.45 => Quality::Poor,
         p if p < 0.65 => Quality::Common,
@@ -1455,7 +1456,7 @@ mod tests {
     #[test]
     fn bloomery_needs_steady_heat_and_enough_charcoal() {
         let run = |ore, charcoal, blast_pattern: &dyn Fn(f32) -> bool| {
-            let mut s = Soak::new(SoakKind::Bloomery { ore, charcoal });
+            let mut s = Soak::new(SoakKind::Bloomery { ore, charcoal, rich: 100 });
             while !s.done() {
                 s.bellows = blast_pattern(s.temp);
                 s.step(0.1, true);

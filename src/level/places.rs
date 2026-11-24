@@ -8,7 +8,8 @@
 // Часть полей и функций — для систем, которые подключат их позже (обучение, алхимия, задания).
 #![allow(dead_code)]
 
-use super::city::{self, crafts, houses, kit::Side, port, public};
+use super::city::{self, crafts, houses, kit::Side, outside::mines, port, public};
+pub use super::city::outside::mines::{MineSite, PileSpot, WorkSpots};
 use super::terrain::{self, ground_y};
 use super::{LevelKind, active};
 use bevy::prelude::*;
@@ -52,6 +53,15 @@ pub enum PlaceKind {
     Vineyard,
     /// Очаг, на котором можно варить отвары.
     Hearth,
+    /// Рудник: штольня, шурф, кострища, горн.
+    Mine,
+    /// Место, где копают болотную руду.
+    BogOre,
+    /// Стан углежогов в лесу.
+    CharcoalCamp,
+    ClayPit,
+    Beach,
+    Quarry,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -179,6 +189,12 @@ fn city_places() -> Vec<Place> {
         p("goth_bloomery", "Сыродутный горн готов", "—", Smithy, smith_point(gb, 1.6, -1.6), 4.0),
         p("steppe_forge", "Горн кочевого кузнеца", "—", Smithy, smith_point(sf, 1.6, 1.4), 4.0),
         p("alan_forge", "Горн аланского кузнеца", "—", Smithy, smith_point(af, 1.4, 1.3), 4.0),
+        p("mine", "Рудник на рудной горке", "μέταλλον", Mine, mines::mine_yard() + Vec3::new(-4.5, 0.0, -2.0), 20.0),
+        p("bog_ore", "Рыжая мочажина (болотная руда)", "—", BogOre, on_ground(mines::west_ravine_x(458.0) + 6.0, 458.0), 20.0),
+        p("charcoal_camp", "Стан углежогов", "—", CharcoalCamp, on_ground(mines::CHARCOAL_CAMP.x - 1.0, mines::CHARCOAL_CAMP.y - 1.0), 18.0),
+        p("clay_pit", "Глиняный карьер", "—", ClayPit, on_ground(mines::CLAY_PIT.x, mines::CLAY_PIT.y - 6.5), 8.0),
+        p("sand_beach", "Песок у Песочной бухты", "—", Beach, on_ground(mines::SAND_BEACH.x + 2.0, mines::SAND_BEACH.y + 3.0), 10.0),
+        p("quarry", "Каменоломня за бухтой", "λατομεῖον", Quarry, on_ground(mines::QUARRY.x, mines::QUARRY.y - 9.0), 14.0),
     ]
 }
 
@@ -235,6 +251,29 @@ pub fn houses() -> &'static [super::HouseSpec] {
 /// В чьём доме точка (номер в [`houses`]): для «залез в чужой дом» и краж.
 pub fn house_at(p: Vec3) -> Option<u32> {
     houses().iter().position(|h| h.contains(p)).map(|i| i as u32)
+}
+
+// ---------------- горное дело ----------------
+
+/// Места добычи (руда, дрова, глина, песок, камень) — см. `mining.rs`.
+pub fn mine_sites() -> &'static [MineSite] {
+    match active() {
+        LevelKind::Chersonesus => mines::mine_sites(),
+        LevelKind::Castle => &[],
+    }
+}
+
+/// Где складывают угольные кучи и обжиговые кострища.
+pub fn pile_spots() -> &'static [PileSpot] {
+    match active() {
+        LevelKind::Chersonesus => mines::pile_spots(),
+        LevelKind::Castle => &[],
+    }
+}
+
+/// Где работают рудокопы и углежоги (для распорядка дня).
+pub fn mine_work_spots() -> Option<WorkSpots> {
+    (active() == LevelKind::Chersonesus).then(mines::work_spots)
 }
 
 // ---------------- травы ----------------

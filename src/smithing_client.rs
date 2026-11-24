@@ -517,6 +517,11 @@ fn have(loot: &LootState, name: &str) -> u32 {
     loot.inventory.as_ref().map_or(0, |inv| inv.grid.items.iter().filter(|p| p.item.info().name == name).map(|p| p.item.count as u32).sum())
 }
 
+/// Руды всех сортов: обожжённой, горной, болотной.
+fn have_ore(loot: &LootState) -> u32 {
+    crate::mining::OreGrade::ALL.iter().map(|g| have(loot, g.item())).sum()
+}
+
 /// Какие полосы взять: лучшие сначала, сталь — одна на лезвие (если просили).
 fn pick_bars(loot: &LootState, pattern: Pattern, steel: bool) -> Vec<ItemUid> {
     let Some(inv) = loot.inventory.as_ref() else { return vec![] };
@@ -686,13 +691,13 @@ fn begin_menu(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
         p.spawn(label(fonts, "Сыродутный горн: руду и уголь слоями, потом непрерывно дуть.", 14.0, TEXT, false));
         row(p).with_children(|r| {
             button(r, fonts, "−", Act::Ore(-1), false);
-            r.spawn(label(fonts, format!("Руда: {} (есть {})", st.ore, have(loot, ORE)), 14.0, TEXT, true));
+            r.spawn(label(fonts, format!("Руда: {} (есть {})", st.ore, have_ore(loot)), 14.0, TEXT, true));
             button(r, fonts, "+", Act::Ore(1), false);
             button(r, fonts, "−", Act::Coal(-1), false);
             r.spawn(label(fonts, format!("Уголь: {} (есть {})", st.charcoal, have(loot, CHARCOAL)), 14.0, TEXT, true));
             button(r, fonts, "+", Act::Coal(1), false);
         });
-        let ok = have(loot, ORE) >= st.ore as u32 && have(loot, CHARCOAL) >= st.charcoal as u32;
+        let ok = have_ore(loot) >= st.ore as u32 && have(loot, CHARCOAL) >= st.charcoal as u32;
         button(p, fonts, "Заложить горн", Act::Begin(Plan::Smelt { ore: st.ore, charcoal: st.charcoal }), ok);
         if k.knows(Lore::Technique(Technique::Smelting)) {
             p.spawn(label(fonts, "Вы знаете: угля по весу примерно столько же, сколько руды; держать жёлто-белый жар, но не белый.", 13.0, DIM, false));
@@ -1067,7 +1072,7 @@ fn work_panel(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
         }
         Job::Soak(s) => {
             let what = match s.kind {
-                SoakKind::Bloomery { ore, charcoal } => format!("Плавка: руды {ore}, угля {charcoal}"),
+                SoakKind::Bloomery { ore, charcoal, rich } => format!("Плавка: руды {ore} (богатость {rich}%), угля {charcoal}"),
                 SoakKind::Carburize => "Цементация полосы".into(),
             };
             p.spawn(label(fonts, format!("{what} · качайте мехи пробелом в такт"), 15.0, TITLE, true));

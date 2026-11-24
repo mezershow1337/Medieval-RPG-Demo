@@ -127,6 +127,19 @@ pub fn balka_x(z: f32) -> f32 {
     40.0 + (z * 0.008).sin() * 40.0 + 0.1 * z
 }
 
+/// Рудная горка в предгорьях к югу от города: невысокий холм с крутым северным уступом,
+/// в который ведут штольню (уступ — по линии `z`, середина — `x`).
+pub const MINE_FACE: (f32, f32) = (-249.0, 702.0);
+
+/// Насколько рудная горка поднимает землю (м).
+fn knoll(x: f32, z: f32) -> f32 {
+    let (mx, fz) = MINE_FACE;
+    let side = 1.0 - smoothstep(16.0, 34.0, (x - mx).abs());
+    let north = smoothstep(fz - 2.0, fz + 7.0, z);
+    let south = 1.0 - smoothstep(fz + 22.0, fz + 46.0, z);
+    9.0 * side * north * south
+}
+
 /// Высота суши без учёта моря.
 fn land(x: f32, z: f32) -> f32 {
     let d = city_distance(x, z);
@@ -142,7 +155,7 @@ fn land(x: f32, z: f32) -> f32 {
     };
     let east = (-((x - balka_x(z)) / 26.0).powi(2)).exp();
     let r = ravine(-480.0, -0.25, 30.0) * 12.0 + east * smoothstep(320.0, 420.0, z) * 10.0;
-    k * (hills + rise - r - 4.0).max(-k * 2.0) + (1.0 - k) * 0.0
+    k * (hills + rise - r - 4.0 + knoll(x, z)).max(-k * 2.0) + (1.0 - k) * 0.0
 }
 
 /// Аналитическая высота земли.

@@ -141,6 +141,8 @@ pub enum LoreClientMessage {
     Stop,
     /// Движение руками закончено (см. work.rs): качество 0..1.
     Stroke { q: f32 },
+    /// Рудник, болото, угольная куча, кострище для обжига (см. mining_server.rs).
+    Mine(crate::mining_net::MineAct),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]

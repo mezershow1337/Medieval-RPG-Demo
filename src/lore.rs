@@ -438,15 +438,24 @@ pub enum Technique {
     Armoury,
     /// Гиппократ «О переломах», Цельс, книга VIII: вытянуть, вправить, наложить лубки и бинты.
     Bonesetting,
+    // --- Горное дело и углежжение (mining.rs) ---
+    /// Рудознатство: отличать руду от пустой породы, болотную руду — от рыжей глины.
+    Prospecting,
+    /// Горное дело: вести штольню, ставить крепь.
+    Mining,
+    /// Обжиг руды на кострище перед плавкой.
+    Roasting,
+    /// Углежжение: сложить, укрыть и вести угольную кучу.
+    Charcoal,
 }
 
 impl Technique {
-    pub const ALL: [Technique; 32] = {
+    pub const ALL: [Technique; 36] = {
         use Technique::*;
         [
             Gathering, Poultice, WoundWashing, Decoction, Dosage, Maceration, Salve, Oxymel, Theriac, Fermentation, Distillation, Sublimation, Calcination, Mordanting,
             VatDyeing, Ink, Soap, Incendiary, Glassblowing, Pottery, ArrowExtraction, Forging, ForgeWelding, Quenching, Tempering, Smelting, Carburizing, Casting, LostWax,
-            MailMaking, Armoury, Bonesetting,
+            MailMaking, Armoury, Bonesetting, Prospecting, Mining, Roasting, Charcoal,
         ]
     };
 
@@ -485,6 +494,10 @@ impl Technique {
             MailMaking => "Кольчужное плетение",
             Armoury => "Доспешное дело",
             Bonesetting => "Вправление переломов",
+            Prospecting => "Рудознатство",
+            Mining => "Горное дело (крепь)",
+            Roasting => "Обжиг руды",
+            Charcoal => "Углежжение",
         }
     }
 
@@ -523,6 +536,10 @@ impl Technique {
             MailMaking => "Тянуть проволоку, навить кольца, каждое кольцо продеть в четыре соседних и заклепать холодным, лёгкими точными ударами.",
             Armoury => "Пластины выковать, пробить отверстия, связать ремнями; шлем собрать из сегментов на каркасе и склепать.",
             Bonesetting => "Сломанную кость вытянуть за концы, пока обломки не встанут на место, обернуть льном и уложить в лубки. Неподвижно сорок дней — иначе срастётся криво.",
+            Prospecting => "Руда тяжелее камня. Бурый железняк — охристый, на изломе ржавый, черта по камню бурая. Болотную руду ищут у ржавых ключей, где на воде радужная плёнка: под дёрном ноздреватые бурые комья.",
+            Mining => "Штольню ведут в склон с уклоном к выходу, чтобы стекала вода. Каждые полтора локтя — крепь: две стойки и верхняк, между ними затяжка из жердей. Плиний: галереи держат брёвнами, иначе кровля садится.",
+            Roasting => "Руду кладут на костёр из дров слоями и ворошат. Уходит вода и сера, руда буреет и трескается — легче дробить, лучше плавится. Перегреть — спечётся в шлаковую корку.",
+            Charcoal => "Феофраст: плотные поленья дуба ставят вокруг кола, кроют листвой, дёрном и землёй, поджигают сверху. Отдушинами правят воздух: дым белый — сохнет, жёлтый — обугливается, голубой и прозрачный — готово, глушить землёй. Прогары засыпать сразу.",
         }
     }
 
@@ -533,6 +550,7 @@ impl Technique {
             Poultice | WoundWashing | Dosage | Theriac | ArrowExtraction | Bonesetting => Skill::Medicine,
             Decoction | Salve | Oxymel => Skill::Herbalism,
             Forging | ForgeWelding | Quenching | Tempering | Smelting | Carburizing | Casting | LostWax | MailMaking | Armoury => Skill::Smithing,
+            Prospecting | Mining | Roasting | Charcoal => Skill::Smithing,
             _ => Skill::Alchemy,
         }
     }
@@ -585,6 +603,8 @@ impl Lore {
                 Smelting | LostWax => 4.0,
                 Armoury => 6.0,
                 MailMaking => 8.0,
+                Prospecting | Roasting => 2.0,
+                Mining | Charcoal => 3.0,
             },
         }
     }
@@ -603,6 +623,7 @@ impl Lore {
             Lore::Technique(Tempering) => vec![Lore::Technique(Quenching)],
             Lore::Technique(Carburizing) => vec![Lore::Technique(ForgeWelding)],
             Lore::Technique(LostWax) => vec![Lore::Technique(Casting)],
+            Lore::Technique(Mining) => vec![Lore::Technique(Prospecting)],
             _ => vec![],
         }
     }
@@ -636,6 +657,8 @@ pub enum Book {
     Theophrastus,
     Celsus,
     Pliny,
+    /// Феофраст, «Исследование о растениях»: книга V об угле и дереве.
+    TheophrastusPlants,
 }
 
 pub struct BookInfo {
@@ -649,9 +672,9 @@ pub struct BookInfo {
 }
 
 impl Book {
-    pub const ALL: [Book; 13] = {
+    pub const ALL: [Book; 14] = {
         use Book::*;
-        [HerbalFragment, Dioscorides, IllustratedHerbal, HippocratesUlcers, GalenSimples, GalenAntidotes, Oribasius, Zosimos, DyerBook, Aeneas, Theophrastus, Celsus, Pliny]
+        [HerbalFragment, Dioscorides, IllustratedHerbal, HippocratesUlcers, GalenSimples, GalenAntidotes, Oribasius, Zosimos, DyerBook, Aeneas, Theophrastus, Celsus, Pliny, TheophrastusPlants]
     };
 
     pub fn info(self) -> BookInfo {
@@ -687,7 +710,14 @@ impl Book {
                 Language::Latin,
                 "кодекс (книги XXXIII–XXXIV)",
                 240.0,
-                "Плиний Старший о металлах: как плавят руду, как калят железо в воде и масле, сколько олова класть в бронзу.",
+                "Плиний Старший о металлах: где и как ищут руду, как ведут и крепят штольни, как плавят руду, как калят железо в воде и масле, сколько олова класть в бронзу.",
+            ),
+            TheophrastusPlants => t(
+                "Феофраст. Исследование о растениях",
+                Language::Greek,
+                "свиток (книга V)",
+                150.0,
+                "Ученик Аристотеля о деревьях: какое дерево на что годится и как углежоги в горах жгут уголь в кучах под землёй.",
             ),
         }
     }
@@ -766,7 +796,8 @@ impl Book {
                 v
             }
             // Только теория: руками это всё равно придётся делать самому.
-            Book::Pliny => vec![Lore::Technique(Smelting), Lore::Technique(Quenching), Lore::Technique(Casting)],
+            Book::Pliny => vec![Lore::Technique(Prospecting), Lore::Technique(Mining), Lore::Technique(Smelting), Lore::Technique(Quenching), Lore::Technique(Casting)],
+            Book::TheophrastusPlants => vec![Lore::Technique(Charcoal)],
         }
     }
 }
@@ -805,6 +836,10 @@ pub enum Teacher {
     GothSmith,
     /// Кочевой кузнец степняков: наконечники стрел, литьё бронзовых бляшек.
     SteppeSmith,
+    /// Старший рудокоп (десятник) на руднике: руда, штольня, обжиг.
+    Miner,
+    /// Готский углежог в горном лесу.
+    CharcoalBurner,
 }
 
 /// Как учится игрок.
@@ -836,7 +871,7 @@ impl LessonMode {
 }
 
 impl Teacher {
-    pub const ALL: [Teacher; 15] = [
+    pub const ALL: [Teacher; 17] = [
         Teacher::Iatros,
         Teacher::Rhizotomos,
         Teacher::Wisewoman,
@@ -852,6 +887,8 @@ impl Teacher {
         Teacher::Armourer,
         Teacher::GothSmith,
         Teacher::SteppeSmith,
+        Teacher::Miner,
+        Teacher::CharcoalBurner,
     ];
 
     pub fn name(self) -> &'static str {
@@ -871,6 +908,8 @@ impl Teacher {
             Teacher::Armourer => "Оружейник",
             Teacher::GothSmith => "Готский кузнец",
             Teacher::SteppeSmith => "Кочевой кузнец",
+            Teacher::Miner => "Десятник рудокопов",
+            Teacher::CharcoalBurner => "Углежог",
         }
     }
 
@@ -880,7 +919,7 @@ impl Teacher {
             Teacher::Iatros => Some(Skill::Medicine),
             Teacher::Rhizotomos | Teacher::Wisewoman | Teacher::Apothecary | Teacher::SteppeHealer => Some(Skill::Herbalism),
             Teacher::Alchemist | Teacher::Dyer | Teacher::Glassblower | Teacher::Potter => Some(Skill::Alchemy),
-            Teacher::Smith | Teacher::Armourer | Teacher::GothSmith | Teacher::SteppeSmith => Some(Skill::Smithing),
+            Teacher::Smith | Teacher::Armourer | Teacher::GothSmith | Teacher::SteppeSmith | Teacher::Miner | Teacher::CharcoalBurner => Some(Skill::Smithing),
             Teacher::Scribe | Teacher::Grammarian => Some(Skill::Letters),
         }
     }
@@ -965,6 +1004,8 @@ impl Teacher {
             Teacher::Armourer => v.extend([t(Forging), t(Quenching), t(Tempering), t(Armoury), t(MailMaking)]),
             Teacher::GothSmith => v.extend([t(Forging), t(Smelting), t(ForgeWelding), t(Quenching)]),
             Teacher::SteppeSmith => v.extend([t(Forging), t(Casting), t(LostWax), t(Quenching)]),
+            Teacher::Miner => v.extend([t(Prospecting), t(Roasting), t(Mining)]),
+            Teacher::CharcoalBurner => v.extend([t(Charcoal), t(Roasting)]),
         }
         v
     }

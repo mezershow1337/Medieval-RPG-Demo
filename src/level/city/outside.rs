@@ -15,6 +15,8 @@ use crate::level::places::{self, ALAN_CAMP, GOTH_VILLAGE, KLEROS_FARM, NECROPOLI
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 use terrain::{balka_x, ground_y};
 
+pub(crate) mod mines;
+
 const ROAD_W: f32 = 4.0;
 
 fn g(x: f32, z: f32) -> Vec3 {
@@ -38,6 +40,7 @@ pub fn outside(b: &mut Builder) {
     camp_forge(b, alan_forge_rect(), "Горн аланского кузнеца");
     brigand_camps(b);
     herbs(b);
+    mines::mines(b);
     wilderness(b, &roads);
 }
 
@@ -50,11 +53,14 @@ pub fn roads() -> Vec<Vec<Vec2>> {
     let sx = south_gate_x();
     let fork = Vec2::new(-112.0, 340.0);
     let v = Vec2::new;
-    vec![
+    let mut all = vec![
         vec![v(gx, 183.4), v(gx, 200.0), v(-110.0, 262.0), fork, v(-200.0, 420.0), v(-330.0, 482.0), v(GOTH_VILLAGE.x + 24.0, GOTH_VILLAGE.z + 2.0)],
         vec![fork, v(-20.0, 455.0), v(30.0, 506.0), v(balka_x(548.0), 548.0), v(120.0, 600.0), v(STEPPE_CAMP.x - 20.0, STEPPE_CAMP.z - 4.0)],
         vec![v(sx, 183.4), v(sx, 200.0), v(185.0, 240.0), v(205.0, 300.0), v(260.0, 400.0), v(330.0, 478.0), v(420.0, 600.0), v(ALAN_CAMP.x - 19.0, ALAN_CAMP.z - 8.0)],
-    ]
+    ];
+    // Тропы к руднику и к стану углежогов.
+    all.extend(mines::mine_roads());
+    all
 }
 
 fn seg_distance(p: Vec2, a: Vec2, c: Vec2) -> f32 {
@@ -944,6 +950,7 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
     for h in places::herb_patches() {
         clear.push((Vec2::new(h.pos.x, h.pos.z), h.radius + 2.0));
     }
+    clear.extend(mines::clearings());
     let blocked = |p: Vec2| {
         terrain::city_distance(p.x, p.y) < 40.0
             || p.y < 186.0 && p.x < 330.0
