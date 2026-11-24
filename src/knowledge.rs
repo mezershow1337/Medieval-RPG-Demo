@@ -32,6 +32,7 @@ use crate::server::GameWorld;
 use bevy::prelude::*;
 use crate::trade_server::{LessonRequested, RefundLesson};
 use crate::work::{Drill, Effort};
+use crate::mining_server::{self, MineTask, MineWorld, Outcome};
 use bevy_renet::{RenetServer, RenetServerEvent, renet::ServerEvent};
 use std::collections::HashMap;
 
@@ -141,6 +142,8 @@ enum Task {
     Practice,
     Treat { uid: ItemUid, target: Option<medicine::CareTarget> },
     Brew { vessel: ItemUid, spec: BrewSpec },
+    /// Копать, колоть, класть кучу, ворошить руду (см. mining_server.rs).
+    Mine(MineTask),
 }
 
 struct Activity {
@@ -598,6 +601,8 @@ pub fn teacher_from_trade(t: crate::trade::TeacherKind) -> Teacher {
         K::SteppeSmith => Teacher::SteppeSmith,
         K::Copyist => Teacher::Copyist,
         K::Philosopher => Teacher::Philosopher,
+        K::Miner => Teacher::Miner,
+        K::CharcoalBurner => Teacher::CharcoalBurner,
     }
 }
 
@@ -743,6 +748,7 @@ fn receive_lore_messages(
     bodies: Res<Bodies>,
     level: Res<LevelColliders>,
     clock: Option<Res<crate::world_clock::WorldClock>>,
+    mut mines: Option<ResMut<MineWorld>>,
 ) {
     for pid in server.clients_id() {
         while let Some(bytes) = server.receive_message(pid, CH_LORE) {
@@ -762,6 +768,27 @@ fn receive_lore_messages(
             }
             if let LoreClientMessage::Stroke { q } = msg {
                 stroke(&mut server, &mut world, pid, q);
+                continue;
+            }
+            // Рудник и кучи: мгновенное (поджечь, отдушина) можно и посреди работы.
+            if let LoreClientMessage::Mine(act) = msg {
+                let Some(mines) = mines.as_deref_mut() else { continue };
+                if !matches!(actor.fighter.action, Action::Idle) {
+                    continue;
+                }
+                let busy = world.activities.contains_key(&pid);
+                let (Some(k), Some(inv)) = (world.players.get(&pid), loot.inventories.get_mut(&pid)) else { continue };
+                match mining_server::act(mines, k, inv, feet, pid, busy, act) {
+                    Ok(Outcome::Start(task, verb, secs, drill, skill)) => {
+                        start(&mut server, &mut world, pid, Task::Mine(task), verb, 0.0, secs, feet, hp, Some(drill), skill);
+                    }
+                    Ok(Outcome::Done(text)) => notice(&mut server, pid, text),
+                    Err(e) => notice(&mut server, pid, e),
+                }
+                sync_inventory(&mut server, &loot, pid);
+                if let (_, Some(pile)) = mining_server::target_of(&act) {
+                    mining_server::broadcast_pile(&mut server, mines, pile);
+                }
                 continue;
             }
             if world.activities.contains_key(&pid) {
@@ -949,7 +976,7 @@ fn receive_lore_messages(
                         Err(e) => notice(&mut server, pid, e),
                     }
                 }
-                LoreClientMessage::Stop | LoreClientMessage::Stroke { .. } | LoreClientMessage::Tend(_) | LoreClientMessage::PlaceStation { .. } | LoreClientMessage::TakeStation { .. } | LoreClientMessage::UpgradeStation { .. } => {}
+                LoreClientMessage::Stop | LoreClientMessage::Stroke { .. } | LoreClientMessage::Mine(_) | LoreClientMessage::Tend(_) | LoreClientMessage::PlaceStation { .. } | LoreClientMessage::TakeStation { .. } | LoreClientMessage::UpgradeStation { .. } => {}
             }
         }
     }
@@ -1065,6 +1092,8 @@ fn apprentice_chore(teacher: Teacher) -> &'static str {
         Teacher::Glassblower | Teacher::Potter => "Носите дрова к печи",
         Teacher::Scribe | Teacher::Grammarian | Teacher::Grammatist | Teacher::Notary | Teacher::Copyist | Teacher::Philosopher | Teacher::Logograph => "Растираете чернила и чините перья",
         Teacher::Smith | Teacher::Armourer | Teacher::GothSmith | Teacher::SteppeSmith => "Качаете меха, носите уголь, бьёте молотом-кувалдой",
+        Teacher::Miner => "Таскаете корзины с рудой из забоя в отвал",
+        Teacher::CharcoalBurner => "Носите дёрн и землю на кучу, колете поленья",
     }
 }
 
@@ -1077,6 +1106,7 @@ fn tick_activities(
     mut world: ResMut<KnowledgeWorld>,
     mut loot: ResMut<LootWorld>,
     mut bodies: ResMut<Bodies>,
+    mut mines: Option<ResMut<MineWorld>>,
 ) {
     let dt = time.delta_secs();
     let mut ended: Vec<(u64, bool)> = Vec::new();
@@ -1104,6 +1134,12 @@ fn tick_activities(
         a.last_hp = f.hp;
         if let Some(e) = a.effort.as_mut() {
             e.tick(dt);
+        }
+        // Пока руду ворошат, она не спекается.
+        if let (Task::Mine(t), Some(m), Some(e)) = (&a.task, mines.as_deref_mut(), a.effort.as_ref())
+            && e.idle() < STIR_GRACE
+        {
+            m.touch(t);
         }
         a.elapsed = match (&a.effort, a.tend.as_mut()) {
             // На огне время варки идёт, пока горит как надо и (в горшке) пока мешают.
@@ -1189,6 +1225,22 @@ fn tick_activities(
         match a.task {
             Task::Read { uid, text } => finish_reading(&mut server, &mut world, &mut loot, pid, uid, text),
             Task::Gather { patch } => finish_gathering(&mut server, &mut world, &mut loot, pid, patch, a.start, q.unwrap_or(0.5)),
+            Task::Mine(task) => {
+                let Some(mines) = mines.as_deref_mut() else { continue };
+                let loot = &mut *loot;
+                let (Some(k), Some(inv)) = (world.players.get_mut(&pid), loot.inventories.get_mut(&pid)) else { continue };
+                let f = mining_server::finish(mines, k, inv, &mut loot.uids, pid, &task, q.unwrap_or(0.5));
+                if !f.notice.is_empty() {
+                    notice(&mut server, pid, f.notice);
+                }
+                sync_inventory(&mut server, loot, pid);
+                sync_knowledge(&mut server, &world, pid);
+                match mining_server::task_target(&task) {
+                    (Some(site), _) => mining_server::broadcast_site(&mut server, mines, site),
+                    (_, Some(pile)) => mining_server::broadcast_pile(&mut server, mines, pile),
+                    _ => {}
+                }
+            }
             Task::Treat { uid, target } => finish_treatment(&mut server, &mut world, &mut loot, &mut game, &mut bodies, pid, uid, target, q),
             Task::Brew { vessel, spec } => {
                 let feet = game.actors.get(&pid).map(|a| a.pose.feet).unwrap_or_default();

@@ -907,6 +907,8 @@ pub fn chore_drill(teacher: crate::lore::Teacher) -> Drill {
         T::Dyer => Drill::Stir,
         // Бить кувалдой по указке мастера.
         T::Smith | T::Armourer | T::GothSmith | T::SteppeSmith => Drill::Rhythm,
+        // Таскать корзины, кидать землю на кучу.
+        T::Miner | T::CharcoalBurner => Drill::Pump,
     }
 }
 

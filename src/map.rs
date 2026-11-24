@@ -373,7 +373,7 @@ struct MapLabel {
 fn label_tier(kind: crate::level::PlaceKind) -> f32 {
     use crate::level::PlaceKind::*;
     match kind {
-        SteppeCamp | GothVillage | AlanCamp | Necropolis | Vineyard | Spring => 0.0,
+        SteppeCamp | GothVillage | AlanCamp | Necropolis | Vineyard | Spring | Mine | CharcoalCamp | Quarry => 0.0,
         Agora | Basilica | Gate | PortMarket | Theatre | Garrison | Praetorium | Thermae | Quay | Cistern => 1.8,
         _ => 3.0,
     }

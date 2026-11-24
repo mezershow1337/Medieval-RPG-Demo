@@ -195,6 +195,8 @@ fn robe_color(t: Teacher) -> Color {
         Teacher::Logograph => Color::srgb(0.58, 0.5, 0.36),
         Teacher::Copyist => Color::srgb(0.2, 0.24, 0.35),
         Teacher::Philosopher => Color::srgb(0.85, 0.82, 0.75),
+        Teacher::Miner => Color::srgb(0.42, 0.3, 0.2),
+        Teacher::CharcoalBurner => Color::srgb(0.2, 0.18, 0.16),
     }
 }
 

@@ -129,6 +129,16 @@ const MATERIALS: &[&str] = &[
     "Железная руда",
     "Древесный уголь",
     "Крица",
+    // Горное дело и углежжение.
+    "Болотная руда",
+    "Обожжённая руда",
+    "Пустая порода",
+    "Дрова",
+    "Морской песок",
+    "Известняковый блок",
+    "Кайло рудокопа",
+    "Заступ",
+    "Топор дровосека",
     "Железная полоса",
     "Стальная полоса",
     "Железный лом",
@@ -266,6 +276,7 @@ pub fn category(base: ItemBaseId) -> Category {
         || name.contains("Синопсис")
         || name.contains("Свиток")
         || name.contains("история")
+        || name.contains("Исследование")
     {
         return Category::Book;
     }
@@ -299,6 +310,8 @@ pub enum TeacherKind {
     SteppeSmith,
     Copyist,
     Philosopher,
+    Miner,
+    CharcoalBurner,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -598,6 +611,7 @@ pub const MERCHANTS: &[MerchantDef] = &[
             s("Книга красильщика", 0, 1, 1.0),
             s("Эней Тактик. Об обороне городов", 0, 1, 1.0),
             s("Феофраст. О камнях", 0, 1, 1.0),
+            s("Феофраст. Исследование о растениях", 0, 1, 1.0),
             s("Чернила", 2, 6, 1.0),
             s("Псалтирь", 1, 2, 1.0),
             s("Дионисий Фракиец. Искусство грамматики", 0, 1, 1.0),
@@ -1401,6 +1415,100 @@ pub const MERCHANTS: &[MerchantDef] = &[
         look: Look {
             tunic: [0.36, 0.3, 0.24],
             trousers: [0.24, 0.2, 0.17],
+            helmet: false,
+        },
+    },
+    MerchantDef {
+        key: "theodosios",
+        name: "Феодосий",
+        title: "десятник рудника",
+        faction: Faction::Citizens,
+        place: "mine",
+        greeting: "Руда тут бурая, железняк. Кто кайло держать умеет — бери поденщину у ворота. В забой без науки не пущу: крепь не знаешь — завалит.",
+        stock: &[
+            s("Железная руда", 6, 16, 1.0),
+            s("Обожжённая руда", 2, 8, 1.0),
+            s("Болотная руда", 0, 6, 0.9),
+            s("Пустая порода", 0, 4, 1.0),
+            s("Кайло рудокопа", 1, 2, 1.0),
+            s("Заступ", 1, 2, 1.0),
+            s("Дрова", 4, 12, 1.0),
+            s("Известняковый блок", 0, 2, 1.0),
+        ],
+        buys: &[(Category::Material, 0.8), (Category::Food, 1.1), (Category::WineOil, 1.1)],
+        money: MoneyPolicy::Coins,
+        vigilance: 0.6,
+        cash: 40 * 300,
+        orders: &[],
+        lessons: &[
+            LessonDef {
+                title: "Феодосий учит различать руду, обжигать её и крепить штольню",
+                teacher: TeacherKind::Miner,
+                mode: LessonMode::Paid,
+                hours: 2.0,
+                secs: 90.0,
+                money: 40 * 12,
+                min: Standing::Neutral,
+            },
+            LessonDef {
+                title: "Подмастерье: таскать корзины с рудой из забоя",
+                teacher: TeacherKind::Miner,
+                mode: LessonMode::Apprentice,
+                hours: 4.0,
+                secs: 120.0,
+                money: 40,
+                min: Standing::Neutral,
+            },
+        ],
+        services: &[],
+        look: Look {
+            tunic: [0.4, 0.33, 0.24],
+            trousers: [0.26, 0.22, 0.18],
+            helmet: false,
+        },
+    },
+    MerchantDef {
+        key: "wulfila",
+        name: "Вульфила",
+        title: "углежог",
+        faction: Faction::Goths,
+        place: "charcoal_camp",
+        greeting: "Дуб да бук — лучший уголь. Куча горит неделю, глаз не сомкнёшь: прозевал дым — и вместо угля зола.",
+        stock: &[
+            s("Древесный уголь", 12, 40, 0.85),
+            s("Дрова", 8, 24, 0.9),
+            s("Топор дровосека", 1, 2, 1.0),
+            s("Заступ", 0, 1, 1.0),
+        ],
+        buys: &[(Category::Food, 1.3), (Category::WineOil, 1.4), (Category::Textile, 1.2), (Category::Material, 0.8)],
+        money: MoneyPolicy::Barter { bronze: 0.85, gold: 1.0 },
+        vigilance: 0.4,
+        cash: 0,
+        orders: &[],
+        lessons: &[
+            LessonDef {
+                title: "Вульфила учит класть и вести угольную кучу",
+                teacher: TeacherKind::CharcoalBurner,
+                mode: LessonMode::Paid,
+                hours: 2.0,
+                secs: 90.0,
+                money: 40 * 8,
+                min: Standing::Neutral,
+            },
+            LessonDef {
+                title: "Подмастерье: носить дёрн и землю, колоть поленья",
+                teacher: TeacherKind::CharcoalBurner,
+                mode: LessonMode::Apprentice,
+                hours: 4.0,
+                secs: 120.0,
+                money: 30,
+                min: Standing::Neutral,
+            },
+        ],
+        services: &[],
+        look: Look {
+            tunic: [0.25, 0.23, 0.2],
+            trousers: [0.2, 0.18, 0.16],
             helmet: false,
         },
     },

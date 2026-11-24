@@ -246,6 +246,18 @@ fn mesh_named(gltf: &Gltf, gltf_meshes: &Assets<GltfMesh>, name: &str) -> Option
 }
 
 /// Габариты меша (min, max) по позициям вершин.
+/// Наибольший размер скана камня (м), как он лежит в `models/rocks/<id>.glb`.
+fn rock_scan_size(id: &str) -> f32 {
+    match id {
+        "rock_07" => 0.32,
+        "rock_09" => 0.14,
+        "stone_01" => 0.15,
+        "namaqualand_boulder_02" => 2.52,
+        "rock_face_01" => 4.95,
+        _ => 1.0,
+    }
+}
+
 fn mesh_bounds(mesh: &Mesh) -> Option<(Vec3, Vec3)> {
     let pos = mesh.attribute(Mesh::ATTRIBUTE_POSITION)?.as_float3()?;
     let mut min = Vec3::splat(f32::MAX);
@@ -370,7 +382,10 @@ fn spawn_plants(
         let (Some(p0), Some(p1)) = (g0.primitives.first(), g1.primitives.first()) else { continue };
         let mut sm = p0.material.as_ref().and_then(|m| gltf_materials.get(m)).map(bevy::pbr::gltf::standard_material_from_gltf_material).unwrap_or_default();
         sm.base_color = Color::srgb(1.12, 1.08, 1.0);
-        let size = meshes.get(&p0.mesh).and_then(mesh_bounds).map(|(a, b)| (b - a).max_element()).unwrap_or(1.0);
+        // Сетка в главном мире бывает уже выгружена (только для рендера) — тогда берём размер
+        // скана из таблицы, иначе камни выходят то с гальку, то со скалу.
+        let size = meshes.get(&p0.mesh).and_then(mesh_bounds).map(|(a, b)| (b - a).max_element()).filter(|s| *s > 0.0).unwrap_or_else(|| rock_scan_size(id));
+        debug!("скан камня {id}: {size:.2} м");
         rocks.push(RockModel { size, lod0: p0.mesh.clone(), lod1: p1.mesh.clone(), mat: standard.add(sm) });
     }
 

@@ -156,6 +156,8 @@ pub enum LoreClientMessage {
     Copy { uid: ItemUid },
     /// Упражняться в письме на своей восковой табличке.
     Practice { uid: ItemUid },
+    /// Рудник, болото, угольная куча, кострище для обжига (см. mining_server.rs).
+    Mine(crate::mining_net::MineAct),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]

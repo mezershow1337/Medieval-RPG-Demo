@@ -478,6 +478,10 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         Mat::Glass => (Color::srgb(0.42, 0.55, 0.46), Color::srgb(0.30, 0.44, 0.38), P_PLAIN, 1.0, 0.1, 0.05, 0.08, 0.0, 0.0, 0.0, 0.0),
         // Красная охра по штукатурке (цоколь и полосы в горнице).
         Mat::Ochre => (Color::srgb(0.55, 0.22, 0.13), Color::srgb(0.40, 0.15, 0.09), P_PLASTER, 1.0, 0.2, 0.3, 0.9, 0.0, 0.05, 0.5, 0.0),
+        Mat::Bedrock => (Color::srgb(0.34, 0.3, 0.25), Color::srgb(0.2, 0.18, 0.15), P_RUBBLE, 1.0, 0.3, 1.2, 0.92, 0.0, 0.2, 0.5, 0.0),
+        Mat::Limonite => (Color::srgb(0.33, 0.2, 0.1), Color::srgb(0.2, 0.11, 0.06), P_RUBBLE, 1.0, 0.35, 1.2, 0.9, 0.0, 0.0, 0.3, 0.0),
+        Mat::Soot => (Color::srgb(0.075, 0.068, 0.062), Color::srgb(0.03, 0.03, 0.03), P_EARTH, 1.0, 0.3, 0.7, 0.95, 0.0, 0.0, 0.0, 0.0),
+        Mat::Shingle => (Color::srgb(0.52, 0.48, 0.4), Color::srgb(0.4, 0.37, 0.31), P_EARTH, 1.0, 0.3, 0.8, 0.9, 0.0, 0.0, 0.0, 0.0),
     };
     let photo = photo_layers(mat);
     let tex = surface_textures();
@@ -586,6 +590,10 @@ fn photo_layers(mat: Mat) -> Option<(u32, u32, f32, f32)> {
         Mat::Gold => (L_GOLD, L_GOLD, 0.4, 0.5),
         Mat::Canvas | Mat::Felt | Mat::Rug | Mat::Cloth => (L_WOOL, L_WOOL, 1.0, 0.7),
         Mat::Ochre => (L_PLASTER, L_PLASTER, 1.0, 0.5),
+        Mat::Bedrock => (L_ROCK, L_ROCK, 0.8, 1.0),
+        Mat::Limonite => (L_SOIL, L_ROCK, 0.85, 1.0),
+        Mat::Soot => (L_SOIL, L_SOIL, 0.95, 0.9),
+        Mat::Shingle => (L_GRAVEL, L_GRAVEL, 0.45, 0.9),
         _ => return None,
     })
 }

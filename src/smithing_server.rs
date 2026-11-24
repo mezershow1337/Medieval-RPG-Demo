@@ -345,12 +345,24 @@ fn begin(world: &mut SmithWorld, loot: &mut LootWorld, k: &Knowledge, pid: u64, 
             if ore < 3 {
                 return Err("Мало руды: заложите хотя бы три меры".into());
             }
-            if count_named(inv, ORE) < ore as u32 || count_named(inv, CHARCOAL) < charcoal as u32 {
+            // Сначала обожжённая (богаче), потом сырая горная, потом болотная.
+            let ores: u32 = crate::mining::OreGrade::ALL.iter().map(|g| count_named(inv, g.item())).sum();
+            if ores < ore as u32 || count_named(inv, CHARCOAL) < charcoal as u32 {
                 return Err("Не хватает руды или угля".into());
             }
-            take_named(inv, ORE, ore as u32);
+            let mut left = ore as u32;
+            let mut used = Vec::new();
+            for g in crate::mining::OreGrade::ALL {
+                let n = count_named(inv, g.item()).min(left);
+                if n > 0 {
+                    take_named(inv, g.item(), n);
+                    used.push((g, n));
+                    left -= n;
+                }
+            }
             take_named(inv, CHARCOAL, charcoal as u32);
-            Job::Soak(Soak::new(SoakKind::Bloomery { ore, charcoal }))
+            let rich = crate::mining::charge_richness(&used);
+            Job::Soak(Soak::new(SoakKind::Bloomery { ore, charcoal, rich }))
         }
         Plan::Carburize { bar } => {
             if kind != StationKind::Forge {
