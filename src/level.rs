@@ -100,6 +100,14 @@ pub enum Mat {
     PetalWhite,
     PetalRed,
     PetalPink,
+    /// Дублёная кожа: обувь, ремни, мехи.
+    Leather,
+    /// Хлебная корка, лепёшки.
+    Bread,
+    /// Зеленоватое стекло: кубки, лампады, флаконы.
+    Glass,
+    /// Штукатурка, расписанная красной охрой: цоколь горницы, полосы.
+    Ochre,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -203,6 +211,40 @@ pub struct ContainerSpec {
     pub pos: Vec3,
     pub name: &'static str,
     pub table: crate::items::LootTableId,
+    /// Стоит в жилом доме (номер в [`Layout::houses`]): взять оттуда — кража у хозяев.
+    pub house: Option<u32>,
+}
+
+/// Жилой дом горожан: границы участка (с двором) и кто в нём живёт.
+#[derive(Clone, Debug)]
+#[allow(dead_code)] // имя и жильцов читают кражи и подсказки
+pub struct HouseSpec {
+    /// «Дом гончара · Термы».
+    pub name: String,
+    pub min: Vec3,
+    pub max: Vec3,
+    /// Жители дома: номера в [`Layout::residents`].
+    pub residents: std::ops::Range<u32>,
+}
+
+impl HouseSpec {
+    pub fn contains(&self, p: Vec3) -> bool {
+        p.x >= self.min.x && p.x <= self.max.x && p.z >= self.min.z && p.z <= self.max.z && p.y > self.min.y - 1.0 && p.y < self.max.y
+    }
+}
+
+/// Вещь хозяев дома: лежит на столе, полке, сундуке или на полу. Сервер выкладывает её
+/// настоящим предметом (`GroundItem` с хозяином), её можно взять, переставить и украсть.
+#[derive(Clone, Copy, Debug)]
+pub struct HouseItemSpec {
+    /// Точка опоры: середина низа предмета.
+    pub pos: Vec3,
+    pub yaw: f32,
+    /// Имя вида предмета (как в `ITEM_BASES`).
+    pub item: &'static str,
+    pub count: u16,
+    /// Номер дома в [`Layout::houses`].
+    pub house: u32,
 }
 
 /// Кто живёт или работает в помещении (рисуется клиентом, стоит на месте).
@@ -279,6 +321,9 @@ pub struct Layout {
     pub estates: Vec<EstateSpec>,
     /// Переключаемая геометрия: стадии строек и обстановка комнат купленных домов.
     pub switches: Vec<SwitchGroup>,
+    /// Жилые дома горожан и вещи в них.
+    pub houses: Vec<HouseSpec>,
+    pub house_items: Vec<HouseItemSpec>,
 }
 
 /// Чем обставить комнату купленного дома.
@@ -512,6 +557,12 @@ struct Builder {
     switches: Vec<SwitchGroup>,
     /// Сколько стройплощадок уже заложено.
     sites: u16,
+    houses: Vec<HouseSpec>,
+    house_items: Vec<HouseItemSpec>,
+    /// Дом, который сейчас обставляется (вещи и сундуки получают хозяев).
+    house: Option<u32>,
+    /// Достаток дома: 0 — бедный, 1 — средний, 2 — зажиточный (больше серебра и стекла).
+    wealth: u8,
 }
 
 impl Builder {
@@ -539,6 +590,10 @@ impl Builder {
             estates: Vec::new(),
             switches: Vec::new(),
             sites: 0,
+            houses: Vec::new(),
+            house_items: Vec::new(),
+            house: None,
+            wealth: 1,
         }
     }
 
@@ -561,6 +616,8 @@ impl Builder {
             plants: self.plants,
             estates: self.estates,
             switches: self.switches,
+            houses: self.houses,
+            house_items: self.house_items,
         }
     }
 
@@ -574,6 +631,8 @@ impl Builder {
     fn placed_in(&mut self, offset: Vec3, chunk: Chunk, f: impl FnOnce(&mut Builder)) {
         let mut t = Builder::new();
         t.loot = self.loot;
+        t.house = self.house;
+        t.wealth = self.wealth;
         f(&mut t);
         let shift = |a: Aabb| Aabb::new(a.min + offset, a.max + offset);
         self.blocks.extend(t.blocks.into_iter().map(|b| Block { aabb: shift(b.aabb), ..b }));
@@ -612,6 +671,7 @@ impl Builder {
             self.switches.push(g);
         }
         self.residents.extend(t.residents.into_iter().map(|r| Resident { pos: r.pos + offset, ..r }));
+        self.house_items.extend(t.house_items.into_iter().map(|h| HouseItemSpec { pos: h.pos + offset, ..h }));
         self.plants.extend(t.plants.into_iter().map(|p| Plant { pos: p.pos + offset, ..p }));
         for mut g in t.glass {
             g.pts.iter_mut().for_each(|p| *p += offset);
@@ -634,7 +694,15 @@ impl Builder {
 
     /// Обыскиваемое место (сундук, шкаф, корзина) по текущей таблице добычи.
     fn container(&mut self, pos: Vec3, name: &'static str) {
-        self.containers.push(ContainerSpec { pos, name, table: self.loot.0 });
+        self.containers.push(ContainerSpec { pos, name, table: self.loot.0, house: self.house });
+    }
+
+    /// Вещь хозяев дома, который сейчас обставляется (вне жилого дома — ничего).
+    fn house_item(&mut self, pos: Vec3, yaw: f32, item: &'static str, count: u16) {
+        if let Some(house) = self.house {
+            debug_assert!(crate::items::ItemBaseId::find(item).is_some(), "нет предмета {item}");
+            self.house_items.push(HouseItemSpec { pos, yaw, item, count, house });
+        }
     }
 
     /// Житель стоит в точке `pos` лицом по `yaw` (тело — невидимая коробка, чтобы сквозь него не ходили).

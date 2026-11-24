@@ -85,6 +85,11 @@ pub fn tick_props(
     }
 }
 
+/// Клетка (2 м) для поиска прохожих рядом с вещью.
+fn wake_cell(p: Vec3) -> (i32, i32) {
+    ((p.x / 2.0).floor() as i32, (p.z / 2.0).floor() as i32)
+}
+
 fn step_world(server: &mut RenetServer, game: &GameWorld, level: &crate::collision::LevelColliders, statics: &[Obb], movers: &[Mover], world: &mut LootWorld) {
     // Руки: куда тянуть каждый предмет.
     let mut holds: HashMap<LootId, Hold> = HashMap::new();
@@ -121,14 +126,31 @@ fn step_world(server: &mut RenetServer, game: &GameWorld, level: &crate::collisi
         }
     }
 
-    // Люди будят лежащее, на что наступили.
-    for g in world.ground.values_mut() {
-        if !g.body.asleep {
+    // Люди будят лежащее, на что наступили. Идущих раскладываем по клеткам: спящих вещей
+    // в домах тысячи, а сверять каждую с каждым прохожим дорого.
+    let mut cells: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+    for (k, m) in movers.iter().enumerate() {
+        if m.vel.length() <= 0.3 {
             continue;
         }
-        let a = g.body.obb().aabb();
-        if movers.iter().any(|m| m.vel.length() > 0.3 && m.aabb.overlaps(&crate::collision::Aabb::new(a.min - Vec3::splat(0.03), a.max + Vec3::splat(0.03)))) {
-            g.body.wake();
+        let (x0, z0) = wake_cell(m.aabb.min - Vec3::splat(0.6));
+        let (x1, z1) = wake_cell(m.aabb.max + Vec3::splat(0.6));
+        for x in x0..=x1 {
+            for z in z0..=z1 {
+                cells.entry((x, z)).or_default().push(k);
+            }
+        }
+    }
+    if !cells.is_empty() {
+        for g in world.ground.values_mut() {
+            if !g.body.asleep {
+                continue;
+            }
+            let Some(near) = cells.get(&wake_cell(g.body.pos)) else { continue };
+            let a = g.body.obb().aabb();
+            if near.iter().any(|k| movers[*k].aabb.overlaps(&crate::collision::Aabb::new(a.min - Vec3::splat(0.03), a.max + Vec3::splat(0.03)))) {
+                g.body.wake();
+            }
         }
     }
 

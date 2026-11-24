@@ -1033,7 +1033,9 @@ impl Town {
                 let patrol = w.act == Act::Guard && dest.is_some();
                 let mut t1 = start + Self::walk_time(len, if patrol { speed * 0.85 } else { speed });
                 // Домой к ночи успевают любой ценой (а то в полночь план начнётся сначала).
-                if k + 1 == wishes.len() && t1 > DAY - 120.0 {
+                // Дорога домой тоже: дальше по плану только сон дома, а затянувшийся обход
+                // иначе застал бы солдата в полночь посреди улицы.
+                if (k + 1 == wishes.len() || pos.distance(home) < 1.0) && t1 > DAY - 120.0 {
                     t1 = (DAY - 120.0).max(start + 1.0);
                 }
                 segs.push(Seg::Walk(Walk { t0: start, t1, pts: path, cum, carry: w.carry, patrol }));

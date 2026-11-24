@@ -9,6 +9,7 @@
 //! Раскладка простая: каждая вещь прижимается к стене ([`Room::take`]) и не встаёт
 //! в проходы перед дверями (двери к этому времени уже построены и известны сборщику).
 
+use super::cozy::{self, Ware, one};
 use super::kit::{self, Rect, Rng, Side};
 use super::*;
 use crate::collision::Aabb;
@@ -19,7 +20,7 @@ use crate::level::{DoorSpec, Role};
 pub struct Room {
     pub r: Rect,
     used: Vec<Rect>,
-    doors: Vec<DoorSpec>,
+    pub(super) doors: Vec<DoorSpec>,
 }
 
 impl Room {
@@ -145,7 +146,7 @@ fn door_zone(d: &DoorSpec) -> Rect {
 }
 
 /// Направление от стены внутрь комнаты.
-fn inward(side: Side) -> Vec3 {
+pub(super) fn inward(side: Side) -> Vec3 {
     -side.out()
 }
 
@@ -504,21 +505,48 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
     let short = if r.w() > r.d() { [Side::W, Side::E, Side::N, Side::S] } else { [Side::N, Side::S, Side::W, Side::E] };
     let all = [Side::N, Side::E, Side::S, Side::W];
     let c = r.center(0.0);
+    let wealth = b.wealth;
     match kind {
         Kind::Kitchen => {
             b.loot(LootTableId::Kitchen);
-            // Очаг у стены, над ним — тренога с котлом.
-            if let Some((f, _)) = room.take(1.3, 1.3, &short, rng) {
+            // Очаг у стены, над ним — тренога с котлом, рядом — поленница.
+            if let Some((f, s)) = room.take(1.3, 1.3, &short, rng) {
                 kit::hearth(b, f.center(0.0));
                 if rng.chance(0.6) {
                     tripod_cauldron(b, f.center(0.0));
+                } else {
+                    // Горшки греются на краю очага.
+                    cozy::lidded_pot(b, f.center(0.2) + axis(s) * 0.35);
+                    kit::jug(b, f.center(0.2) - axis(s) * 0.38, 0.2, Mat::Ceramic);
                 }
                 b.lamp(f.center(0.6), Color::srgb(1.0, 0.5, 0.2), 3_000.0, 5.0);
+                let wood = f.center(0.0) + axis(s) * 1.05;
+                let wf = Rect::new(wood.x - 0.3, wood.z - 0.3, wood.x + 0.3, wood.z + 0.3);
+                if room.free(wf) {
+                    room.reserve(wf);
+                    cozy::firewood(b, wf, rng);
+                }
             }
             if let Some((f, s)) = room.take(1.6, 0.35, &long, rng) {
                 let mut rr = Rng::new(rng.int(9999) as u32);
                 kit::shelf(b, f, 2, &mut rr, Mat::Ceramic);
                 hanging_bunches(b, f.center(2.5) + inward(s) * 0.25 - axis(s) * 0.7, f.center(2.5) + inward(s) * 0.25 + axis(s) * 0.7, 5);
+            }
+            // Полка с посудой и припасами (вещи хозяев).
+            let herb = ["Сушёный чабрец", "Сушёная мята", "Сушёный шалфей"][rng.int(3)];
+            let mut upper = vec![Ware::Bowls, one(cozy::CUP), Ware::Jug(0.22), one(cozy::LAMP), one(herb)];
+            let mut lower = vec![one("Глиняный горшок"), Ware::Pot, one(cozy::BOWL)];
+            if rng.chance(0.5) {
+                lower.push(one("Горшок мёда"));
+            }
+            if rng.chance(0.4) {
+                upper.push(one("Кувшин оливкового масла"));
+            }
+            cozy::shuffle(&mut upper, rng);
+            cozy::shelf_unit(b, &mut room, &long, 1.4, &upper, &lower, rng);
+            // Колышки с утварью.
+            if let Some((f, s)) = room.take(1.3, 0.12, &all, rng) {
+                cozy::utensil_rail(b, f.center(1.75) - inward(s) * 0.06, inward(s), rng);
             }
             if let Some((f, _)) = room.take(0.6, 0.6, &all, rng) {
                 kit::hand_mill(b, f.center(0.0));
@@ -529,14 +557,37 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             if let Some((f, _)) = room.take(0.6, 0.6, &all, rng) {
                 basket(b, f.center(0.0), 0.25, 0.4, Mat::HerbGreen, Some("Корзина с припасами"));
             }
-            if let Some((f, _)) = room.take(1.1, 0.5, &all, rng) {
-                for k in 0..2 {
-                    kit::amphora(b, f.center(0.0) + axis_of(&f) * (k as f32 - 0.5) * 0.45, 0.9, rng.int(3) as u32);
-                }
+            if let Some((f, _)) = room.take(0.6, 0.6, &all, rng) {
+                cozy::amphora_ring(b, f.center(0.0), rng);
             }
-            if let Some((f, _)) = room.take(0.9, 0.45, &all, rng) {
-                kit::table(b, f, 0.6);
-                b.mesh(Mat::Thatch).lathe(f.center(0.6), &[(0.0, 0.0), (0.12, 0.0), (0.12, 0.05), (0.07, 0.1), (0.0, 0.11)], 8);
+            // Рабочий стол: нож, хлеб, рыба, ступка.
+            if let Some((f, _)) = room.take(1.2, 0.55, &all, rng) {
+                kit::table(b, f, 0.75);
+                let mut w = vec![one(cozy::KNIFE), one(cozy::BREAD), one(cozy::BOWL), Ware::Fruit([Mat::PetalYellow, Mat::PetalRed, Mat::HerbGreen][rng.int(3)])];
+                if rng.chance(0.6) {
+                    w.push(one("Солёная рыба"));
+                }
+                if rng.chance(0.4) {
+                    w.push(one("Ступка с пестиком"));
+                }
+                if rng.chance(0.3) {
+                    w.push(one(cozy::CHEESE));
+                }
+                cozy::shuffle(&mut w, rng);
+                cozy::lay(b, f.inset(0.05), 0.75, &w, rng);
+            }
+            if let Some((f, _)) = room.take(0.6, 0.6, &all, rng) {
+                cozy::mortarium(b, f.center(0.0));
+            }
+            if rng.chance(0.6)
+                && let Some((f, _)) = room.take(0.45, 0.45, &all, rng)
+            {
+                cozy::chopping_block(b, f.center(0.0));
+            }
+            if r.w().max(r.d()) > 3.4 {
+                let s = long[rng.int(2)];
+                let p = wall_point(r, s, 2.45) + inward(s) * 0.35;
+                cozy::hanging_fish(b, p - axis(s) * 0.6, p + axis(s) * 0.6, 4);
             }
             if !people.wife {
                 people.wife = room.resident(b, c, c + Vec3::X, if rng.chance(0.3) { Role::Cook } else { Role::Housewife });
@@ -544,16 +595,61 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
         }
         Kind::Bedroom => {
             b.loot(LootTableId::Household);
-            if let Some((f, _)) = room.take(2.0, 0.95, &long, rng) {
+            let mut beds = Vec::new();
+            if let Some((f, s)) = room.take(2.0, 0.95, &long, rng) {
                 bed(b, f, rng);
+                beds.push((f, s));
             }
             if r.w().max(r.d()) > 4.2
-                && let Some((f, _)) = room.take(2.0, 0.95, &long, rng)
+                && let Some((f, s)) = room.take(2.0, 0.95, &long, rng)
             {
                 bed(b, f, rng);
+                beds.push((f, s));
+            }
+            // Сандалии у ложа и ночной горшок.
+            for (f, s) in &beds {
+                let edge = f.center(0.0) + inward(*s) * ((if s.along_x() { f.d() } else { f.w() }) / 2.0 + 0.2);
+                if rng.chance(0.7) {
+                    cozy::sandals(b, edge + axis(*s) * 0.3, inward(*s));
+                }
+                if rng.chance(0.35) {
+                    cozy::chamber_pot(b, f.center(0.0) - axis(*s) * ((if s.along_x() { f.w() } else { f.d() }) / 2.0 - 0.25));
+                }
             }
             if let Some((f, _)) = room.take(1.0, 0.6, &all, rng) {
                 chest(b, f, "Сундук");
+                let along_x = f.w() > f.d();
+                if rng.chance(0.5) {
+                    cozy::folded_blankets(b, f.center(0.55), along_x, rng);
+                } else {
+                    let mut w = vec![one(cozy::COMB), one(cozy::SPINDLE)];
+                    if rng.chance(0.4) {
+                        w.push(one(cozy::CASKET));
+                    }
+                    cozy::lay(b, f.inset(0.08), 0.55, &w, rng);
+                }
+            }
+            // Столик у ложа: светильник, гребень, зеркальце, украшения.
+            if let Some((f, _)) = room.take(0.55, 0.42, &all, rng) {
+                kit::table(b, f, 0.55);
+                let mut w = vec![one(cozy::LAMP), one(cozy::COMB)];
+                if wealth >= 1 && rng.chance(0.55) {
+                    w.push(one(cozy::MIRROR));
+                }
+                if rng.chance(0.3) {
+                    w.push(one(cozy::AMPULLA));
+                }
+                if wealth >= 2 && rng.chance(0.5) {
+                    w.push(one(["Серебряный перстень", "Бронзовая фибула", cozy::ENKOLPION][rng.int(3)]));
+                } else if rng.chance(0.2) {
+                    w.push(one(["Нательный крест", "Бронзовая фибула", "Бронзовая пряжка"][rng.int(3)]));
+                }
+                cozy::lay(b, f.inset(0.03), 0.55, &w, rng);
+            }
+            if rng.chance(0.45)
+                && let Some((f, _)) = room.take(0.5, 0.5, &all, rng)
+            {
+                cozy::wash_stand(b, f.center(0.0), wealth >= 2);
             }
             if let Some((f, _)) = room.take(0.4, 0.4, &all, rng) {
                 lampstand(b, f.center(0.0), false);
@@ -564,13 +660,38 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             if let Some((f, s)) = room.take(1.0, 0.15, &all, rng) {
                 pegs(b, f.center(1.9) - inward(s) * 0.07, inward(s), if rng.chance(0.5) { Mat::Cloth } else { Mat::Felt });
             }
-            if let Some(s) = all.get(rng.int(4)) {
+            if rng.chance(0.45) {
+                let mut upper = vec![Ware::Jug(0.2), one(cozy::AMPULLA)];
+                if rng.chance(0.5) {
+                    upper.push(one(cozy::CASKET));
+                }
+                if rng.chance(0.4) {
+                    upper.push(one(cozy::YARN));
+                }
+                cozy::shelf_unit(b, &mut room, &all, 1.0, &upper, &[], rng);
+            }
+            // Завеса над ложем.
+            if let Some((f, s)) = beds.first().copied().filter(|_| rng.chance(0.55)) {
+                let p = f.center(1.55) - inward(s) * ((if s.along_x() { f.d() } else { f.w() }) / 2.0 - 0.02);
+                cozy::wall_hanging(b, p, inward(s), 1.3, 0.9, rng);
+            } else if let Some(s) = all.get(rng.int(4)) {
                 let p = wall_point(r, *s, 2.2);
                 wall_cross(b, p, inward(*s));
             }
             let cr = r.inset(0.9);
             if cr.w() > 0.8 && cr.d() > 0.8 {
                 rug(b, cr, if rng.chance(0.5) { Mat::Rug } else { Mat::Thatch });
+            }
+            // Детский угол: лошадка, кости, мяч; у самых маленьких — люлька.
+            if rng.chance(0.45)
+                && let Some((f, _)) = room.take(0.7, 0.6, &all, rng)
+            {
+                cozy::toys(b, f.center(0.0) - Vec3::new(0.15, 0.0, 0.1), rng);
+            }
+            if rng.chance(0.15)
+                && let Some((f, _)) = room.take(0.9, 0.55, &all, rng)
+            {
+                cozy::cradle(b, f);
             }
             if !people.child && rng.chance(0.25) {
                 people.child = room.resident(b, c, c + Vec3::Z, Role::Child);
@@ -598,6 +719,29 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                 b.loot(LootTableId::Storehouse);
                 chest(b, f, "Ларь");
             }
+            // Помост с припасами: мёд, воск, масло, рыба, соль.
+            if let Some((f, _)) = room.take(1.5, 0.45, &all, rng) {
+                kit::bench(b, f);
+                let mut w = vec![one(["Кувшин вина", "Кувшин оливкового масла"][rng.int(2)]), one("Солёная рыба"), one(cozy::FIGS)];
+                if rng.chance(0.5) {
+                    w.push(one("Горшок мёда"));
+                }
+                if rng.chance(0.4) {
+                    w.push(one("Воск"));
+                }
+                if rng.chance(0.35) {
+                    w.push(one("Мешок соли"));
+                }
+                cozy::shuffle(&mut w, rng);
+                cozy::lay(b, f.inset(0.03), 0.45, &w, rng);
+            }
+            let s = long[rng.int(2)];
+            let p = wall_point(r, s, 2.4) + inward(s) * 0.4;
+            if rng.chance(0.5) {
+                cozy::hanging_fish(b, p - axis(s) * 0.7, p + axis(s) * 0.7, 5);
+            } else {
+                hanging_bunches(b, p - axis(s) * 0.7, p + axis(s) * 0.7, 5);
+            }
         }
         Kind::Weaving => {
             b.loot(LootTableId::Household);
@@ -617,9 +761,21 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             if let Some((f, _)) = room.take(1.0, 0.6, &all, rng) {
                 chest(b, f, "Сундук с тканями");
             }
-            if let Some((f, _)) = room.take(1.2, 0.4, &all, rng) {
+            // Скамья с пряжей, веретёнами и ножницами.
+            if let Some((f, _)) = room.take(1.3, 0.4, &all, rng) {
                 kit::bench(b, f);
-                b.mesh(Mat::Cloth).cuboid(f.center(0.45) - Vec3::new(0.3, 0.0, 0.15), f.center(0.45) + Vec3::new(0.3, 0.1, 0.15));
+                let mut w = vec![one(cozy::YARN), one(cozy::SPINDLE), one(cozy::YARN), one(cozy::SHEARS)];
+                if rng.chance(0.5) {
+                    w.push(one(cozy::SPINDLE));
+                }
+                if rng.chance(0.3) {
+                    w.push(one(["Отрез шерсти", "Отрез льна"][rng.int(2)]));
+                }
+                cozy::shuffle(&mut w, rng);
+                cozy::lay(b, f.inset(0.03), 0.45, &w, rng);
+            }
+            if let Some((f, s)) = room.take(1.3, 0.15, &all, rng) {
+                cozy::skein_pole(b, f.center(1.8) - inward(s) * 0.07, inward(s), rng);
             }
             if !people.wife || rng.chance(0.4) {
                 people.wife |= room.resident(b, c, c - Vec3::X, Role::Weaver);
@@ -627,6 +783,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
         }
         Kind::Living => {
             b.loot(LootTableId::Household);
+            cozy::painted_socle(b, &room, if wealth >= 2 { 1.1 } else { 0.85 });
             if let Some((f, s)) = room.take(1.0, 0.55, &long, rng) {
                 cupboard(b, f, s, "Шкаф", rng);
             }
@@ -641,7 +798,11 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             };
             if let Some(t) = table {
                 kit::table(b, t, 0.72);
-                table_setting(b, t.inset(0.08), 0.72, rng);
+                // Льняная скатерть и всё, что на столе.
+                let cloth = t.inset(0.1);
+                b.mesh(if rng.chance(0.6) { Mat::PetalWhite } else { Mat::Canvas }).cuboid(cloth.min3(0.72), cloth.max3(0.725));
+                let w = cozy::table_wares(wealth, rng);
+                cozy::lay(b, t.inset(0.06), 0.725, &w, rng);
                 for (k, s) in [Side::N, Side::S, Side::W, Side::E].into_iter().enumerate() {
                     let p = t.center(0.0) + s.out() * (if s.along_x() { t.d() } else { t.w() } / 2.0 + 0.35);
                     let foot = Rect::new(p.x - 0.2, p.z - 0.2, p.x + 0.2, p.z + 0.2);
@@ -652,16 +813,54 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                 }
             }
             if let Some((f, _)) = room.take(0.4, 0.4, &all, rng) {
-                lampstand(b, f.center(0.0), rng.chance(0.35));
+                lampstand(b, f.center(0.0), rng.chance(0.5));
             }
             if let Some((f, _)) = room.take(1.4, 0.4, &long, rng) {
                 kit::bench(b, f);
+                cozy::cushions(b, f.inset(0.04), 0.45, rng);
+            }
+            // Полка: светильник, ампула, шкатулка, посуда.
+            let mut upper = vec![Ware::Jug(0.24), one(cozy::AMPULLA), Ware::Bowls];
+            if wealth >= 1 {
+                upper.push(one(cozy::BRONZE_LAMP));
+            }
+            if rng.chance(0.45) {
+                upper.push(one(cozy::CASKET));
+            }
+            if wealth >= 2 && rng.chance(0.6) {
+                upper.push(one("Стеклянная чаша"));
+            }
+            let mut lower = vec![one(cozy::BOWL), one(cozy::CUP), Ware::Jug(0.3), one(cozy::LAMP)];
+            if rng.chance(0.35) {
+                lower.push(one("Кувшин вина"));
+            }
+            cozy::shuffle(&mut upper, rng);
+            cozy::shuffle(&mut lower, rng);
+            cozy::shelf_unit(b, &mut room, &all, 1.4, &upper, &lower, rng);
+            // Столик с доской для тавлей.
+            if rng.chance(0.4)
+                && let Some((f, _)) = room.take(0.7, 0.6, &all, rng)
+            {
+                kit::table(b, f, 0.6);
+                cozy::lay(b, f.inset(0.04), 0.6, &[one(cozy::TABULA), one(cozy::DICE)], rng);
             }
             if let Some((f, _)) = room.take(0.6, 0.6, &all, rng) {
                 brazier(b, f.center(0.0));
             }
+            // Завеса на стене, крест, у зажиточных — икона с лампадкой.
+            if let Some((f, s)) = room.take(1.4, 0.1, &all, rng) {
+                cozy::wall_hanging(b, f.center(1.7) - inward(s) * 0.05, inward(s), 1.3, 1.1, rng);
+            }
             let s = all[rng.int(4)];
-            wall_cross(b, wall_point(r, s, 2.3), inward(s));
+            if wealth >= 2 && rng.chance(0.6) {
+                cozy::wall_icon(b, wall_point(r, s, 1.9), inward(s));
+            } else {
+                wall_cross(b, wall_point(r, s, 2.3), inward(s));
+            }
+            if rng.chance(0.5) {
+                let s = all[(rng.int(4) + 1) % 4];
+                cozy::bracket_lamp(b, wall_point(r, s, 2.0) + axis(s) * 0.9, inward(s));
+            }
             if !people.master {
                 people.master = room.resident(b, c + Vec3::new(0.6, 0.0, 0.6), c, Role::Householder);
             }
@@ -674,15 +873,29 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                 workbench(b, f, tools);
                 bench_at = Some((f, s));
             }
+            // Что сделано и чем работают: настоящие вещи на полке мастерской.
+            let goods: Vec<Ware> = match trade {
+                Trade::Cobbler => vec![one("Кожаные сапоги"), one(cozy::SHEARS), one("Кожаные сапоги"), one("Сырая шкура")],
+                Trade::Carpenter => vec![one("Плотничий топор"), one("Ясеневая заготовка"), one(cozy::HORSE), one(cozy::CASKET)],
+                Trade::Potter => vec![one(cozy::BOWL), one(cozy::LAMP), one(cozy::CUP), one(cozy::BOWL), one(cozy::LAMP), one("Глиняный горшок")],
+                Trade::Netmaker => vec![Ware::Item("Свинцовые грузила", 6), one("Отрез льна"), Ware::Item("Свинцовые грузила", 4)],
+                Trade::Metalworker => vec![one("Бронзовая пряжка"), one("Бронзовая фибула"), one("Бронзовый лом"), one("Медный лом"), one(cozy::BRONZE_LAMP)],
+                Trade::Dyer => vec![one("Корень марены"), one("Вайда"), one("Квасцы"), one(cozy::YARN), one(cozy::YARN)],
+            };
+            let (upper, lower) = goods.split_at(goods.len() / 2);
+            cozy::shelf_unit(b, &mut room, &all, 1.5, upper, lower, rng);
+            if let Some((f, s)) = room.take(1.2, 0.12, &all, rng) {
+                cozy::tool_board(b, f.center(1.6) - inward(s) * 0.06, inward(s), tools, rng);
+            }
             match trade {
                 Trade::Cobbler => {
                     if let Some((f, _)) = room.take(1.2, 0.35, &all, rng) {
                         // Колодки и готовая обувь на полке.
                         let mut rr = Rng::new(rng.int(999) as u32);
-                        kit::shelf(b, f, 2, &mut rr, Mat::Felt);
+                        kit::shelf(b, f, 2, &mut rr, Mat::Leather);
                     }
                     if let Some((f, _)) = room.take(0.9, 0.9, &all, rng) {
-                        b.mesh(Mat::Felt).cuboid(f.min3(0.0), f.max3(0.25));
+                        b.mesh(Mat::Leather).cuboid(f.min3(0.0), f.max3(0.25));
                         kit::hidden(b, f.min3(0.0), f.max3(0.25));
                     }
                 }
@@ -732,13 +945,12 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                     }
                 }
                 Trade::Dyer => {
-                    for (k, mat) in [Mat::Rug, Mat::Cloth, Mat::PetalYellow].into_iter().enumerate() {
+                    for mat in [Mat::Rug, Mat::Cloth, Mat::PetalYellow] {
                         if let Some((f, _)) = room.take(0.8, 0.8, &all, rng) {
                             let p = f.center(0.0);
                             b.mesh(Mat::Ceramic).lathe(p, &[(0.0, 0.0), (0.3, 0.0), (0.36, 0.55), (0.32, 0.58)], 12);
                             b.mesh(mat).disc(p + Vec3::Y * 0.5, 0.31, 10, true);
                             kit::hidden(b, p - Vec3::new(0.35, 0.0, 0.35), p + Vec3::new(0.35, 0.6, 0.35));
-                            let _ = k;
                         }
                     }
                     if let Some((f, s)) = room.take(2.0, 0.1, &all, rng) {
@@ -753,6 +965,11 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             if let Some((f, _)) = room.take(0.4, 0.4, &all, rng) {
                 stool(b, f.center(0.0));
             }
+            if rng.chance(0.5)
+                && let Some((f, s)) = room.take(0.4, 0.4, &all, rng)
+            {
+                cozy::broom(b, f.center(0.0) - inward(s) * 0.15, inward(s));
+            }
             if !people.craft {
                 let (want, look) = match bench_at {
                     Some((f, s)) => (f.center(0.0) + inward(s) * 0.9, f.center(0.0)),
@@ -765,13 +982,23 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             b.loot(LootTableId::Household);
             let n = ((r.w().max(r.d())) / 3.2) as usize;
             for _ in 0..n.max(1) {
-                if let Some((f, _)) = room.take(2.0, 0.95, &long, rng) {
+                if let Some((f, s)) = room.take(2.0, 0.95, &long, rng) {
                     bed(b, f, rng);
+                    if rng.chance(0.5) {
+                        let edge = f.center(0.0) + inward(s) * ((if s.along_x() { f.d() } else { f.w() }) / 2.0 + 0.2);
+                        cozy::sandals(b, edge + axis(s) * 0.3, inward(s));
+                    }
                 }
                 if rng.chance(0.6)
                     && let Some((f, _)) = room.take(1.0, 0.6, &long, rng)
                 {
                     chest(b, f, "Сундук");
+                    if rng.chance(0.5) {
+                        cozy::folded_blankets(b, f.center(0.55), f.w() > f.d(), rng);
+                    } else {
+                        let w = [one(cozy::COMB), one([cozy::SPINDLE, cozy::LAMP, cozy::MIRROR][rng.int(3)])];
+                        cozy::lay(b, f.inset(0.08), 0.55, &w, rng);
+                    }
                 }
             }
             if let Some((f, s)) = room.take(1.0, 0.55, &all, rng) {
@@ -781,6 +1008,9 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
                 && let Some((f, s)) = room.take(1.9, 0.6, &long, rng)
             {
                 kit::loom(b, f.center(0.0) - inward(s) * 0.2, s.along_x());
+                if let Some((f, _)) = room.take(0.6, 0.6, &all, rng) {
+                    basket(b, f.center(0.0), 0.25, 0.35, Mat::Felt, Some("Корзина с пряжей"));
+                }
             }
             for _ in 0..2 {
                 if let Some((f, _)) = room.take(0.4, 0.4, &all, rng) {
@@ -789,6 +1019,16 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             }
             if let Some((f, s)) = room.take(1.0, 0.15, &all, rng) {
                 pegs(b, f.center(1.9) - inward(s) * 0.07, inward(s), Mat::Cloth);
+            }
+            if rng.chance(0.5)
+                && let Some((f, s)) = room.take(1.3, 0.1, &all, rng)
+            {
+                cozy::wall_hanging(b, f.center(1.6) - inward(s) * 0.05, inward(s), 1.2, 0.9, rng);
+            }
+            if rng.chance(0.4)
+                && let Some((f, _)) = room.take(0.7, 0.6, &all, rng)
+            {
+                cozy::toys(b, f.center(0.0) - Vec3::new(0.15, 0.0, 0.1), rng);
             }
             let k = (r.w().max(r.d()) / 4.0) as usize;
             for i in 0..k {
@@ -804,7 +1044,7 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
 }
 
 /// Ось вдоль стены `s`.
-fn axis(s: Side) -> Vec3 {
+pub(super) fn axis(s: Side) -> Vec3 {
     if s.along_x() { Vec3::X } else { Vec3::Z }
 }
 
@@ -902,6 +1142,25 @@ pub fn yard_extras(b: &mut Builder, r: Rect, stair: Option<Rect>, people: &mut H
     }
     if let Some((f, _)) = room.take(0.6, 0.6, &all, rng) {
         basket(b, f.center(0.0), 0.25, 0.35, Mat::Thatch, None);
+    }
+    // Горшки с зеленью, поленница, метла, курятник — двор, в котором живут.
+    if rng.chance(0.7)
+        && let Some((f, _)) = room.take(1.6, 0.4, &all, rng)
+    {
+        cozy::herb_pots(b, f, rng);
+    }
+    if rng.chance(0.6)
+        && let Some((f, _)) = room.take(1.4, 0.5, &all, rng)
+    {
+        cozy::firewood(b, f, rng);
+    }
+    if rng.chance(0.4)
+        && let Some((f, _)) = room.take(1.0, 0.7, &all, rng)
+    {
+        cozy::hen_coop(b, f);
+    }
+    if let Some((f, s)) = room.take(0.4, 0.4, &all, rng) {
+        cozy::broom(b, f.center(0.0) - inward(s) * 0.15, inward(s));
     }
     if !people.child && rng.chance(0.35) {
         let c = r.center(0.0) + Vec3::new(2.2, 0.0, 0.0);

@@ -610,7 +610,29 @@ pub const ITEM_BASES: &[ItemBase] = &[
     base!("Рыбий клей", "Клей", None, (1, 1), None, 5, &[], Sh::Small, false),
     base!("Сухожилия", "Жилы", None, (1, 1), None, 10, &[], Sh::Small, false),
     // Две-три липовые дощечки и тесьма: лубок на сломанную руку или ногу (Гиппократ, «О переломах»).
-    base!("Лубок", "Лубок", None, (1, 2), None, 4, &[], Sh::Small, false),
+    base!("Лубок", "Лубок", None, (1, 2), None, 4, &[], Sh::Small, false),    // Домашняя утварь и мелочи горожан (вещи хозяев в домах, см. level/city/cozy.rs).
+    base!("Глиняный светильник", "Светильник", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Бронзовый светильник", "Светильник", None, (1, 1), None, 2, &[], Sh::Small, false),
+    base!("Краснолаковая миска", "Миска", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Глиняная кружка", "Кружка", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Стеклянный кубок", "Кубок", None, (1, 1), None, 4, &[], Sh::Small, false),
+    base!("Бронзовый кувшин", "Кувшин", None, (1, 2), None, 1, &[], Sh::Flask, false),
+    base!("Серебряная ложка", "Ложка", None, (1, 1), None, 6, &[], Sh::Small, false),
+    base!("Кухонный нож", "Нож", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Каравай хлеба", "Хлеб", None, (1, 1), None, 4, &[], Sh::Small, false),
+    base!("Головка сыра", "Сыр", None, (1, 1), None, 3, &[], Sh::Small, false),
+    base!("Сушёные смоквы", "Смоквы", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Костяной гребень", "Гребень", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Бронзовое зеркальце", "Зеркальце", None, (1, 1), None, 2, &[], Sh::Small, false),
+    base!("Ампула святого Мины", "Ампула", None, (1, 1), None, 4, &[], Sh::Small, false),
+    base!("Энколпион", "Энколпион", None, (1, 1), None, 2, &[], Sh::Small, false),
+    base!("Игральные кости", "Кости", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Деревянная лошадка", "Лошадка", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Веретено с пряслицем", "Веретено", None, (1, 2), None, 3, &[], Sh::Small, false),
+    base!("Моток пряжи", "Пряжа", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Железные ножницы", "Ножницы", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Деревянная шкатулка", "Шкатулка", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Доска для тавлей", "Тавлеи", None, (3, 2), None, 1, &[], Sh::Small, false),
 ];
 
 /// Старое название → новое (предметы переименованы под VI век).

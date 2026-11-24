@@ -32,6 +32,10 @@ use bevy::prelude::*;
 use bevy_renet::{RenetServer, RenetServerEvent, renet::ServerEvent};
 use std::collections::{HashMap, HashSet};
 
+/// Кражи хозяйских вещей в домах (API для свидетелей и стражи).
+#[allow(unused_imports)]
+pub use crate::home_items::{HomeTag, OwnedItemTaken, TakeHow};
+
 /// Сколько тел храним одновременно (старые исчезают).
 const MAX_CORPSES: usize = 64;
 
@@ -41,6 +45,7 @@ impl Plugin for LootServerPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(LootWorld::default())
             .add_plugins(crate::consumables::ConsumablesPlugin)
+            .add_plugins(crate::home_items::HomeItemsPlugin)
             .add_observer(on_connection)
             .add_observer(on_character_died)
             .add_observer(on_spawn_ground_item)
@@ -106,6 +111,8 @@ pub struct GroundItem {
     pub shelf: Option<ShelfTag>,
     /// Кто держит в руках.
     pub holder: Option<u64>,
+    /// Вещь хозяев жилого дома (`home_items.rs`): унести или сунуть в сумку — кража.
+    pub owner: Option<crate::home_items::HomeTag>,
 }
 
 impl GroundItem {
@@ -163,6 +170,10 @@ pub struct LootWorld {
     pub holds: HashMap<u64, HoldState>,
     /// Покупки и кражи с прилавка за кадр.
     pub shelf_requests: Vec<ShelfRequest>,
+    /// Взятые за кадр вещи хозяев домов (рассылает `home_items`).
+    pub taken: Vec<crate::home_items::OwnedItemTaken>,
+    /// В каком жилом доме стоит сундук уровня.
+    pub container_house: HashMap<LootId, u32>,
 }
 
 impl Default for LootWorld {
@@ -180,6 +191,8 @@ impl Default for LootWorld {
             fixed: HashMap::new(),
             holds: HashMap::new(),
             shelf_requests: Vec::new(),
+            taken: Vec::new(),
+            container_house: HashMap::new(),
         }
     }
 }
@@ -247,7 +260,7 @@ impl LootWorld {
         let mut body = PropBody::for_item(item.base, item.count, start, rot);
         body.vel = vel;
         body.ang = Vec3::new(self.rng.range_f32(-2.0, 2.0), self.rng.range_f32(-2.0, 2.0), self.rng.range_f32(-2.0, 2.0));
-        self.insert_ground(server, GroundItem { body, item, shelf: None, holder: None })
+        self.insert_ground(server, GroundItem { body, item, shelf: None, holder: None, owner: None })
     }
 
     /// Положить готовое тело в мир (для прилавков) и разослать всем.
@@ -358,6 +371,7 @@ pub fn ground_message(id: LootId, g: &GroundItem) -> LootServerMessage {
         shelf: g.shelf.as_ref().map(|t| ShelfMark { merchant: t.merchant }),
         // Вид кованой вещи; у прочего — как в модели.
         finish: if g.item.make.is_some() { (g.item.look() * 255.0) as u8 } else { 255 },
+        owned: g.owner.is_some(),
     }
 }
 
@@ -450,13 +464,19 @@ fn container_inventory(world: &mut LootWorld, table: LootTableId) -> Inventory {
 }
 
 /// Сундуки, шкафы и корзины в домах, лавках и казармах (места задаёт уровень).
-fn spawn_world_containers(mut world: ResMut<LootWorld>) {
-    for (i, c) in crate::level::layout().containers.iter().enumerate() {
+fn spawn_world_containers(mut server: ResMut<RenetServer>, mut world: ResMut<LootWorld>, mut homes: ResMut<crate::home_items::HomeItems>) {
+    let layout = crate::level::layout();
+    for (i, c) in layout.containers.iter().enumerate() {
         let id = CONTAINER_ID_BASE + i as LootId;
         let inv = container_inventory(&mut world, c.table);
         world.fixed.insert(id, (c.table, None));
+        if let Some(h) = c.house {
+            world.container_house.insert(id, h);
+        }
         world.corpses.insert(id, Corpse { pos: c.pos, yaw: 0.0, name: c.name.to_string(), inv, created: 0, own_model: false });
     }
+    // Вещи хозяев в жилых домах: на столах, полках, сундуках.
+    homes.setup(&mut server, &mut world, &layout);
 }
 
 fn refill_world_containers(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMut<LootWorld>, mut next: Local<f32>) {
@@ -557,12 +577,24 @@ fn receive_loot_messages(
                         }
                         let item = g.item.clone();
                         let before = item.count;
+                        let owner = g.owner.as_ref().map(|o| o.house);
+                        let at = g.pos();
                         let inv = world.inventories.get_mut(&pid).unwrap();
-                        match inv.place(item, Target::Auto) {
+                        match inv.place(item.clone(), Target::Auto) {
                             Ok(_) => {
                                 world.remove_ground(&mut server, id);
+                                if let Some(house) = owner {
+                                    world.taken.push(crate::home_items::OwnedItemTaken { player: pid, house, item, at, how: crate::home_items::TakeHow::Pocketed });
+                                }
                             }
                             Err(rest) => {
+                                if rest.count != before
+                                    && let Some(house) = owner
+                                {
+                                    let mut part = item.clone();
+                                    part.count = before - rest.count;
+                                    world.taken.push(crate::home_items::OwnedItemTaken { player: pid, house, item: part, at, how: crate::home_items::TakeHow::Pocketed });
+                                }
                                 if rest.count != before {
                                     // Часть стопки влезла — на земле остаётся меньше.
                                     let g = world.ground.get_mut(&id).unwrap();
@@ -604,6 +636,12 @@ fn receive_loot_messages(
                     };
                     if let Err(e) = result {
                         notice(&mut server, pid, e.message());
+                    } else if let (Owner::Container(cid), Owner::Me) = (from, to)
+                        && let Some(&house) = world.container_house.get(&cid)
+                        && let Some(item) = world.inventories.get(&pid).and_then(|inv| inv.find(uid)).map(|(_, i)| i.clone())
+                    {
+                        // Вынул из хозяйского сундука — кража (если дом не его: свой сундук делается личным).
+                        world.taken.push(crate::home_items::OwnedItemTaken { player: pid, house, item, at: feet, how: crate::home_items::TakeHow::FromContainer });
                     }
                     // Даже при ошибке шлём состояние: клиент вернёт предмет на место.
                     let owners: Vec<Owner> = if from == to { vec![from] } else { vec![from, to] };

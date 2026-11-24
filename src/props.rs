@@ -493,6 +493,26 @@ pub fn step_bodies(bodies: &mut [(&mut PropBody, Option<Hold>)], env: &Env, dt: 
     for i in &awake {
         bodies[*i].0.asleep = false;
     }
+    // Соседи каждого бодрствующего: в домах тысячи спящих вещей, перебирать все на каждом
+    // подшаге дорого. За кадр тело не уходит дальше запаса.
+    let mut is_awake = vec![false; bodies.len()];
+    for i in &awake {
+        is_awake[*i] = true;
+    }
+    let near: Vec<Vec<usize>> = awake
+        .iter()
+        .map(|i| {
+            let a = &bodies[*i].0;
+            let reach = a.half.length() + a.vel.length() * dt + 0.5;
+            (0..bodies.len())
+                .filter(|j| {
+                    let b = &bodies[*j].0;
+                    let r = reach + b.half.length() + b.vel.length() * dt;
+                    a.pos.distance_squared(b.pos) <= r * r
+                })
+                .collect()
+        })
+        .collect();
     let h = dt / SUBSTEPS as f32;
     for _ in 0..SUBSTEPS {
         for (k, i) in awake.iter().enumerate() {
@@ -502,9 +522,9 @@ pub fn step_bodies(bodies: &mut [(&mut PropBody, Option<Hold>)], env: &Env, dt: 
             }
         }
         // Пары: бодрствующее с любым соседним.
-        for i in &awake {
-            for j in 0..bodies.len() {
-                if j == *i || (j < *i && awake.contains(&j)) {
+        for (k, i) in awake.iter().enumerate() {
+            for &j in &near[k] {
+                if j == *i || (j < *i && is_awake[j]) {
                     continue;
                 }
                 let (lo, hi) = if *i < j { (*i, j) } else { (j, *i) };

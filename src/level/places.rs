@@ -226,6 +226,17 @@ pub fn hearths() -> &'static [Vec3] {
     H.get_or_init(|| super::layout().hearths)
 }
 
+/// Жилые дома горожан активного уровня (номер дома — индекс).
+pub fn houses() -> &'static [super::HouseSpec] {
+    static H: OnceLock<Vec<super::HouseSpec>> = OnceLock::new();
+    H.get_or_init(|| super::layout().houses)
+}
+
+/// В чьём доме точка (номер в [`houses`]): для «залез в чужой дом» и краж.
+pub fn house_at(p: Vec3) -> Option<u32> {
+    houses().iter().position(|h| h.contains(p)).map(|i| i as u32)
+}
+
 // ---------------- травы ----------------
 
 /// Заросль дикого лекарственного растения. `herb` — латинский род (ключ для травников).

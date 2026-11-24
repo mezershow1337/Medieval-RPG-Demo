@@ -148,6 +148,20 @@ fn smooth_props(time: Res<Time>, grab: Res<PropGrab>, mut items: Query<(&GroundV
         }
         let ahead = if m.asleep { 0.0 } else { (now - m.at).clamp(0.0, 0.1) };
         let target = m.pos + m.vel * ahead;
+        // Лежащее на месте не трогаем: иначе тысячи вещей в домах каждый кадр пересчитывали бы
+        // свои трансформы. Почти доехавшее ставим точно на место.
+        if m.asleep {
+            let d = t.translation.distance_squared(target);
+            let same_rot = t.rotation.dot(m.rot).abs() > 1.0 - 1e-7;
+            if d == 0.0 && same_rot {
+                continue;
+            }
+            if d < 1e-6 && t.rotation.angle_between(m.rot) < 0.002 {
+                t.translation = target;
+                t.rotation = m.rot;
+                continue;
+            }
+        }
         if t.translation.distance(target) > 3.0 {
             t.translation = target;
             t.rotation = m.rot;

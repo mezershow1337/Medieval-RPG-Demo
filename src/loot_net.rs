@@ -79,8 +79,9 @@ pub enum LootServerMessage {
     /// (`CorpseMarker` с тем же id), нужно только привязать к ней обыск.
     CorpseSpawned { id: LootId, pos: NetPos, yaw: f32, name: String, empty: bool, own_model: bool },
     CorpseEmpty { id: LootId, empty: bool },
-    /// Предмет в мире (твёрдое тело): центр коробки, поворот, скорость. `shelf` — товар на прилавке.
-    GroundSpawned { id: LootId, pos: NetPos, rot: [f32; 4], vel: NetPos, base: ItemBaseId, quality: Quality, count: u16, asleep: bool, shelf: Option<ShelfMark>, finish: u8 },
+    /// Предмет в мире (твёрдое тело): центр коробки, поворот, скорость. `shelf` — товар на прилавке,
+    /// `owned` — вещь хозяев дома (взять — кража).
+    GroundSpawned { id: LootId, pos: NetPos, rot: [f32; 4], vel: NetPos, base: ItemBaseId, quality: Quality, count: u16, asleep: bool, shelf: Option<ShelfMark>, finish: u8, owned: bool },
     /// Предмет улёгся: точное положение.
     PropRest { id: LootId, pos: NetPos, rot: [f32; 4] },
     /// Кто держит предмет (None — никто).

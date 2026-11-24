@@ -271,6 +271,11 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         Mat::PetalWhite => (Color::srgb(0.92, 0.90, 0.84), Color::srgb(0.8, 0.8, 0.7), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
         Mat::PetalRed => (Color::srgb(0.80, 0.08, 0.05), Color::srgb(0.6, 0.05, 0.03), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
         Mat::PetalPink => (Color::srgb(0.85, 0.50, 0.65), Color::srgb(0.7, 0.4, 0.5), P_PLAIN, 1.0, 0.1, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0),
+        Mat::Leather => (Color::srgb(0.36, 0.22, 0.13), Color::srgb(0.22, 0.13, 0.07), P_PLAIN, 1.0, 0.3, 0.5, 0.65, 0.0, 0.0, 0.3, 0.0),
+        Mat::Bread => (Color::srgb(0.70, 0.45, 0.20), Color::srgb(0.48, 0.28, 0.11), P_PLAIN, 1.0, 0.3, 0.5, 0.9, 0.0, 0.0, 0.0, 0.0),
+        Mat::Glass => (Color::srgb(0.42, 0.55, 0.46), Color::srgb(0.30, 0.44, 0.38), P_PLAIN, 1.0, 0.1, 0.05, 0.08, 0.0, 0.0, 0.0, 0.0),
+        // Красная охра по штукатурке (цоколь и полосы в горнице).
+        Mat::Ochre => (Color::srgb(0.55, 0.22, 0.13), Color::srgb(0.40, 0.15, 0.09), P_PLASTER, 1.0, 0.2, 0.3, 0.9, 0.0, 0.05, 0.5, 0.0),
     };
     let photo = photo_layers(mat);
     let tex = surface_textures();
@@ -304,7 +309,8 @@ pub fn depth_rank(mat: Mat) -> f32 {
         Mat::Felt | Mat::Canvas | Mat::Cloth => 11,
         Mat::Water | Mat::Coals => 10,
         Mat::Mosaic | Mat::Signinum => 9,
-        Mat::Ceramic | Mat::Bronze | Mat::Iron | Mat::Gold => 8,
+        Mat::Ceramic | Mat::Bronze | Mat::Iron | Mat::Gold | Mat::Glass | Mat::Bread | Mat::Leather => 8,
+        Mat::Ochre => 7,
         Mat::Paving | Mat::Floor | Mat::Cobble => 7,
         Mat::Plaster | Mat::Trim => 6,
         Mat::Wood => 5,
@@ -362,6 +368,7 @@ fn photo_layers(mat: Mat) -> Option<(u32, u32, f32, f32)> {
         Mat::Bronze => (L_BRONZE, L_BRONZE, 0.5, 0.6),
         Mat::Gold => (L_GOLD, L_GOLD, 0.4, 0.5),
         Mat::Canvas | Mat::Felt | Mat::Rug | Mat::Cloth => (L_WOOL, L_WOOL, 1.0, 0.7),
+        Mat::Ochre => (L_PLASTER, L_PLASTER, 1.0, 0.5),
         _ => return None,
     })
 }
