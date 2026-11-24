@@ -12,7 +12,8 @@ use crate::inventory_ui::UiFonts;
 use crate::ui_theme::{Appear, Skin, ink, theme};
 use crate::protocol::{DEFAULT_PORT, PROTOCOL_ID, connection_config};
 use crate::settings::{DRAW_DISTANCES, Preset, RENDER_SCALES, Settings};
-use bevy::input_focus::AutoFocus;
+use bevy::input_focus::tab_navigation::TabIndex;
+use bevy::input_focus::{AutoFocus, InputFocus};
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontSize, TextCursorStyle};
 use bevy::ui_widgets::TextInput;
@@ -93,7 +94,7 @@ impl Plugin for MenuPlugin {
         })
         .add_systems(Startup, begin.after(crate::inventory_ui::setup_fonts))
         .add_systems(PreUpdate, escape_key.after(bevy::input::InputSystems))
-        .add_systems(Update, (sync_name, handle_buttons, submit_on_enter, poll_resolve, watch_connection, rebuild, orbit_camera, hud_visibility, cursor_in_menu).chain())
+        .add_systems(Update, (sync_name, highlight_focused_field, handle_buttons, submit_on_enter, poll_resolve, watch_connection, rebuild, orbit_camera, hud_visibility, cursor_in_menu).chain())
         .add_systems(Update, look_preview.in_set(crate::rig::PoseSet));
     }
 }
@@ -374,12 +375,24 @@ struct AddressField;
 #[derive(Component)]
 struct NameField;
 
-/// Ник из поля — сразу в настройки (сохраняются при «Создать» / «Подключиться»).
+/// Ник из поля — сразу в настройки и в settings.txt (без «изменения» ресурса:
+/// иначе каждая буква заново применяла бы графику — тени, камеры, окно).
 fn sync_name(field: Query<&EditableText, (With<NameField>, Changed<EditableText>)>, mut settings: ResMut<Settings>) {
     for text in &field {
         let name = crate::protocol::clean_name(&text.value().to_string());
         if settings.nickname != name {
-            settings.nickname = name;
+            settings.bypass_change_detection().nickname = name;
+            settings.save();
+        }
+    }
+}
+
+/// Поле ввода, в котором сейчас курсор, обведено ярким золотом — видно, куда печатаешь.
+fn highlight_focused_field(focus: Res<InputFocus>, mut fields: Query<(Entity, &mut BorderColor), With<TextInput>>) {
+    for (e, mut border) in &mut fields {
+        let color = if focus.get() == Some(e) { GOLD } else { GOLD_DIM };
+        if border.top != color {
+            *border = BorderColor::all(color);
         }
     }
 }
@@ -628,6 +641,8 @@ fn rebuild(
                 r.spawn((
                     NameField,
                     TextInput,
+                    // Без TabIndex щелчок по полю снимал фокус и клавиатура в поле не попадала.
+                    TabIndex(0),
                     EditableText { max_characters: Some(24), ..EditableText::new(settings.nickname.as_str()) },
                     TextLayout::no_wrap(),
                     font(&fonts, false, 20.0),
@@ -660,6 +675,7 @@ fn rebuild(
             p.spawn((
                 AddressField,
                 TextInput,
+                TabIndex(0),
                 EditableText::new(settings.last_address.as_str()),
                 TextLayout::no_wrap(),
                 font(&fonts, false, 22.0),
