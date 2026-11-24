@@ -626,19 +626,26 @@ pub fn didaskaleion(b: &mut Builder) {
     for (k, (side, room)) in peri.rooms.iter().enumerate() {
         match side {
             Side::N => {
-                // Аудитория: ряды скамей лицом к кафедре.
+                // Класс грамматиста: кафедра на помосте, ряды скамей лицом к ней (ученики сидят
+                // с табличками на коленях), счётная доска, полка со свитками, светильник,
+                // расписанная стена и балочный потолок.
                 let c = room.center(0.0);
                 b.solid([c.x - 0.6, 0.0, room.z0 + 0.3], [c.x + 0.6, 0.5, room.z0 + 1.2], Mat::Limestone);
-                b.solid([c.x - 0.35, 0.5, room.z0 + 0.3], [c.x + 0.35, 1.5, room.z0 + 0.5], Mat::Wood);
+                interior::chair(b, Vec3::new(c.x, 0.5, room.z0 + 0.75), Vec3::NEG_Z);
                 for row in 0..3 {
                     let z = room.z0 + 2.4 + row as f32 * 1.2;
                     if z > room.z1 - 0.5 {
                         break;
                     }
-                    kit::bench(b, Rect::new(room.x0 + 1.0, z, c.x - 1.0, z + 0.4));
-                    kit::bench(b, Rect::new(c.x + 1.0, z, room.x1 - 1.0, z + 0.4));
+                    for (x0, x1) in [(room.x0 + 1.0, c.x - 1.0), (c.x + 1.0, room.x1 - 1.0)] {
+                        school_bench(b, Rect::new(x0, z, x1, z + 0.4));
+                        // Свободные таблички и стили на краю скамьи.
+                        if (row + (x0 > c.x) as usize) % 2 == 0 {
+                            wax_tablet(b, Vec3::new(x1 - 0.3, 0.45, z + 0.2), 0.2);
+                        }
+                    }
                 }
-                b.lamp(c + Vec3::Y * 3.0, Color::srgb(1.0, 0.75, 0.45), 8_000.0, 9.0);
+                classroom(b, *room, c, &mut rng);
             }
             Side::W | Side::E if k % 2 == 0 => {
                 // Книгохранилище: шкафы-армарии со свитками у наружной стены и у торцов.
@@ -667,7 +674,13 @@ pub fn didaskaleion(b: &mut Builder) {
         match side {
             Side::N => {
                 let cat = Vec3::new(c.x + 1.0, 0.0, room.z0 + 1.6);
-                let students: Vec<(Role, Vec3, Vec3)> = (0..4).map(|i| (Role::Student, Vec3::new(room.x0 + 2.0 + i as f32 * 2.5, 0.0, room.z0 + 3.0 + (i % 2) as f32 * 1.2), cat)).collect();
+                // Ученики сидят на скамьях (по двое в ряду), лицом к учителю.
+                let seat = |i: usize| {
+                    let row = (i / 2) as f32;
+                    let x = if i % 2 == 0 { (room.x0 + 1.0 + c.x - 1.0) / 2.0 } else { (c.x + 1.0 + room.x1 - 1.0) / 2.0 };
+                    Vec3::new(x, 0.0, room.z0 + 2.65 + row * 1.2)
+                };
+                let students: Vec<(Role, Vec3, Vec3)> = (0..4).map(|i| (Role::Student, seat(i), seat(i) - Vec3::Z)).collect();
                 extras(b, *room, L::Library, &[], &[(Role::Scholar, cat, cat + Vec3::Z)], &mut rng);
                 extras(b, *room, L::Library, &[], &students, &mut rng);
             }
@@ -681,6 +694,83 @@ pub fn didaskaleion(b: &mut Builder) {
             }
         }
     }
+}
+
+/// Школьная скамья без столкновений (ученики сидят прямо на ней).
+fn school_bench(b: &mut Builder, r: Rect) {
+    let h = 0.45;
+    let m = b.mesh(Mat::Wood);
+    m.cuboid(r.min3(h - 0.06), r.max3(h));
+    for (x, z) in [(r.x0 + 0.08, r.z0 + 0.08), (r.x1 - 0.08, r.z0 + 0.08), (r.x0 + 0.08, r.z1 - 0.08), (r.x1 - 0.08, r.z1 - 0.08)] {
+        m.cuboid(Vec3::new(x - 0.04, 0.0, z - 0.04), Vec3::new(x + 0.04, h - 0.06, z + 0.04));
+    }
+}
+
+/// Восковая табличка со стилем, лежит на `p` (верх поверхности); `turn` — поворот.
+fn wax_tablet(b: &mut Builder, p: Vec3, turn: f32) {
+    let rot = Quat::from_rotation_y(turn);
+    let (w, d) = (0.13, 0.09);
+    let corners = |hw: f32, hd: f32, y0: f32, y1: f32| {
+        let a = p + rot * Vec3::new(-hw, y0, -hd);
+        let c = p + rot * Vec3::new(hw, y1, hd);
+        (a.min(c), a.max(c))
+    };
+    let (a, c) = corners(w, d, 0.0, 0.018);
+    b.mesh(Mat::Wood).cuboid(a, c);
+    let (a, c) = corners(w - 0.015, d - 0.015, 0.018, 0.022);
+    b.mesh(Mat::DarkStone).cuboid(a, c);
+    let s0 = p + rot * Vec3::new(-0.1, 0.03, d + 0.02);
+    let s1 = p + rot * Vec3::new(0.1, 0.03, d + 0.03);
+    b.mesh(Mat::Bronze).beam(s0, s1, 0.005, 0.005, Vec3::Y);
+}
+
+/// Убранство класса: потолок с балками, расписанный пояс по стенам, счётная доска,
+/// полка со свитками, светильники.
+fn classroom(b: &mut Builder, room: Rect, c: Vec3, rng: &mut Rng) {
+    // Потолок: дощатый настил на балках (поперёк класса).
+    let top = 4.3;
+    b.decor([room.x0, top, room.z0], [room.x1, top + 0.06, room.z1], Mat::Wood);
+    let n = (room.w() / 1.1).floor().max(1.0) as usize;
+    for k in 0..=n {
+        let x = room.x0 + 0.1 + k as f32 * (room.w() - 0.2) / n as f32;
+        b.decor([x - 0.08, top - 0.2, room.z0], [x + 0.08, top, room.z1], Mat::Wood);
+    }
+    // Стены: красный цокольный пояс (opus signinum) и полоса росписи над ним.
+    let walls = [
+        ([room.x0, 0.0, room.z0], [room.x1, 0.0, room.z0 + 0.03]),
+        ([room.x0, 0.0, room.z0], [room.x0 + 0.03, 0.0, room.z1]),
+        ([room.x1 - 0.03, 0.0, room.z0], [room.x1, 0.0, room.z1]),
+    ];
+    for (lo, hi) in walls {
+        b.decor([lo[0], 0.05, lo[2]], [hi[0], 0.95, hi[2]], Mat::Signinum);
+        b.decor([lo[0], 0.95, lo[2]], [hi[0], 1.07, hi[2]], Mat::Banner);
+        b.decor([lo[0], 2.9, lo[2]], [hi[0], 3.0, hi[2]], Mat::Banner);
+    }
+    // Счётная доска (абак) на столике слева от кафедры: камешки в трёх столбцах.
+    let ab = Rect::new(c.x - 2.6, room.z0 + 0.5, c.x - 1.4, room.z0 + 1.1);
+    kit::table(b, ab, 0.8);
+    let o = ab.center(0.8);
+    b.mesh(Mat::Wood).cuboid(o + Vec3::new(-0.5, 0.0, -0.22), o + Vec3::new(0.5, 0.025, 0.22));
+    for col in 0..3 {
+        let x = o.x - 0.3 + col as f32 * 0.3;
+        b.mesh(Mat::Iron).cuboid(Vec3::new(x - 0.004, o.y + 0.025, o.z - 0.2), Vec3::new(x + 0.004, o.y + 0.03, o.z + 0.2));
+        for i in 0..(2 + rng.range(0.0, 6.0) as usize) {
+            let q = Vec3::new(x - 0.06 + (i % 4) as f32 * 0.035 + 0.02, o.y + 0.03, o.z + 0.15 - (i / 4) as f32 * 0.04);
+            b.mesh(Mat::Marble).cuboid(q - Vec3::new(0.012, 0.0, 0.012), q + Vec3::new(0.012, 0.014, 0.012));
+        }
+    }
+    // Табличка и свиток учителя на кафедральном столике справа.
+    let desk = Rect::new(c.x + 1.4, room.z0 + 0.4, c.x + 2.4, room.z0 + 1.0);
+    kit::table(b, desk, 0.8);
+    wax_tablet(b, desk.center(0.8) + Vec3::new(-0.2, 0.0, 0.0), -0.3);
+    b.mesh(Mat::Canvas).beam(desk.center(0.83) + Vec3::new(0.12, 0.0, -0.1), desk.center(0.83) + Vec3::new(0.38, 0.0, 0.05), 0.035, 0.035, Vec3::Y);
+    // Полка со свитками и табличками у боковой стены.
+    kit::shelf(b, Rect::new(room.x0 + 0.1, room.z0 + 0.4, room.x0 + 0.5, room.z0 + 1.9), 3, rng, Mat::Canvas);
+    // Светильники: на подставке у кафедры и подвесной над скамьями.
+    interior::lampstand(b, Vec3::new(room.x1 - 0.5, 0.0, room.z0 + 0.6), true);
+    b.lamp(c + Vec3::Y * 3.0, Color::srgb(1.0, 0.75, 0.45), 8_000.0, 9.0);
+    interior::oil_lamp(b, Vec3::new(c.x, top - 0.9, c.z));
+    b.mesh(Mat::Iron).beam(Vec3::new(c.x, top - 0.86, c.z), Vec3::new(c.x, top - 0.2, c.z), 0.006, 0.006, Vec3::X);
 }
 
 // ---------------- дом ссыльных ----------------
