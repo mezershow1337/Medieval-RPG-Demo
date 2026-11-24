@@ -120,6 +120,9 @@ impl Plugin for FightPlugin {
 
 /// Плечо руки от первого лица в пространстве камеры (за краем экрана справа внизу).
 const VIEW_SHOULDER: Vec3 = Vec3::new(0.24, -0.3, 0.12);
+/// Плечо левой руки: ниже и дальше в сторону, чтобы рука, тянущаяся к древку через грудь,
+/// не закрывала полэкрана.
+const VIEW_SHOULDER_L: Vec3 = Vec3::new(-0.3, -0.46, 0.06);
 /// Насколько меч от первого лица выше, чем в мире (только внешний вид).
 const VIEW_LIFT: f32 = 0.36;
 
@@ -426,7 +429,7 @@ fn animate_view_sword(
             continue;
         };
         *arm_vis = *vis;
-        let shoulder = if arm.left { VIEW_SHOULDER * Vec3::new(-1.0, 1.0, 1.0) } else { VIEW_SHOULDER };
+        let shoulder = if arm.left { VIEW_SHOULDER_L } else { VIEW_SHOULDER };
         for (joint, (pos, rot)) in arm.joints().into_iter().zip(crate::rig::view_arm_pose(shoulder, grip, axis, arm.left)) {
             if let Ok(mut t) = joints.get_mut(joint) {
                 t.translation = pos;
