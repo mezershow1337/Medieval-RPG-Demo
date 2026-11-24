@@ -19,7 +19,8 @@ impl Plugin for CivilClientPlugin {
         app.add_message::<CivilNet>()
             .init_resource::<LawUi>()
             .add_systems(Startup, setup_law_ui.after(crate::inventory_ui::setup_fonts))
-            .add_systems(Update, (apply_civil, law_input, draw_law_ui).chain());
+            .add_systems(Update, (apply_civil, law_input, draw_law_ui).chain())
+            .add_systems(Update, law_demo.before(apply_civil).run_if(|| std::env::var_os("MRPG_LAW_DEMO").is_some()));
     }
 }
 
@@ -57,6 +58,9 @@ impl LawUi {
 
 #[derive(Component)]
 struct LawRoot;
+/// Окна закона: их не прячут на снимке окна стражи (`MRPG_LAW_DEMO`).
+#[derive(Component)]
+pub struct ShotKeep;
 #[derive(Component)]
 struct LawText;
 #[derive(Component)]
@@ -166,6 +170,19 @@ fn apply_civil(
     }
 }
 
+/// Снимок окна стражи (`MRPG_LAW_DEMO=1` вместе с `MRPG_CAM`): стражник остановил,
+/// свидетели бегут доносить.
+fn law_demo(mut out: MessageWriter<CivilNet>, mut sent: Local<bool>) {
+    // Отсчёт на снимке не убегает (кадры в облаке идут медленно).
+    out.write(CivilNet::Law(LawMessage::Witnessed { count: 2, secs: 7.0 }));
+    if *sent {
+        return;
+    }
+    *sent = true;
+    out.write(CivilNet::Law(LawMessage::Halt { fine: 680, crimes: vec!["кража".into(), "побои".into()], purse: 412, persuade: Some(38) }));
+    out.write(CivilNet::Law(LawMessage::Notice("«Держи вора!» — вас заметили: «Серебряная фибула».".into())));
+}
+
 fn setup_law_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>) {
     let font = |size: f32, bold: bool| TextFont {
         font: if bold { fonts.bold.clone() } else { fonts.regular.clone() }.into(),
@@ -174,13 +191,13 @@ fn setup_law_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
     };
     // Сообщения закона — над хотбаром.
     commands
-        .spawn(Node { position_type: PositionType::Absolute, width: percent(100), bottom: percent(17), justify_content: JustifyContent::Center, ..default() })
+        .spawn((ShotKeep, Node { position_type: PositionType::Absolute, width: percent(100), bottom: percent(17), justify_content: JustifyContent::Center, ..default() }))
         .with_children(|p| {
             p.spawn((NoticeText, Text::new(""), font(18.0, false), TextColor(Color::srgb(0.98, 0.86, 0.6)), TextLayout::justify(Justify::Center), TextShadow::default()));
         });
     // Свидетели бегут к страже — сверху по центру, на коже.
     commands
-        .spawn(Node { position_type: PositionType::Absolute, width: percent(100), top: px(64), justify_content: JustifyContent::Center, ..default() })
+        .spawn((ShotKeep, Node { position_type: PositionType::Absolute, width: percent(100), top: px(64), justify_content: JustifyContent::Center, ..default() }))
         .with_children(|p| {
             p.spawn((
                 WitnessText,
@@ -196,6 +213,7 @@ fn setup_law_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
     commands
         .spawn((
             LawRoot,
+            ShotKeep,
             Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
             Visibility::Hidden,
         ))

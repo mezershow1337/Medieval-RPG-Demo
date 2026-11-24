@@ -188,8 +188,8 @@ pub fn sky_radiance(dir: Vec3, s: &SkyUniform) -> Vec3 {
         let q = p + (w - Vec2::splat(0.5)) * 1.1;
         let dn = fbm(q * 1.3);
         let k = s.horizon.w;
-        let thr = 0.66 + (0.44 - 0.66) * k.min(1.0) - 0.22 * smoothstep(0.7, 1.0, k);
-        let cover = smoothstep(thr, thr + 0.16, dn) * smoothstep(0.0, 0.07, e);
+        let thr = 0.66 + (0.44 - 0.66) * k.min(1.0) - 0.22 * smoothstep(0.7, 1.0, k) - 0.3 * oc;
+        let cover = smoothstep(thr, thr + 0.16, dn).max(oc * 0.93) * smoothstep(0.0, 0.07, e);
         let d_sun = fbm((q + s2 * 0.16) * 1.3);
         let lit = ((dn - d_sun) * 5.0 + 0.45).clamp(0.0, 1.0);
         let thin = 1.0 - smoothstep(thr + 0.05, thr + 0.3, dn);

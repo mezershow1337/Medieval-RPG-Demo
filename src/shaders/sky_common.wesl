@@ -80,8 +80,9 @@ fn cloud_layer(dir: vec3<f32>, s: SkyParams, t: f32, hor: vec3<f32>) -> vec4<f32
     let w = vec2<f32>(fbm3(p * 0.6 + 3.1), fbm3(p * 0.6 + 7.7));
     let q = p + (w - 0.5) * 1.1;
     let dn = fbm(q * 1.3);
-    let thr = mix(0.66, 0.44, min(cover_k, 1.0)) - 0.22 * smoothstep(0.7, 1.0, cover_k);
-    let cover = smoothstep(thr, thr + 0.16, dn) * smoothstep(0.0, 0.07, e);
+    let thr = mix(0.66, 0.44, min(cover_k, 1.0)) - 0.22 * smoothstep(0.7, 1.0, cover_k) - 0.3 * oc;
+    // В ненастье тучи сливаются в сплошную пелену без просветов.
+    let cover = max(smoothstep(thr, thr + 0.16, dn), oc * 0.93) * smoothstep(0.0, 0.07, e);
     // Самозатенение: насколько облако гуще в сторону солнца.
     let d_sun = fbm((q + s2 * 0.16) * 1.3);
     let lit = clamp((dn - d_sun) * 5.0 + 0.45, 0.0, 1.0);

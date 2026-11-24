@@ -205,7 +205,7 @@ const GOLD: Key = Key {
     fog_far: (Vec3::new(0.5, 0.5, 0.56), Vec3::new(0.8, 0.77, 0.74)),
     visibility: 1600.0,
     sky_light: 950.0,
-    haze: 0.0012,
+    haze: 0.0007,
     exposure: 0.2,
 };
 
@@ -213,7 +213,7 @@ const GOLD: Key = Key {
 const DUSK: Key = Key {
     sun_color: Vec3::new(1.0, 0.5, 0.32),
     lux: 900.0,
-    ambient: (Vec3::new(0.42, 0.46, 0.78), 60.0),
+    ambient: (Vec3::new(0.42, 0.46, 0.78), 40.0),
     horizon: Vec3::new(0.25, 0.18, 0.26),
     horizon_sun: (Vec3::new(1.05, 0.38, 0.10), 4.0),
     zenith: Vec3::new(0.035, 0.06, 0.17),
@@ -221,14 +221,14 @@ const DUSK: Key = Key {
     visibility: 1300.0,
     sky_light: 900.0,
     haze: 0.0016,
-    exposure: 0.55,
+    exposure: 0.25,
 };
 
 /// Ночь: тёмная синева, свет луны, звёзды; жёлтые пятна факелов и очагов.
 const NIGHT: Key = Key {
     sun_color: Vec3::new(0.62, 0.72, 1.0),
     lux: 0.0,
-    ambient: (Vec3::new(0.32, 0.40, 0.78), 26.0),
+    ambient: (Vec3::new(0.32, 0.40, 0.78), 11.0),
     horizon: Vec3::new(0.026, 0.034, 0.062),
     horizon_sun: (Vec3::new(0.012, 0.012, 0.02), 4.0),
     zenith: Vec3::new(0.005, 0.009, 0.03),
@@ -236,7 +236,7 @@ const NIGHT: Key = Key {
     visibility: 900.0,
     sky_light: 900.0,
     haze: 0.0018,
-    exposure: 1.1,
+    exposure: 0.45,
 };
 
 fn smooth01(x: f32) -> f32 {
@@ -274,8 +274,9 @@ pub fn mood_at(game: f64) -> Mood {
     let zenith = grey(key.zenith, 0.8 * overcast).lerp(horizon * 0.9, 0.5 * overcast) * dim;
     let horizon_sun = (key.horizon_sun.0 * (1.0 - 0.85 * overcast), key.horizon_sun.1);
     // Главный свет: солнце (пока оно над горизонтом), ночью — луна.
-    let sun_lux = key.lux * smooth01((e + 0.02) / 0.08) * (1.0 - 0.78 * overcast) * (1.0 - 0.3 * w.rain);
-    let moon_lux = (30.0 + 420.0 * moon_light) * smooth01((moon.y - 0.02) / 0.15) * night * (1.0 - 0.85 * overcast);
+    // Под сплошными тучами прямого солнца почти нет: тени расплываются, свет идёт от неба.
+    let sun_lux = key.lux * smooth01((e + 0.02) / 0.08) * (1.0 - 0.97 * overcast) * (1.0 - 0.4 * w.rain);
+    let moon_lux = (12.0 + 190.0 * moon_light) * smooth01((moon.y - 0.02) / 0.15) * night * (1.0 - 0.85 * overcast);
     let (light_dir, light_color, lux) = if sun_lux >= moon_lux {
         // Под низким солнцем свет не должен идти снизу.
         let d = Vec3::new(sun.x, sun.y.max(0.05), sun.z).normalize();
@@ -291,7 +292,7 @@ pub fn mood_at(game: f64) -> Mood {
         sun: light_dir,
         sun_color: c(light_color),
         lux,
-        ambient: (c(key.ambient.0), key.ambient.1 * (1.0 + 0.3 * overcast)),
+        ambient: (c(key.ambient.0.lerp(Vec3::splat(0.7), 0.5 * overcast)), key.ambient.1 * (1.0 + 0.35 * overcast * dayness.max(0.3))),
         horizon,
         horizon_sun,
         zenith,
@@ -301,6 +302,7 @@ pub fn mood_at(game: f64) -> Mood {
         shadow_distance: 240.0,
         day: e > 0.3,
         sky_light: key.sky_light * (1.0 - 0.3 * overcast),
+
         sun_sky: sun,
         dayness,
         night,
@@ -310,7 +312,8 @@ pub fn mood_at(game: f64) -> Mood {
         wind: w.wind,
         rain: w.rain,
         haze: key.haze + 0.03 * fog * fog + 0.004 * w.rain,
-        exposure: key.exposure,
+        // Под тучами и в дождь мир темнее и глуше (глаз не успевает подстроиться полностью).
+        exposure: key.exposure - 0.35 * overcast - 0.25 * w.rain,
     }
 }
 

@@ -239,9 +239,13 @@ fn on_netcode_error(event: On<NetcodeErrorEvent>, mut state: ResMut<NetState>) {
 pub struct WaitingCamera;
 
 /// Снимки уровня (MRPG_CAM): прячем интерфейс.
-fn hide_ui_for_shots(mut roots: Query<&mut Visibility, (With<Node>, Without<ChildOf>)>) {
-    for mut v in &mut roots {
-        *v = Visibility::Hidden;
+fn hide_ui_for_shots(mut roots: Query<(&mut Visibility, Has<crate::civil_client::ShotKeep>), (With<Node>, Without<ChildOf>)>) {
+    // Снимок окна стражи (`MRPG_LAW_DEMO`): его окна оставляем.
+    let law = std::env::var_os("MRPG_LAW_DEMO").is_some();
+    for (mut v, keep) in &mut roots {
+        if !(law && keep) {
+            *v = Visibility::Hidden;
+        }
     }
 }
 

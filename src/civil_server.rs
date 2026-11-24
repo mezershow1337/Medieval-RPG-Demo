@@ -75,7 +75,7 @@ pub struct CivilServerPlugin;
 
 impl Plugin for CivilServerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_connect).add_observer(on_merchant_caught).add_systems(Update, civil_tick);
+        app.add_observer(on_connect).add_observer(on_merchant_caught).add_observer(on_container_taken).add_systems(Update, civil_tick);
     }
 }
 
@@ -591,6 +591,22 @@ fn on_connect(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, civi
         let corpse = world.corpses.iter().find(|c| c.civ.as_ref().is_some_and(|cc| cc.civ == p.civ)).map(|c| (c.id, c.pos.into(), c.yaw));
         server.send_message(*client_id, CH_RELIABLE, encode(&ServerMessage::CivilianDead { civ: p.civ, corpse: corpse.filter(|_| !p.alive()) }));
     }
+}
+
+/// Вынули вещь из сундука в чужом доме, церкви, казарме или на складе — кража, если видели.
+fn on_container_taken(event: On<crate::loot_server::ContainerTaken>, mut civil: ResMut<CivilWorld>, locks: Option<Res<crate::towns_server::Locks>>) {
+    use crate::items::LootTableId as T;
+    let c = event.event();
+    if crate::level::active() != crate::level::LevelKind::Chersonesus || locks.is_some_and(|l| l.own_container(c.container, c.player)) {
+        return;
+    }
+    let faction = match c.table {
+        T::Church => Faction::Church,
+        T::Barracks => Faction::Garrison,
+        T::Storehouse => Faction::Merchants,
+        _ => Faction::Citizens,
+    };
+    civil.report_theft(Theft { player: c.player, value: c.value.max(1), at: c.at, what: c.what.clone(), faction, caught_by: None });
 }
 
 /// Торговец поймал вора за руку (см. `trade_server::caught_stealing`).
@@ -1380,9 +1396,15 @@ mod tests {
         assert_eq!(militia_resident(id), Some(123));
         assert_eq!(militia_resident(5), None);
         assert!(MILITIA_ID_BASE > (1 << 62) + 1_000_000, "не пересекается с обычными NPC");
-        // Пахарь — с вилами, ремесленник — с топором.
-        assert_eq!(militia_arms(Role::Farmer, 1).1, "Вилы");
+        // Пахарь — с острогой или рогатиной, ремесленник — с топором; всё это есть в игре.
+        assert_eq!(militia_arms(Role::Farmer, 1).0, WeaponKind::Spear);
         assert_eq!(militia_arms(Role::Craftsman, 1).0, WeaponKind::Axe);
+        for role in [Role::Farmer, Role::Craftsman, Role::Sailor, Role::Householder, Role::Soldier] {
+            for i in 0..8 {
+                let item = militia_arms(role, i).1;
+                assert!(crate::items::ItemBaseId::find(item).is_some(), "нет предмета «{item}»");
+            }
+        }
     }
 
     #[test]

@@ -32,6 +32,8 @@ struct Out {
     cheats_changed: bool,
     teleport: Option<Vec3>,
     look: Option<(f32, f32)>,
+    /// Часы мира переведены: разослать всем.
+    clock_changed: bool,
 }
 
 impl Out {
@@ -51,6 +53,7 @@ struct Ctx<'a> {
     loot: Option<&'a mut LootWorld>,
     bodies: Option<&'a mut crate::medicine_server::Bodies>,
     rules: &'a mut ConsoleRules,
+    clock: &'a mut crate::world_clock::WorldClock,
     now: f64,
     pid: u64,
     host: bool,
@@ -64,6 +67,7 @@ fn receive_commands(
     mut loot: Option<ResMut<LootWorld>>,
     mut bodies: Option<ResMut<crate::medicine_server::Bodies>>,
     mut rules: ResMut<ConsoleRules>,
+    mut clock: ResMut<crate::world_clock::WorldClock>,
     time: Res<Time>,
 ) {
     for pid in server.clients_id() {
@@ -77,11 +81,12 @@ fn receive_commands(
                 loot: loot.as_deref_mut(),
                 bodies: bodies.as_deref_mut(),
                 rules: &mut rules,
+                clock: &mut clock,
                 now: time.elapsed_secs_f64(),
                 pid,
                 host,
             };
-            let mut out = Out { lines: Vec::new(), cheats_changed: false, teleport: None, look: None };
+            let mut out = Out { lines: Vec::new(), cheats_changed: false, teleport: None, look: None, clock_changed: false };
             run_command(&mut ctx, &line, &mut out);
             info!("Консоль игрока {pid}: {line}");
             let world = &mut *world;
@@ -99,6 +104,9 @@ fn receive_commands(
                 && let Some(a) = world.actors.get(&pid)
             {
                 server.send_message(pid, CH_CONSOLE, encode(&ConsoleServerMessage::Cheats(a.cheats)));
+            }
+            if out.clock_changed {
+                server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Clock { game: clock.game }));
             }
             for (text, error) in out.lines {
                 server.send_message(pid, CH_CONSOLE, encode(&ConsoleServerMessage::Reply { text, error }));
@@ -121,6 +129,12 @@ fn run_command(ctx: &mut Ctx, line: &str, out: &mut Out) {
             let dead = if alive { "" } else { ", мёртв" };
             out.ok(format!("  {id}{me}: {:.1} {:.1} {:.1}{dead}", p.x, p.y, p.z));
         }
+        return;
+    }
+
+    // Без читов: который час и какая погода.
+    if (cmd == "time" || cmd == "weather") && arg(1).is_none() {
+        out.ok(clock_report(ctx.clock));
         return;
     }
 
@@ -239,6 +253,8 @@ fn run_command(ctx: &mut Ctx, line: &str, out: &mut Out) {
             out.ok(format!("{} ×{n}", kind.name_ru()));
         }
         "tp" | "goto" => teleport(ctx, &args, out),
+        "time" | "timeofday" => set_time(ctx, arg(1).unwrap_or(""), out),
+        "weather" => find_weather(ctx, arg(1).unwrap_or(""), out),
         "give" => give(ctx, &args, out),
         _ => out.err(format!("Неизвестная команда «{cmd}». Список — help.")),
     }
@@ -417,4 +433,83 @@ mod tests {
         assert_eq!(parse_quality("5"), Some(Quality::Legendary));
         assert_eq!(parse_quality("rare"), Some(Quality::Rare));
     }
+}
+
+fn clock_report(clock: &crate::world_clock::WorldClock) -> String {
+    let w = clock.weather();
+    let sky = if w.rain > 0.1 {
+        "дождь"
+    } else if w.fog > 0.35 {
+        "туман"
+    } else if w.clouds > 0.6 {
+        "пасмурно"
+    } else {
+        "ясно"
+    };
+    format!(
+        "День {}, {} ({}). Погода: {sky}, облачность {:.0}%, ветер {:.0} м/с.",
+        clock.day(),
+        clock.hhmm(),
+        crate::world_clock::part_of_day(clock.hour()),
+        w.clouds * 100.0,
+        w.wind_speed()
+    )
+}
+
+/// `time 23` или `time 5:30` — перевести часы вперёд до ближайшего такого часа.
+fn set_time(ctx: &mut Ctx, arg: &str, out: &mut Out) {
+    let named = match arg {
+        "night" | "ночь" | "полночь" => Some(0.5),
+        "dawn" | "рассвет" => Some(5.2),
+        "morning" | "утро" => Some(8.0),
+        "noon" | "day" | "день" | "полдень" => Some(13.0),
+        "evening" | "вечер" | "закат" => Some(19.5),
+        _ => None,
+    };
+    let hours = named.or_else(|| {
+        let mut it = arg.split(':');
+        let h: f64 = it.next()?.trim().parse().ok()?;
+        let m: f64 = it.next().map_or(Some(0.0), |m| m.trim().parse().ok())?;
+        (0.0..24.0).contains(&h).then_some(h + m / 60.0)
+    });
+    let Some(hours) = hours else {
+        out.err("time ЧЧ[:ММ] | ночь | рассвет | утро | день | вечер");
+        return;
+    };
+    let day = crate::world_clock::DAY;
+    let start = (ctx.clock.game / day).floor() * day;
+    let mut t = start + hours * 3600.0;
+    if t < ctx.clock.game {
+        t += day;
+    }
+    ctx.clock.game = t;
+    out.clock_changed = true;
+    out.ok(clock_report(ctx.clock));
+}
+
+/// Погода идёт по часам мира (у всех одинаково), поэтому «включить дождь» — значит
+/// промотать часы до ближайшего дождя.
+fn find_weather(ctx: &mut Ctx, arg: &str, out: &mut Out) {
+    let want: fn(&crate::world_clock::Weather) -> bool = match arg {
+        "rain" | "дождь" => |w| w.rain > 0.5,
+        "fog" | "туман" => |w| w.fog > 0.6,
+        "clear" | "ясно" => |w| w.rain < 0.01 && w.clouds < 0.35 && w.fog < 0.2,
+        "wind" | "ветер" => |w| w.wind_speed() > 9.0,
+        _ => {
+            out.err("weather дождь | туман | ясно | ветер");
+            return;
+        }
+    };
+    // Ищем по 10 игровых минут на 30 дней вперёд.
+    let mut t = ctx.clock.game;
+    for _ in 0..(30 * 24 * 6) {
+        t += 600.0;
+        if want(&crate::world_clock::weather_at(t)) {
+            ctx.clock.game = t;
+            out.clock_changed = true;
+            out.ok(clock_report(ctx.clock));
+            return;
+        }
+    }
+    out.err("За месяц вперёд такой погоды нет.");
 }

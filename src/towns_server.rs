@@ -82,6 +82,11 @@ impl Locks {
         }
     }
 
+    /// Сундук стоит в доме этого игрока (купленном, снятом или где он гость).
+    pub fn own_container(&self, container: u32, player: u64) -> bool {
+        self.container_estate.get(&container).and_then(|e| self.allowed.get(e)).is_some_and(|who| who.contains(&player))
+    }
+
     /// Можно ли игроку открыть сундук уровня номер `container`.
     pub fn container(&mut self, container: u32, player: u64) -> bool {
         let Some(e) = self.container_estate.get(&container) else { return true };
