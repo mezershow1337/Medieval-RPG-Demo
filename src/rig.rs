@@ -164,7 +164,7 @@ fn jitter(id: u64, salt: u64) -> f32 {
 impl Outfit {
     pub fn for_actor(kind: ActorKind, id: u64) -> Self {
         let j = |s| jitter(id, s);
-        let brown = |k: f32| Color::srgb(0.12 + 0.25 * k, 0.08 + 0.15 * k, 0.05 + 0.08 * k);
+        let brown = |k: f32| Color::srgb(0.17 + 0.3 * k, 0.11 + 0.18 * k, 0.07 + 0.09 * k);
         let skin_med = Color::srgb(0.97 + 0.03 * j(3), 0.93 + 0.05 * j(3), 0.9 + 0.06 * j(3));
         let base = Outfit {
             head: HeadGear::Bare,
