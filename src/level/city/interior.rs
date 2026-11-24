@@ -21,6 +21,8 @@ pub struct Room {
     pub r: Rect,
     used: Vec<Rect>,
     pub(super) doors: Vec<DoorSpec>,
+    /// Занятые места на стенах (что висит выше мебели).
+    walls: Vec<Rect>,
 }
 
 impl Room {
@@ -46,7 +48,7 @@ impl Room {
             .filter(|f| !(f.w() > r.w() * 0.9 || f.d() > r.d() * 0.9))
             .chain(b.keep_clear.iter().filter(|p| p.y.abs() < 1.0).map(|p| Rect::new(p.x - 0.8, p.z - 0.8, p.x + 0.8, p.z + 0.8)))
             .collect();
-        Room { r, used, doors }
+        Room { r, used, doors, walls: Vec::new() }
     }
 
     /// Свободна ли площадка: внутри комнаты, не на занятом месте и не в проходе у двери.
@@ -94,6 +96,45 @@ impl Room {
             }
         }
         None
+    }
+
+    /// Место на стене длиной `len` для того, что висит выше мебели (одежда, связки, светильник):
+    /// не над дверью и не там, где уже что-то висит. Возвращает точку на грани стены (y = 0)
+    /// и стену.
+    pub fn wall_spot(&mut self, len: f32, sides: &[Side], rng: &mut Rng) -> Option<(Vec3, Side)> {
+        let mut options = Vec::new();
+        for &side in sides {
+            let r = self.r;
+            let (s0, s1) = if side.along_x() { (r.x0, r.x1) } else { (r.z0, r.z1) };
+            let mut s = s0 + 0.15;
+            while s + len <= s1 - 0.15 {
+                let f = match side {
+                    Side::N => Rect::new(s, r.z0, s + len, r.z0 + 0.15),
+                    Side::S => Rect::new(s, r.z1 - 0.15, s + len, r.z1),
+                    Side::W => Rect::new(r.x0, s, r.x0 + 0.15, s + len),
+                    Side::E => Rect::new(r.x1 - 0.15, s, r.x1, s + len),
+                };
+                // Тонкие полосы у стен в `used` — то, что там уже висит (ковры, колышки, полки).
+                let hung = self.used.iter().any(|u| u.w().min(u.d()) <= 0.2 && overlaps(&u.inset(-0.1), &f));
+                if !hung && !self.walls.iter().any(|u| overlaps(&u.inset(-0.15), &f)) && self.doors.iter().all(|d| !overlaps(&door_zone(d), &f)) {
+                    options.push((f, side));
+                }
+                s += 0.25;
+            }
+        }
+        if options.is_empty() {
+            return None;
+        }
+        let (f, side) = options[rng.int(options.len())];
+        self.walls.push(f);
+        let c = f.center(0.0);
+        let at = match side {
+            Side::N => Vec3::new(c.x, 0.0, self.r.z0),
+            Side::S => Vec3::new(c.x, 0.0, self.r.z1),
+            Side::W => Vec3::new(self.r.x0, 0.0, c.z),
+            Side::E => Vec3::new(self.r.x1, 0.0, c.z),
+        };
+        Some((at, side))
     }
 
     /// Место для человека (0,6 × 0,6 м), ближайшее к `want`.
@@ -1041,6 +1082,8 @@ pub fn furnish(b: &mut Builder, r: Rect, kind: Kind, people: &mut Household, rng
             }
         }
     }
+    // Второй проход: крупное у стен и на стенах, чтобы с порога комната выглядела жилой.
+    cozy::dress(b, &mut room, kind, wealth, rng);
 }
 
 /// Ось вдоль стены `s`.

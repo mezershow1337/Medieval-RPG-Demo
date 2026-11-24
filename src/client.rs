@@ -253,7 +253,8 @@ fn mute_player_camera_for_shots(mut cams: Query<&mut Camera, With<crate::player:
 
 /// Обход для снимков уровня (вместе с `MRPG_CAM`): `MRPG_TOUR="имя:x,y,z,tx,ty,tz;…"` — камера
 /// ожидания по очереди встаёт в каждую точку и сохраняет `MRPG_TOUR_DIR/имя.png` (первый снимок —
-/// через `MRPG_TOUR_FRAMES` кадров, пока всё грузится, следующие — через 8), потом игра выходит.
+/// через `MRPG_TOUR_FRAMES` кадров, пока всё грузится, следующие — через `MRPG_TOUR_NEXT`, по
+/// умолчанию 8), потом игра выходит.
 /// Одна загрузка уровня на много снимков: на программном рендере это минуты и гигабайты.
 fn shot_tour(mut commands: Commands, mut cams: Query<&mut Transform, With<WaitingCamera>>, mut state: Local<(usize, u32)>, mut exit: MessageWriter<AppExit>) {
     let tour = std::env::var("MRPG_TOUR").unwrap_or_default();
@@ -278,7 +279,8 @@ fn shot_tour(mut commands: Commands, mut cams: Query<&mut Transform, With<Waitin
     for mut c in &mut cams {
         *c = *tf;
     }
-    if *n >= if *i == 0 { first } else { 8 } {
+    let next: u32 = std::env::var("MRPG_TOUR_NEXT").ok().and_then(|s| s.parse().ok()).unwrap_or(8);
+    if *n >= if *i == 0 { first } else { next } {
         info!("обход: снимок {name}");
         commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(format!("{dir}/{name}.png")));
         *i += 1;

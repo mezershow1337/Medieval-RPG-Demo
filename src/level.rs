@@ -1030,6 +1030,11 @@ pub fn active() -> LevelKind {
 
 /// Полная раскладка активного уровня.
 pub fn layout() -> Layout {
+    // Раскладку города строят многие системы запуска (сервер, клиент, карта, звук, жители),
+    // и Bevy запускает их параллельно. Каждая сборка — сотни мегабайт геометрии, поэтому
+    // строим по одной: пик памяти — одна раскладка, а не пять сразу.
+    static BUILDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = BUILDING.lock().unwrap_or_else(|e| e.into_inner());
     match active() {
         LevelKind::Chersonesus => city::city_layout(),
         LevelKind::Castle => castle::castle_layout(),

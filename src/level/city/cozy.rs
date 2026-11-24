@@ -640,3 +640,381 @@ pub fn shuffle<T>(v: &mut [T], rng: &mut Rng) {
         v.swap(i, j);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Второй проход: крупное у стен и на стенах
+// ---------------------------------------------------------------------------
+
+/// Что ставится на пол у стены.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Floor {
+    /// Корзина с зерном, шерстью, луком или бельём.
+    Basket,
+    /// Мешки с зерном или мукой.
+    Sacks,
+    /// Два-три кувшина и горшка на полу.
+    Jugs,
+    /// Амфора на подставке-кольце.
+    Amphora,
+    /// Пифос (врыт по пояс).
+    Pithos,
+    /// Ведро с водой и гидрия.
+    Water,
+    /// Поленница.
+    Wood,
+    /// Стопка одеял и тюфяк.
+    Bedding,
+    /// Сундук (без добычи: пожитки).
+    Chest,
+    /// Ступа-мортарий и колода.
+    Mortar,
+    /// Ткацкий станок.
+    Loom,
+    /// Связки прутьев и шесты (мастерская, кладовая).
+    Bundles,
+}
+
+impl Floor {
+    fn size(self) -> (f32, f32) {
+        match self {
+            Floor::Basket | Floor::Amphora | Floor::Water | Floor::Mortar => (0.55, 0.55),
+            Floor::Sacks => (1.1, 0.55),
+            Floor::Jugs => (0.8, 0.45),
+            Floor::Pithos => (0.8, 0.8),
+            Floor::Wood => (0.9, 0.5),
+            Floor::Bedding => (0.75, 0.55),
+            Floor::Chest => (0.95, 0.55),
+            Floor::Loom => (1.9, 0.6),
+            Floor::Bundles => (0.6, 0.35),
+        }
+    }
+}
+
+/// Что вешается на стену (выше мебели).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Wall {
+    /// Плащ или туника на колышке.
+    Clothes,
+    /// Косы чеснока и лука.
+    Garlic,
+    /// Пучки трав на жерди.
+    Herbs,
+    /// Ниша со светильником.
+    Niche,
+    /// Серп, мотыга, моток верёвки на крюках.
+    Tools,
+    /// Корзина и сумка на крюке.
+    Bag,
+    /// Сковорода и черпаки.
+    Pans,
+    /// Связка рыбы.
+    Fish,
+}
+
+impl Wall {
+    fn len(self) -> f32 {
+        match self {
+            Wall::Clothes => 0.7,
+            Wall::Garlic => 0.5,
+            Wall::Herbs => 1.0,
+            Wall::Niche => 0.5,
+            Wall::Tools => 0.9,
+            Wall::Bag => 0.6,
+            Wall::Pans => 0.8,
+            Wall::Fish => 0.9,
+        }
+    }
+}
+
+/// Что ставить и вешать по назначению комнаты (с повторами — чаще).
+fn dress_lists(kind: super::interior::Kind) -> (&'static [Floor], &'static [Wall], usize, usize) {
+    use super::interior::Kind;
+    use Floor as F;
+    use Wall as W;
+    match kind {
+        Kind::Kitchen => (&[F::Basket, F::Jugs, F::Sacks, F::Water, F::Wood, F::Mortar, F::Amphora, F::Basket], &[W::Garlic, W::Herbs, W::Pans, W::Fish, W::Niche, W::Bag], 5, 4),
+        Kind::Storeroom => (&[F::Sacks, F::Pithos, F::Amphora, F::Basket, F::Jugs, F::Bundles, F::Sacks, F::Amphora], &[W::Garlic, W::Herbs, W::Fish, W::Tools, W::Bag], 6, 3),
+        Kind::Bedroom => (&[F::Bedding, F::Basket, F::Chest, F::Jugs], &[W::Clothes, W::Clothes, W::Niche, W::Bag], 2, 3),
+        Kind::Loft => (&[F::Bedding, F::Basket, F::Chest, F::Sacks], &[W::Clothes, W::Herbs, W::Bag, W::Clothes], 2, 3),
+        Kind::Living => (&[F::Basket, F::Jugs, F::Amphora, F::Loom, F::Water, F::Chest], &[W::Clothes, W::Niche, W::Garlic, W::Bag], 3, 3),
+        Kind::Weaving => (&[F::Basket, F::Basket, F::Bedding, F::Sacks, F::Jugs], &[W::Clothes, W::Bag, W::Niche, W::Herbs], 4, 3),
+        Kind::Workshop(_) => (&[F::Basket, F::Bundles, F::Jugs, F::Water, F::Sacks, F::Bundles], &[W::Tools, W::Tools, W::Bag, W::Niche, W::Clothes], 4, 3),
+    }
+}
+
+/// Дополнить обставленную комнату крупным у стен (корзины, мешки, кувшины, дрова, станок)
+/// и вещами на стенах (одежда, косы чеснока, травы, светильник в нише, инструменты),
+/// а на свободную середину — циновку. С порога комната должна выглядеть обжитой.
+pub fn dress(b: &mut Builder, room: &mut Room, kind: super::interior::Kind, wealth: u8, rng: &mut Rng) {
+    use super::interior::Kind;
+    let all = [Side::N, Side::E, Side::S, Side::W];
+    let (floor, wall, mut nf, mut nw) = dress_lists(kind);
+    let small = room.r.w().min(room.r.d()) < 2.6;
+    if small {
+        nf /= 2;
+        nw = nw.saturating_sub(1);
+    }
+    let mut loom = false;
+    for _ in 0..nf {
+        let what = floor[rng.int(floor.len())];
+        if what == Floor::Loom && (loom || small) {
+            continue;
+        }
+        let (len, depth) = what.size();
+        let Some((f, s)) = room.take(len, depth, &all, rng) else { continue };
+        loom |= what == Floor::Loom;
+        floor_thing(b, f, s, what, wealth, rng);
+    }
+    for _ in 0..nw {
+        let what = wall[rng.int(wall.len())];
+        let Some((p, s)) = room.wall_spot(what.len(), &all, rng) else { continue };
+        wall_thing(b, p, s, what, wealth, rng);
+    }
+    // Циновка или ковёр посреди комнаты.
+    let c = room.r.center(0.0);
+    let (hw, hd) = if room.r.w() > room.r.d() { (0.9, 0.6) } else { (0.6, 0.9) };
+    let mat_f = Rect::new(c.x - hw, c.z - hd, c.x + hw, c.z + hd);
+    if !matches!(kind, Kind::Kitchen | Kind::Storeroom | Kind::Workshop(_)) && room.free(mat_f) && rng.chance(0.7) {
+        let mat = if wealth == 0 || rng.chance(0.4) { Mat::Thatch } else { Mat::Rug };
+        reed_mat(b, mat_f, mat);
+    }
+}
+
+fn floor_thing(b: &mut Builder, f: Rect, s: Side, what: Floor, wealth: u8, rng: &mut Rng) {
+    let c = f.center(0.0);
+    let n = inward(s);
+    let along = axis(s);
+    match what {
+        Floor::Basket => {
+            let fill = [Mat::Bread, Mat::Felt, Mat::PetalWhite, Mat::Canvas, Mat::HerbGreen, Mat::Earth][rng.int(6)];
+            let r = rng.range(0.18, 0.25);
+            super::interior::basket(b, c, r, rng.range(0.28, 0.45), fill, None);
+            // Иногда рядом — маленькая корзинка с крышкой.
+            if rng.chance(0.35) {
+                let q = c + along * (r + 0.05) * if rng.chance(0.5) { 1.0 } else { -1.0 } - n * 0.05;
+                lidded_basket(b, q, 0.11);
+            }
+        }
+        Floor::Sacks => super::interior::sacks(b, f, rng),
+        Floor::Jugs => {
+            let k = 2 + usize::from(rng.chance(0.3));
+            for i in 0..k {
+                let t = (i as f32 + 0.5) / k as f32 - 0.5;
+                let p = c + along * (t * 0.7) + n * rng.range(-0.06, 0.06);
+                let h = rng.range(0.3, 0.55);
+                if rng.chance(0.25) {
+                    lidded_pot(b, p);
+                } else {
+                    kit::jug(b, p, h, Mat::Ceramic);
+                }
+            }
+            kit::hidden(b, f.min3(0.0), f.max3(0.4));
+        }
+        Floor::Amphora => {
+            amphora_ring(b, c, rng);
+            kit::hidden(b, f.min3(0.0), f.max3(0.8));
+        }
+        Floor::Pithos => kit::pithos(b, c, rng.range(1.0, 1.25), rng.range(0.15, 0.3)),
+        Floor::Water => {
+            kit::bucket(b, c - along * 0.12);
+            super::interior::hydria(b, c + along * 0.14 + n * 0.02);
+        }
+        Floor::Wood => firewood(b, f, rng),
+        Floor::Bedding => {
+            // Свёрнутый тюфяк и стопка покрывал.
+            let roll = c - along * 0.15;
+            b.mesh([Mat::Canvas, Mat::Felt][rng.int(2)]).beam(roll - n * 0.22 + Vec3::Y * 0.12, roll + n * 0.22 + Vec3::Y * 0.12, 0.12, 0.12, Vec3::Y);
+            folded_blankets(b, c + along * 0.2 + Vec3::Y * 0.0, s.along_x(), rng);
+            kit::hidden(b, f.min3(0.0), f.max3(0.25));
+        }
+        Floor::Chest => {
+            kit::chest(b, c, s.along_x());
+            if rng.chance(0.5) {
+                folded_blankets(b, c + Vec3::Y * 0.5, s.along_x(), rng);
+            } else if wealth >= 1 {
+                lidded_basket(b, c + Vec3::Y * 0.5 + along * 0.2, 0.1);
+            }
+        }
+        Floor::Mortar => {
+            if rng.chance(0.5) {
+                mortarium(b, c);
+            } else {
+                chopping_block(b, c);
+            }
+        }
+        Floor::Loom => {
+            kit::loom(b, c - n * 0.2, s.along_x());
+        }
+        Floor::Bundles => {
+            // Прислонённые к стене жерди и связка прутьев.
+            let m = b.mesh(Mat::Wood);
+            for i in 0..3 {
+                let foot = c + along * (i as f32 * 0.12 - 0.12) + n * 0.25;
+                m.beam(foot, foot - n * 0.22 + Vec3::Y * rng.range(1.5, 1.9), 0.02, 0.02, along);
+            }
+            b.mesh(Mat::Thatch).beam(c - n * 0.05 + along * 0.18, c - n * 0.08 + along * 0.2 + Vec3::Y * 0.9, 0.09, 0.09, along);
+            kit::hidden(b, f.min3(0.0), f.max3(0.5));
+        }
+    }
+}
+
+fn wall_thing(b: &mut Builder, at: Vec3, s: Side, what: Wall, wealth: u8, rng: &mut Rng) {
+    let out = inward(s);
+    let along = axis(s);
+    match what {
+        Wall::Clothes => {
+            let mat = [Mat::Cloth, Mat::Rug, Mat::Canvas, Mat::Felt, Mat::Leather][rng.int(if wealth > 0 { 5 } else { 3 })];
+            hung_garment(b, at + Vec3::Y * 1.75, out, along, mat, rng);
+        }
+        Wall::Garlic => {
+            let p = at + Vec3::Y * 1.85;
+            peg(b, p, out);
+            braid(b, p + out * 0.06 - along * 0.1, Mat::PetalWhite, 9, rng);
+            braid(b, p + out * 0.06 + along * 0.1, if rng.chance(0.5) { Mat::Bread } else { Mat::PetalWhite }, 8, rng);
+        }
+        Wall::Herbs => {
+            let a = at + out * 0.12 - along * 0.45 + Vec3::Y * 2.0;
+            super::interior::hanging_bunches(b, a, a + along * 0.9, 4 + rng.int(3));
+        }
+        Wall::Niche => niche_lamp(b, at + Vec3::Y * 1.35, out, along, wealth, rng),
+        Wall::Tools => wall_tools(b, at + Vec3::Y * 1.6, out, along, rng),
+        Wall::Bag => {
+            let p = at + Vec3::Y * 1.7;
+            peg(b, p - along * 0.15, out);
+            peg(b, p + along * 0.15, out);
+            // Заплечная сумка и плетёная корзинка на крюках.
+            let bag = p - along * 0.15 + out * 0.07;
+            b.mesh(Mat::Leather).beam(bag - Vec3::Y * 0.05, bag - Vec3::Y * 0.4, 0.13, 0.05, out);
+            b.mesh(Mat::Leather).beam(bag, bag - Vec3::Y * 0.08, 0.01, 0.005, out);
+            let k = p + along * 0.15 + out * 0.12 - Vec3::Y * 0.42;
+            super::interior::basket(b, k, 0.12, 0.2, Mat::HerbGreen, None);
+            b.mesh(Mat::Thatch).beam(k + Vec3::Y * 0.2 - along * 0.1, p + along * 0.15 + out * 0.05, 0.006, 0.006, out);
+        }
+        Wall::Pans => {
+            let p = at + Vec3::Y * 1.7;
+            utensil_rail(b, p, out, rng);
+        }
+        Wall::Fish => {
+            let a = at + out * 0.15 - along * 0.4 + Vec3::Y * 2.05;
+            hanging_fish(b, a, a + along * 0.8, 3 + rng.int(3));
+        }
+    }
+}
+
+/// Деревянный колышек в стене.
+fn peg(b: &mut Builder, p: Vec3, out: Vec3) {
+    b.mesh(Mat::Wood).beam(p - out * 0.01, p + out * 0.1 + Vec3::Y * 0.02, 0.014, 0.014, Vec3::Y);
+}
+
+/// Плащ или туника на колышке: ткань широкими складками.
+fn hung_garment(b: &mut Builder, p: Vec3, out: Vec3, along: Vec3, mat: Mat, rng: &mut Rng) {
+    peg(b, p, out);
+    let top = p + out * 0.05 - Vec3::Y * 0.02;
+    let len = rng.range(0.85, 1.15);
+    let m = b.mesh(mat);
+    // Складки: несколько полос, расходящихся книзу.
+    let n = 5;
+    for i in 0..n {
+        let t = i as f32 / (n - 1) as f32 - 0.5;
+        let a = top + along * (t * 0.16);
+        let c = top + along * (t * 0.5) - Vec3::Y * len + out * (0.03 + 0.03 * ((i % 2) as f32));
+        m.beam(a, c, 0.06, 0.018, out);
+    }
+    // Плечи туники: поперечная полоса чуть ниже колышка.
+    if mat != Mat::Leather && rng.chance(0.5) {
+        m.beam(top - along * 0.3 - Vec3::Y * 0.12 + out * 0.02, top + along * 0.3 - Vec3::Y * 0.12 + out * 0.02, 0.05, 0.015, out);
+    }
+    // Клавы — тёмные полосы на тунике.
+    if mat == Mat::Canvas || mat == Mat::PetalWhite {
+        let c = b.mesh(Mat::Rug);
+        for sgn in [-1.0f32, 1.0] {
+            c.beam(top + along * (sgn * 0.05) + out * 0.045, top + along * (sgn * 0.13) - Vec3::Y * len * 0.8 + out * 0.07, 0.012, 0.006, out);
+        }
+    }
+}
+
+/// Коса из головок чеснока или лука на соломенном жгуте (лёгкая: таких в городе сотни).
+fn braid(b: &mut Builder, p: Vec3, mat: Mat, n: usize, rng: &mut Rng) {
+    let n = n.min(6);
+    let len = n as f32 * 0.07;
+    b.mesh(Mat::Thatch).beam(p, p - Vec3::Y * (len + 0.06), 0.012, 0.012, Vec3::X);
+    let m = b.mesh(mat);
+    for i in 0..n {
+        let y = 0.07 + i as f32 * 0.07;
+        let a = i as f32 * 2.1 + rng.range(-0.3, 0.3);
+        let q = p - Vec3::Y * y + Vec3::new(a.cos(), 0.0, a.sin()) * 0.028;
+        m.lathe(q - Vec3::Y * 0.035, &[(0.0, 0.0), (0.035, 0.025), (0.018, 0.06), (0.0, 0.075)], 5);
+    }
+}
+
+/// Ниша в стене со светильником (в бедном доме — глиняным, в богатом — с бронзовым и лампадой).
+fn niche_lamp(b: &mut Builder, p: Vec3, out: Vec3, along: Vec3, wealth: u8, rng: &mut Rng) {
+    // Ниша: тёмная арочка в плоскости стены и выступающий подоконник.
+    let w = 0.2;
+    let back = p + out * 0.005;
+    b.mesh(Mat::DarkStone).quad(
+        [back - along * w, back + along * w, back + along * w + Vec3::Y * 0.32, back - along * w + Vec3::Y * 0.32],
+        out,
+    );
+    let arc: Vec<Vec3> = (0..=8).map(|k| {
+        let a = std::f32::consts::PI * k as f32 / 8.0;
+        back + out * 0.01 + along * (a.cos() * w) + Vec3::Y * (0.32 + a.sin() * 0.12)
+    }).collect();
+    b.mesh(Mat::DarkStone).beam_path(&arc, 0.025, 0.012, out);
+    for k in 0..8 {
+        b.mesh(Mat::DarkStone).tri(back + Vec3::Y * 0.32, arc[k], arc[k + 1], out);
+    }
+    b.mesh(Mat::Limestone).cuboid(
+        (p - along * (w + 0.04) - Vec3::Y * 0.04).min(p + along * (w + 0.04) + out * 0.08),
+        (p - along * (w + 0.04) - Vec3::Y * 0.04).max(p + along * (w + 0.04) + out * 0.08 + Vec3::Y * 0.04),
+    );
+    let lamp = p + out * 0.06 + Vec3::Y * 0.04;
+    oil_lamp(b, lamp);
+    if wealth >= 1 && rng.chance(0.5) {
+        kit::jug(b, lamp + along * 0.12, 0.14, Mat::Ceramic);
+    }
+}
+
+/// Инструменты на крюках: серп, мотыга, моток верёвки.
+fn wall_tools(b: &mut Builder, p: Vec3, out: Vec3, along: Vec3, rng: &mut Rng) {
+    peg(b, p - along * 0.32, out);
+    peg(b, p, out);
+    peg(b, p + along * 0.32, out);
+    // Серп.
+    let s0 = p - along * 0.32 + out * 0.06;
+    b.mesh(Mat::Wood).beam(s0, s0 - Vec3::Y * 0.14, 0.015, 0.015, out);
+    let blade: Vec<Vec3> = (0..=8).map(|k| {
+        let a = k as f32 / 8.0 * 3.4;
+        s0 - Vec3::Y * 0.14 + along * (a.sin() * 0.13) - Vec3::Y * ((1.0 - a.cos()) * 0.1)
+    }).collect();
+    b.mesh(Mat::Iron).beam_path(&blade, 0.012, 0.003, out);
+    // Мотыга.
+    let h0 = p + out * 0.06;
+    b.mesh(Mat::Wood).beam(h0 + Vec3::Y * 0.05, h0 - Vec3::Y * 0.9, 0.018, 0.018, out);
+    b.mesh(Mat::Iron).beam(h0 - Vec3::Y * 0.9, h0 - Vec3::Y * 0.9 + out * 0.18 - Vec3::Y * 0.05, 0.05, 0.006, along);
+    // Моток верёвки.
+    let r0 = p + along * 0.32 + out * 0.07 - Vec3::Y * 0.14;
+    let coil: Vec<Vec3> = (0..=10).map(|k| {
+        let a = k as f32 / 10.0 * std::f32::consts::TAU;
+        r0 + along * (a.cos() * 0.11) + Vec3::Y * (a.sin() * 0.13)
+    }).collect();
+    b.mesh(Mat::Thatch).beam_path(&coil, 0.03, if rng.chance(0.5) { 0.03 } else { 0.022 }, out);
+}
+
+/// Корзинка с крышкой.
+fn lidded_basket(b: &mut Builder, p: Vec3, r: f32) {
+    b.mesh(Mat::Thatch).lathe(p, &[(0.0, 0.0), (r * 0.85, 0.0), (r, r * 1.2), (r * 0.6, r * 1.45), (0.0, r * 1.5)], 7);
+}
+
+/// Камышовая циновка или ковёр посреди комнаты.
+fn reed_mat(b: &mut Builder, f: Rect, mat: Mat) {
+    if mat == Mat::Rug {
+        super::interior::rug(b, f, Mat::Rug);
+        return;
+    }
+    b.mesh(Mat::Thatch).cuboid(f.min3(0.0), f.max3(0.015));
+    // Обвязка по краям.
+    let m = b.mesh(Mat::Canvas);
+    m.cuboid(Vec3::new(f.x0, 0.0, f.z0), Vec3::new(f.x1, 0.02, f.z0 + 0.04));
+    m.cuboid(Vec3::new(f.x0, 0.0, f.z1 - 0.04), Vec3::new(f.x1, 0.02, f.z1));
+}
