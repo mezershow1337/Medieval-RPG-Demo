@@ -48,12 +48,12 @@ impl Plugin for PlayerPlugin {
     }
 }
 
-pub fn spawn_local_player(commands: &mut Commands, pos: Vec3, assets: &crate::client::CharacterAssets) {
+pub fn spawn_local_player(commands: &mut Commands, pos: Vec3, yaw: f32, assets: &crate::client::CharacterAssets) {
     commands
         .spawn((
-            LocalPlayer::default(),
+            LocalPlayer { yaw, ..default() },
             crate::fight::LocalFighter::new(crate::npc::fighter_for(crate::protocol::ActorKind::Player)),
-            Transform::from_translation(pos),
+            Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)),
             Visibility::default(),
         ))
         .with_children(|p| {
