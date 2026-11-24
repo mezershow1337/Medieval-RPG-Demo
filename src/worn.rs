@@ -44,7 +44,14 @@ fn place(base: ItemBaseId, along: Option<f32>, at: Vec3, q: Quat) -> Transform {
 /// Модель предмета в руке, в системе оружия рига.
 pub fn in_hand(base: ItemBaseId, kind: WeaponKind) -> Transform {
     let len = crate::icons::model_half_extents(base)[2] * 2.0;
-    place(base, Some(grip_from_butt(kind, len)), crate::client::weapon_grips(kind).0, Quat::IDENTITY)
+    let mut t = place(base, Some(grip_from_butt(kind, len)), crate::client::weapon_grips(kind).0, Quat::IDENTITY);
+    // Кулак — на оси рукояти, а не в центре коробки модели (у топора топорище сбоку от лезвия).
+    // Лук держат за середину, его концы не в счёт.
+    if kind != WeaponKind::Bow {
+        let [x, y] = crate::icons::grip_axis_offset(base);
+        t.translation -= t.rotation * Vec3::new(x, y, 0.0);
+    }
+    t
 }
 
 /// Показать оружие под сущностью `e`: своя модель предмета, если есть, иначе общая по виду.

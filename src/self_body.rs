@@ -2,8 +2,8 @@
 //!
 //! * «тень» — всё тело целиком, с оружием в руках и щитом, в отдельном слое `SHADOW_LAYER`:
 //!   его видит только солнце (тень на земле и стенах), камера его не рисует;
-//! * «видимое» — только пояс и ноги (всё выше схлопнуто в точку): глянешь вниз — видны
-//!   ноги и сапоги; теней оно не отбрасывает, чтобы не было двойной.
+//! * «видимое» — только ноги (штаны, обмотки, обувь, поножи, `rig::LegsOnly`): глянешь под
+//!   ноги — видны ноги и сапоги; теней оно не отбрасывает, чтобы не было двойной.
 //!
 //! Руки с оружием рисует `fight.rs` (рука от первого лица): они кадрированы под камеру.
 //! Поза обоих тел считается так же, как у других игроков (`client::solve_fighter_body`).
@@ -14,7 +14,7 @@ use crate::fight::LocalFighter;
 use crate::gear_look::Gear;
 use crate::player::LocalPlayer;
 use crate::protocol::ActorKind;
-use crate::rig::{self, Bone, NeedsRig, Outfit, Rig, RigPose};
+use crate::rig::{self, NeedsRig, Outfit, Rig, RigPose};
 use crate::worn;
 use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
@@ -53,7 +53,7 @@ pub struct SelfBody {
     shown_gear: Option<Gear>,
 }
 
-/// Скелет своего тела: `visible` — видимое камере (только пояс и ноги).
+/// Скелет своего тела: `visible` — видимое камере (только ноги).
 #[derive(Component)]
 struct SelfRig {
     visible: bool,
@@ -77,7 +77,6 @@ impl Plugin for SelfBodyPlugin {
                 spawn_self_body,
                 refresh_self_gear,
                 refresh_self_weapon,
-                collapse_view_body,
             ),
         )
         .add_systems(
@@ -125,7 +124,7 @@ fn spawn_self_body(
                 b.spawn((
                     SelfRig { visible: true },
                     Shade::NoShadow,
-                    worn::Worn::new(extras),
+                    rig::LegsOnly,
                     NeedsRig(o),
                     Transform::default(),
                     Visibility::default(),
@@ -141,31 +140,12 @@ fn spawn_self_body(
     }
 }
 
-/// У видимого тела всё выше пояса (торс, голова, руки) схлопнуто в точку: камера внутри
-/// головы, руки — свои, от первого лица, а грудь заслоняла бы ноги и лезла в камеру.
-/// Масштаб суставов `apply_poses` не трогает, ставим один раз.
-fn collapse_view_body(
-    rigs: Query<(&Rig, &SelfRig), Added<Rig>>,
-    mut joints: Query<&mut Transform>,
-) {
-    for (rig, s) in &rigs {
-        if !s.visible {
-            continue;
-        }
-        for bone in [Bone::Torso] {
-            if let Ok(mut t) = joints.get_mut(rig.joint(bone)) {
-                t.scale = Vec3::ZERO;
-            }
-        }
-    }
-}
-
 /// Надел или снял доспех, щит, повесил меч на пояс — переодеваем оба тела.
 fn refresh_self_gear(
     mut commands: Commands,
     local: Query<&LocalFighter>,
     mut bodies: Query<(Entity, &mut SelfBody, &Children)>,
-    mut rigs: Query<&mut worn::Worn, With<SelfRig>>,
+    mut rigs: Query<Option<&mut worn::Worn>, With<SelfRig>>,
     shields: Query<(Entity, &SelfShield)>,
     models: Option<Res<rig::CharacterModels>>,
     net: Option<Res<crate::client::NetState>>,
@@ -187,9 +167,13 @@ fn refresh_self_gear(
             let Ok(mut w) = rigs.get_mut(child) else {
                 continue;
             };
-            w.want = worn::Extras::of(&f.gear);
+            if let Some(w) = w.as_mut() {
+                w.want = worn::Extras::of(&f.gear);
+            }
             if rebuild {
-                w.reset();
+                if let Some(w) = w.as_mut() {
+                    w.reset();
+                }
                 commands
                     .entity(child)
                     .despawn_related::<Children>()
@@ -246,10 +230,12 @@ fn refresh_self_weapon(
     }
 }
 
-/// Видимое тело (пояс и ноги) чуть позади камеры: глянешь вниз — ступни под тобой
-/// и чуть впереди при шаге.
-fn view_body_offset(_pitch: f32) -> Vec3 {
-    Vec3::new(0.0, 0.0, 0.03)
+/// Насколько видимые ноги позади камеры. Глянешь под ноги — голова у человека уходит вперёд
+/// над носками, поэтому ноги сдвигаем назад: бёдра не заслоняют сапоги.
+fn view_body_offset(pitch: f32) -> Vec3 {
+    let down = ((-pitch - 0.6) / 0.7).clamp(0.0, 1.0);
+    let down = down * down * (3.0 - 2.0 * down);
+    Vec3::new(0.0, 0.0, 0.05 + 0.25 * down)
 }
 
 #[allow(clippy::type_complexity)]

@@ -123,6 +123,8 @@ const VIEW_SHOULDER: Vec3 = Vec3::new(0.24, -0.3, 0.12);
 /// Плечо левой руки: ниже и дальше в сторону, чтобы рука, тянущаяся к древку через грудь,
 /// не закрывала полэкрана.
 const VIEW_SHOULDER_L: Vec3 = Vec3::new(-0.3, -0.46, 0.06);
+/// Вокруг чего опускаем оружие с руками, когда смотрят под ноги (у груди).
+const VIEW_LIFT_PIVOT: Vec3 = Vec3::new(0.0, -0.3, 0.1);
 /// Насколько меч от первого лица выше, чем в мире (только внешний вид).
 const VIEW_LIFT: f32 = 0.36;
 
@@ -377,8 +379,13 @@ fn animate_view_sword(
     let fix = Quat::from_rotation_x(-p.pitch * 0.4);
     // Меч от первого лица чуть приподнят, чтобы в кадре была рука с рукоятью.
     let (hilt, dir) = view_framing(fix * hilt, fix * dir);
-    let want_pos = Vec3::new(-0.06, -0.25 + VIEW_LIFT, -0.04) + hilt;
-    let want_rot = Quat::from_rotation_arc(Vec3::Y, dir);
+    // Глядя под ноги, оружие с руками опускаем к низу кадра (держишь его у бока), иначе
+    // рука с древком закрывает свои ноги.
+    let look_down = ((-p.pitch - 0.6) / 0.7).clamp(0.0, 1.0);
+    let lift = Quat::from_rotation_x(-0.6 * look_down);
+    let lifted = |v: Vec3| VIEW_LIFT_PIVOT + lift * (v - VIEW_LIFT_PIVOT);
+    let want_pos = lifted(Vec3::new(-0.06, -0.25 + VIEW_LIFT, -0.04) + hilt);
+    let want_rot = lift * Quat::from_rotation_arc(Vec3::Y, dir);
     // Сглаживаем: смена фаз (комбо, отбитый удар, поправка сервера) без рывков.
     let k = 1.0 - (-35.0 * dt).exp();
     match *smoothed {
@@ -420,7 +427,7 @@ fn animate_view_sword(
             let guard = matches!(f.fighter.action, Action::Windup { .. } | Action::Strike { .. } | Action::Recovery { .. });
             let fist = if guard { Vec3::new(-0.16, -0.08, -0.28) } else { Vec3::new(-0.2, -0.18, -0.3) };
             let (pos, _) = view_framing(fix * fist, Vec3::NEG_Z);
-            Some((Vec3::new(-0.06, -0.25 + VIEW_LIFT, -0.04) + pos, (fix * Vec3::new(0.15, 0.25, -1.0)).normalize()))
+            Some((lifted(Vec3::new(-0.06, -0.25 + VIEW_LIFT, -0.04) + pos), lift * (fix * Vec3::new(0.15, 0.25, -1.0)).normalize()))
         } else {
             None
         };

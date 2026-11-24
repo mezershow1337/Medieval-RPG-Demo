@@ -553,6 +553,15 @@ fn finish_models(
 #[derive(Component)]
 pub struct NeedsRig(pub Outfit);
 
+/// Скелет только с одеждой ног (штаны, обмотки, обувь, поножи) — своё тело от первого лица:
+/// глянешь под ноги — видны ноги, а рубаха и доспех выше пояса не лезут в камеру.
+#[derive(Component)]
+pub struct LegsOnly;
+
+fn is_leg_layer(layer: &str) -> bool {
+    matches!(layer, "trousers" | "wraps" | "shoes" | "boots" | "greaves")
+}
+
 /// Готовый скелет: сущности суставов.
 #[derive(Component)]
 pub struct Rig {
@@ -631,13 +640,13 @@ fn attach_rigs(
     mut commands: Commands,
     mut models: ResMut<CharacterModels>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    rigs: Query<(Entity, &NeedsRig)>,
+    rigs: Query<(Entity, &NeedsRig, Has<LegsOnly>)>,
     weapons: Query<(Entity, &NeedsWeapon)>,
     shields: Query<(Entity, &NeedsShield)>,
     arms: Query<(Entity, &NeedsViewArm)>,
     net: Option<Res<crate::client::NetState>>,
 ) {
-    for (e, need) in &rigs {
+    for (e, need, legs_only) in &rigs {
         let outfit = need.0;
         let mut joints = [Entity::PLACEHOLDER; BONES];
         for bone in 0..BONES {
@@ -647,7 +656,7 @@ fn attach_rigs(
             joints[bone] = joint;
         }
         commands.entity(e).with_children(|p| {
-            for layer in outfit.layers() {
+            for layer in outfit.layers().into_iter().filter(|l| !legs_only || is_leg_layer(l)) {
                 models.spawn_part(p, &mut materials, layer, Some(&outfit), Some(&joints), false);
             }
         });

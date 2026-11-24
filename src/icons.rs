@@ -28,6 +28,15 @@ pub use art::ITEM_ART;
 /// Ключ модели -> половинные размеры её коробки (файл создаёт `item_bounds.py`), для физики предметов.
 mod shapes;
 pub use shapes::ITEM_SHAPES;
+/// Ключ модели -> где ось рукояти относительно центра коробки (файл создаёт `item_grips.py`).
+mod grips;
+
+/// Сдвиг оси рукояти/топорища от центра коробки модели по X и Y (у топора лезвие сбоку,
+/// и топорище не в центре коробки).
+pub fn grip_axis_offset(base: ItemBaseId) -> [f32; 2] {
+    let key = art_key(base);
+    grips::ITEM_GRIPS.iter().find(|(k, _)| *k == key).map(|(_, o)| *o).unwrap_or([0.0, 0.0])
+}
 
 /// Половинные размеры коробки, в которую вписана 3D-модель предмета (низ модели — на y = 0).
 pub fn model_half_extents(base: ItemBaseId) -> [f32; 3] {

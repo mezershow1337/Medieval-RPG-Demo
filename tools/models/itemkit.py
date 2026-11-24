@@ -828,8 +828,11 @@ def write_art_table():
         f.write("pub const ITEM_ART: &[(&str, &str)] = &[\n" + "\n".join(rows) + "\n];\n")
     # Размеры моделей для физики предметов (src/icons/shapes.rs).
     import item_bounds
+    import item_grips
 
     item_bounds.main()
+    # Где у оружия ось рукояти (src/icons/grips.rs) — по ней кулак держит топорище.
+    item_grips.main()
 
 
 # =========================================================================== студия и иконка
