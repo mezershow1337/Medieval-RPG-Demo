@@ -108,7 +108,8 @@ fn setup_hint_ui(mut commands: Commands, theme: Res<UiTheme>) {
             Node {
                 position_type: PositionType::Absolute,
                 right: px(18),
-                top: percent(20),
+                // Под мини-картой в правом верхнем углу.
+                top: px(360),
                 width: px(390),
                 padding: Skin::Leather.padding(),
                 flex_direction: FlexDirection::Column,

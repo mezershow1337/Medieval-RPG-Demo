@@ -6,7 +6,7 @@ use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendTyp
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_0021;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_0022;
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -175,7 +175,8 @@ impl ActorKind {
 /// Сервер -> клиент (надёжный канал).
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ServerMessage {
-    Welcome { your_id: u64, spawn: NetPos },
+    /// Вы в игре: ваш номер, где появились и куда смотрите (`yaw`, как у `LocalPlayer`).
+    Welcome { your_id: u64, spawn: NetPos, yaw: f32 },
     PlayerJoined { id: u64 },
     PlayerLeft { id: u64 },
     /// Сервер отклонил перемещение и возвращает игрока в эту точку.
@@ -184,7 +185,7 @@ pub enum ServerMessage {
     Hit { attacker: u64, target: u64, outcome: HitOutcome, at: NetPos },
     Died { id: u64, killer: Option<u64> },
     /// Ваш персонаж возрождён в этой точке.
-    Respawned { pos: NetPos },
+    Respawned { pos: NetPos, yaw: f32 },
     /// На земле появилось тело (его можно будет обыскать).
     CorpseSpawned { corpse_id: u64, kind: ActorKind, pos: NetPos, yaw: f32, gear: crate::gear_look::Gear },
     CorpseRemoved { corpse_id: u64 },

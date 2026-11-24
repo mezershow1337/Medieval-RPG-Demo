@@ -22,6 +22,7 @@ impl Plugin for LifeClientPlugin {
         daily_life::warm_up();
         app.init_resource::<Fright>()
             .init_resource::<LiveActs>()
+            .init_resource::<ResidentSpots>()
             .add_message::<daily_life::Alarm>()
             .add_systems(Startup, (setup_props, setup_rain, setup_chatter.after(crate::inventory_ui::setup_fonts)))
             .add_systems(Update, rain)
@@ -35,6 +36,11 @@ pub struct LifeSystems;
 /// Чем сейчас занят каждый житель (для разговора на «E»).
 #[derive(Resource, Default)]
 pub struct LiveActs(pub Vec<Act>);
+
+/// Где сейчас каждый житель на улице или в доме (для мини-карты); `None` — ушёл из города или погиб.
+/// Считается для всех, не только для видимых вблизи.
+#[derive(Resource, Default)]
+pub struct ResidentSpots(pub Vec<Option<Vec2>>);
 
 /// Сглаженный поворот и предметы в руках жителя.
 #[derive(Component)]
@@ -427,6 +433,7 @@ fn drive_residents(
     mut fright: ResMut<Fright>,
     mut alarms: MessageReader<daily_life::Alarm>,
     mut acts: ResMut<LiveActs>,
+    mut spots: ResMut<ResidentSpots>,
     level: Res<crate::collision::LevelColliders>,
     camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     mut people: Query<(&ResidentView, &mut Transform, &mut Visibility, &Children, &mut Gait, Has<crate::civil_client::Fallen>)>,
@@ -458,6 +465,9 @@ fn drive_residents(
     if acts.0.len() != n {
         acts.0 = vec![Act::Idle; n];
     }
+    if spots.0.len() != n {
+        spots.0 = vec![None; n];
+    }
     for (r, mut tf, mut vis, children, mut gait, fallen) in &mut people {
         let i = r.index;
         let scale = tf.scale.y;
@@ -477,6 +487,9 @@ fn drive_residents(
         // Тело-коробка в доме мешает, только пока житель там (и жив).
         if let Some((home, _)) = anchor {
             level.set_body_gone(i, fallen || s.pos.distance(home) > 0.4 || matches!(s.act, Act::Sleep | Act::Away));
+        }
+        if let Some(spot) = spots.0.get_mut(i) {
+            *spot = (!fallen && s.act != Act::Away).then(|| s.pos.xz());
         }
         if fallen {
             continue;

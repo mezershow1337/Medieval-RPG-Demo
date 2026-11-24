@@ -163,6 +163,7 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .insert_resource(level)
         .insert_resource(world)
         .insert_resource(PlayerNames::default())
+        .insert_resource(LastSpawns::default())
         .insert_resource(civil)
         .add_plugins(crate::civil_server::CivilServerPlugin)
         .add_plugins(crate::world_clock::ClockServerPlugin)
@@ -253,6 +254,17 @@ pub(crate) fn spawn_npc(world: &mut GameWorld, level: &LevelColliders, spawn: Np
 #[derive(Resource, Default)]
 pub struct PlayerNames(pub HashMap<u64, String>);
 
+/// Где каждый игрок (по нику) появлялся в последний раз: следующий вход — в другом месте.
+#[derive(Resource, Default)]
+pub struct LastSpawns(HashMap<String, &'static str>);
+
+/// Случайное место в городе (или выбранное, `MRPG_SPAWN`) подальше от живых игроков.
+fn choose_spawn(world: &mut GameWorld, level: &LevelColliders, me: u64, last: Option<&str>) -> (&'static str, Vec3, f32) {
+    let others: Vec<Vec3> = world.actors.iter().filter(|(id, a)| **id != me && a.kind == ActorKind::Player && a.alive).map(|(_, a)| a.pose.feet).collect();
+    let rng = &mut world.rng;
+    level::pick_spawn(&level::SpawnChoice::from_env(), level, &others, last, || rng.next_f32())
+}
+
 fn on_server_event(
     event: On<RenetServerEvent>,
     mut server: ResMut<RenetServer>,
@@ -260,17 +272,20 @@ fn on_server_event(
     time: Res<Time>,
     transport: Res<NetcodeServerTransport>,
     mut names: ResMut<PlayerNames>,
+    mut last_spawns: ResMut<LastSpawns>,
+    level: Res<LevelColliders>,
 ) {
     match &event.0 {
         ServerEvent::ClientConnected { client_id } => {
             let id = *client_id;
-            let spawn = level::spawn_point(world.joined_count);
             world.joined_count += 1;
             let profile = transport.user_data(id).and_then(|d| crate::estates::unpack_profile(&d));
             let look = profile.as_ref().map(|p| p.look).unwrap_or_default();
             let name = profile.map(|p| p.name).filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Странник {}", id % 1000));
-            info!("Игрок «{name}» ({id}) подключился");
-            server.send_message(id, CH_RELIABLE, encode(&ServerMessage::Welcome { your_id: id, spawn: spawn.into() }));
+            let (spot, spawn, yaw) = choose_spawn(&mut world, &level, id, last_spawns.0.get(&name).copied());
+            last_spawns.0.insert(name.clone(), spot);
+            info!("Игрок «{name}» ({id}) подключился, появился: {}", level::spawn_spot(spot).map_or(spot, |s| s.name));
+            server.send_message(id, CH_RELIABLE, encode(&ServerMessage::Welcome { your_id: id, spawn: spawn.into(), yaw }));
             // Новичку — имена всех, кто уже в игре; всем — имя новичка.
             for (other, n) in &names.0 {
                 server.send_message(id, CH_RELIABLE, encode(&ServerMessage::PlayerName { id: *other, name: n.clone() }));
@@ -286,7 +301,7 @@ fn on_server_event(
                 id,
                 Actor {
                     kind: ActorKind::Player,
-                    pose: Pose { feet: spawn, yaw: 0.0, pitch: 0.0, crouching: false },
+                    pose: Pose { feet: spawn, yaw, pitch: 0.0, crouching: false },
                     fighter: npc::fighter_for(ActorKind::Player),
                     alive: true,
                     last_update: time.elapsed_secs_f64(),
@@ -956,16 +971,25 @@ pub fn add_civ_corpse(server: &mut RenetServer, world: &mut GameWorld, killer: O
 fn respawns(mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, level: Res<LevelColliders>, time: Res<Time>) {
     let now = time.elapsed_secs_f64();
     let world = &mut *world;
+    let due: Vec<u64> = world.actors.iter().filter(|(_, a)| a.respawn_at.is_some_and(|t| now >= t)).map(|(id, _)| *id).collect();
+    let spots: HashMap<u64, (Vec3, f32)> = due
+        .into_iter()
+        .map(|id| {
+            let (_, p, yaw) = choose_spawn(world, &level, id, None);
+            (id, (p, yaw))
+        })
+        .collect();
     for (&id, actor) in world.actors.iter_mut() {
         if actor.respawn_at.is_some_and(|t| now >= t) {
-            let spawn = level::spawn_point((world.rng.next_f32() * 8.0) as usize);
+            let (spawn, yaw) = spots.get(&id).copied().unwrap_or((level::spawn_point(0), 0.0));
+            actor.pose.yaw = yaw;
             actor.respawn_at = None;
             actor.alive = true;
             actor.fighter = npc::fighter_for(actor.kind);
             actor.pose.feet = spawn;
             actor.last_update = now;
             actor.protected_until = now + SPAWN_PROTECTION_SECS;
-            server.send_message(id, CH_RELIABLE, encode(&ServerMessage::Respawned { pos: spawn.into() }));
+            server.send_message(id, CH_RELIABLE, encode(&ServerMessage::Respawned { pos: spawn.into(), yaw }));
         }
     }
     let (due, waiting): (Vec<_>, Vec<_>) = world.npc_respawns.drain(..).partition(|(t, _)| now >= *t);
