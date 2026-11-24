@@ -259,7 +259,8 @@ fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
             });
         });
     commands
-        .spawn((Node { position_type: PositionType::Absolute, width: percent(100), top: px(54), justify_content: JustifyContent::Center, ..default() }, Pickable::IGNORE))
+        // Глашатай — внизу слева, рядом с хотбаром: вверху тесно (компас, цель, подсказки, мини-карта).
+        .spawn((Node { position_type: PositionType::Absolute, left: px(12), bottom: px(22), max_width: px(350), ..default() }, Pickable::IGNORE))
         .with_children(|p| {
             theme().plaque(p).with_children(|p| {
                 p.spawn((

@@ -736,8 +736,10 @@ fn chatter(
             text.0 = line.clone();
         }
         let size = computed.size() * computed.inverse_scale_factor();
-        node.left = Val::Px(px.x - size.x * 0.5);
-        node.top = Val::Px(px.y - size.y);
+        // Реплика того, кто у края кадра, не обрезается краем экрана.
+        let screen = cam.logical_viewport_size().unwrap_or(Vec2::splat(f32::MAX));
+        node.left = Val::Px((px.x - size.x * 0.5).clamp(8.0, (screen.x - size.x - 8.0).max(8.0)));
+        node.top = Val::Px((px.y - size.y).clamp(8.0, (screen.y - size.y - 8.0).max(8.0)));
         *vis = Visibility::Inherited;
         shown += 1;
     }
