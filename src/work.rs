@@ -54,7 +54,8 @@ impl Drill {
             Drill::Pump => 1.1,
             Drill::Rhythm => 0.6,
             Drill::Track | Drill::Tension => WINDOW,
-            Drill::Mimic => 3.2,
+            // Показ (по секунде на движение) и повтор — круг урока.
+            Drill::Mimic => 5.5,
             Drill::Trace | Drill::Scribe => 2.2,
             Drill::Count => 4.5,
         }
@@ -63,16 +64,20 @@ impl Drill {
     /// Подсказка, как работать.
     pub fn hint(self) -> &'static str {
         match self {
-            Drill::Grind => "Водите мышью по кругу — ровно и не частя",
-            Drill::Stir => "Мешайте мышью по кругу — медленно, не расплескайте",
-            Drill::Pump => "Мышь вверх-вниз на полный ход, в такт",
-            Drill::Rhythm => "ЛКМ, когда отметка посередине",
-            Drill::Track => "Ведите указку мышью за словом",
-            Drill::Tension => "Держите ЛКМ — натяжение в светлой зоне, не порвите",
-            Drill::Mimic => "Смотрите, что показывает мастер, и повторите мышью",
-            Drill::Trace => "Ведите стиль мышью по образцу: черта за чертой, не сходя с линии",
-            Drill::Scribe => "Выводите слово буква за буквой: стиль — по образцу",
-            Drill::Count => "Мышь вверх-вниз — камешки в столбце, ЛКМ — следующий разряд",
+            Drill::Grind => "Мышью по кругу — ровно, не частя. Или держите стрелку вправо/влево",
+            Drill::Stir => "Мышью по кругу — медленно. Или держите стрелку вправо/влево",
+            Drill::Pump => "Мышь вверх-вниз на полный ход, в такт. Или стрелки вверх/вниз",
+            Drill::Rhythm => "ЛКМ или любая стрелка, когда отметка посередине",
+            Drill::Track => "Ведите указку за словом: мышью или стрелками влево/вправо",
+            Drill::Tension => {
+                "Держите ЛКМ или любую стрелку — натяжение в светлой зоне, не порвите"
+            }
+            Drill::Mimic => "Смотрите, что показывает мастер, и повторите: мышью или стрелками",
+            Drill::Trace => "Ведите стиль по образцу (мышь или стрелки): черта за чертой",
+            Drill::Scribe => "Выводите слово буква за буквой (мышь или стрелки) — по образцу",
+            Drill::Count => {
+                "Вверх-вниз (мышь или стрелки) — камешки, ЛКМ или вправо — следующий разряд"
+            }
         }
     }
 }
@@ -158,9 +163,19 @@ pub fn quality_word(q: f32) -> &'static str {
     }
 }
 
-/// Множитель часов урока от прилежания: 0.5..1.3.
+/// Множитель часов урока от прилежания: 0.9..2.1 — за урок у мастера выносят заметно больше.
 pub fn lesson_mult(q: f32) -> f32 {
-    0.5 + 0.8 * q.clamp(0.0, 1.0)
+    0.9 + 1.2 * q.clamp(0.0, 1.0)
+}
+
+/// Урок у мастера короче обычной работы: каждый удачный повтор двигает его вдвое дальше.
+pub const LESSON_PACE: f32 = 0.5;
+
+impl Effort {
+    /// Работа для урока или смены у мастера (`secs` — длина урока по старому счёту).
+    pub fn lesson(drill: Drill, secs: f32) -> Self {
+        Effort::new(drill, secs * LESSON_PACE)
+    }
 }
 
 /// Множитель платы подмастерью: 0.5..1.2 — мастер видит, как работали.
@@ -180,6 +195,12 @@ pub struct Input {
     pub delta: Vec2,
     pub lmb_pressed: bool,
     pub lmb_held: bool,
+    /// Стрелки, которые держат (x вправо, y вверх; −1/0/1).
+    pub arrows: Vec2,
+    /// Стрелка, нажатая в этом кадре.
+    pub arrow: Option<Dir>,
+    /// Enter: как щелчок ЛКМ.
+    pub enter: bool,
 }
 
 /// Что случилось за кадр.
@@ -216,7 +237,6 @@ pub enum Dir {
 }
 
 impl Dir {
-    /// Как назвать движение (в шрифте игры нет стрелок).
     /// Как назвать движение (в шрифте игры нет стрелок).
     pub fn arrow(self) -> &'static str {
         match self {
@@ -303,6 +323,8 @@ pub struct Meter {
     pub pebbles: [u8; 3],
     pub col: usize,
     acc: f32,
+    /// Секунд с последнего нажатия стрелок (пока работают с клавиатуры, рука не сползает).
+    kb_t: f32,
 }
 
 impl Meter {
@@ -353,6 +375,7 @@ impl Meter {
             pebbles: [0; 3],
             col: 0,
             acc: 0.0,
+            kb_t: 10.0,
         };
         match drill {
             Drill::Mimic => m.new_sequence(),
@@ -406,7 +429,8 @@ impl Meter {
     }
 
     fn new_sequence(&mut self) {
-        let len = (3 + self.rounds / 2).min(5) as usize;
+        // Начинают с трёх движений, потом — по четыре; длиннее не запомнить.
+        let len = (3 + self.rounds / 3).min(4) as usize;
         let mut seq: Vec<Dir> = Vec::with_capacity(len);
         while seq.len() < len {
             let d = Dir::from_index(self.rand() >> 7);
@@ -419,26 +443,42 @@ impl Meter {
         self.seq_i = 0;
         self.seq_ok.clear();
         self.showing = true;
-        self.show_t = 0.0;
+        // Перед показом — пауза: мастер берёт инструмент, ученик успевает поднять глаза.
+        self.show_t = -Self::SHOW_LEAD;
         self.flick = Vec2::ZERO;
     }
 
-    /// Сколько показывать одно движение мастера.
-    pub const SHOW_STEP: f32 = 0.6;
+    /// Сколько показывать одно движение мастера (медленно — чтобы успеть запомнить).
+    pub const SHOW_STEP: f32 = 1.05;
+    /// Пауза перед показом.
+    pub const SHOW_LEAD: f32 = 0.9;
+    /// После показа вся цепочка ещё видна столько секунд.
+    pub const SHOW_TAIL: f32 = 1.2;
+
+    /// Мастер ещё не начал показывать (пауза перед показом).
+    pub fn lead_in(&self) -> bool {
+        self.showing && self.show_t < 0.0
+    }
 
     /// Какое движение мастер показывает сейчас (во время показа).
     pub fn shown(&self) -> Option<usize> {
-        if !self.showing {
+        if !self.showing || self.show_t < 0.0 {
             return None;
         }
         let i = (self.show_t / Self::SHOW_STEP) as usize;
         (i < self.seq.len()).then_some(i)
     }
 
+    /// Сколько секунд даётся на повтор после показа.
+    pub fn repeat_time(&self) -> f32 {
+        2.2 * self.seq.len() as f32 + 3.0
+    }
+
     /// Прошёл кадр. Возвращает мазок, если движение завершено.
     pub fn update(&mut self, inp: Input) -> Option<Stroke> {
         let dt = inp.dt.clamp(0.0, 0.1);
         self.t += dt;
+        let inp = self.keyboard(inp, dt);
         let s = match self.drill {
             Drill::Grind | Drill::Stir => self.circle(inp, dt),
             Drill::Pump => self.pump(inp, dt),
@@ -456,11 +496,79 @@ impl Meter {
         s
     }
 
+    /// Стрелки и Enter превращаются в движения руки — играть можно без мыши.
+    fn keyboard(&mut self, mut inp: Input, dt: f32) -> Input {
+        let arrows = Vec2::new(inp.arrows.x.clamp(-1.0, 1.0), inp.arrows.y.clamp(-1.0, 1.0));
+        if arrows != Vec2::ZERO || inp.arrow.is_some() || inp.enter {
+            self.kb_t = 0.0;
+        } else {
+            self.kb_t += dt;
+        }
+        // Сдвиг руки (y вверх) в пиксели мыши (y вниз).
+        let mouse = |v: Vec2| Vec2::new(v.x, -v.y);
+        let pressed = inp.arrow.is_some() || inp.enter;
+        match self.drill {
+            Drill::Grind | Drill::Stir => {
+                // Держите вправо — по часовой, влево — против; рука идёт по кругу
+                // чуть быстрее нужного, ровный ход — отпускать в такт с призраком.
+                let turn = if arrows.x != 0.0 { arrows.x } else { -arrows.y };
+                if turn != 0.0 {
+                    let r = 0.9;
+                    let a = if self.pos.length() > 0.3 {
+                        self.pos.y.atan2(self.pos.x)
+                    } else {
+                        PI / 2.0
+                    };
+                    let w = TAU / (self.drill.period() * 0.75);
+                    let a2 = a - turn * w * dt;
+                    let to = Vec2::new(a2.cos(), a2.sin()) * r;
+                    inp.delta += mouse(to - self.pos) / SENS;
+                }
+            }
+            Drill::Pump => {
+                // Полный ход вниз или вверх — за ~0.45 с, пока держат стрелку.
+                if arrows.y != 0.0 {
+                    let v = 2.0 / 0.45 * arrows.y * dt;
+                    inp.delta.y += -v / (SENS * 1.4);
+                }
+            }
+            Drill::Rhythm => inp.lmb_pressed |= pressed,
+            Drill::Track => {
+                // Вправо — за словом, влево — быстро в начало строки.
+                let v = if arrows.x > 0.0 {
+                    0.16
+                } else if arrows.x < 0.0 {
+                    -0.8
+                } else {
+                    0.0
+                };
+                inp.delta.x += v * dt / (SENS * 0.5);
+            }
+            Drill::Tension => inp.lmb_held |= arrows != Vec2::ZERO,
+            Drill::Mimic => {}
+            Drill::Trace | Drill::Scribe => {
+                if arrows != Vec2::ZERO {
+                    inp.delta += mouse(arrows.normalize_or_zero() * 0.55 * dt) * NIB_PX;
+                }
+            }
+            Drill::Count => {
+                match inp.arrow {
+                    Some(Dir::Up) => inp.delta.y -= PEBBLE_PX,
+                    Some(Dir::Down) => inp.delta.y += PEBBLE_PX,
+                    Some(Dir::Right) => inp.lmb_pressed = true,
+                    _ => {}
+                }
+                inp.lmb_pressed |= inp.enter;
+            }
+        }
+        inp
+    }
+
     fn circle(&mut self, inp: Input, dt: f32) -> Option<Stroke> {
         let d = Vec2::new(inp.delta.x, -inp.delta.y) * SENS;
         self.pos = (self.pos + d).clamp_length_max(1.25);
-        // Без движения рука сама сползает к середине.
-        if d.length_squared() < 1e-8 {
+        // Без движения рука сама сползает к середине (но не между нажатиями стрелок).
+        if d.length_squared() < 1e-8 && self.kb_t > 1.0 {
             self.pos *= 1.0 - (dt * 1.5).min(1.0);
         }
         self.rev_t += dt;
@@ -616,7 +724,7 @@ impl Meter {
     fn mimic(&mut self, inp: Input, dt: f32) -> Option<Stroke> {
         if self.showing {
             self.show_t += dt;
-            if self.show_t >= Self::SHOW_STEP * self.seq.len() as f32 + 0.3 {
+            if self.show_t >= Self::SHOW_STEP * self.seq.len() as f32 + Self::SHOW_TAIL {
                 self.showing = false;
                 self.show_t = 0.0;
                 self.flick = Vec2::ZERO;
@@ -625,13 +733,22 @@ impl Meter {
         }
         self.show_t += dt;
         self.flick_cool -= dt;
-        if self.flick_cool > 0.0 {
+        // Стрелка — сразу движение, без рывка мышью.
+        if let Some(d) = inp.arrow
+            && self.seq_i < self.seq.len()
+        {
+            self.seq_ok.push(self.seq.get(self.seq_i) == Some(&d));
+            self.seq_i += 1;
+            self.flick = Vec2::ZERO;
+            self.flick_cool = 0.22;
+        }
+        if self.flick_cool > 0.0 && self.seq_i < self.seq.len() {
             return None;
         }
         self.flick += Vec2::new(inp.delta.x, -inp.delta.y);
         // Медленный дрейф мыши не считается движением.
         self.flick *= 1.0 - (dt * 3.0).min(1.0);
-        if self.flick.length() >= 70.0 {
+        if self.seq_i < self.seq.len() && self.flick.length() >= 70.0 {
             let d = if self.flick.x.abs() > self.flick.y.abs() {
                 if self.flick.x > 0.0 { Dir::Right } else { Dir::Left }
             } else if self.flick.y > 0.0 {
@@ -645,7 +762,7 @@ impl Meter {
             self.flick_cool = 0.22;
         }
         let len = self.seq.len();
-        let timeout = self.show_t > 1.2 * len as f32 + 1.5;
+        let timeout = self.show_t > self.repeat_time();
         if self.seq_i < len && !timeout {
             return None;
         }
@@ -905,8 +1022,8 @@ pub fn chore_drill(teacher: crate::lore::Teacher) -> Drill {
         T::Alchemist | T::Glassblower | T::Potter => Drill::Pump,
         // Мешать чан.
         T::Dyer => Drill::Stir,
-        // Бить кувалдой по указке мастера.
-        T::Smith | T::Armourer | T::GothSmith | T::SteppeSmith => Drill::Rhythm,
+        // Качать мехи, подносить уголь (бить в такт мастер учит на уроке).
+        T::Smith | T::Armourer | T::GothSmith | T::SteppeSmith => Drill::Pump,
         // Таскать корзины, кидать землю на кучу.
         T::Miner | T::CharcoalBurner => Drill::Pump,
     }
@@ -920,6 +1037,48 @@ pub fn chore_drill_for(teacher: crate::lore::Teacher, can_write: bool) -> Drill 
         // В школе помогают с малышами: показывают буквы на табличке.
         T::Grammatist | T::Grammarian if can_write => Drill::Trace,
         t => chore_drill(t),
+    }
+}
+
+/// Каким движением идёт платный урок у мастера: у каждого ремесла своё.
+pub fn paid_drill(teacher: crate::lore::Teacher) -> Drill {
+    use crate::lore::Teacher as T;
+    match teacher {
+        // Мастер бьёт ручником — ученик вторит кувалдой в такт.
+        T::Smith | T::Armourer | T::GothSmith | T::SteppeSmith => Drill::Rhythm,
+        // Кайло — тоже в такт.
+        T::Miner => Drill::Rhythm,
+        // Перевязка, вправление: ровное натяжение.
+        T::Iatros => Drill::Tension,
+        // Стеклодув дует в трубку: ровное дыхание, не перестараться.
+        T::Glassblower => Drill::Tension,
+        // Гончарный круг и знахаркин отвар — медленно по кругу.
+        T::Potter | T::Wisewoman => Drill::Stir,
+        // Аптекарь и степной лекарь — растирать снадобья.
+        T::Apothecary | T::SteppeHealer => Drill::Grind,
+        // Остальные показывают приёмы руками — повторить за мастером.
+        _ => Drill::Mimic,
+    }
+}
+
+/// Как назвать урок с этим движением («Урок: ковка — …»).
+pub fn lesson_verb(drill: Drill) -> &'static str {
+    match drill {
+        Drill::Rhythm => "бейте в такт с мастером",
+        Drill::Tension => "держите ровно, как показал мастер",
+        Drill::Stir => "ведите по кругу, как мастер",
+        Drill::Grind => "растирайте, как показал мастер",
+        Drill::Pump => "работайте в такт с мастером",
+        _ => "повторяйте за мастером",
+    }
+}
+
+/// Каким движением идёт урок предмета у этого учителя: грамота — своими упражнениями,
+/// ремесло — движением ремесла.
+pub fn lesson_drill_for(teacher: crate::lore::Teacher, lore: crate::lore::Lore) -> Drill {
+    match lesson_drill(lore) {
+        Drill::Mimic => paid_drill(teacher),
+        d => d,
     }
 }
 
@@ -1098,6 +1257,143 @@ mod tests {
         let s = got.expect("урок засчитан");
         assert!(s.q > 0.95, "{s:?}");
         assert!(m.showing, "мастер показывает новое");
+    }
+
+    #[test]
+    fn mimic_with_arrow_keys_and_slow_show() {
+        let mut m = Meter::new(Drill::Mimic, 0.0, 5);
+        assert!(m.lead_in(), "сперва пауза — мастер берёт инструмент");
+        let mut show = 0.0;
+        while m.showing {
+            m.update(Input {
+                dt: 0.05,
+                ..Input::default()
+            });
+            show += 0.05;
+        }
+        // Три движения показывают не меньше трёх с лишним секунд — успеть запомнить.
+        assert!(show >= 3.0 * Meter::SHOW_STEP, "{show}");
+        let seq = m.seq.clone();
+        let mut got = None;
+        for d in seq {
+            for _ in 0..20 {
+                m.update(Input {
+                    dt: 1.0 / 60.0,
+                    ..Input::default()
+                });
+            }
+            got = m
+                .update(Input {
+                    dt: 1.0 / 60.0,
+                    arrow: Some(d),
+                    arrows: d.vec(),
+                    ..Input::default()
+                })
+                .or(got);
+        }
+        let s = got.expect("урок засчитан");
+        assert!(s.q > 0.95, "{s:?}");
+    }
+
+    #[test]
+    fn arrow_keys_drive_every_hand_drill() {
+        let dt = 1.0 / 60.0;
+        // Ступка: держать стрелку вправо — рука сама ходит по кругу, мазки добротные.
+        let mut m = Meter::new(Drill::Grind, 0.0, 3);
+        let out = feed(&mut m, 600, dt, |_| Input {
+            arrows: Vec2::X,
+            ..Input::default()
+        });
+        assert!(out.len() >= 6, "оборотов {}", out.len());
+        let avg = out.iter().skip(1).map(|s| s.q).sum::<f32>() / (out.len() - 1) as f32;
+        assert!(avg > 0.6, "круги стрелкой {avg}");
+        // Мехи: полсекунды вниз, полсекунды вверх.
+        let mut m = Meter::new(Drill::Pump, 0.0, 3);
+        let out = feed(&mut m, 600, dt, |t| Input {
+            arrows: if (t / 0.55) as i32 % 2 == 0 {
+                Vec2::NEG_Y
+            } else {
+                Vec2::Y
+            },
+            ..Input::default()
+        });
+        assert!(out.len() >= 6, "качков {}", out.len());
+        assert!(out.iter().skip(1).all(|s| s.q > 0.7), "{out:?}");
+        // Молот: стрелка, когда отметка посередине.
+        let mut m = Meter::new(Drill::Rhythm, 0.0, 3);
+        let mut hits = Vec::new();
+        for _ in 0..600 {
+            let mid = m.swing().abs() < 0.05;
+            if let Some(s) = m.update(Input {
+                dt,
+                arrow: mid.then_some(Dir::Down),
+                ..Input::default()
+            }) {
+                hits.push(s);
+            }
+        }
+        assert!(
+            hits.len() >= 4 && hits.iter().all(|s| s.q > 0.8),
+            "{hits:?}"
+        );
+        // Натяжение: держать стрелку — тянется.
+        let mut m = Meter::new(Drill::Tension, 0.0, 3);
+        feed(&mut m, 30, dt, |_| Input {
+            arrows: Vec2::Y,
+            ..Input::default()
+        });
+        assert!(m.tension > 0.3);
+        // Абак: вверх — камешек, вправо — следующий разряд.
+        let mut m = Meter::new(Drill::Count, 0.0, 3);
+        let col = m.col;
+        m.update(Input {
+            dt,
+            arrow: Some(Dir::Up),
+            arrows: Vec2::Y,
+            ..Input::default()
+        });
+        m.update(Input {
+            dt,
+            arrow: Some(Dir::Up),
+            arrows: Vec2::Y,
+            ..Input::default()
+        });
+        assert_eq!(m.pebbles[col], 2);
+        m.update(Input {
+            dt,
+            arrow: Some(Dir::Right),
+            arrows: Vec2::X,
+            ..Input::default()
+        });
+        assert_eq!(m.col, col + 1);
+    }
+
+    #[test]
+    fn crafts_have_their_own_lesson_drills() {
+        use crate::lore::Teacher as T;
+        assert_eq!(paid_drill(T::Smith), Drill::Rhythm);
+        assert_ne!(
+            paid_drill(T::Smith),
+            chore_drill(T::Smith),
+            "урок и смена у кузнеца — разные движения"
+        );
+        let kinds: std::collections::HashSet<Drill> = [
+            T::Smith,
+            T::Iatros,
+            T::Potter,
+            T::Apothecary,
+            T::Alchemist,
+            T::Glassblower,
+        ]
+        .into_iter()
+        .map(paid_drill)
+        .collect();
+        assert!(kinds.len() >= 4, "{kinds:?}");
+        // Грамота — своими упражнениями.
+        assert_eq!(
+            lesson_drill_for(T::Grammatist, crate::lore::Lore::Alphabet),
+            Drill::Trace
+        );
     }
 
     /// Ведёт стиль к точке чуть впереди на черте с умеренной скоростью (как умелый ученик).

@@ -294,8 +294,14 @@ fn receive_trade(
                 state.fine = fine;
                 state.rev += 1;
             }
-            TradeServerMessage::LessonStarted { title, secs, drill, skill } => {
-                work.begin(drill, skill, crate::work_client::Via::Trade, &title, 0.0);
+            TradeServerMessage::LessonStarted {
+                title,
+                secs,
+                done,
+                drill,
+                skill,
+            } => {
+                work.begin(drill, skill, crate::work_client::Via::Trade, &title, done);
                 state.lesson = Some((title, now, secs));
                 // Урок идёт в мире: окно закрываем, чтобы можно было смотреть на мастера.
                 if state.view.take().is_some() {
@@ -306,9 +312,8 @@ fn receive_trade(
             TradeServerMessage::LessonProgress(p) => work.progress = p,
             TradeServerMessage::LessonFinished { ok } => {
                 work.end(crate::work_client::Via::Trade);
-                if !ok && state.lesson.is_some() {
-                    loot.notify("Урок прерван", now);
-                }
+                // Почему кончился (отложен, ушли) — скажет сервер.
+                let _ = ok;
                 state.lesson = None;
             }
             TradeServerMessage::Say(text) => {
@@ -645,7 +650,7 @@ fn update_trade_hud(
             };
             bar.display = Display::Flex;
             fill.width = percent(k * 100.0);
-            let t = format!("{title}… не отходите от мастера · X — бросить");
+            let t = format!("{title}… не отходите от мастера · X — отложить (прогресс сохранится)");
             if lesson_text.0 != t {
                 lesson_text.0 = t;
             }

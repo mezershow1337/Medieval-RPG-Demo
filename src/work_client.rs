@@ -64,7 +64,7 @@ fn demo_work(mut work: ResMut<MyWork>, mut done: Local<bool>, time: Res<Time>) {
         "grind" => (Drill::Grind, "Ступка: растираете"),
         "stir" => (Drill::Stir, "Глиняный горшок: варите"),
         "pump" => (Drill::Pump, "Алембик: перегоняете"),
-        "rhythm" => (Drill::Rhythm, "Качаете меха, носите уголь, бьёте молотом-кувалдой"),
+        "rhythm" => (Drill::Rhythm, "Урок: ковка — бейте в такт с мастером"),
         "track" => (Drill::Track, "Чтение"),
         "tension" => (Drill::Tension, "Перевязываете рану"),
         "mimic" => (Drill::Mimic, "Урок: отвары — повторяйте за мастером"),
@@ -161,6 +161,8 @@ fn drive_meter(
     time: Res<Time>,
     motion: Res<AccumulatedMouseMotion>,
     mouse: Res<ButtonInput<MouseButton>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    console: Option<Res<crate::console::Console>>,
     mut loot: ResMut<LootState>,
     trade: Option<Res<crate::trade_client::TradeState>>,
     mut work: ResMut<MyWork>,
@@ -185,7 +187,33 @@ fn drive_meter(
     if loot.ui_open || trade.is_some_and(|t| t.window_open()) {
         return;
     }
-    let mut inp = Input { dt: time.delta_secs(), delta: motion.delta, lmb_pressed: mouse.just_pressed(MouseButton::Left), lmb_held: mouse.pressed(MouseButton::Left) };
+    // Стрелки — вместо мыши (кому мышью неудобно). В открытой консоли стрелки — её.
+    let typing = console.is_some_and(|c| c.open);
+    let held = |k: KeyCode| if keys.pressed(k) && !typing { 1.0 } else { 0.0 };
+    let arrows = Vec2::new(
+        held(KeyCode::ArrowRight) - held(KeyCode::ArrowLeft),
+        held(KeyCode::ArrowUp) - held(KeyCode::ArrowDown),
+    );
+    let arrow = [
+        (KeyCode::ArrowUp, Dir::Up),
+        (KeyCode::ArrowDown, Dir::Down),
+        (KeyCode::ArrowLeft, Dir::Left),
+        (KeyCode::ArrowRight, Dir::Right),
+    ]
+    .into_iter()
+    .find(|(k, _)| keys.just_pressed(*k) && !typing)
+    .map(|(_, d)| d);
+    let enter =
+        !typing && (keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter));
+    let mut inp = Input {
+        dt: time.delta_secs(),
+        delta: motion.delta,
+        lmb_pressed: mouse.just_pressed(MouseButton::Left),
+        lmb_held: mouse.pressed(MouseButton::Left),
+        arrows,
+        arrow,
+        enter,
+    };
     if work.demo {
         inp = demo_input(work.meter.as_ref().expect("есть"), inp.dt);
     }
@@ -362,13 +390,44 @@ fn update_work_hud(
                     continue;
                 }
                 let line = match m.shown() {
-                    Some(i) => m.seq.iter().enumerate().map(|(k, d)| if k == i { d.arrow().to_uppercase() } else if k < i { d.arrow().to_string() } else { "·".into() }).collect::<Vec<_>>().join(" "),
-                    None if m.showing => m.seq.iter().map(|d| d.arrow()).collect::<Vec<_>>().join(" "),
-                    None => m.seq.iter().enumerate().map(|(k, _)| match m.seq_ok.get(k) {
-                        Some(true) => "+".to_string(),
-                        Some(false) => "×".to_string(),
-                        None => "?".to_string(),
-                    }).collect::<Vec<_>>().join(" "),
+                    None if m.lead_in() => "смотрите на мастера…".to_string(),
+                    Some(i) => m
+                        .seq
+                        .iter()
+                        .enumerate()
+                        .map(|(k, d)| {
+                            if k == i {
+                                d.arrow().to_uppercase()
+                            } else if k < i {
+                                d.arrow().to_string()
+                            } else {
+                                "·".into()
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    None if m.showing => m
+                        .seq
+                        .iter()
+                        .map(|d| d.arrow())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    None => m
+                        .seq
+                        .iter()
+                        .enumerate()
+                        .map(|(k, _)| match m.seq_ok.get(k) {
+                            Some(true) => "+".to_string(),
+                            Some(false) => "×".to_string(),
+                            None => "?".to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                };
+                let c = if m.showing {
+                    Color::srgb(0.95, 0.85, 0.55)
+                } else {
+                    Color::srgb(0.8, 0.9, 1.0)
                 };
                 let c = if m.showing { Color::srgb(0.95, 0.85, 0.55) } else { Color::srgb(0.8, 0.9, 1.0) };
                 set_text(line, Some(c));

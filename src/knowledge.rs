@@ -268,12 +268,24 @@ pub struct KnowledgeWorld {
     pub stations: HashMap<u32, Station>,
     next_station: u32,
     activities: HashMap<u64, Activity>,
+    /// Отложенные уроки: (игрок, мастер, платный?, предмет) — сделанная работа.
+    /// Бросили урок или ушли — вернулись к тому же мастеру и продолжили с того же места.
+    paused: HashMap<(u64, u32, bool, Option<Lore>), Effort>,
     rng: Rng,
 }
 
 impl Default for KnowledgeWorld {
     fn default() -> Self {
-        Self { players: HashMap::new(), patches: HashMap::new(), masters: HashMap::new(), stations: HashMap::new(), next_station: 1, activities: HashMap::new(), rng: Rng::from_time() }
+        Self {
+            players: HashMap::new(),
+            patches: HashMap::new(),
+            masters: HashMap::new(),
+            stations: HashMap::new(),
+            next_station: 1,
+            activities: HashMap::new(),
+            paused: HashMap::new(),
+            rng: Rng::from_time(),
+        }
     }
 }
 
@@ -694,6 +706,36 @@ fn tick_fires(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMu
     }
 }
 
+/// Брошенный урок: запомнить, сколько сделано, чтобы продолжить с того же места.
+/// Возвращает сообщение игроку (None — это был не урок).
+fn park_lesson(world: &mut KnowledgeWorld, pid: u64, a: &Activity, why: &str) -> Option<String> {
+    let Task::Lesson {
+        master,
+        mode,
+        subject,
+    } = a.task
+    else {
+        return None;
+    };
+    let e = a.effort.clone()?;
+    let paid = mode == LessonMode::Paid;
+    // Смену подмастерья, в которой ничего не сделано, помнить незачем; оплаченный урок — всегда.
+    if !paid && e.done <= 0.0 {
+        return Some(format!("{why}: вы ещё ничего не сделали"));
+    }
+    let frac = e.frac();
+    world.paused.insert((pid, master, paid, subject), e);
+    let again = if paid {
+        "без новой платы"
+    } else {
+        "с того же места"
+    };
+    Some(format!(
+        "{why}: сделано {:.0}%. Вернитесь к мастеру (E) — продолжите {again}",
+        frac * 100.0
+    ))
+}
+
 /// Работа у сосуда кончилась — убрать сосуд и пар у всех.
 fn end_work(server: &mut RenetServer, pid: u64, a: &Activity) {
     if a.work.is_some() {
@@ -730,7 +772,12 @@ fn work_view(world: &KnowledgeWorld, spec: &BrewSpec, vessel: Vessel, feet: Vec3
 #[allow(clippy::too_many_arguments)]
 fn start(server: &mut RenetServer, world: &mut KnowledgeWorld, player: u64, task: Task, verb: String, done: f32, total: f32, feet: Vec3, hp: f32, drill: Option<Drill>, skill: f32) {
     let effort = drill.map(|d| {
-        let mut e = Effort::new(d, total);
+        // Урок у мастера идёт быстрее обычной работы (см. work::LESSON_PACE).
+        let mut e = if matches!(task, Task::Lesson { .. }) {
+            Effort::lesson(d, total)
+        } else {
+            Effort::new(d, total)
+        };
         // Дочитывают с того места, где остановились.
         e.done = e.need * (done / total.max(0.01)).clamp(0.0, 1.0);
         e
@@ -759,6 +806,9 @@ fn receive_lore_messages(
                 if let Some(a) = world.activities.remove(&pid) {
                     end_work(&mut server, pid, &a);
                     send(&mut server, pid, &LoreServerMessage::ActivityEnded);
+                    if let Some(msg) = park_lesson(&mut world, pid, &a, "Урок отложен") {
+                        notice(&mut server, pid, msg);
+                    }
                 }
                 continue;
             }
@@ -869,7 +919,15 @@ fn receive_lore_messages(
                         notice(&mut server, pid, format!("{}: «Мне больше нечему тебя учить»", m.teacher.name()));
                         continue;
                     };
-                    if paid {
+                    // Отложенный урок продолжают без новой платы.
+                    let resumed = world.paused.remove(&(pid, master, paid, subject));
+                    let Some(m) = world.masters.get(&master) else {
+                        continue;
+                    };
+                    let Some(k) = world.players.get(&pid) else {
+                        continue;
+                    };
+                    if paid && resumed.is_none() {
                         let loot = &mut *loot;
                         let Some(inv) = loot.inventories.get_mut(&pid) else { continue };
                         if let Err(e) = take_money(inv, m.price, &mut loot.uids) {
@@ -880,17 +938,53 @@ fn receive_lore_messages(
                     }
                     let can_write = k.knows(Lore::Write(Language::Greek));
                     let (mode, verb, drill) = if paid {
-                        let drill = crate::work::lesson_drill(next);
-                        let verb = match drill {
-                            Drill::Mimic => format!("Урок: {} — повторяйте за мастером", next.name().to_lowercase()),
-                            _ => format!("Урок: {} — {}", next.subject().to_lowercase(), lesson_verb(next)),
+                        let drill = crate::work::lesson_drill_for(m.teacher, next);
+                        let verb = if drill.tablet() || drill == Drill::Track {
+                            format!(
+                                "Урок: {} — {}",
+                                next.subject().to_lowercase(),
+                                lesson_verb(next)
+                            )
+                        } else {
+                            format!(
+                                "Урок: {} — {}",
+                                next.name().to_lowercase(),
+                                crate::work::lesson_verb(drill)
+                            )
                         };
                         (LessonMode::Paid, verb, drill)
                     } else {
                         (LessonMode::Apprentice, apprentice_chore_for(m.teacher, can_write).to_string(), crate::work::chore_drill_for(m.teacher, can_write))
                     };
                     let skill = m.teacher.skill().map_or(0.0, |s| k.skill(s));
-                    start(&mut server, &mut world, pid, Task::Lesson { master, mode, subject }, verb, 0.0, LESSON_SECS, feet, hp, Some(drill), skill);
+                    // Отложенный урок мог идти другим движением (до обновления) — тогда заново.
+                    let resumed = resumed.filter(|e| e.drill == drill);
+                    let done = resumed.as_ref().map_or(0.0, |e| e.frac() * LESSON_SECS);
+                    start(
+                        &mut server,
+                        &mut world,
+                        pid,
+                        Task::Lesson {
+                            master,
+                            mode,
+                            subject,
+                        },
+                        verb,
+                        done,
+                        LESSON_SECS,
+                        feet,
+                        hp,
+                        Some(drill),
+                        skill,
+                    );
+                    if let (Some(e), Some(a)) = (resumed, world.activities.get_mut(&pid)) {
+                        notice(
+                            &mut server,
+                            pid,
+                            format!("Продолжаете урок с того же места: {:.0}%", e.frac() * 100.0),
+                        );
+                        a.effort = Some(e);
+                    }
                 }
                 LoreClientMessage::Copy { uid } => {
                     let Some(inv) = loot.inventories.get(&pid) else { continue };
@@ -1201,21 +1295,19 @@ fn tick_activities(
                     notice(&mut server, pid, "Переписка прервана — место отмечено, допишете потом");
                     sync_knowledge(&mut server, &world, pid);
                 }
-                // Прерванный урок: что успели — то и выучили.
-                Task::Lesson { master, mode, subject } => {
-                    let frac = a.effort.as_ref().map_or(0.0, |e| e.frac());
-                    let Some(teacher) = world.masters.get(&master).map(|m| m.teacher) else { continue };
-                    let why = if left.contains(&pid) { format!("{} ушёл — урок окончен", teacher.name()) } else { "Урок прерван".to_string() };
-                    if frac < 0.15 {
-                        notice(&mut server, pid, why);
+                // Прерванный урок откладывается: вернётесь к мастеру — продолжите с того же места.
+                Task::Lesson { master, .. } => {
+                    let Some(teacher) = world.masters.get(&master).map(|m| m.teacher) else {
                         continue;
+                    };
+                    let why = if left.contains(&pid) {
+                        format!("{} ушёл — урок отложен", teacher.name())
+                    } else {
+                        "Урок отложен".to_string()
+                    };
+                    if let Some(msg) = park_lesson(&mut world, pid, &a, &why) {
+                        notice(&mut server, pid, msg);
                     }
-                    let q = a.effort.as_ref().map_or(0.5, |e| e.quality());
-                    let Some(k) = world.players.get_mut(&pid) else { continue };
-                    let learned = k.study_subject(teacher, subject, mode, frac * crate::work::lesson_mult(q));
-                    let msg = learned_message(&learned).unwrap_or_else(|| "засчитана часть урока".into());
-                    notice(&mut server, pid, format!("{why}: {msg}"));
-                    sync_knowledge(&mut server, &world, pid);
                 }
                 _ => {}
             }

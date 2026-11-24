@@ -473,10 +473,15 @@ fn merchant_window(
                     } else {
                         format!("платят {}", format_money_short(l.money))
                     };
+                    let started = if l.done > 0.0 {
+                        format!(" · начато {:.0}%", l.done * 100.0)
+                    } else {
+                        String::new()
+                    };
                     r.spawn((
                         text(
                             fonts,
-                            format!("{} · {}, {:.0} с", l.title, money, l.secs),
+                            format!("{} · {}, {:.0} с{started}", l.title, money, l.secs),
                             13.0,
                             TEXT,
                             false,
@@ -493,7 +498,9 @@ fn merchant_window(
                         None => button(
                             r,
                             fonts,
-                            if l.paid {
+                            if l.done > 0.0 {
+                                "Продолжить"
+                            } else if l.paid {
                                 "Учиться"
                             } else {
                                 "Работать"
