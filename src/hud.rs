@@ -42,7 +42,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FrameTimeDiagnosticsPlugin::default())
             .add_systems(Startup, setup_hud.after(crate::inventory_ui::setup_fonts))
-            .add_systems(Update, (update_status, update_health, update_banner, update_target, update_aim));
+            .add_systems(Update, (update_status, update_health, update_banner, update_target, update_aim, toggle_help));
     }
 }
 
@@ -53,7 +53,7 @@ fn text(s: &str, size: f32, color: Color) -> (Text, TextFont, TextColor) {
 const AIM_BOX: f32 = 76.0;
 const AIM_RADIUS: f32 = 26.0;
 
-fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
+pub fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
     // Красная вспышка при уроне (на весь экран).
     commands.spawn((HudRoot, FlashOverlay, Node { width: percent(100), height: percent(100), position_type: PositionType::Absolute, ..default() }, BackgroundColor(Color::NONE)));
     // Прицел.
@@ -103,9 +103,9 @@ fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
         .with_children(|p| {
             p.spawn((BannerText, theme.title_colored("", 40.0, Color::WHITE)));
         });
-    // Цель (враг перед вами) — под компасом (см. map.rs).
+    // Цель (враг перед вами) — вверху по центру.
     commands
-        .spawn((HudRoot, Node { width: percent(100), position_type: PositionType::Absolute, top: px(70), justify_content: JustifyContent::Center, ..default() }))
+        .spawn((HudRoot, Node { width: percent(100), position_type: PositionType::Absolute, top: px(14), justify_content: JustifyContent::Center, ..default() }))
         .with_children(|p| {
             p.spawn((TargetText, text("", 18.0, Color::srgb(1.0, 0.9, 0.8))));
         });
@@ -181,28 +181,68 @@ fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
                 ));
             });
         });
-    commands.spawn((HudRoot, 
-        StatusText,
-        text("Connecting...", 16.0, Color::WHITE),
-        Node { position_type: PositionType::Absolute, left: px(12), top: px(10), ..default() },
-    ));
+    // Левая колонка сверху: мини-карта (её вставляет `minimap.rs` первой), строка связи, управление.
+    let column = commands
+        .spawn((
+            HudRoot,
+            Node { position_type: PositionType::Absolute, left: px(12), top: px(10), flex_direction: FlexDirection::Column, align_items: AlignItems::FlexStart, row_gap: px(6), ..default() },
+            // Под окнами (сумка, торговля), если они дотянутся до угла.
+            GlobalZIndex(-1),
+            Pickable::IGNORE,
+        ))
+        .id();
+    commands.insert_resource(HudLeftColumn(column));
+    commands.spawn((StatusText, text("Connecting...", 14.0, Color::WHITE), TextShadow { offset: Vec2::splat(1.0), color: Color::srgba(0.0, 0.0, 0.0, 0.8) }, Node { display: Display::None, ..default() }, ChildOf(column)));
+    commands.spawn((HelpHint, theme.text("F2 — управление", 12.0, Color::srgba(1.0, 1.0, 1.0, 0.7)), TextShadow { offset: Vec2::splat(1.0), color: Color::srgba(0.0, 0.0, 0.0, 0.8) }, ChildOf(column)));
     commands.spawn((
-        HudRoot,
         HelpText,
+        TextShadow { offset: Vec2::splat(1.0), color: Color::srgba(0.0, 0.0, 0.0, 0.8) },
         theme.text(
 
-            "Esc — меню (пауза, настройки) | F9 — эффекты | F11 — полный экран\n\
+            "Esc — меню (пауза, настройки) | F9 — эффекты | F11 — полный экран | F2 — скрыть\n\
              WASD — ходьба | Shift — бег | Пробел — прыжок | Ctrl/C — присесть\n\
              ЛКМ — удар оттуда, куда ведёте мышь (вправо, влево, вверх, наискось; вниз — укол), СКМ — укол\n\
              ПКМ вовремя — парирование и рипост (ЛКМ); держать — глухой блок (дорого, без рипоста)\n\
              Q или ПКМ на замахе — финт | другой удар на замахе — морф | встречный зеркальный удар — чембер\n\
-             1 — кулаки | 2–9 / колесо — хотбар | F7 — подсказки боя у прицела",
-            14.0,
+             1 — кулаки | 2–9 / колесо — хотбар | F7 — подсказки боя у прицела\n\
+             M — карта | N — мини-карта | +/− — её масштаб",
+            12.0,
             Color::srgba(1.0, 1.0, 1.0, 0.8),
         ),
-        // Сверху слева под строкой статуса: низ экрана занят хотбаром.
-        Node { position_type: PositionType::Absolute, left: px(12), top: px(64), ..default() },
+        Node { display: Display::None, ..default() },
+        ChildOf(column),
     ));
+}
+
+/// Колонка HUD в левом верхнем углу (мини-карта, связь, управление).
+#[derive(Resource)]
+pub struct HudLeftColumn(pub Entity);
+
+/// «F2 — управление», пока список клавиш спрятан.
+#[derive(Component)]
+struct HelpHint;
+
+/// F2 — показать или спрятать список управления (запоминается в settings.txt).
+fn toggle_help(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut settings: Option<ResMut<crate::settings::Settings>>,
+    console: Option<Res<crate::console::Console>>,
+    mut help: Single<&mut Node, (With<HelpText>, Without<HelpHint>)>,
+    mut hint: Single<&mut Node, (With<HelpHint>, Without<HelpText>)>,
+) {
+    let Some(s) = settings.as_mut() else { return };
+    if keys.just_pressed(KeyCode::F2) && !console.is_some_and(|c| c.open) {
+        s.show_controls = !s.show_controls;
+        s.save();
+    }
+    let (shown, hidden) = (Display::Flex, Display::None);
+    let want = if s.show_controls { (shown, hidden) } else { (hidden, shown) };
+    if help.display != want.0 {
+        help.display = want.0;
+    }
+    if hint.display != want.1 {
+        hint.display = want.1;
+    }
 }
 
 /// Метка у прицела: куда пойдёт удар (по движению мыши), какой удар идёт сейчас,
@@ -258,7 +298,7 @@ fn update_status(
     diagnostics: Res<DiagnosticsStore>,
     remotes: Query<&RemoteActor>,
     player: Query<&Transform, With<LocalPlayer>>,
-    mut text: Single<&mut Text, With<StatusText>>,
+    mut text: Single<(&mut Text, &mut Node), With<StatusText>>,
     settings: Option<Res<crate::settings::Settings>>,
 ) {
     let fps = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS).and_then(|d| d.smoothed()).unwrap_or(0.0);
@@ -278,7 +318,13 @@ fn update_status(
     // Без «Показывать FPS» строка видна, только пока что-то не так со связью.
     let show = settings.is_none_or(|s| s.show_fps);
     let connected = client.as_ref().is_some_and(|c| c.is_connected()) && state.error.is_none();
+    let (text, node) = &mut *text;
     text.0 = if show { format!("{status}\nFPS {fps:.0}{pos}") } else if connected { String::new() } else { status };
+    // Пустая строка не занимает места в колонке.
+    let want = if text.0.is_empty() { Display::None } else { Display::Flex };
+    if node.display != want {
+        node.display = want;
+    }
 }
 
 fn update_health(
