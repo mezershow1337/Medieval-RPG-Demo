@@ -108,7 +108,7 @@ fn refresh_display(server: &mut RenetServer, tw: &TradeWorld, loot: &mut LootWor
         let mut body = PropBody::for_item(piece.base, 1, pos, rot);
         body.place(pos, rot);
         let shelf = Some(ShelfTag { merchant: id, shelf_uid: uid, home: (pos, rot), away: 0.0 });
-        loot.insert_ground(server, GroundItem { body, item: piece, shelf, holder: None });
+        loot.insert_ground(server, GroundItem { body, item: piece, shelf, holder: None, owner: None });
     }
 }
 

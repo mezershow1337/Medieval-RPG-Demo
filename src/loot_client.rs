@@ -24,7 +24,8 @@ impl Plugin for LootClientPlugin {
             .add_systems(Startup, (setup_loot_assets, crate::icons::setup_models, setup_prompt, setup_use_bar).chain().after(crate::inventory_ui::setup_fonts))
             .add_systems(Update, (receive_loot, attach_corpse_views, interact_input).chain().run_if(client_connected))
             .add_plugins(crate::props_client::PropsClientPlugin)
-            .add_systems(Update, (aim_target, update_prompt, update_notices, update_use_bar).chain());
+            .add_systems(Update, (aim_target, update_prompt, update_notices, update_use_bar).chain())
+            .add_systems(Update, cull_far_home_items);
     }
 }
 
@@ -98,6 +99,8 @@ pub struct GroundView {
     pub half: Vec3,
     /// Товар на прилавке этого торговца.
     pub shelf: Option<crate::trade::MerchantId>,
+    /// Вещь хозяев дома: взять — украсть.
+    pub owned: bool,
 }
 
 #[derive(Resource)]
@@ -261,22 +264,26 @@ fn receive_loot(
                     }
                 }
             }
-            LootServerMessage::GroundSpawned { id, pos, rot, vel, base, quality, count, asleep, shelf, finish } => {
+            LootServerMessage::GroundSpawned { id, pos, rot, vel, base, quality, count, asleep, shelf, finish, owned } => {
                 let pos: Vec3 = pos.into();
                 let rot = Quat::from_array(rot).normalize();
                 let body = crate::props::PropBody::for_item(base, count, pos, rot);
                 let (half, offset) = (body.half, body.model_offset());
                 // Тот же предмет пересоздаётся (украли с прилавка, часть стопки подобрали): не прыгаем.
                 let start = index.0.get(&id).and_then(|e| motions.get(*e).ok()).map(|_| pos).unwrap_or(pos);
-                let e = commands
-                    .spawn((
-                        GroundView { id, base, quality, count, half, shelf: shelf.map(|s| s.merchant) },
-                        crate::props_client::PropMotion { pos, rot, vel: vel.into(), at: now, asleep },
-                        Transform::from_translation(start).with_rotation(rot),
-                        Visibility::default(),
-                    ))
-                    .with_children(|p| spawn_item_model(p, &assets, &models, base, quality, offset, shelf.is_some(), finish))
-                    .id();
+                let mut ec = commands.spawn((
+                    GroundView { id, base, quality, count, half, shelf: shelf.map(|s| s.merchant), owned },
+                    crate::props_client::PropMotion { pos, rot, vel: vel.into(), at: now, asleep },
+                    Transform::from_translation(start).with_rotation(rot),
+                    Visibility::default(),
+                ));
+                if owned {
+                    // Вещей в домах тысячи: модель появляется, только когда игрок рядом.
+                    ec.insert(LazyModel { offset, finish, shown: false });
+                } else {
+                    ec.with_children(|p| spawn_item_model(p, &assets, &models, base, quality, offset, shelf.is_some(), finish));
+                }
+                let e = ec.id();
                 if let Some(old) = index.0.insert(id, e) {
                     commands.entity(old).despawn();
                 }
@@ -592,6 +599,9 @@ fn update_prompt(
                     None => format!("{name}{quality} — товар ({weight})\n[E] купить · [ЛКМ] взять в руки"),
                 };
                 (line, Color::srgb(1.0, 0.85, 0.45))
+            } else if g.owned {
+                // Хозяйское добро: взять можно, но это кража (увидят — позовут стражу).
+                (format!("{name}{count} ({weight}) — чужое\n[E] Украсть · [ЛКМ] взять в руки"), Color::srgb(1.0, 0.62, 0.45))
             } else {
                 (format!("[E] Подобрать: {name}{count}{quality} ({weight}) · [ЛКМ] взять в руки"), quality_color(g.quality))
             }
@@ -611,5 +621,53 @@ fn update_notices(time: Res<Time>, mut state: ResMut<LootState>, mut text: Singl
     let line = state.notices.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>().join("\n");
     if text.0 != line {
         text.0 = line;
+    }
+}
+
+/// Модель вещи в доме создаётся по близости (`cull_far_home_items`).
+#[derive(Component)]
+struct LazyModel {
+    offset: Vec3,
+    finish: u8,
+    shown: bool,
+}
+
+/// Ближе этого (м) вещи в домах получают модель, дальше [`HOME_ITEM_DROP`] — теряют:
+/// их тысячи, а из-за стен их всё равно не видно.
+const HOME_ITEM_DRAW: f32 = 22.0;
+const HOME_ITEM_DROP: f32 = 27.0;
+/// Сколько моделей создавать за проверку, чтобы не было рывков.
+const HOME_ITEM_BATCH: usize = 120;
+
+/// Создать модели ближних вещей в домах и убрать дальние (раз в пятую долю секунды).
+fn cull_far_home_items(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut next: Local<f32>,
+    assets: Option<Res<LootAssets>>,
+    models: Option<Res<ItemModels>>,
+    camera: Query<(&GlobalTransform, &Camera), With<Camera3d>>,
+    mut items: Query<(Entity, &GroundView, &Transform, &mut LazyModel)>,
+) {
+    let now = time.elapsed_secs();
+    if now < *next {
+        return;
+    }
+    *next = now + 0.2;
+    let (Some(assets), Some(models)) = (assets, models) else { return };
+    // Активная камера: обычно камера игрока, на снимках — камера ожидания.
+    let Some(eye) = camera.iter().find(|(_, c)| c.is_active).map(|(t, _)| t.translation()) else { return };
+    let mut budget = HOME_ITEM_BATCH;
+    for (e, g, t, mut lazy) in &mut items {
+        let d2 = t.translation.distance_squared(eye);
+        if !lazy.shown && d2 < HOME_ITEM_DRAW * HOME_ITEM_DRAW && budget > 0 {
+            budget -= 1;
+            lazy.shown = true;
+            let (offset, finish) = (lazy.offset, lazy.finish);
+            commands.entity(e).with_children(|p| spawn_item_model(p, &assets, &models, g.base, g.quality, offset, false, finish));
+        } else if lazy.shown && d2 > HOME_ITEM_DROP * HOME_ITEM_DROP {
+            lazy.shown = false;
+            commands.entity(e).despawn_related::<Children>();
+        }
     }
 }

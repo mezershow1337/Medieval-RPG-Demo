@@ -97,7 +97,18 @@ pub fn block_houses(b: &mut Builder, i: i32, j: i32, seed: u32) {
         let f = Frame { r: lot, front, mirror: rng.chance(0.5) };
         match lot_mode(i, j, k, shop) {
             LotMode::Lived => {
-                house(b, f, main_street || shop != Shop::None, shop, &mut rng, LotMode::Lived);
+                let (h, r0) = (b.houses.len() as u32, b.residents.len() as u32);
+                b.house = Some(h);
+                // Достаток: у главной улицы и с лавкой живут богаче.
+                let rich = if main_street || shop != Shop::None { 0.45 } else { 0.15 };
+                let mut wr = Rng::new(seed ^ (0x0a11 + k as u32 * 31));
+                b.wealth = if wr.chance(rich) { 2 } else if wr.chance(0.3) { 0 } else { 1 };
+                let info = house(b, f, main_street || shop != Shop::None, shop, &mut rng, LotMode::Lived);
+                b.house = None;
+                b.wealth = 1;
+                let name = house_name(&f, shop, info.two_storey);
+                let r1 = b.residents.len() as u32;
+                b.houses.push(crate::level::HouseSpec { name, min: f.r.min3(-0.5), max: f.r.max3(info.top), residents: r0..r1 });
             }
             LotMode::Vacant => {
                 let (d0, c0, bl0) = (b.doors.len(), b.containers.len(), b.blocks.len());
@@ -147,6 +158,23 @@ fn estate_name(f: &Frame, two_storey: bool) -> String {
         .unwrap_or("Главная улица");
     let what = if two_storey { "Двухэтажная усадьба" } else { "Усадьба" };
     // Ближнее место — как адрес: «Усадьба · Западная церковь».
+    format!("{what} · {near}")
+}
+
+/// «Дом · Термы», «Лавка · Агора» — как адрес жилого дома.
+fn house_name(f: &Frame, shop: Shop, two_storey: bool) -> String {
+    let c = f.r.center(0.0);
+    let near = crate::level::places::places()
+        .iter()
+        .filter(|p| crate::level::inside_city(p.pos.x, p.pos.z))
+        .min_by(|a, b| a.pos.distance_squared(c).total_cmp(&b.pos.distance_squared(c)))
+        .map(|p| p.name)
+        .unwrap_or("Главная улица");
+    let what = match (shop, two_storey) {
+        (Shop::None, true) => "Двухэтажный дом",
+        (Shop::None, false) => "Дом",
+        _ => "Дом с лавкой",
+    };
     format!("{what} · {near}")
 }
 

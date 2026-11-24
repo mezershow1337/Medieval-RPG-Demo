@@ -75,7 +75,7 @@ pub struct CivilServerPlugin;
 
 impl Plugin for CivilServerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_connect).add_observer(on_merchant_caught).add_observer(on_container_taken).add_systems(Update, civil_tick);
+        app.add_observer(on_connect).add_observer(on_merchant_caught).add_observer(on_container_taken).add_observer(on_owned_item_taken).add_systems(Update, civil_tick);
     }
 }
 
@@ -607,6 +607,16 @@ fn on_container_taken(event: On<crate::loot_server::ContainerTaken>, mut civil: 
         _ => Faction::Citizens,
     };
     civil.report_theft(Theft { player: c.player, value: c.value.max(1), at: c.at, what: c.what.clone(), faction, caught_by: None });
+}
+
+/// Взял хозяйскую вещь в жилом доме (`home_items`): в сумку с места или вынес из дома.
+fn on_owned_item_taken(event: On<crate::home_items::OwnedItemTaken>, mut civil: ResMut<CivilWorld>) {
+    let t = event.event();
+    if crate::level::active() != crate::level::LevelKind::Chersonesus {
+        return;
+    }
+    let what = t.item.info().name.to_string();
+    civil.report_theft(Theft { player: t.player, value: t.item.value().max(1), at: t.at, what, faction: Faction::Citizens, caught_by: None });
 }
 
 /// Торговец поймал вора за руку (см. `trade_server::caught_stealing`).

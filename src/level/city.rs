@@ -20,6 +20,7 @@
 pub(crate) mod crafts;
 pub(crate) mod estate;
 pub(crate) mod houses;
+pub(crate) mod cozy;
 pub(crate) mod interior;
 pub(crate) mod kit;
 pub(crate) mod outside;

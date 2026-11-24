@@ -35,6 +35,7 @@ mod fight;
 mod guide;
 mod hints;
 mod gear_look;
+mod home_items;
 mod hotbar;
 mod graphics;
 mod hud;
