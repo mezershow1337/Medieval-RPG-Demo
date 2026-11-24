@@ -543,9 +543,12 @@ def lin(c):
     return tuple(f(v) for v in c)
 
 
-def metal_mat(name, color, color2=None, rough=(0.28, 0.5), scratches=0.5, rust=0.0, dirt=0.6, scale=1.0, polish_dir=None, bump=0.25, tarnish=None):
+def metal_mat(name, color, color2=None, rough=(0.28, 0.5), scratches=0.5, rust=0.0, dirt=0.6, scale=1.0, polish_dir=None, bump=0.25, tarnish=None, grind=False):
     """Металл: оттенки, царапины, грязь в углублениях, пятна ржавчины.
-    polish_dir — ось ("X"/"Y"/"Z"), вдоль которой идут следы шлифовки (клинки)."""
+    polish_dir — ось ("X"/"Y"/"Z"), вдоль которой идут следы шлифовки (клинки).
+    grind — клинок: плоскости (нормаль вдоль ±Y) кованые, матовые, со следами молота;
+    подточка у кромки (нормаль отклоняется от Y) светлая и полированная. Так клинок
+    не отражает небо одним синим пятном, а читается как сталь: тёмная плоскость, яркая кромка."""
     m, nb, bsdf = new_material(name)
     c1 = lin(color)
     c2 = lin(color2) if color2 else tuple(v * 0.7 for v in c1)
@@ -570,6 +573,27 @@ def metal_mat(name, color, color2=None, rough=(0.28, 0.5), scratches=0.5, rust=0
     base = nb.mix(nb.math("MULTIPLY", scr, 0.35), base, tuple(min(1, v * 1.35) for v in c1))
     roughv = nb.math("ADD", rough[0], nb.math("MULTIPLY", nb.ramp(nb.noise(14.0, 5, 0.6, vec), [(0.3, 0.0), (0.7, 1.0)]), rough[1] - rough[0]))
     roughv = nb.math("SUBTRACT", roughv, nb.math("MULTIPLY", scr, 0.12), clamp=True)
+    hammer = None
+    if grind:
+        tc = nb.new("ShaderNodeTexCoord")
+        sep = nb.new("ShaderNodeSeparateXYZ")
+        nb.link(tc.outputs["Normal"], sep.inputs["Vector"])
+        ay = nb.math("ABSOLUTE", sep.outputs["Y"])
+        g = nb.new("ShaderNodeRGBToBW")
+        nb.link(nb.ramp(ay, [(0.955, 1.0), (0.988, 0.0)]), g.inputs["Color"])
+        g = g.outputs["Val"]
+        # Следы молота на плоскости: неглубокие вмятины-ячейки, разные по тону.
+        hv = nb.coord((scale * 1.0, scale * 0.45, scale * 1.0))
+        hammer = nb.math("POWER", nb.voronoi(70.0, hv), 0.6)
+        scale_tone = nb.noise(22.0, 6, 0.65, vec)
+        flat = nb.mix(nb.math("MULTIPLY", nb.math("SUBTRACT", scale_tone, 0.35), 0.9, clamp=True), tuple(v * 0.92 for v in c1), tuple(v * 0.62 for v in c2))
+        flat = nb.mix(1.0, flat, nb.math("ADD", 0.82, nb.math("MULTIPLY", hammer, 0.22)), "MULTIPLY")
+        flat = nb.mix(1.0, flat, nb.mix(0.0, forged, forged), "MULTIPLY")
+        edge_col = nb.mix(nb.math("MULTIPLY", scr, 0.5), tuple(min(1, v * 1.08) for v in c1), tuple(min(1, v * 1.25) for v in c1))
+        base = nb.mix(g, flat, edge_col)
+        flat_rough = nb.math("ADD", nb.math("ADD", roughv, 0.16), nb.math("MULTIPLY", scale_tone, 0.12), clamp=True)
+        roughv = nb.mixf(g, flat_rough, nb.math("ADD", rough[0] * 0.6, nb.math("MULTIPLY", scr, 0.1)))
+        hammer = nb.math("MULTIPLY", hammer, nb.math("SUBTRACT", 1.0, g))
     metallic = 1.0
     if tarnish:
         # Патина/потускнение в углублениях (бронза, серебро).
@@ -589,7 +613,10 @@ def metal_mat(name, color, color2=None, rough=(0.28, 0.5), scratches=0.5, rust=0
     nb.val(bsdf.inputs["Base Color"], base)
     nb.val(bsdf.inputs["Roughness"], roughv)
     nb.val(bsdf.inputs["Metallic"], metallic)
-    nb.val(bsdf.inputs["Normal"], nb.bump(nb.math("ADD", nb.math("ADD", nb.math("MULTIPLY", n_fine, 0.3), nb.math("MULTIPLY", scr, -0.4)), nb.math("MULTIPLY", forged, 0.25)), bump, 0.001))
+    height = nb.math("ADD", nb.math("ADD", nb.math("MULTIPLY", n_fine, 0.3), nb.math("MULTIPLY", scr, -0.4)), nb.math("MULTIPLY", forged, 0.25))
+    if hammer is not None:
+        height = nb.math("ADD", height, nb.math("MULTIPLY", hammer, 0.9))
+    nb.val(bsdf.inputs["Normal"], nb.bump(height, bump, 0.001))
     return m
 
 
@@ -748,8 +775,10 @@ def liquid_mat(name, color, rough=0.05):
 def common_materials():
     """Общие материалы: железо, бронза, золото, дерево, кожа, лён, бечёвка…"""
     metal_mat("iron", (150, 150, 152), (92, 90, 88), rough=(0.32, 0.55), rust=0.35, dirt=0.7)
+    # Головы топоров: кованое железо с наваренной светлой кромкой.
+    metal_mat("axe_iron", (160, 160, 162), (92, 90, 88), rough=(0.3, 0.5), rust=0.3, dirt=0.7, bump=0.4, grind=True)
     metal_mat("iron_dark", (110, 108, 106), (60, 58, 56), rough=(0.4, 0.62), rust=0.45, dirt=0.8)
-    metal_mat("blade_steel", (196, 198, 200), (140, 142, 146), rough=(0.18, 0.34), scratches=0.8, rust=0.12, dirt=0.4, polish_dir="Z")
+    metal_mat("blade_steel", (196, 198, 200), (140, 142, 146), rough=(0.2, 0.36), scratches=0.8, rust=0.12, dirt=0.4, polish_dir="Z", bump=0.4, grind=True)
     metal_mat("bronze", (196, 146, 82), (130, 90, 46), rough=(0.3, 0.5), dirt=0.8, tarnish=((60, 92, 70), 0.7))
     metal_mat("gilt", (235, 186, 96), (175, 125, 52), rough=(0.18, 0.32), dirt=0.6, scratches=0.3)
     metal_mat("gold", (250, 200, 110), (200, 150, 70), rough=(0.14, 0.26), dirt=0.5, scratches=0.3)

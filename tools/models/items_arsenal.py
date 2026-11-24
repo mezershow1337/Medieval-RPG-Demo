@@ -20,7 +20,7 @@ import arsenal_data as D  # noqa: E402
 
 def mats():
     K.common_materials()
-    K.metal_mat("pattern_steel", (190, 192, 196), (120, 122, 128), rough=(0.2, 0.36), scratches=0.7, rust=0.08, dirt=0.4, polish_dir="Z")
+    K.metal_mat("pattern_steel", (190, 192, 196), (120, 122, 128), rough=(0.2, 0.36), scratches=0.7, rust=0.08, dirt=0.4, polish_dir="Z", bump=0.4, grind=True)
     K.metal_mat("lead_metal", (120, 122, 128), (90, 92, 98), rough=(0.5, 0.7), scratches=0.2, dirt=0.6)
 
 
@@ -204,7 +204,7 @@ def build_axe(key, m):
         st.append((x, (top - bot) / 2, th, (top + bot) / 2))
     bm = K.blade(st, 12, edge=0.0004)
     K.deform(bm, lambda v: (-v.z, v.y, v.x))
-    K.mesh_obj("head", bm, "iron", smooth_angle=50)
+    K.mesh_obj("head", bm, "axe_iron", smooth_angle=50)
     if head == "dolabra":
         spike = K.lathe([(0.0, 0.014, 0.01), (0.12, 0.004), (0.14, 0.0001)], 4, axis="X")
         K.move(spike, 0.02, 0, mid)
