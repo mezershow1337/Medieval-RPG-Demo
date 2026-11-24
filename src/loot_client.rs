@@ -512,14 +512,20 @@ fn setup_prompt(mut commands: Commands, fonts: Res<UiFonts>) {
                 ));
             });
         });
+    // Сообщения («Вы изучили…», «Подобрано…») — вверху по центру, под строкой цели,
+    // поверх остального HUD: внизу их закрывали полоски здоровья и хотбар.
     commands
-        .spawn(Node {
-            position_type: PositionType::Absolute,
-            width: percent(100),
-            bottom: px(70),
-            justify_content: JustifyContent::Center,
-            ..default()
-        })
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                top: px(112),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            GlobalZIndex(20),
+            Pickable::IGNORE,
+        ))
         .with_children(|p| {
             crate::ui_theme::theme().plaque(p).with_children(|p| {
                 p.spawn((
@@ -617,7 +623,7 @@ fn update_prompt(
 fn update_notices(time: Res<Time>, mut state: ResMut<LootState>, mut text: Single<&mut Text, With<NoticeText>>) {
     let now = time.elapsed_secs();
     let state = state.bypass_change_detection();
-    state.notices.retain(|(_, at)| now - at < 3.0);
+    state.notices.retain(|(_, at)| now - at < 5.0);
     let line = state.notices.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>().join("\n");
     if text.0 != line {
         text.0 = line;
