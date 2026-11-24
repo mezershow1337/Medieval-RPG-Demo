@@ -12,6 +12,7 @@
 
 mod alchemy_fx;
 mod appearance;
+mod start_kit;
 mod audio;
 mod bot;
 mod brewing;

@@ -6,7 +6,8 @@
 //! усы; кожа, волосы и сложение — по народу (ромеи, готы, аланы, гунны, заморские купцы).
 //!
 //! Телосложение и черты лица — цели формы (морфы) в `assets/models/humans.glb`
-//! (`tools/models/build_humans.py`, цели MakeHuman CC0): `thin`, `heavy`, `rugged`, `longnose`, `steppe`.
+//! (`tools/models/build_humans.py`, цели MakeHuman CC0): `thin`, `heavy` и лицевые
+//! `rugged`, `longnose`, `steppe`, `square`, `brow`, `broad`, `round`, `aged`.
 
 use crate::rig::{Beard, Hair};
 use bevy::color::Color;
@@ -79,15 +80,24 @@ pub const BUILDS: [((f32, f32), &str); 5] = [
     ((0.0, 1.0), "Здоровяк"),
 ];
 
-/// Черты лица: веса целей `rugged` (грубые/тонкие), `longnose` (длинный/короткий нос), `steppe`.
-pub const FACES: [([f32; 3], &str); 6] = [
-    ([0.0, 0.0, 0.0], "Обычное"),
-    ([0.9, 0.0, 0.0], "Грубое, скуластое"),
-    ([-0.7, 0.6, 0.0], "Тонкое, длинный нос"),
-    ([0.3, 1.0, 0.0], "Горбоносое"),
-    ([-0.6, -0.8, 0.0], "Мягкое, курносое"),
-    ([0.3, -0.2, 1.0], "Степное"),
+/// Варианты лица: веса лицевых целей формы (порядок — как в строке-подписи ниже) и название в редакторе.
+pub const FACES: [([f32; 8], &str); 11] = [
+    //  rugged longnose steppe square brow broad round aged
+    ([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "Обычное"),
+    ([0.9, 0.0, 0.0, 0.2, 0.3, 0.0, 0.0, 0.0], "Грубое, скуластое"),
+    ([-0.7, 0.6, 0.0, -0.3, 0.0, 0.0, 0.0, 0.0], "Тонкое, длинный нос"),
+    ([0.3, 1.0, 0.0, 0.0, 0.2, 0.0, 0.0, 0.0], "Горбоносое"),
+    ([-0.6, -0.8, 0.0, 0.0, 0.0, 0.0, 0.4, 0.0], "Мягкое, курносое"),
+    ([0.3, -0.2, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0], "Степное"),
+    ([0.3, 0.0, 0.0, 1.0, 0.9, 0.0, 0.0, 0.0], "Тяжёлая челюсть"),
+    ([0.0, -0.3, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0], "Широконосое, губастое"),
+    ([-0.3, -0.3, 0.0, 0.0, 0.0, 0.2, 1.0, 0.0], "Круглое, полное"),
+    ([-0.4, 0.3, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0], "Узкое, острое"),
+    ([0.2, 0.3, 0.0, 0.0, 0.2, 0.0, 0.0, 1.0], "Старческое"),
 ];
+
+/// Номер старческого лица в `FACES` (его чаще получают седые горожане).
+pub const AGED_FACE: u8 = 10;
 
 /// Веса целей формы модели (их имена — как в build_humans.py).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -97,6 +107,11 @@ pub struct Shape {
     pub rugged: f32,
     pub longnose: f32,
     pub steppe: f32,
+    pub square: f32,
+    pub brow: f32,
+    pub broad: f32,
+    pub round: f32,
+    pub aged: f32,
 }
 
 impl Shape {
@@ -107,6 +122,11 @@ impl Shape {
             "rugged" => self.rugged,
             "longnose" => self.longnose,
             "steppe" => self.steppe,
+            "square" => self.square,
+            "brow" => self.brow,
+            "broad" => self.broad,
+            "round" => self.round,
+            "aged" => self.aged,
             _ => 0.0,
         }
     }
@@ -159,11 +179,11 @@ impl Look {
         let (hair, beard, colors, skin, face): (&[f32], &[f32], &[f32], &[f32], &[f32]) = match folk {
             // Короткая, под машинку, длинные, лысеющий, бритый.
             // Короткая борода, окладистая, усы, щетина, выбрит.
-            Folk::Romaioi => (&[5.0, 2.0, 0.6, 1.4, 0.4], &[3.0, 2.0, 0.8, 2.0, 2.2], &[3.0, 4.0, 3.0, 1.0, 0.6, 0.0, 0.2, 0.0, 0.0], &[0.2, 1.0, 3.0, 3.0, 2.0, 0.5, 0.0], &[3.0, 1.0, 2.0, 2.0, 1.0, 0.0]),
-            Folk::Goths => (&[2.0, 0.5, 5.0, 0.8, 0.0], &[1.5, 2.0, 3.0, 1.0, 0.8], &[0.0, 0.5, 1.5, 2.0, 4.0, 3.0, 1.2, 0.0, 0.0], &[3.0, 3.0, 1.0, 0.2, 0.3, 0.0, 0.0], &[3.0, 2.0, 1.0, 0.5, 1.5, 0.0]),
-            Folk::Alans => (&[3.0, 1.0, 2.0, 0.8, 0.5], &[2.0, 3.0, 2.0, 1.0, 0.5], &[1.5, 3.0, 2.5, 1.0, 1.5, 0.5, 0.3, 0.0, 0.0], &[0.8, 2.0, 2.5, 1.5, 1.5, 0.2, 0.0], &[2.0, 2.0, 1.0, 2.0, 0.5, 1.0]),
-            Folk::Nomads => (&[0.5, 1.5, 1.0, 0.3, 4.0], &[1.0, 0.3, 3.0, 2.0, 2.0], &[5.0, 3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], &[0.0, 0.5, 2.0, 2.0, 3.0, 1.0, 0.0], &[0.3, 1.0, 0.0, 0.0, 0.3, 6.0]),
-            Folk::Overseas => (&[4.0, 3.0, 1.0, 1.0, 1.0], &[2.5, 2.0, 1.5, 2.0, 1.5], &[5.0, 4.0, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], &[0.0, 0.0, 1.0, 2.0, 2.5, 2.5, 1.5], &[2.0, 1.5, 2.0, 2.5, 1.0, 0.0]),
+            Folk::Romaioi => (&[5.0, 2.0, 0.6, 1.4, 0.4], &[3.0, 2.0, 0.8, 2.0, 2.2], &[3.0, 4.0, 3.0, 1.0, 0.6, 0.0, 0.2, 0.0, 0.0], &[0.2, 1.0, 3.0, 3.0, 2.0, 0.5, 0.0], &[3.0, 1.0, 2.0, 2.0, 1.0, 0.0, 1.0, 0.6, 1.2, 1.2, 0.0]),
+            Folk::Goths => (&[2.0, 0.5, 5.0, 0.8, 0.0], &[1.5, 2.0, 3.0, 1.0, 0.8], &[0.0, 0.5, 1.5, 2.0, 4.0, 3.0, 1.2, 0.0, 0.0], &[3.0, 3.0, 1.0, 0.2, 0.3, 0.0, 0.0], &[3.0, 2.0, 1.0, 0.5, 1.5, 0.0, 2.5, 0.2, 1.5, 0.8, 0.0]),
+            Folk::Alans => (&[3.0, 1.0, 2.0, 0.8, 0.5], &[2.0, 3.0, 2.0, 1.0, 0.5], &[1.5, 3.0, 2.5, 1.0, 1.5, 0.5, 0.3, 0.0, 0.0], &[0.8, 2.0, 2.5, 1.5, 1.5, 0.2, 0.0], &[2.0, 2.0, 1.0, 2.0, 0.5, 1.0, 1.5, 0.3, 0.8, 1.0, 0.0]),
+            Folk::Nomads => (&[0.5, 1.5, 1.0, 0.3, 4.0], &[1.0, 0.3, 3.0, 2.0, 2.0], &[5.0, 3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], &[0.0, 0.5, 2.0, 2.0, 3.0, 1.0, 0.0], &[0.3, 1.0, 0.0, 0.0, 0.3, 6.0, 1.0, 0.3, 1.0, 0.2, 0.0]),
+            Folk::Overseas => (&[4.0, 3.0, 1.0, 1.0, 1.0], &[2.5, 2.0, 1.5, 2.0, 1.5], &[5.0, 4.0, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], &[0.0, 0.0, 1.0, 2.0, 2.5, 2.5, 1.5], &[2.0, 1.5, 2.0, 2.5, 1.0, 0.0, 0.8, 2.5, 1.0, 1.0, 0.0]),
         };
         let mut look = Look {
             set: true,
@@ -179,6 +199,9 @@ impl Look {
             look.hair_color = if r(8) < 0.6 { 7 } else { 8 };
             if look.hair == 0 && r(9) < 0.5 {
                 look.hair = 3;
+            }
+            if r(10) < 0.6 {
+                look.face = AGED_FACE;
             }
         }
         look
@@ -200,8 +223,8 @@ impl Look {
     }
     pub fn shape(&self) -> Shape {
         let (thin, heavy) = BUILDS[self.build as usize % BUILDS.len()].0;
-        let [rugged, longnose, steppe] = FACES[self.face as usize % FACES.len()].0;
-        Shape { thin, heavy, rugged, longnose, steppe }
+        let [rugged, longnose, steppe, square, brow, broad, round, aged] = FACES[self.face as usize % FACES.len()].0;
+        Shape { thin, heavy, rugged, longnose, steppe, square, brow, broad, round, aged }
     }
 
     /// Число вариантов и подпись каждого поля (для окна облика).
@@ -335,6 +358,25 @@ mod tests {
         let g = Look::from_text("причёска 99, кожа abc, ???").unwrap();
         assert_eq!(g.hair as usize, HAIR_STYLES.len() - 1);
         assert_eq!(g.skin, Look::PLAYER_DEFAULT.skin);
+    }
+
+    #[test]
+    fn every_face_target_is_in_the_model() {
+        // Имена целей формы в humans.glb должны совпадать с теми, что читает `Shape::weight`.
+        let glb = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/models/humans.glb")).unwrap();
+        let len = u32::from_le_bytes(glb[12..16].try_into().unwrap()) as usize;
+        let json = String::from_utf8_lossy(&glb[20..20 + len]);
+        let all = Shape { thin: 1.0, heavy: 1.0, rugged: 1.0, longnose: 1.0, steppe: 1.0, square: 1.0, brow: 1.0, broad: 1.0, round: 1.0, aged: 1.0 };
+        for name in ["thin", "heavy", "rugged", "longnose", "steppe", "square", "brow", "broad", "round", "aged"] {
+            assert!(json.contains(&format!("\"{name}\"")), "нет цели {name} в humans.glb");
+            assert_eq!(all.weight(name), 1.0, "Shape::weight не знает {name}");
+        }
+        // Все варианты лица различаются.
+        for (i, a) in FACES.iter().enumerate() {
+            for b in &FACES[i + 1..] {
+                assert!(a.0.iter().zip(b.0).map(|(x, y)| (x - y).abs()).sum::<f32>() > 0.5, "{} ~ {}", a.1, b.1);
+            }
+        }
     }
 
     #[test]
