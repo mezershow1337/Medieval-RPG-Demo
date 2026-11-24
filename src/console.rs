@@ -133,6 +133,8 @@ const COMMANDS: &[(&str, &str)] = &[
     ("spawn", "<stratiot|bucellarius|goth|alan|hun> [сколько] враг перед вами"),
     ("stats", "FPS, координаты, читы в углу экрана (fps — то же)"),
     ("wireframe", "каркас всех моделей"),
+    ("time", "[ЧЧ[:ММ]] который час; с числом — перевести часы мира (ночь, рассвет…)"),
+    ("weather", "[дождь|туман|ясно|ветер] погода сейчас; со словом — промотать до неё"),
     ("who", "игроки на сервере"),
     ("sv_cheats", "0|1 (только хозяин) разрешить читы всем игрокам"),
     ("clear", "очистить консоль"),
@@ -388,7 +390,6 @@ fn execute_commands(
                 console.lines.clear();
                 console.dirty = true;
             }
-            "time" | "timeofday" => console.ok("Смены дня и ночи в игре пока нет: в Херсонесе всегда вечер."),
             "quit" | "exit" => {
                 exit.write(AppExit::Success);
             }

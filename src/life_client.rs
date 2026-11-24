@@ -738,7 +738,16 @@ fn clock_hud(clock: Res<WorldClock>, mut text: Single<&mut Text, With<ClockText>
     if **root == Visibility::Hidden && std::env::var("MRPG_CAM").is_err() {
         **root = Visibility::Inherited;
     }
-    let rain = if clock.rain() > 0.1 { " · дождь" } else { "" };
+    let w = clock.weather();
+    let rain = if w.rain > 0.1 {
+        " · дождь"
+    } else if w.fog > 0.35 {
+        " · туман"
+    } else if w.wind_speed() > 9.0 {
+        " · ветрено"
+    } else {
+        ""
+    };
     let line = format!("{} · {}{}", clock.hhmm(), crate::world_clock::part_of_day(clock.hour()), rain);
     if text.0 != line {
         text.0 = line;
@@ -756,8 +765,8 @@ struct RainBox(f32);
 #[derive(Resource)]
 struct RainLook(Handle<StandardMaterial>);
 
-const RAIN_H: f32 = 22.0;
-const RAIN_R: f32 = 24.0;
+const RAIN_H: f32 = 14.0;
+const RAIN_R: f32 = 16.0;
 
 fn setup_rain(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
     use bevy::asset::RenderAssetUsages;
@@ -765,14 +774,18 @@ fn setup_rain(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats
     let mut pos: Vec<[f32; 3]> = Vec::new();
     let mut nrm: Vec<[f32; 3]> = Vec::new();
     let mut idx: Vec<u32> = Vec::new();
-    // Струи: косые крестики из двух тонких полосок.
-    for k in 0..7000u64 {
+    // Капли: короткие тонкие чёрточки (крестик из двух полосок), густо; у самой камеры — пусто,
+    // чтобы капля не перечёркивала весь кадр.
+    for k in 0..36000u64 {
         let x = (crate::world_clock::unit(k, 1) * 2.0 - 1.0) * RAIN_R;
         let z = (crate::world_clock::unit(k, 2) * 2.0 - 1.0) * RAIN_R;
+        if x * x + z * z < 2.2 * 2.2 {
+            continue;
+        }
         let y = crate::world_clock::unit(k, 3) * RAIN_H;
-        let len = 0.5 + 0.4 * crate::world_clock::unit(k, 4);
+        let len = 0.16 + 0.2 * crate::world_clock::unit(k, 4);
         let top = Vec3::new(x, y, z);
-        let bot = top + Vec3::new(0.06, -len, 0.03);
+        let bot = top + Vec3::new(0.01, -len, 0.005);
         for side in [Vec3::new(0.006, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.006)] {
             let b = pos.len() as u32;
             for p in [top - side, top + side, bot + side, bot - side] {
@@ -796,30 +809,39 @@ fn setup_rain(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats
 
 fn rain(
     time: Res<Time>,
-    clock: Res<WorldClock>,
+    mood: Option<Res<crate::daylight::CurrentMood>>,
     look: Option<Res<RainLook>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     mut boxes: Query<(&RainBox, &mut Transform, &mut Visibility)>,
 ) {
-    let r = if crate::level::active() == crate::level::LevelKind::Chersonesus { clock.rain() } else { 0.0 };
+    let m = mood.as_ref().map(|m| m.0);
+    let r = m.filter(|_| crate::level::active() == crate::level::LevelKind::Chersonesus).map_or(0.0, |m| m.rain);
     let Some(cam) = camera.iter().find(|(c, _)| c.is_active).map(|(_, t)| t.translation()) else { return };
     let want = if r > 0.02 { Visibility::Inherited } else { Visibility::Hidden };
     if let Some(look) = look
-        && let Some(mut m) = mats.get_mut(&look.0)
+        && let Some(mut mat) = mats.get_mut(&look.0)
     {
-        let a = 0.45 * r;
-        if (m.base_color.alpha() - a).abs() > 0.01 {
-            m.base_color.set_alpha(a);
+        // Струи светятся сами (unlit): ночью они лишь чуть светлее тьмы.
+        let day = m.map_or(1.0, |md| md.dayness.max(1.0 - md.night));
+        let lit = 0.16 + 0.66 * day;
+        let c = Color::srgba(0.95 * lit, lit, (1.07 * lit).min(1.0), 0.75 * r);
+        let old = mat.base_color.to_srgba();
+        if (old.red - c.to_srgba().red).abs() + (old.alpha - c.alpha()).abs() > 0.01 {
+            mat.base_color = c;
         }
     }
-    // Падают 9 м/с; коробки сдвигаются по кругу, рисунок повторяется без скачков.
+    // Падают 9 м/с и сносятся ветром; коробки сдвигаются по кругу, рисунок повторяется без скачков.
+    let wind = m.map_or(Vec2::ZERO, |m| m.wind) * 0.45;
+    let dir = Vec3::new(wind.x, -9.0, wind.y).normalize();
+    let tilt = Quat::from_rotation_arc(Vec3::NEG_Y, dir);
     let fall = (time.elapsed_secs() * 9.0).rem_euclid(RAIN_H);
     for (b, mut tf, mut vis) in &mut boxes {
         if *vis != want {
             *vis = want;
         }
-        tf.translation = Vec3::new(cam.x, cam.y - 4.0 - fall + b.0 * RAIN_H, cam.z);
+        tf.rotation = tilt;
+        tf.translation = cam + tilt * Vec3::new(0.0, -4.0 - fall + b.0 * RAIN_H, 0.0);
     }
 }
 

@@ -174,8 +174,6 @@ pub struct LootWorld {
     pub shelf_requests: Vec<ShelfRequest>,
     /// Взятые за кадр вещи хозяев домов (рассылает `home_items`).
     pub taken: Vec<crate::home_items::OwnedItemTaken>,
-    /// В каком жилом доме стоит сундук уровня.
-    pub container_house: HashMap<LootId, u32>,
 }
 
 impl Default for LootWorld {
@@ -195,7 +193,6 @@ impl Default for LootWorld {
             holds: HashMap::new(),
             shelf_requests: Vec::new(),
             taken: Vec::new(),
-            container_house: HashMap::new(),
         }
     }
 }
@@ -455,6 +452,18 @@ fn on_spawn_ground_item(event: On<SpawnGroundItem>, mut server: ResMut<RenetServ
     world.spawn_ground(&mut server, ev.pos, ev.vel, ev.item);
 }
 
+/// Игрок вынул вещь из сундука уровня (стража решит, кража ли это: `civil_server`).
+#[derive(Event, Clone, Debug)]
+pub struct ContainerTaken {
+    pub player: u64,
+    /// Номер сундука в раскладке уровня.
+    pub container: u32,
+    pub table: LootTableId,
+    pub at: Vec3,
+    pub value: u32,
+    pub what: String,
+}
+
 /// Через сколько секунд опустевший сундук снова наполняется (хозяева докупают, воры приходят снова).
 const REFILL_AFTER: f32 = 20.0 * 60.0;
 
@@ -472,9 +481,6 @@ fn spawn_world_containers(mut server: ResMut<RenetServer>, mut world: ResMut<Loo
         let id = CONTAINER_ID_BASE + i as LootId;
         let inv = container_inventory(&mut world, c.table);
         world.fixed.insert(id, (c.table, None));
-        if let Some(h) = c.house {
-            world.container_house.insert(id, h);
-        }
         world.corpses.insert(id, Corpse { pos: c.pos, yaw: 0.0, name: c.name.to_string(), inv, created: 0, own_model: false });
     }
     // Вещи хозяев в жилых домах: на столах, полках, сундуках.
@@ -525,7 +531,9 @@ fn spawn_demo_loot(mut commands: Commands) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn receive_loot_messages(
+    mut commands: Commands,
     mut server: ResMut<RenetServer>,
     game: Res<GameWorld>,
     level: Res<LevelColliders>,
@@ -616,6 +624,14 @@ fn receive_loot_messages(
                         continue;
                     }
                     let was_empty = empty_flags(&world, &[from, to]);
+                    // Из сундука уровня к себе — может оказаться кражей.
+                    let taking = match (from, to) {
+                        (Owner::Container(id), Owner::Me) if world.fixed.contains_key(&id) => world.corpses.get(&id).and_then(|c| {
+                            let (_, item) = c.inv.find(uid)?;
+                            Some((id, c.pos, item.value(), item.info().name.to_string()))
+                        }),
+                        _ => None,
+                    };
                     let src_inv = world.take_inv(pid, from);
                     let Some(src_inv) = src_inv else { continue };
                     let result = if from == to {
@@ -636,14 +652,14 @@ fn receive_loot_messages(
                         world.put_inv(pid, to, b);
                         r
                     };
-                    if let Err(e) = result {
-                        notice(&mut server, pid, e.message());
-                    } else if let (Owner::Container(cid), Owner::Me) = (from, to)
-                        && let Some(&house) = world.container_house.get(&cid)
-                        && let Some(item) = world.inventories.get(&pid).and_then(|inv| inv.find(uid)).map(|(_, i)| i.clone())
-                    {
-                        // Вынул из хозяйского сундука — кража (если дом не его: свой сундук делается личным).
-                        world.taken.push(crate::home_items::OwnedItemTaken { player: pid, house, item, at: feet, how: crate::home_items::TakeHow::FromContainer });
+                    match result {
+                        Err(e) => notice(&mut server, pid, e.message()),
+                        Ok(_) => {
+                            if let Some((id, at, value, what)) = taking {
+                                let table = world.fixed[&id].0;
+                                commands.trigger(ContainerTaken { player: pid, container: (id - CONTAINER_ID_BASE) as u32, table, at, value, what });
+                            }
+                        }
                     }
                     // Даже при ошибке шлём состояние: клиент вернёт предмет на место.
                     let owners: Vec<Owner> = if from == to { vec![from] } else { vec![from, to] };

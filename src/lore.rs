@@ -42,10 +42,12 @@ pub enum Skill {
     Trade,
     /// Книжность: чтение, письмо, учёба.
     Letters,
+    /// Красноречие: уговорить стражника, сторговаться, заболтать.
+    Eloquence,
 }
 
 /// Сколько всего навыков (длина [`Knowledge::skills`]).
-pub const SKILL_COUNT: usize = 10;
+pub const SKILL_COUNT: usize = 11;
 
 impl Skill {
     /// Порядок для окон: тело, бой, ремёсла, знахарство, город.
@@ -60,6 +62,7 @@ impl Skill {
         Skill::Medicine,
         Skill::Letters,
         Skill::Trade,
+        Skill::Eloquence,
     ];
 
     pub fn name(self) -> &'static str {
@@ -74,6 +77,7 @@ impl Skill {
             Skill::Archery => "Стрельба из лука",
             Skill::Trade => "Торговля",
             Skill::Letters => "Книжность",
+            Skill::Eloquence => "Красноречие",
         }
     }
 
@@ -89,7 +93,8 @@ impl Skill {
             Skill::Archery => &[(Skill::Strength, 0.2)],
             Skill::Herbalism => &[(Skill::Endurance, 0.1)],
             Skill::Medicine => &[(Skill::Herbalism, 0.1)],
-            Skill::Trade => &[(Skill::Letters, 0.05)],
+            Skill::Trade => &[(Skill::Letters, 0.05), (Skill::Eloquence, 0.15)],
+            Skill::Eloquence => &[(Skill::Trade, 0.05)],
             _ => &[],
         }
     }

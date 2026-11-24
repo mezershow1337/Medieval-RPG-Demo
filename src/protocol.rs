@@ -6,7 +6,7 @@ use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendTyp
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_0020;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_0021;
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -142,6 +142,8 @@ pub enum ActorKind {
     AlanLancer,
     /// Гунно-булгарский кочевник: составной лук, вблизи — нож-сакс.
     HunArcher,
+    /// Горожанин, схвативший что под руку попало (топор, вилы, тесак), когда поднялся шум.
+    Townsman,
 }
 
 impl ActorKind {
@@ -165,6 +167,7 @@ impl ActorKind {
             ActorKind::GothWarrior => "Готский воин",
             ActorKind::AlanLancer => "Аланский копейщик",
             ActorKind::HunArcher => "Кочевник-лучник",
+            ActorKind::Townsman => "Горожанин",
         }
     }
 }

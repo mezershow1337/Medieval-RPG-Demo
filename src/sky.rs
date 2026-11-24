@@ -23,6 +23,10 @@ pub struct SkyUniform {
     pub horizon: Vec4,
     pub horizon_sun: Vec4,
     pub zenith: Vec4,
+    /// Направление на луну, w — освещённая часть диска.
+    pub moon: Vec4,
+    /// x — ночь 0..1, y — ненастье 0..1, zw — ветер (м/с).
+    pub extra: Vec4,
 }
 
 // ---------- Купол неба ----------
@@ -147,11 +151,14 @@ fn norm2(v: Vec2) -> Vec2 {
     (v + Vec2::new(1e-5, 0.0)).normalize()
 }
 
-/// Цвет неба в направлении `dir` (без диска солнца — его в отражениях даёт сам свет солнца).
+/// Цвет неба в направлении `dir` (без дисков солнца и луны — в отражениях их даёт свет).
+/// Та же формула, что `sky_radiance` в sky_common.wesl (облака упрощены).
 pub fn sky_radiance(dir: Vec3, s: &SkyUniform) -> Vec3 {
     let dir = dir.normalize();
     let sun = s.sun.truncate().normalize();
-    let day = s.sun.w > 0.5;
+    let d = s.sun.w.clamp(0.0, 1.0);
+    let n = s.extra.x.clamp(0.0, 1.0);
+    let oc = s.extra.y.clamp(0.0, 1.0);
     let e = dir.y;
     let h = e.clamp(0.0, 1.0);
     let sd = dir.dot(sun).max(0.0);
@@ -160,33 +167,42 @@ pub fn sky_radiance(dir: Vec3, s: &SkyUniform) -> Vec3 {
     let s2 = norm2(Vec2::new(sun.x, sun.z));
     let d2 = norm2(Vec2::new(dir.x, dir.z));
     let toward = (d2.dot(s2) * 0.5 + 0.5).clamp(0.0, 1.0);
-    let mid = if day { Vec3::new(0.26, 0.46, 0.86) } else { Vec3::new(0.34, 0.40, 0.66).lerp(Vec3::new(1.0, 0.66, 0.46), toward.powi(3)) };
-    let mut col = hor.lerp(mid, smoothstep(0.0, if day { 0.16 } else { 0.22 }, h));
-    col = col.lerp(s.zenith.truncate(), smoothstep(0.12, 0.85, h));
-    if day {
-        col += Vec3::new(1.0, 0.9, 0.7) * sd.powf(8.0) * 0.5;
-    } else {
-        col += Vec3::new(2.2, 1.15, 0.45) * sd.powf(7.0) * 0.55;
-        col += Vec3::new(3.5, 2.0, 0.9) * sd.powf(90.0) * 0.9;
-    }
+    let zen = s.zenith.truncate();
+    let mut mid = Vec3::new(0.34, 0.40, 0.66).lerp(Vec3::new(1.0, 0.66, 0.46), toward.powi(3)).lerp(Vec3::new(0.26, 0.46, 0.86), d);
+    mid = mid.lerp(hor.lerp(zen, 0.5), n);
+    mid = mid.lerp(hor * 1.04, oc * 0.7);
+    let mut col = hor.lerp(mid, smoothstep(0.0, 0.22 + (0.16 - 0.22) * d, h));
+    col = col.lerp(zen.lerp(hor * 1.02, oc * 0.6), smoothstep(0.12, 0.85, h));
+    let veil = (1.0 - n) * (1.0 - 0.8 * oc);
+    let halo_gold = Vec3::new(2.2, 1.15, 0.45) * sd.powf(7.0) * 0.55 + Vec3::new(3.5, 2.0, 0.9) * sd.powf(90.0) * 0.9;
+    let halo_day = Vec3::new(1.0, 0.9, 0.7) * sd.powf(8.0) * 0.5;
+    col += halo_gold.lerp(halo_day, d) * veil;
+    let moon = s.moon.truncate().normalize_or_zero();
+    let md = dir.dot(moon).max(0.0);
+    let moon_up = smoothstep(-0.03, 0.05, moon.y) * s.moon.w * n;
+    col += Vec3::new(0.10, 0.12, 0.16) * md.powf(60.0) * moon_up * (1.0 - 0.6 * oc);
     // Облака (упрощённо: без перистых и без кромки).
     if e > 0.0 {
         let p = Vec2::new(dir.x, dir.z) / (e + 0.07) * 0.75;
         let w = Vec2::new(fbm3(p * 0.6 + Vec2::splat(3.1)), fbm3(p * 0.6 + Vec2::splat(7.7)));
         let q = p + (w - Vec2::splat(0.5)) * 1.1;
-        let d = fbm(q * 1.3);
-        let thr = 0.66 + (0.44 - 0.66) * s.horizon.w;
-        let cover = smoothstep(thr, thr + 0.16, d) * smoothstep(0.0, 0.07, e);
+        let dn = fbm(q * 1.3);
+        let k = s.horizon.w;
+        let thr = 0.66 + (0.44 - 0.66) * k.min(1.0) - 0.22 * smoothstep(0.7, 1.0, k) - 0.3 * oc;
+        let cover = smoothstep(thr, thr + 0.16, dn).max(oc * 0.93) * smoothstep(0.0, 0.07, e);
         let d_sun = fbm((q + s2 * 0.16) * 1.3);
-        let lit = ((d - d_sun) * 5.0 + 0.45).clamp(0.0, 1.0);
-        let thin = 1.0 - smoothstep(thr + 0.05, thr + 0.3, d);
-        let mut c = if day {
-            Vec3::new(0.62, 0.66, 0.76).lerp(Vec3::new(1.32, 1.3, 1.26), lit * 0.7 + thin * 0.3)
-        } else {
-            let gold = Vec3::new(1.25, 0.62, 0.55).lerp(Vec3::new(2.9, 1.45, 0.55), toward * toward);
-            let shadow = Vec3::new(0.26, 0.27, 0.40).lerp(Vec3::new(0.42, 0.26, 0.26), toward);
-            shadow.lerp(gold, lit * (0.35 + 0.65 * thin))
-        };
+        let lit = ((dn - d_sun) * 5.0 + 0.45).clamp(0.0, 1.0);
+        let thin = 1.0 - smoothstep(thr + 0.05, thr + 0.3, dn);
+        let day_c = Vec3::new(0.62, 0.66, 0.76).lerp(Vec3::new(1.32, 1.3, 1.26), lit * 0.7 + thin * 0.3);
+        let gold = Vec3::new(1.25, 0.62, 0.55).lerp(Vec3::new(2.9, 1.45, 0.55), toward * toward);
+        let shadow = Vec3::new(0.26, 0.27, 0.40).lerp(Vec3::new(0.42, 0.26, 0.26), toward);
+        let gold_c = shadow.lerp(gold, lit * (0.35 + 0.65 * thin));
+        let mut c = gold_c.lerp(day_c, d);
+        let grey = Vec3::new(0.34, 0.35, 0.38).lerp(Vec3::new(0.62, 0.64, 0.68), lit * 0.6 + thin * 0.4) * (0.55 + 0.45 * d);
+        c = c.lerp(grey, oc * 0.8);
+        let moon_lit = smoothstep(-0.02, 0.1, moon.y) * s.moon.w;
+        let night_c = Vec3::new(0.010, 0.012, 0.020).lerp(Vec3::new(0.045, 0.052, 0.075), lit) * (0.6 + 0.8 * moon_lit);
+        c = c.lerp(night_c, n);
         c = c.lerp(hor, (1.0 - smoothstep(0.0, 0.22, e)) * 0.55);
         col = col.lerp(c, cover);
     }
@@ -334,15 +350,21 @@ fn cubemap(size: u32, mips: u32, texel: impl Fn(Vec3, u32) -> Vec3 + Sync) -> Im
 /// шероховатость × (уровней − 1)). Небо не меняется, поэтому считать его каждый кадр
 /// на видеокарте незачем.
 pub fn sky_environment(s: &SkyUniform) -> (Image, Image) {
-    const SPEC: u32 = 128;
-    let mips = SPEC.trailing_zeros() + 1;
+    sky_environment_sized(s, 128, 1.0)
+}
+
+/// То же с размером отражений `spec` и долей выборок `quality` (для пересчёта на ходу,
+/// когда меняется время суток и погода).
+pub fn sky_environment_sized(s: &SkyUniform, spec: u32, quality: f32) -> (Image, Image) {
+    let mips = spec.trailing_zeros() + 1;
+    let q = |n: u32| ((n as f32 * quality) as u32).max(8);
     // Освещённый небом и солнцем известняк города — для отражений у горизонта и снизу.
-    let stone = Vec3::new(0.62, 0.56, 0.46) * prefilter_diffuse(Vec3::Y, s, 128) * 1.5;
-    let specular = cubemap(SPEC, mips, |d, mip| {
+    let stone = Vec3::new(0.62, 0.56, 0.46) * prefilter_diffuse(Vec3::Y, s, q(128)) * 1.5;
+    let specular = cubemap(spec, mips, |d, mip| {
         let rough = mip as f32 / (mips - 1) as f32;
-        prefilter_with(d, rough, if mip == 0 { 1 } else { 24 + mip * 8 }, |l| surround_radiance(l, s, stone))
+        prefilter_with(d, rough, if mip == 0 { 1 } else { q(24 + mip * 8) }, |l| surround_radiance(l, s, stone))
     });
-    let diffuse = cubemap(32, 1, |d, _| prefilter_diffuse(d, s, 96));
+    let diffuse = cubemap(if spec >= 128 { 32 } else { 16 }, 1, |d, _| prefilter_diffuse(d, s, q(96)));
     (diffuse, specular)
 }
 
@@ -378,6 +400,8 @@ mod tests {
             horizon: Vec4::new(0.56, 0.48, 0.54, 0.0),
             horizon_sun: Vec4::new(1.5, 0.78, 0.24, 5.0),
             zenith: Vec4::new(0.11, 0.2, 0.46, 0.0),
+            moon: Vec4::new(0.8, -0.2, 0.4, 0.5),
+            extra: Vec4::ZERO,
         };
         let toward = sky_radiance(Vec3::new(-0.8, 0.02, -0.42), &s);
         let away = sky_radiance(Vec3::new(0.8, 0.02, 0.42), &s);
