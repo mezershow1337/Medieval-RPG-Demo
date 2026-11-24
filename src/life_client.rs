@@ -72,6 +72,9 @@ pub enum Prop {
     Cup,
     Torch,
     Book,
+    /// Восковая табличка ученика и стиль.
+    Tablet,
+    Stylus,
 }
 
 /// Что из предмета куда смотрит: точка хвата — начало координат, ось рукояти — +Y.
@@ -91,6 +94,8 @@ fn setup_props(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mat
     let wicker = mat(Color::srgb(0.7, 0.58, 0.36), 0.95, 0.0);
     let straw = mat(Color::srgb(0.78, 0.68, 0.4), 0.95, 0.0);
     let leather = mat(Color::srgb(0.35, 0.18, 0.1), 0.7, 0.0);
+    let wax = mat(Color::srgb(0.2, 0.12, 0.05), 0.5, 0.0);
+    let bronze = mat(Color::srgb(0.62, 0.45, 0.24), 0.4, 0.8);
     let flame = mats.add(StandardMaterial { base_color: Color::srgb(1.0, 0.6, 0.2), emissive: LinearRgba::rgb(14.0, 6.0, 1.5), unlit: true, ..default() });
     let mut m = |mesh: Mesh| meshes.add(mesh);
     let at = |y: f32| Transform::from_xyz(0.0, y, 0.0);
@@ -147,6 +152,11 @@ fn setup_props(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mat
         PropParts(vec![(m(Cylinder::new(0.02, 0.55).into()), dark_wood.clone(), at(0.05)), (m(Sphere::new(0.07).into()), flame.clone(), at(0.36))]),
     );
     parts.insert(Prop::Book, PropParts(vec![(m(Cuboid::new(0.2, 0.05, 0.26).into()), leather.clone(), Transform::IDENTITY)]));
+    parts.insert(
+        Prop::Tablet,
+        PropParts(vec![(m(Cuboid::new(0.26, 0.018, 0.17).into()), wood.clone(), Transform::IDENTITY), (m(Cuboid::new(0.23, 0.006, 0.14).into()), wax, at(0.011))]),
+    );
+    parts.insert(Prop::Stylus, PropParts(vec![(m(Cylinder::new(0.004, 0.14).into()), bronze, at(0.04))]));
     commands.insert_resource(PropKit { parts });
 }
 
@@ -254,6 +264,18 @@ fn look_for(me: usize, role: Role, s: &NpcState, t: f32, phase: f32, night: bool
             i.pitch = -0.2;
             i.right_grip = grip(0.05 + 0.3 * k, 1.2, -0.42);
             i.left_grip = grip(-0.05 + 0.3 * k, 1.25, -0.42);
+        }
+        Act::Write if role == Role::Student => {
+            // Ученик сидит на скамье, табличка на коленях, стиль в правой руке.
+            i.crouch = 0.82;
+            i.lean = 0.12;
+            i.pitch = -0.75;
+            let k = (tt * 3.1).sin();
+            i.left_grip = grip(-0.1, 0.6, -0.34);
+            i.left_axis = Some(Vec3::new(1.0, 0.0, 0.0));
+            i.right_grip = grip(0.06 + 0.03 * k, 0.66, -0.36 + 0.015 * (tt * 2.2).cos());
+            i.right_axis = Some(Vec3::new(-0.2, -0.6, -0.5).normalize());
+            props = [Some(Prop::Stylus), Some(Prop::Tablet)];
         }
         Act::Write => {
             i.lean = -0.3;
