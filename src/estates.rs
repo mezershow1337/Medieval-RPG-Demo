@@ -38,6 +38,8 @@ pub struct Profile {
     pub name: String,
     /// Облик персонажа (выбран в главном меню, хранится в settings.txt).
     pub look: crate::appearance::Look,
+    /// Стартовый набор (оружие и доспех на выбор), выдаётся при входе и после смерти.
+    pub kit: crate::start_kit::StartKit,
 }
 
 /// Папка данных игры: `%APPDATA%\MedievalRPG` в Windows, `~/.local/share/medieval_rpg` в Linux.
@@ -73,7 +75,7 @@ pub fn local_profile() -> Profile {
         Some(s) => format!("{base} ({s})"),
         None => base,
     };
-    let p = Profile { key: key.max(1), name: clean_name(&name), look: Default::default() };
+    let p = Profile { key: key.max(1), name: clean_name(&name), look: Default::default(), kit: Default::default() };
     let _ = std::fs::create_dir_all(data_dir());
     let _ = std::fs::write(&file, format!("key={:016x}\nname={}\n", p.key, p.name));
     p
@@ -89,7 +91,7 @@ fn parse_profile(text: &str) -> Option<Profile> {
             name = Some(clean_name(v));
         }
     }
-    Some(Profile { key: key.filter(|k| *k != 0)?, name: name.unwrap_or_else(|| "Путник".into()), look: Default::default() })
+    Some(Profile { key: key.filter(|k| *k != 0)?, name: name.unwrap_or_else(|| "Путник".into()), look: Default::default(), kit: Default::default() })
 }
 
 /// Имя без управляющих символов, не длиннее 32 символов.
@@ -111,11 +113,14 @@ pub fn pack_profile(p: &Profile) -> [u8; 256] {
     out[13..13 + n].copy_from_slice(&name[..n]);
     // Облик — в хвосте блока (имя занимает не дальше 213-го байта).
     out[LOOK_AT..LOOK_AT + 7].copy_from_slice(&p.look.pack());
+    out[KIT_AT..KIT_AT + 6].copy_from_slice(&p.kit.pack());
     out
 }
 
 /// Где в профиле подключения лежит облик.
 const LOOK_AT: usize = 240;
+/// И стартовый набор.
+const KIT_AT: usize = 248;
 
 pub fn unpack_profile(data: &[u8; 256]) -> Option<Profile> {
     if &data[..4] != b"MRPG" {
@@ -125,7 +130,8 @@ pub fn unpack_profile(data: &[u8; 256]) -> Option<Profile> {
     let n = (data[12] as usize).min(200);
     let name = String::from_utf8_lossy(&data[13..13 + n]).to_string();
     let look = crate::appearance::Look::unpack(&data[LOOK_AT..LOOK_AT + 7]);
-    (key != 0).then(|| Profile { key, name: clean_name(&name), look })
+    let kit = crate::start_kit::StartKit::unpack(&data[KIT_AT..KIT_AT + 6]);
+    (key != 0).then(|| Profile { key, name: clean_name(&name), look, kit })
 }
 
 // ---------------------------------------------------------------------------
@@ -278,13 +284,13 @@ mod tests {
 
     #[test]
     fn profile_round_trip() {
-        let p = Profile { key: 0x1234_5678_9abc_def0, name: "Гагик из Херсона".into(), look: crate::appearance::Look::PLAYER_DEFAULT };
+        let p = Profile { key: 0x1234_5678_9abc_def0, name: "Гагик из Херсона".into(), look: crate::appearance::Look::PLAYER_DEFAULT, kit: crate::start_kit::StartKit { weapon: 4, shield: 2, chest: 1, ..Default::default() } };
         assert_eq!(unpack_profile(&pack_profile(&p)), Some(p.clone()));
         // В profile.txt облика нет (он в settings.txt).
-        assert_eq!(parse_profile(&format!("key={:016x}\nname={}\n", p.key, p.name)), Some(Profile { look: Default::default(), ..p }));
+        assert_eq!(parse_profile(&format!("key={:016x}\nname={}\n", p.key, p.name)), Some(Profile { look: Default::default(), kit: Default::default(), ..p }));
         assert!(unpack_profile(&[0u8; 256]).is_none());
         // Очень длинное имя режется по границе буквы.
-        let long = Profile { key: 5, name: "Ж".repeat(40), look: Default::default() };
+        let long = Profile { key: 5, name: "Ж".repeat(40), look: Default::default(), kit: Default::default() };
         let back = unpack_profile(&pack_profile(&long)).unwrap();
         assert!(back.name.chars().all(|c| c == 'Ж'));
     }

@@ -86,7 +86,29 @@ MORPH_SOURCES = {
                  (MH_T + "nose/nose-trans-forward.target", 0.4), (MH_T + "chin/chin-height-incr.target", 0.5),
                  (MH_T + "cheek/l-cheek-volume-decr.target", 0.5), (MH_T + "cheek/r-cheek-volume-decr.target", 0.5)],
     "steppe": [(MH_T + "macrodetails/asian-male-young.target", 0.9), (MH_T + "macrodetails/caucasian-male-young.target", -0.6)],
+    # Квадратная тяжёлая челюсть (с минусом — узкое лицо с острым подбородком).
+    "square": [(MH_T + "head/head-square.target", 0.9), (MH_T + "chin/chin-width-incr.target", 0.6),
+               (MH_T + "chin/chin-bones-incr.target", 0.8), (MH_T + "chin/chin-height-incr.target", -0.3)],
+    # Низкие нависшие брови, глубоко посаженные глаза, покатый лоб.
+    "brow": [(MH_T + "eyebrows/eyebrows-trans-forward.target", 1.0), (MH_T + "eyebrows/eyebrows-trans-down.target", 0.7),
+             (MH_T + "eyebrows/eyebrows-angle-down.target", 0.5), (MH_T + "forehead/forehead-nubian-incr.target", 0.6),
+             (MH_T + "forehead/forehead-trans-forward.target", 0.4)],
+    # Старость: впалые щёки и виски, обвисшие черты.
+    "aged": [(MH_T + "head/head-age-incr.target", 1.0),
+             (MH_T + "cheek/l-cheek-volume-decr.target", 0.6), (MH_T + "cheek/r-cheek-volume-decr.target", 0.6),
+             (MH_T + "cheek/l-cheek-bones-incr.target", 0.4), (MH_T + "cheek/r-cheek-bones-incr.target", 0.4)],
+    # Круглое полное лицо, мягкий подбородок, вздёрнутый нос.
+    "round": [(MH_T + "head/head-round.target", 0.9), (MH_T + "head/head-fat-incr.target", 0.6),
+              (MH_T + "cheek/l-cheek-volume-incr.target", 0.7), (MH_T + "cheek/r-cheek-volume-incr.target", 0.7),
+              (MH_T + "nose/nose-point-up.target", 0.4)],
+    # Широкий нос и полные губы.
+    "broad": [(MH_T + "nose/nose-flaring-incr.target", 0.9), (MH_T + "nose/nose-width1-incr.target", 0.8),
+              (MH_T + "nose/nose-width2-incr.target", 0.5), (MH_T + "mouth/mouth-scale-horiz-incr.target", 0.5),
+              (MH_T + "mouth/mouth-lowerlip-volume-incr.target", 0.8), (MH_T + "mouth/mouth-upperlip-volume-incr.target", 0.7),
+              (MH_T + "nose/nose-hump-decr.target", 0.5)],
 }
+# Цели MakeHuman для черт лица слабоваты (до 0,5–1 см): усиливаем, чтобы лица заметно различались.
+MORPH_GAIN = {"rugged": 1.6, "longnose": 1.6, "aged": 3.0, "broad": 2.5}
 MORPHS = tuple(MORPH_SOURCES)
 BODY_MORPHS = ("thin", "heavy")
 
@@ -102,7 +124,7 @@ def make_morphs(base, rest):
         d = np.zeros_like(base.v)
         for rel, w in src:
             try:
-                d += base.target_delta(rel, w)
+                d += base.target_delta(rel, w * MORPH_GAIN.get(name, 1.0))
             except Exception as e:  # noqa: BLE001
                 print("нет цели", rel, e)
         if name not in BODY_MORPHS:

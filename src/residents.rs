@@ -136,10 +136,10 @@ pub fn outfit(role: Role, seed: u64) -> Outfit {
             beard: Beard::None,
             tunic_color: dyed,
             // Мягкие черты, тоньше кость.
-            shape: Shape { rugged: -0.8, longnose: plain.shape.longnose.min(0.3) - 0.3, heavy: plain.shape.heavy * 0.5, ..plain.shape },
+            shape: Shape { rugged: -0.8, longnose: plain.shape.longnose.min(0.3) - 0.3, square: plain.shape.square.min(0.0) - 0.4, brow: 0.0, heavy: plain.shape.heavy * 0.5, ..plain.shape },
             ..plain
         },
-        Role::Child => Outfit { beard: Beard::None, hair: if plain.hair == Hair::Balding { Hair::Short } else { plain.hair }, shape: Shape { heavy: 0.0, ..plain.shape }, ..plain },
+        Role::Child => Outfit { beard: Beard::None, hair: if plain.hair == Hair::Balding { Hair::Short } else { plain.hair }, shape: Shape { heavy: 0.0, aged: 0.0, brow: plain.shape.brow * 0.3, ..plain.shape }, ..plain },
         // Ученики — юноши: в лучшем случае пушок над губой.
         Role::Student => Outfit { beard: if h(6) < 0.3 { Beard::Moustache } else { Beard::None }, hair: Hair::Short, ..plain },
         // Клир по обычаю носит бороду и длинные волосы.

@@ -158,6 +158,8 @@ pub struct LootWorld {
     pub corpses: HashMap<LootId, Corpse>,
     pub ground: HashMap<LootId, GroundItem>,
     pub inventories: HashMap<u64, Inventory>,
+    /// Стартовый набор каждого игрока (из профиля подключения): выдаётся при входе и после смерти.
+    kits: HashMap<u64, crate::start_kit::StartKit>,
     /// Какое тело открыто у игрока.
     open: HashMap<u64, LootId>,
     /// Тела боевой системы, для которых добыча уже создана.
@@ -182,6 +184,7 @@ impl Default for LootWorld {
             // Свои номера — в отдельном диапазоне, чтобы не совпасть с телами боевой системы.
             next_id: 1 << 40,
             linked: HashSet::new(),
+            kits: HashMap::new(),
             corpses: HashMap::new(),
             ground: HashMap::new(),
             inventories: HashMap::new(),
@@ -218,15 +221,11 @@ impl LootWorld {
         roll_item(ItemBaseId::by_name(name), quality, count, &mut self.rng, &mut self.uids)
     }
 
-    fn starter_inventory(&mut self) -> Inventory {
+    /// «Нищий старт»: выбранные игроком простое оружие и доспех, бинт, уксус и пять фоллисов.
+    fn starter_inventory(&mut self, player: u64) -> Inventory {
         let mut inv = Inventory::new(PLAYER_GRID);
-        let kit = vec![
-            self.make("Спата", Quality::Common, 1),
-            self.make("Стёганая туника", Quality::Common, 1),
-            self.make("Кожаные сапоги", Quality::Poor, 1),
-            self.make("Бинт", Quality::Common, 3),
-            self.make("Фоллис", Quality::Common, 30),
-        ];
+        let chosen = self.kits.get(&player).copied().unwrap_or_default();
+        let kit = chosen.items().into_iter().map(|(name, quality, count)| self.make(name, quality, count)).collect();
         inv.fill(kit, true);
         inv
     }
@@ -393,11 +392,13 @@ fn forward(yaw: f32, pitch: f32) -> Vec3 {
 // Системы
 // ---------------------------------------------------------------------------
 
-fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, mut world: ResMut<LootWorld>) {
+fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, mut world: ResMut<LootWorld>, transport: Option<Res<bevy_renet::netcode::NetcodeServerTransport>>) {
     match &event.0 {
         ServerEvent::ClientConnected { client_id } => {
             let id = *client_id;
-            let inv = world.starter_inventory();
+            let kit = transport.as_ref().and_then(|t| t.user_data(id)).and_then(|d| crate::estates::unpack_profile(&d)).map(|p| p.kit).unwrap_or_default();
+            world.kits.insert(id, kit);
+            let inv = world.starter_inventory(id);
             server.send_message(id, CH_LOOT, encode(&LootServerMessage::Inventory(inv.clone())));
             world.inventories.insert(id, inv);
             for (cid, c) in &world.corpses {
@@ -414,6 +415,7 @@ fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, m
         ServerEvent::ClientDisconnected { client_id, .. } => {
             world.release(&mut server, *client_id, None);
             world.inventories.remove(client_id);
+            world.kits.remove(client_id);
             world.open.remove(client_id);
         }
     }
@@ -792,7 +794,7 @@ fn sync_combat_corpses(mut server: ResMut<RenetServer>, game: Res<GameWorld>, mu
         }
         let (name, inv) = match c.kind {
             ActorKind::Player => {
-                let fresh = world.starter_inventory();
+                let fresh = world.starter_inventory(c.actor);
                 let old = world.inventories.insert(c.actor, fresh.clone()).unwrap_or_else(|| Inventory::new(PLAYER_GRID));
                 server.send_message(c.actor, CH_LOOT, encode(&LootServerMessage::Inventory(fresh)));
                 if world.open.remove(&c.actor).is_some() {
@@ -823,5 +825,32 @@ fn sync_combat_corpses(mut server: ResMut<RenetServer>, game: Res<GameWorld>, mu
         if world.corpses.remove(&id).is_some() {
             server.broadcast_message(CH_LOOT, encode(&LootServerMessage::Removed { id }));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::start_kit::{KitField, StartKit};
+
+    #[test]
+    fn starter_inventory_follows_the_chosen_kit() {
+        let mut world = LootWorld::default();
+        let mut kit = StartKit::default();
+        kit.step(KitField::Weapon, 4); // пехотное копьё
+        kit.step(KitField::Chest, 1); // кольчуга
+        world.kits.insert(7, kit);
+        let inv = world.starter_inventory(7);
+        let worn = |slot| inv.equipped(slot).map(|i| i.info().name);
+        assert_eq!(worn(EquipSlot::MainHand), Some("Пехотное копьё"));
+        assert_eq!(worn(EquipSlot::Chest), Some("Кольчуга"));
+        assert_eq!(worn(EquipSlot::Feet), Some("Кожаные сапоги"));
+        let count = |name: &str| inv.all_items().filter(|i| i.info().name == name).map(|i| i.count as u32).sum::<u32>();
+        assert_eq!(count("Бинт"), 1);
+        assert_eq!(count("Винный уксус"), 1);
+        assert_eq!(crate::economy::purse(&inv), 5 * crate::economy::NUMMI_PER_FOLLIS);
+        // Без набора (старый клиент) — набор по умолчанию: спата и стёганка.
+        let plain = world.starter_inventory(8);
+        assert_eq!(plain.equipped(EquipSlot::MainHand).map(|i| i.info().name), Some("Спата"));
     }
 }

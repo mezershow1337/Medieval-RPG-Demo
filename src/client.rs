@@ -360,7 +360,7 @@ pub fn outfit_of(kind: ActorKind, id: u64, gear: &Gear) -> Outfit {
 }
 
 /// Какой щит в руке: у игроков — надетый, у врагов — по типу (если он у них есть).
-fn shield_of(kind: ActorKind, has_shield: bool, gear: &Gear) -> Option<ShieldKind> {
+pub(crate) fn shield_of(kind: ActorKind, has_shield: bool, gear: &Gear) -> Option<ShieldKind> {
     if kind == ActorKind::Player {
         return gear.shield().map(|s| match s {
             ShieldLook::Oval => ShieldKind::Oval,
@@ -787,7 +787,8 @@ fn gear_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<Wa
 
 /// `MRPG_PEOPLE_SHOWCASE=x,y,z` (или пусто — у агоры): для снимков ряд горожан разного облика
 /// (бороды, усы, бритые, кожа, сложение), лицом к +Z. `MRPG_PEOPLE_WALK=1` — шагают на месте,
-/// `MRPG_PEOPLE_FOCUS=x` — камера крупно у фигуры x, `MRPG_PEOPLE_SEED` — другой набор людей.
+/// `MRPG_PEOPLE_FOCUS=x` — камера крупно у фигуры x, `MRPG_PEOPLE_SEED` — другой набор людей,
+/// `MRPG_PEOPLE_FACES=1` — все варианты лица подряд.
 #[derive(Component)]
 struct ShowcasePerson(usize);
 
@@ -810,8 +811,37 @@ fn people_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<
             None => Transform::from_translation(o + Vec3::new(mid * GAP, 1.3, 4.4)).looking_at(o + Vec3::new(mid * GAP, 0.95, 0.0), Vec3::Y),
         };
     }
-    for (i, role) in roles.iter().enumerate() {
-        let outfit = crate::residents::outfit(*role, 100 + i as u64 * 7 + seed * 131);
+    // `MRPG_PEOPLE_FACES=1` — вместо горожан бритые одинаковые люди со всеми вариантами лица подряд.
+    // Число — с какого лица начать: тогда трое стоят дугой лицом к камере (крупный план).
+    let faces = std::env::var("MRPG_PEOPLE_FACES").is_ok();
+    let first: Option<usize> = std::env::var("MRPG_PEOPLE_FACES").ok().and_then(|s| s.parse().ok());
+    let count = if faces { crate::appearance::FACES.len() } else { roles.len() };
+    for i in 0..count {
+        if let Some(f) = first {
+            if i < f || i >= f + 3 {
+                continue;
+            }
+            let k = (i - f) as f32 - 1.0;
+            let look = crate::appearance::Look { face: i as u8, beard: 4, hair: 0, ..crate::appearance::Look::PLAYER_DEFAULT };
+            let outfit = crate::residents::outfit(Role::Householder, 100).with_look(look);
+            // Камера в точке o + (0, 1.6, 1.3) смотрит на −Z; люди на дуге радиусом 1,3 м.
+            let eye = o + Vec3::new(0.0, 0.0, 1.3);
+            let a = k * 0.36;
+            let at = eye + Vec3::new(a.sin(), 0.0, -a.cos()) * 1.3;
+            commands
+                .spawn((Transform::from_translation(at).with_rotation(Quat::from_rotation_y(std::f32::consts::PI - a)), Visibility::default()))
+                .with_children(|c| {
+                    c.spawn((BodyRig, ShowcasePerson(i), NeedsRig(outfit), Transform::default(), Visibility::default()));
+                });
+            *cam = Transform::from_translation(eye + Vec3::Y * 1.62).looking_at(eye + Vec3::new(0.0, 1.55, -1.3), Vec3::Y);
+            continue;
+        }
+        let outfit = if faces {
+            let look = crate::appearance::Look { face: i as u8, beard: 4, hair: 1, ..crate::appearance::Look::PLAYER_DEFAULT };
+            crate::residents::outfit(Role::Householder, 100).with_look(look)
+        } else {
+            crate::residents::outfit(roles[i], 100 + i as u64 * 7 + seed * 131)
+        };
         commands
             .spawn((Transform::from_translation(o + Vec3::X * (i as f32 * GAP)).with_rotation(Quat::from_rotation_y(std::f32::consts::PI)), Visibility::default()))
             .with_children(|c| {
@@ -824,6 +854,7 @@ fn pose_people(time: Res<Time>, mut rigs: Query<(&ShowcasePerson, &mut RigPose)>
     let walk = std::env::var("MRPG_PEOPLE_WALK").is_ok();
     // Для снимков походки: `MRPG_PEOPLE_PHASE` — доля цикла шага (одинаковая у всех фигур).
     let phase: Option<f32> = std::env::var("MRPG_PEOPLE_PHASE").ok().and_then(|s| s.parse().ok());
+    let faces = std::env::var("MRPG_PEOPLE_FACES").is_ok();
     let now = time.elapsed_secs();
     for (p, mut pose) in &mut rigs {
         let k = p.0 as f32;
@@ -831,7 +862,9 @@ fn pose_people(time: Res<Time>, mut rigs: Query<(&ShowcasePerson, &mut RigPose)>
             Some(u) => (u + k * 0.13) * std::f32::consts::TAU,
             None => now * 1.3 / rig::step_cycle(1.3) * std::f32::consts::TAU + k,
         };
-        *pose = rig::solve_pose(&PoseInput { time: now + k * 3.7, walk: if walk { 1.0 } else { 0.0 }, walk_phase, ..default() }).pose;
+        // Для сравнения лиц все стоят одинаково и смотрят прямо.
+        let t = if faces { 0.0 } else { now + k * 3.7 };
+        *pose = rig::solve_pose(&PoseInput { time: t, walk: if walk { 1.0 } else { 0.0 }, walk_phase, ..default() }).pose;
     }
 }
 
