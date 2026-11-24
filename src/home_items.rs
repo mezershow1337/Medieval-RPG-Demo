@@ -238,17 +238,3 @@ mod tests {
         assert!(layout.containers.iter().filter(|c| c.house.is_some()).count() > 40);
     }
 }
-#[cfg(test)]
-mod dbg_print {
-    #[test]
-    fn dbg_houses() {
-        let layout = crate::level::layout();
-        for (h, hs) in layout.houses.iter().enumerate().take(12) {
-            let items: Vec<_> = layout.house_items.iter().filter(|s| s.house == h as u32).collect();
-            eprintln!("H{h} {} min {} max {} items {}", hs.name, hs.min, hs.max, items.len());
-            for s in items.iter().take(40) {
-                eprintln!("   {:.2},{:.2},{:.2} {}", s.pos.x, s.pos.y, s.pos.z, s.item);
-            }
-        }
-    }
-}

@@ -634,8 +634,8 @@ struct LazyModel {
 
 /// Ближе этого (м) вещи в домах получают модель, дальше [`HOME_ITEM_DROP`] — теряют:
 /// их тысячи, а из-за стен их всё равно не видно.
-const HOME_ITEM_DRAW: f32 = 28.0;
-const HOME_ITEM_DROP: f32 = 34.0;
+const HOME_ITEM_DRAW: f32 = 22.0;
+const HOME_ITEM_DROP: f32 = 27.0;
 /// Сколько моделей создавать за проверку, чтобы не было рывков.
 const HOME_ITEM_BATCH: usize = 120;
 
