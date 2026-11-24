@@ -66,6 +66,10 @@ pub fn about(skill: Skill) -> SkillAbout {
             "Дешевле покупаете и дороже продаёте.",
             "Сделки в лавках и мена за стенами. Чем больше оборот — тем больше опыта.",
         ),
+        Skill::Eloquence => a(
+            "Стража чаще верит вашим словам и отпускает без пени.",
+            "Разговоры со стражей (удачные — особенно), торг в лавках, уроки риторики по книгам.",
+        ),
     }
 }
 
@@ -120,6 +124,9 @@ pub enum Perk {
     KnowsPrice,
     Haggler,
     Merchant,
+    // Красноречие
+    SweetWords,
+    Advocate,
 }
 
 /// Условие умения.
@@ -191,12 +198,12 @@ use Need as N;
 use Skill as S;
 
 impl Perk {
-    pub const ALL: [Perk; 34] = {
+    pub const ALL: [Perk; 36] = {
         use Perk::*;
         [
             PortersBack, HeavyHand, Hammerman, SecondWind, ArmourHabit, ForcedMarch, Drill, TurnTheBlade, Veteran, Bucellarius, SteadyAim, SteppeBow, Sagittarius, ForgeEye, Temperer,
             Bladesmith, MasterSmith, Stoker, Zosimian, Colourman, FireMaster, Rhizotomist, HerbKnower, Pharmacist, Dresser, HerbHealer, Surgeon, Archiatros, Literate, Bookman, Rhetor,
-            KnowsPrice, Haggler, Merchant,
+            KnowsPrice, Haggler, Merchant, SweetWords, Advocate,
         ]
     };
 
@@ -473,6 +480,22 @@ impl Perk {
                 "Покупка −4%, продажа +4%.",
                 &[N::Skill(S::Trade, 60.0), N::Skill(S::Letters, 25.0), N::Perk(Haggler)],
             ),
+            SweetWords => p(
+                "Ласковое слово",
+                S::Eloquence,
+                0,
+                "Вовремя улыбнуться, назвать стражника по имени, вспомнить общего знакомого.",
+                "Уговорить стражу легче (+8%).",
+                &[N::Skill(S::Eloquence, 15.0)],
+            ),
+            Advocate => p(
+                "Ходатай",
+                S::Eloquence,
+                1,
+                "Знает, на какой закон сослаться и чьё имя назвать в претории.",
+                "Уговорить стражу ещё легче (+10%), торг +2%.",
+                &[N::Skill(S::Eloquence, 40.0), N::Skill(S::Letters, 20.0), N::Perk(SweetWords)],
+            ),
         }
     }
 
@@ -581,6 +604,8 @@ pub struct Mods {
     pub reading: f32,
     /// Скорость учения у мастера.
     pub lessons: f32,
+    /// Прибавка к удаче уговорить стражу (0.1 = +10%).
+    pub persuade: f32,
 }
 
 impl Default for Mods {
@@ -600,6 +625,7 @@ impl Default for Mods {
             sell: 1.0,
             reading: 1.0,
             lessons: 1.0,
+            persuade: 0.0,
         }
     }
 }
@@ -669,6 +695,13 @@ impl Mods {
                 Rhetor => {
                     m.reading *= 1.15;
                     m.lessons *= 1.1;
+                    m.buy *= 0.98;
+                    m.sell *= 1.02;
+                    m.persuade += 0.04;
+                }
+                SweetWords => m.persuade += 0.08,
+                Advocate => {
+                    m.persuade += 0.1;
                     m.buy *= 0.98;
                     m.sell *= 1.02;
                 }

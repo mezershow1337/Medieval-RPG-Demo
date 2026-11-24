@@ -197,6 +197,19 @@ pub fn profile(kind: ActorKind) -> Profile {
             patience: 1.5,
             aggro: 26.0,
         },
+        // Горожанин с топором или вилами: без доспеха и выучки, но злой и не один.
+        ActorKind::Townsman => Profile {
+            hp: 70.0,
+            weapon: WeaponKind::Axe,
+            shield: false,
+            armor: 5.0,
+            damage_mult: 0.8,
+            speed: 2.7,
+            defend_chance: 0.15,
+            cooldown: (1.6, 3.0),
+            patience: 1.0,
+            aggro: 16.0,
+        },
     }
 }
 
@@ -276,6 +289,7 @@ impl Training {
             ActorKind::GothWarrior => (0.3, 0.8),
             ActorKind::AlanLancer => (0.15, 0.7),
             ActorKind::HunArcher => (0.4, 0.9),
+            ActorKind::Townsman => (0.85, 1.0),
         };
         if r < recruit {
             Training::Recruit
@@ -476,6 +490,15 @@ pub struct Brain {
     evade_on_notice: bool,
     /// Стражник идёт задержать этого игрока (не нападает, пока тот не окажет сопротивление).
     pub arrest: Option<u64>,
+    /// Путь по делу (на крик, к месту преступления, в казарму и обратно на пост): точки по
+    /// сетке проходов города, идёт по ним, пока не встретит цель.
+    pub route: Vec<Vec3>,
+    /// Бежит, а не идёт.
+    pub hurry: bool,
+    /// Сколько секунд не может приблизиться к очередной точке пути (застрял).
+    stuck: f32,
+    /// Расстояние до очередной точки в прошлый раз.
+    route_dist: f32,
 }
 
 impl Brain {
@@ -496,6 +519,32 @@ impl Brain {
     /// Нападать ли на этого игрока.
     pub fn hostile_to(&self, player: u64) -> bool {
         self.faction.is_none() || self.provoked.contains(&player) || self.hostile_players.contains(&player)
+    }
+
+    /// Пойти (или побежать) по пути из точек.
+    pub fn set_route(&mut self, route: Vec<Vec3>, hurry: bool) {
+        self.route = route;
+        self.hurry = hurry;
+        self.stuck = 0.0;
+        self.route_dist = f32::MAX;
+        self.stroll_to = None;
+    }
+
+    /// Сменить пост (место, вокруг которого стоит и бродит, и откуда не уходит далеко).
+    pub fn set_post(&mut self, at: Vec3, yaw: f32, wander: f32) {
+        self.home = at;
+        self.home_yaw = yaw;
+        self.wander = wander;
+        self.stroll_to = None;
+    }
+
+    pub fn wander(&self) -> f32 {
+        self.wander
+    }
+
+    /// Сейчас дерётся (видит цель).
+    pub fn fighting(&self) -> bool {
+        self.target.is_some()
     }
 
     /// На него или его товарищей напали.
@@ -923,9 +972,30 @@ pub fn think(
         }
         // Стражник идёт к разыскиваемому и встаёт перед ним.
         let arrest = brain.arrest.and_then(|id| others.iter().find(|o| o.id == id && o.alive)).map(|o| o.pose.feet);
-        let goal = arrest.unwrap_or(brain.stroll_to.unwrap_or(brain.home));
+        // По делу: идём по точкам пути, пропуская достигнутые (и ту, к которой не пройти).
+        while let Some(next) = brain.route.first().copied() {
+            let d = Vec2::new(next.x - pose.feet.x, next.z - pose.feet.z).length();
+            if d < 0.9 || brain.stuck > 2.5 {
+                brain.route.remove(0);
+                brain.stuck = 0.0;
+                brain.route_dist = f32::MAX;
+                continue;
+            }
+            if d < brain.route_dist - 0.05 {
+                brain.route_dist = d;
+                brain.stuck = 0.0;
+            } else {
+                brain.stuck += dt;
+            }
+            break;
+        }
+        let on_route = arrest.is_none() && !brain.route.is_empty();
+        let goal = arrest.or(brain.route.first().copied()).unwrap_or(brain.stroll_to.unwrap_or(brain.home));
         let to_goal = goal - pose.feet;
-        if let Some(at) = arrest {
+        if on_route {
+            pose.yaw = turn_towards(pose.yaw, yaw_towards(pose.feet, goal), 5.0 * dt);
+            wish = pose.forward_flat() * if brain.hurry { 1.3 } else { 0.6 };
+        } else if let Some(at) = arrest {
             pose.yaw = turn_towards(pose.yaw, yaw_towards(pose.feet, at), 3.0 * dt);
             if Vec2::new(to_goal.x, to_goal.z).length() > 1.7 {
                 wish = pose.forward_flat() * 0.9;
@@ -940,7 +1010,9 @@ pub fn think(
 
     // --- Движение с физикой ---
     let move_speed = speed * fighter.move_speed_mult();
-    let wish = wish.clamp_length_max(1.0) * move_speed;
+    // Бегом по делу — быстрее обычного шага.
+    let cap = if brain.hurry && brain.target.is_none() && !brain.route.is_empty() { 1.3 } else { 1.0 };
+    let wish = wish.clamp_length_max(cap) * move_speed;
     brain.velocity.x = wish.x;
     brain.velocity.z = wish.z;
     brain.velocity.y -= GRAVITY * dt;

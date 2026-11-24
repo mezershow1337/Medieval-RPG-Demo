@@ -241,6 +241,8 @@ impl Outfit {
                 trousers: Color::srgb(0.35, 0.3, 0.25),
                 ..base
             },
+            // Горожанина рисуют в одежде того жителя, кто схватился за оружие (`client::outfit_of`).
+            ActorKind::Townsman => base,
             ActorKind::HunArcher => Outfit {
                 head: HeadGear::FeltCap,
                 tunic: Tunic::Kaftan,

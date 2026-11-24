@@ -149,6 +149,11 @@ impl Nav {
         true
     }
 
+    /// Путь для бегущего по делу (стражник на крик): A* с запасом 40 м вокруг.
+    pub fn route(&self, from: Vec3, to: Vec3) -> Option<Vec<Vec3>> {
+        self.local_path(from, to, 40.0)
+    }
+
     /// Путь между близкими точками: A* в прямоугольнике вокруг них (с запасом `margin` м).
     fn local_path(&self, from: Vec3, to: Vec3, margin: f32) -> Option<Vec<Vec3>> {
         use std::cmp::Reverse;
@@ -1692,10 +1697,12 @@ fn move_residents_server(clock: Res<crate::world_clock::WorldClock>, mut civil: 
     fright.settle(day, now);
     for (i, plan) in plans.people.iter().enumerate() {
         let Some(p) = civil.people.get_mut(i) else { break };
-        if p.role.is_none() || !p.alive() {
+        // Схватился за оружие и бегает бойцом (`civil_server::rally`): им правит сервер боя.
+        if p.role.is_none() || !p.alive() || p.rallied.is_some() {
             continue;
         }
         let Some(s) = fright.state(plan, i, now) else { continue };
+        p.act = s.act;
         let anchor = town().map_or(p.pos, |t| t.residents[i].pos);
         p.pos = s.pos;
         p.yaw = s.yaw;

@@ -261,6 +261,8 @@ pub struct Layout {
     pub torches: Vec<Torch>,
     pub lamps: Vec<Lamp>,
     pub glass: Vec<GlassPane>,
+    /// Окна с деревянной решёткой (проём по середине толщины стены): ночью некоторые светятся.
+    pub windows: Vec<Aabb>,
     /// Декоративная геометрия по материалам и участкам карты (без коллизий).
     pub decor: HashMap<(Mat, Chunk), MeshBuilder>,
     /// Невидимые преграды (стёкла окон и т. п.).
@@ -497,6 +499,7 @@ struct Builder {
     torches: Vec<Torch>,
     lamps: Vec<Lamp>,
     glass: Vec<GlassPane>,
+    windows: Vec<Aabb>,
     decor: HashMap<(Mat, Chunk), MeshBuilder>,
     invisible: Vec<Aabb>,
     ground: Option<HeightField>,
@@ -527,6 +530,7 @@ impl Builder {
             torches: Vec::new(),
             lamps: Vec::new(),
             glass: Vec::new(),
+            windows: Vec::new(),
             decor: HashMap::new(),
             invisible: Vec::new(),
             ground: None,
@@ -552,6 +556,7 @@ impl Builder {
             torches: self.torches,
             lamps: self.lamps,
             glass: self.glass,
+            windows: self.windows,
             decor: self.decor,
             invisible: self.invisible,
             ground: self.ground,
@@ -578,6 +583,7 @@ impl Builder {
         let shift = |a: Aabb| Aabb::new(a.min + offset, a.max + offset);
         self.blocks.extend(t.blocks.into_iter().map(|b| Block { aabb: shift(b.aabb), ..b }));
         self.invisible.extend(t.invisible.into_iter().map(shift));
+        self.windows.extend(t.windows.into_iter().map(shift));
         self.torches.extend(t.torches.into_iter().map(|x| Torch { pos: x.pos + offset, ..x }));
         self.lamps.extend(t.lamps.into_iter().map(|x| Lamp { pos: x.pos + offset, ..x }));
         self.hearths.extend(t.hearths.into_iter().map(|p| p + offset));
@@ -1026,6 +1032,7 @@ pub fn spawn_level(
     mut flame_mats: ResMut<Assets<crate::graphics::FlameMaterial>>,
     mut water_mats: ResMut<Assets<crate::sky::WaterMaterial>>,
     mut smoke_mats: ResMut<Assets<crate::smoke::SmokeMaterial>>,
+    mut window_mats: ResMut<Assets<StandardMaterial>>,
 ) {
     let mut layout = layout();
     commands.insert_resource(crate::vegetation::PendingPlants(std::mem::take(&mut layout.plants)));
@@ -1148,6 +1155,25 @@ pub fn spawn_level(
     let flame = flame_mats.add(crate::graphics::FlameMaterial::default());
     for (i, t) in layout.torches.iter().enumerate() {
         crate::graphics::spawn_flame(&mut commands, flame_mesh.clone(), flame.clone(), t.pos + Vec3::Y * 0.12, t.out, i as f32 * 1.7);
+    }
+    // Ночью в части окон горит свет: тёплое свечение за деревянной решёткой (не у всех — кто-то спит).
+    let mut glow = MeshBuilder::default();
+    for (i, w) in layout.windows.iter().enumerate() {
+        if crate::world_clock::unit(i as u64, 0x3D0) < 0.45 {
+            glow.cuboid(w.min, w.max);
+        }
+    }
+    if !glow.is_empty() {
+        let mat = window_mats.add(StandardMaterial {
+            base_color: Color::BLACK,
+            emissive: LinearRgba::BLACK,
+            perceptual_roughness: 1.0,
+            double_sided: true,
+            cull_mode: None,
+            ..default()
+        });
+        commands.insert_resource(crate::daylight::WindowGlow(mat.clone()));
+        commands.spawn((Mesh3d(meshes.add(glow.build())), MeshMaterial3d(mat), Transform::IDENTITY, Visibility::Hidden, NotShadowCaster, crate::daylight::WindowGlowMesh));
     }
     for lamp in &layout.lamps {
         commands.spawn((

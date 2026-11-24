@@ -214,7 +214,34 @@ pub fn city_layout() -> Layout {
     let holes = std::mem::take(&mut b.holes);
     b.ground = Some(terrain::heightfield(holes));
     b.water_y = Some(WATER_Y);
-    b.finish()
+    let mut layout = b.finish();
+    let lamps = door_lamps(&layout);
+    layout.torches.extend(lamps);
+    layout
+}
+
+/// Факелы у дверей лавок и домов на мощёной главной улице и агоре (у каждой второй двери):
+/// ночью от них на мостовой тёплые пятна света. Снаружи — та сторона, где под ногами плиты.
+fn door_lamps(layout: &Layout) -> Vec<super::Torch> {
+    let paving: Vec<&super::Block> = layout.blocks.iter().filter(|b| b.mat == Mat::Paving).collect();
+    let paved = |p: Vec3| paving.iter().any(|b| b.aabb.min.x <= p.x && p.x <= b.aabb.max.x && b.aabb.min.z <= p.z && p.z <= b.aabb.max.z && (b.aabb.max.y - p.y).abs() < 0.5);
+    let mut out = Vec::new();
+    for (i, d) in layout.doors.iter().enumerate() {
+        if crate::world_clock::unit(i as u64, 0x1A4) > 0.5 || d.height < 1.8 {
+            continue;
+        }
+        let n = if d.along_x { Vec3::Z } else { Vec3::X };
+        let off = d.wall_t * 0.5 + 0.6;
+        let dir = match (paved(d.center + n * off), paved(d.center - n * off)) {
+            (true, false) => n,
+            (false, true) => -n,
+            _ => continue,
+        };
+        let side = if d.along_x { Vec3::X } else { Vec3::Z };
+        let pos = d.center + dir * (d.wall_t * 0.5 + 0.22) + side * (d.width * 0.5 + 0.4) + Vec3::Y * 2.15;
+        out.push(super::Torch { pos, out: dir });
+    }
+    out
 }
 
 /// Мостовые: главная улица и площадь — известняковые плиты с крытым водостоком посередине;
@@ -256,6 +283,19 @@ mod tests {
 
     fn free(level: &LevelColliders, p: Vec3) -> bool {
         level.body_is_free(&Body::STANDING, p)
+    }
+
+    #[test]
+    fn street_doors_get_lamps_and_windows_are_known() {
+        let layout = city_layout();
+        let lamps = door_lamps(&layout);
+        assert!(lamps.len() > 60, "факелов у дверей: {}", lamps.len());
+        // Факел смотрит на улицу (горизонтально) и висит над человеческим ростом.
+        for t in &lamps {
+            assert!((t.out.length() - 1.0).abs() < 1e-3 && t.out.y == 0.0);
+            assert!(t.pos.y > 1.8, "{:?}", t.pos);
+        }
+        assert!(layout.windows.len() > 100, "окон: {}", layout.windows.len());
     }
 
     /// Идёт по ломаной; возвращает конечную точку. Падает, если застрял.

@@ -98,6 +98,7 @@ mod work_client;
 mod worn;
 mod world_clock;
 mod daily_life;
+mod daylight;
 mod life_client;
 mod night_lights;
 

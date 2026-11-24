@@ -94,6 +94,12 @@ pub struct CrimeCommitted {
     pub victim: Faction,
     pub at: Vec3,
     pub fine: u32,
+    /// Торговец, который поймал (для свидетелей).
+    pub merchant: Option<MerchantId>,
+    /// Цена украденного.
+    pub value: u32,
+    /// Что украли.
+    pub what: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -900,6 +906,9 @@ fn deal(
                 victim: victim.def().faction,
                 at,
                 fine,
+                merchant: None,
+                value: 0,
+                what: String::new(),
             });
             return DealOutcome::Caught {
                 said: format!(
@@ -1063,6 +1072,9 @@ fn deal(
                 victim: Faction::Garrison,
                 at,
                 fine,
+                merchant: None,
+                value: 0,
+                what: String::new(),
             });
             return DealOutcome::Done {
                 said: format!(
@@ -1170,23 +1182,22 @@ fn caught_stealing(tw: &mut TradeWorld, player: u64, id: MerchantId, item: &Item
             def.name
         );
     }
+    // В городе суд вершит стража: торговец кричит, а пеню назначат, только если
+    // кто-то из свидетелей (и он сам) добежит до стражи (см. `civil_server`).
     let fine = item.value() * Crime::TheftCaught.fine_multiplier();
-    tw.add_fine(player, fine);
-    tw.change_rep(player, def.faction, -12.0);
-    if def.faction != Faction::Garrison {
-        tw.change_rep(player, Faction::Garrison, -4.0);
-    }
     crimes.push(CrimeCommitted {
         player,
         crime: Crime::TheftCaught,
         victim: def.faction,
         at,
         fine,
+        merchant: Some(id),
+        value: item.value(),
+        what: name.to_string(),
     });
     format!(
-        "«Держи вора!» {} поймал вас с «{name}». По закону — штраф в четверную цену: {}",
-        def.name,
-        format_money(fine)
+        "«Держи вора!» {} схватил вас за руку с «{name}» и зовёт стражу. Свидетели побегут доносить: у вас секунд десять.",
+        def.name
     )
 }
 

@@ -183,6 +183,7 @@ pub fn run(start: crate::menu::Start) {
         .add_plugins(crate::world_clock::ClockClientPlugin)
         .add_plugins(crate::life_client::LifeClientPlugin)
         .add_plugins(crate::night_lights::NightLightsPlugin)
+        .add_plugins(crate::daylight::DaylightPlugin)
         .add_plugins(crate::civil_client::CivilClientPlugin)
         .add_plugins(crate::trade_client::TradeClientPlugin)
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))
@@ -238,9 +239,13 @@ fn on_netcode_error(event: On<NetcodeErrorEvent>, mut state: ResMut<NetState>) {
 pub struct WaitingCamera;
 
 /// Снимки уровня (MRPG_CAM): прячем интерфейс.
-fn hide_ui_for_shots(mut roots: Query<&mut Visibility, (With<Node>, Without<ChildOf>)>) {
-    for mut v in &mut roots {
-        *v = Visibility::Hidden;
+fn hide_ui_for_shots(mut roots: Query<(&mut Visibility, Has<crate::civil_client::ShotKeep>), (With<Node>, Without<ChildOf>)>) {
+    // Снимок окна стражи (`MRPG_LAW_DEMO`): его окна оставляем.
+    let law = std::env::var_os("MRPG_LAW_DEMO").is_some();
+    for (mut v, keep) in &mut roots {
+        if !(law && keep) {
+            *v = Visibility::Hidden;
+        }
     }
 }
 
@@ -255,21 +260,26 @@ fn mute_player_camera_for_shots(mut cams: Query<&mut Camera, With<crate::player:
 /// ожидания по очереди встаёт в каждую точку и сохраняет `MRPG_TOUR_DIR/имя.png` (первый снимок —
 /// через `MRPG_TOUR_FRAMES` кадров, пока всё грузится, следующие — через 8), потом игра выходит.
 /// Одна загрузка уровня на много снимков: на программном рендере это минуты и гигабайты.
+/// `имя@часы:…` — снимок в другое время суток (`@75.5` — 03:30 четвёртых суток).
 fn shot_tour(mut commands: Commands, mut cams: Query<&mut Transform, With<WaitingCamera>>, mut state: Local<(usize, u32)>, mut exit: MessageWriter<AppExit>) {
     let tour = std::env::var("MRPG_TOUR").unwrap_or_default();
-    let views: Vec<(&str, Transform)> = tour
+    let views: Vec<(&str, Option<f64>, Transform)> = tour
         .split(';')
         .filter_map(|v| {
             let (name, cam) = v.split_once(':')?;
+            let (name, at) = match name.split_once('@') {
+                Some((n, h)) => (n, h.trim().parse::<f64>().ok().map(|h| h * 3600.0)),
+                None => (name, None),
+            };
             let f: Vec<f32> = cam.split(',').filter_map(|t| t.trim().parse().ok()).collect();
-            (f.len() == 6).then(|| (name.trim(), Transform::from_xyz(f[0], f[1], f[2]).looking_at(Vec3::new(f[3], f[4], f[5]), Vec3::Y)))
+            (f.len() == 6).then(|| (name.trim(), at, Transform::from_xyz(f[0], f[1], f[2]).looking_at(Vec3::new(f[3], f[4], f[5]), Vec3::Y)))
         })
         .collect();
     let first: u32 = std::env::var("MRPG_TOUR_FRAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(30);
     let dir = std::env::var("MRPG_TOUR_DIR").unwrap_or_else(|_| ".".into());
     let (i, n) = &mut *state;
     *n += 1;
-    let Some((name, tf)) = views.get(*i) else {
+    let Some((name, at, tf)) = views.get(*i) else {
         if *n > 12 {
             exit.write(AppExit::Success);
         }
@@ -278,7 +288,12 @@ fn shot_tour(mut commands: Commands, mut cams: Query<&mut Transform, With<Waitin
     for mut c in &mut cams {
         *c = *tf;
     }
-    if *n >= if *i == 0 { first } else { 8 } {
+    if at.is_some() {
+        crate::graphics::set_shot_time(*at);
+    }
+    // Сменилось время — ждём дольше: свет неба пересчитывается в фоне.
+    let changed = *i > 0 && at.is_some() && views[*i - 1].1 != *at;
+    if *n >= if *i == 0 { first } else if changed { 16 } else { 8 } {
         info!("обход: снимок {name}");
         commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(format!("{dir}/{name}.png")));
         *i += 1;
@@ -355,6 +370,12 @@ pub fn weapon_grips(weapon: WeaponKind) -> (Vec3, Option<Vec3>) {
 
 /// Как одет боец: враги — по своему типу, игроки — по надетому в инвентаре.
 pub fn outfit_of(kind: ActorKind, id: u64, gear: &Gear) -> Outfit {
+    if kind == ActorKind::Townsman
+        && let Some(i) = crate::civil_server::militia_resident(id)
+        && let Some(role) = crate::residents::role_of(i)
+    {
+        return crate::residents::outfit(role, i as u64 + 17);
+    }
     let base = Outfit::for_actor(kind, id);
     if kind == ActorKind::Player { base.with_gear(gear) } else { base }
 }

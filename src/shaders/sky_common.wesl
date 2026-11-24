@@ -5,10 +5,11 @@
 // Закат («золотой час»): глубокая синева в зените, золото и персик у горизонта со стороны
 // солнца, розоватый «пояс Венеры» и сизая дымка с противоположной стороны, кучевые облака,
 // подсвеченные снизу (тёмные сердцевины, золотые края), высокие перистые облака.
-// День: голубое небо с белыми облаками.
+// День: голубое небо с белыми облаками. Ночь: тёмная синева, луна и звёзды, облака в
+// лунном свете. Между ними — плавно, по часам мира (graphics::mood_at).
 
 struct SkyParams {
-    // xyz — направление на солнце, w — 1 днём, 0 на закате.
+    // xyz — направление на солнце, w — «день» 0..1 (1 днём, 0 на закате и в сумерках).
     sun: vec4<f32>,
     // Цвет горизонта со стороны от солнца (он же цвет дымки), w — облачность 0..1.
     horizon: vec4<f32>,
@@ -16,6 +17,10 @@ struct SkyParams {
     horizon_sun: vec4<f32>,
     // Цвет зенита, w — время сдвига облаков (для отражений можно 0).
     zenith: vec4<f32>,
+    // xyz — направление на луну, w — освещённая часть диска 0..1.
+    moon: vec4<f32>,
+    // x — ночь 0..1, y — ненастье (серая пелена туч) 0..1, zw — ветер, м/с (снос облаков).
+    extra: vec4<f32>,
 }
 
 fn hash21(p: vec2<f32>) -> f32 {
@@ -55,106 +60,121 @@ fn horizon_color(dir: vec3<f32>, s: SkyParams) -> vec3<f32> {
 }
 
 // Облака: x — плотность покрытия 0..1, yzw — цвет.
-fn cloud_layer(dir: vec3<f32>, sun: vec3<f32>, t: f32, cover_k: f32, day: bool, hor: vec3<f32>) -> vec4<f32> {
+fn cloud_layer(dir: vec3<f32>, s: SkyParams, t: f32, hor: vec3<f32>) -> vec4<f32> {
     let e = dir.y;
     if e <= 0.0 {
         return vec4<f32>(0.0);
     }
+    let sun = normalize(s.sun.xyz);
+    let d = clamp(s.sun.w, 0.0, 1.0);
+    let n = clamp(s.extra.x, 0.0, 1.0);
+    let oc = clamp(s.extra.y, 0.0, 1.0);
+    let cover_k = s.horizon.w;
     let sd = max(dot(dir, sun), 0.0);
     let s2 = normalize(sun.xz + vec2<f32>(1e-4, 0.0));
     let toward = clamp(dot(normalize(dir.xz + vec2<f32>(1e-5, 0.0)), s2) * 0.5 + 0.5, 0.0, 1.0);
-    // Плоскость облаков: вдали сжимается к горизонту.
-    let p = dir.xz / (e + 0.07) * 0.75 + vec2<f32>(t * 0.0035, t * 0.0012);
+    // Плоскость облаков: вдали сжимается к горизонту; облака сносит ветром.
+    let drift = vec2<f32>(0.0035, 0.0012) + s.extra.zw * 0.0009;
+    let p = dir.xz / (e + 0.07) * 0.75 + drift * t;
     // Искривление пространства — рваные, «живые» края.
     let w = vec2<f32>(fbm3(p * 0.6 + 3.1), fbm3(p * 0.6 + 7.7));
     let q = p + (w - 0.5) * 1.1;
-    let d = fbm(q * 1.3);
-    let thr = mix(0.66, 0.44, cover_k);
-    let cover = smoothstep(thr, thr + 0.16, d) * smoothstep(0.0, 0.07, e);
+    let dn = fbm(q * 1.3);
+    let thr = mix(0.66, 0.44, min(cover_k, 1.0)) - 0.22 * smoothstep(0.7, 1.0, cover_k) - 0.3 * oc;
+    // В ненастье тучи сливаются в сплошную пелену без просветов.
+    let cover = max(smoothstep(thr, thr + 0.16, dn), oc * 0.93) * smoothstep(0.0, 0.07, e);
     // Самозатенение: насколько облако гуще в сторону солнца.
     let d_sun = fbm((q + s2 * 0.16) * 1.3);
-    let lit = clamp((d - d_sun) * 5.0 + 0.45, 0.0, 1.0);
-    let thin = 1.0 - smoothstep(thr + 0.05, thr + 0.3, d);
-    var c: vec3<f32>;
-    if day {
-        c = mix(vec3<f32>(0.62, 0.66, 0.76), vec3<f32>(1.32, 1.3, 1.26), lit * 0.7 + thin * 0.3);
-        c += vec3<f32>(0.8, 0.7, 0.5) * pow(sd, 10.0) * thin;
-    } else {
-        // Снизу облака подсвечены закатом: у солнца — золото, над головой — персик и розовый,
-        // напротив — сизо-лиловые; сердцевины тёмные.
-        let gold = mix(vec3<f32>(1.25, 0.62, 0.55), vec3<f32>(2.9, 1.45, 0.55), pow(toward, 2.0));
-        let shadow = mix(vec3<f32>(0.26, 0.27, 0.40), vec3<f32>(0.42, 0.26, 0.26), toward);
-        c = mix(shadow, gold, lit * (0.35 + 0.65 * thin));
-        // Серебристая (золотая) кромка у облаков рядом с солнцем.
-        c += vec3<f32>(4.0, 2.3, 1.0) * pow(sd, 9.0) * thin * 1.6;
-    }
+    let lit = clamp((dn - d_sun) * 5.0 + 0.45, 0.0, 1.0);
+    let thin = 1.0 - smoothstep(thr + 0.05, thr + 0.3, dn);
+    // День: белые кучевые с серыми днищами.
+    var day_c = mix(vec3<f32>(0.62, 0.66, 0.76), vec3<f32>(1.32, 1.3, 1.26), lit * 0.7 + thin * 0.3);
+    day_c += vec3<f32>(0.8, 0.7, 0.5) * pow(sd, 10.0) * thin;
+    // Закат: снизу облака подсвечены — у солнца золото, над головой персик и розовый,
+    // напротив сизо-лиловые; сердцевины тёмные; золотая кромка у солнца.
+    let gold = mix(vec3<f32>(1.25, 0.62, 0.55), vec3<f32>(2.9, 1.45, 0.55), pow(toward, 2.0));
+    let shadow = mix(vec3<f32>(0.26, 0.27, 0.40), vec3<f32>(0.42, 0.26, 0.26), toward);
+    var gold_c = mix(shadow, gold, lit * (0.35 + 0.65 * thin));
+    gold_c += vec3<f32>(4.0, 2.3, 1.0) * pow(sd, 9.0) * thin * 1.6;
+    var c = mix(gold_c, day_c, d);
+    // Ненастье: тяжёлые серые тучи.
+    let grey = mix(vec3<f32>(0.34, 0.35, 0.38), vec3<f32>(0.62, 0.64, 0.68), lit * 0.6 + thin * 0.4) * mix(0.55, 1.0, d);
+    c = mix(c, grey, oc * 0.8);
+    // Ночь: тёмные облака, края серебрятся в лунном свете.
+    let moon = normalize(s.moon.xyz);
+    let md = max(dot(dir, moon), 0.0);
+    let moon_up = smoothstep(-0.02, 0.1, moon.y) * s.moon.w;
+    var night_c = mix(vec3<f32>(0.010, 0.012, 0.020), vec3<f32>(0.045, 0.052, 0.075), lit) * (0.6 + 0.8 * moon_up);
+    night_c += vec3<f32>(0.35, 0.38, 0.45) * pow(md, 12.0) * thin * moon_up;
+    c = mix(c, night_c, n);
     // Дальние облака тонут в дымке горизонта.
     c = mix(c, hor, (1.0 - smoothstep(0.0, 0.22, e)) * 0.55);
-    // Перистые облака — тонкие штрихи высоко в небе.
-    let pc = dir.xz / (e + 0.3) * 0.55 + vec2<f32>(t * 0.002, 0.0);
+    // Перистые облака — тонкие штрихи высоко в небе (в ненастье их не видно за тучами).
+    let pc = dir.xz / (e + 0.3) * 0.55 + vec2<f32>(t * 0.002, 0.0) + s.extra.zw * (t * 0.0004);
     let rp = vec2<f32>(pc.x * 0.8 + pc.y * 0.6, -pc.x * 0.6 + pc.y * 0.8);
     let streak = fbm(vec2<f32>(rp.x * 0.45, rp.y * 5.0) + w * 0.6);
-    let cirrus = smoothstep(0.56, 0.78, streak) * smoothstep(0.04, 0.25, e) * 0.55 * (1.0 - cover);
-    var cc: vec3<f32>;
-    if day {
-        cc = vec3<f32>(1.1, 1.12, 1.15);
-    } else {
-        cc = mix(vec3<f32>(1.0, 0.55, 0.6), vec3<f32>(2.3, 1.2, 0.6), pow(toward, 1.5));
-    }
+    let cirrus = smoothstep(0.56, 0.78, streak) * smoothstep(0.04, 0.25, e) * 0.55 * (1.0 - cover) * (1.0 - oc);
+    var cc = mix(mix(vec3<f32>(1.0, 0.55, 0.6), vec3<f32>(2.3, 1.2, 0.6), pow(toward, 1.5)), vec3<f32>(1.1, 1.12, 1.15), d);
+    cc = mix(cc, vec3<f32>(0.04, 0.045, 0.06) * (0.6 + moon_up), n);
     let total = cover + cirrus;
     let col = (c * cover + cc * cirrus) / max(total, 1e-4);
     return vec4<f32>(min(total, 1.0), col);
 }
 
-// Небо в направлении `dir`. `disc` — рисовать ли диск солнца (в отражениях его заменяет блик).
+// Небо в направлении `dir`. `disc` — рисовать ли диски солнца и луны (в отражениях их
+// заменяет блик).
 fn sky_radiance(dir_in: vec3<f32>, s: SkyParams, t: f32, disc: bool) -> vec3<f32> {
     let dir = normalize(dir_in);
     let sun = normalize(s.sun.xyz);
-    let day = s.sun.w > 0.5;
+    let d = clamp(s.sun.w, 0.0, 1.0);
+    let n = clamp(s.extra.x, 0.0, 1.0);
+    let oc = clamp(s.extra.y, 0.0, 1.0);
     let e = dir.y;
     let h = clamp(e, 0.0, 1.0);
     let sd = max(dot(dir, sun), 0.0);
     let hor = horizon_color(dir, s);
 
     // Градиент: горизонт → середина → зенит. На закате середина неба со стороны солнца —
-    // персиковая, с противоположной — лиловато-голубая.
+    // персиковая, с противоположной — лиловато-голубая. Ночью — от дымки к густой синеве.
     let s2 = normalize(sun.xz + vec2<f32>(1e-4, 0.0));
     let toward = clamp(dot(normalize(dir.xz + vec2<f32>(1e-5, 0.0)), s2) * 0.5 + 0.5, 0.0, 1.0);
-    var mid: vec3<f32>;
-    if day {
-        mid = vec3<f32>(0.26, 0.46, 0.86);
-    } else {
-        mid = mix(vec3<f32>(0.34, 0.40, 0.66), vec3<f32>(1.0, 0.66, 0.46), pow(toward, 3.0));
-    }
-    var col = mix(hor, mid, smoothstep(0.0, select(0.22, 0.16, day), h));
-    col = mix(col, s.zenith.rgb, smoothstep(0.12, 0.85, h));
+    var mid = mix(mix(vec3<f32>(0.34, 0.40, 0.66), vec3<f32>(1.0, 0.66, 0.46), pow(toward, 3.0)), vec3<f32>(0.26, 0.46, 0.86), d);
+    mid = mix(mid, mix(hor, s.zenith.rgb, 0.5), n);
+    // Ненастье: небо ровное и серое.
+    mid = mix(mid, hor * 1.04, oc * 0.7);
+    var col = mix(hor, mid, smoothstep(0.0, mix(0.22, 0.16, d), h));
+    col = mix(col, mix(s.zenith.rgb, hor * 1.02, oc * 0.6), smoothstep(0.12, 0.85, h));
 
-    // Ореол вокруг солнца (рассеяние Ми): у горизонта сильнее.
-    if day {
-        col += vec3<f32>(1.0, 0.9, 0.7) * pow(sd, 8.0) * 0.5;
-    } else {
-        col += vec3<f32>(2.2, 1.15, 0.45) * pow(sd, 7.0) * 0.55;
-        col += vec3<f32>(3.5, 2.0, 0.9) * pow(sd, 90.0) * 0.9;
-    }
+    // Ореол вокруг солнца (рассеяние Ми): у горизонта сильнее; за тучами — тусклый.
+    let veil = (1.0 - n) * (1.0 - 0.8 * oc);
+    let halo_gold = vec3<f32>(2.2, 1.15, 0.45) * pow(sd, 7.0) * 0.55 + vec3<f32>(3.5, 2.0, 0.9) * pow(sd, 90.0) * 0.9;
+    let halo_day = vec3<f32>(1.0, 0.9, 0.7) * pow(sd, 8.0) * 0.5;
+    col += mix(halo_gold, halo_day, d) * veil;
+    // Луна: ореол в дымке и диск.
+    let moon = normalize(s.moon.xyz);
+    let md = max(dot(dir, moon), 0.0);
+    let moon_up = smoothstep(-0.03, 0.05, moon.y) * s.moon.w * n;
+    col += vec3<f32>(0.10, 0.12, 0.16) * pow(md, 60.0) * moon_up * (1.0 - 0.6 * oc);
     if disc {
-        col += select(vec3<f32>(40.0, 26.0, 13.0), vec3<f32>(30.0, 27.0, 22.0), day) * smoothstep(0.99985, 0.99993, sd);
+        let sun_disc = smoothstep(0.99985, 0.99993, sd) * (1.0 - oc * 0.9) * smoothstep(-0.03, 0.0, sun.y);
+        col += mix(vec3<f32>(40.0, 26.0, 13.0), vec3<f32>(30.0, 27.0, 22.0), d) * sun_disc;
+        let moon_disc = smoothstep(0.99980, 0.99990, md) * (1.0 - oc * 0.95);
+        col += vec3<f32>(2.4, 2.5, 2.7) * moon_disc * moon_up;
     }
 
     // Облака.
-    let cl = cloud_layer(dir, sun, s.zenith.w, s.horizon.w, day, hor);
+    let cl = cloud_layer(dir, s, s.zenith.w, hor);
     col = mix(col, cl.yzw, cl.x);
 
-    // Горы Таврики на юго-востоке (+X, +Z): голубые в дымке, на закате — с розовым отсветом.
+    // Горы Таврики на юго-востоке (+X, +Z): голубые в дымке, на закате — с розовым отсветом,
+    // ночью — чёрный силуэт на чуть светлом небе.
     let az = atan2(dir.z, dir.x);
     let land = smoothstep(-0.2, 0.5, dot(normalize(vec2<f32>(dir.x, dir.z) + 1e-5), normalize(vec2<f32>(0.45, 1.0))));
     let ridge = (0.012 + 0.05 * fbm(vec2<f32>(az * 3.0, 1.0)) + 0.02 * fbm(vec2<f32>(az * 12.0, 5.0))) * land;
     let near_ridge = (0.004 + 0.022 * fbm(vec2<f32>(az * 6.0 + 9.0, 2.0))) * land;
-    var far_c: vec3<f32>;
-    if day {
-        far_c = vec3<f32>(0.52, 0.60, 0.72);
-    } else {
-        far_c = mix(hor * 0.8, vec3<f32>(0.62, 0.44, 0.50), 0.5);
-    }
+    var far_c = mix(mix(hor * 0.8, vec3<f32>(0.62, 0.44, 0.50), 0.5), vec3<f32>(0.52, 0.60, 0.72), d);
+    far_c = mix(far_c, hor * 0.92, oc * 0.5);
+    far_c = mix(far_c, hor * 0.55, n);
     col = mix(col, far_c, (1.0 - smoothstep(ridge - 0.002, ridge + 0.002, e)) * 0.9);
     col = mix(col, far_c * 0.72, (1.0 - smoothstep(near_ridge - 0.002, near_ridge + 0.002, e)) * 0.9);
     if e < 0.0 {

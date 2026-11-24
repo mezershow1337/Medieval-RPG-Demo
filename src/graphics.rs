@@ -23,9 +23,11 @@ pub const SUN_DIR: Vec3 = Vec3::new(-0.78, 0.42, 0.40);
 
 /// Освещение уровня. Небо, дымка и туман согласованы: туман Bevy вдали даёт ровно цвет
 /// горизонта неба (`horizon` + `horizon_sun` в сторону солнца), поэтому стены и море
-/// растворяются в небе без шва.
-#[derive(Clone, Copy)]
+/// растворяются в небе без шва. В Херсонесе всё это меняется по часам мира и погоде
+/// (см. [`mood_at`] и `daylight.rs`).
+#[derive(Clone, Copy, Debug)]
 pub struct Mood {
+    /// Откуда светит главный свет (солнце, ночью — луна).
     pub sun: Vec3,
     pub sun_color: Color,
     pub lux: f32,
@@ -45,6 +47,25 @@ pub struct Mood {
     pub day: bool,
     /// Яркость неба как источника света (кд/м² на единицу цвета неба).
     pub sky_light: f32,
+    /// Направление на само солнце (для неба; может быть под горизонтом).
+    pub sun_sky: Vec3,
+    /// «День» для неба 0..1 (1 — день, 0 — закат и сумерки).
+    pub dayness: f32,
+    /// Ночь 0..1.
+    pub night: f32,
+    /// Ненастье: серая пелена туч 0..1.
+    pub overcast: f32,
+    /// Луна: направление и освещённая часть диска.
+    pub moon: Vec3,
+    pub moon_light: f32,
+    pub wind: Vec2,
+    pub rain: f32,
+    /// Мокрость мостовых и крыш (держится после дождя).
+    pub wet: f32,
+    /// Плотность объёмной дымки у земли (лучи от факелов и солнца, утренняя мгла).
+    pub haze: f32,
+    /// Экспозиция цветокоррекции (ступени).
+    pub exposure: f32,
 }
 
 impl Mood {
@@ -53,69 +74,250 @@ impl Mood {
     }
     pub fn sky_uniform(&self) -> SkyUniform {
         SkyUniform {
-            sun: self.sun.normalize().extend(if self.day { 1.0 } else { 0.0 }),
+            sun: self.sun_sky.normalize().extend(self.dayness),
             horizon: self.horizon.extend(self.clouds),
             horizon_sun: self.horizon_sun.0.extend(self.horizon_sun.1),
             zenith: self.zenith.extend(0.0),
+            moon: self.moon.normalize_or_zero().extend(self.moon_light),
+            extra: Vec4::new(self.night, self.overcast, self.wind.x, self.wind.y),
         }
     }
 }
 
-/// Время суток в Херсонесе: `MRPG_TIME=day` — ясный полдень, иначе золотой час.
-fn golden_hour() -> bool {
-    !std::env::var("MRPG_TIME").is_ok_and(|t| t == "day")
+/// Застывшее время для снимков: `MRPG_TIME=day` — ясный полдень, `MRPG_TIME=golden` —
+/// золотой час, `MRPG_TIME=<часы>` — любой момент (как `MRPG_HOUR`, `75.5` — 03:30 четвёртых
+/// суток). Без переменной время идёт по часам мира.
+pub fn frozen_time() -> Option<f64> {
+    if let Some(t) = SHOT_TIME.lock().ok().and_then(|t| *t) {
+        return Some(t);
+    }
+    static T: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
+    *T.get_or_init(|| match std::env::var("MRPG_TIME").ok()?.as_str() {
+        "day" => Some(2.0 * crate::world_clock::DAY + 13.0 * 3600.0),
+        "golden" => Some(2.0 * crate::world_clock::DAY + 18.75 * 3600.0),
+        h => h.parse::<f64>().ok().map(|h| h.max(0.0) * 3600.0),
+    })
 }
 
+/// Время для очередного снимка обхода (`MRPG_TOUR="имя@часы:…"`).
+static SHOT_TIME: std::sync::Mutex<Option<f64>> = std::sync::Mutex::new(None);
+
+pub fn set_shot_time(t: Option<f64>) {
+    if let Ok(mut s) = SHOT_TIME.lock() {
+        *s = t;
+    }
+}
+
+/// Освещение в момент запуска (до первых часов от сервера).
 pub fn mood() -> Mood {
     match crate::level::active() {
-        crate::level::LevelKind::Castle => Mood {
-            sun: SUN_DIR,
-            sun_color: Color::srgb(1.0, 0.84, 0.66),
-            lux: 11_000.0,
-            ambient: (Color::srgb(0.62, 0.62, 0.8), 200.0),
-            horizon: Vec3::new(0.44, 0.36, 0.46),
-            horizon_sun: (Vec3::new(0.8, 0.22, 0.0), 6.0),
-            zenith: Vec3::new(0.09, 0.11, 0.27),
-            clouds: 0.5,
-            fog_far: (Color::srgb(0.36, 0.36, 0.46), Color::srgb(0.62, 0.56, 0.60)),
-            visibility: 380.0,
-            shadow_distance: 160.0,
-            day: false,
-            sky_light: 700.0,
-        },
-        crate::level::LevelKind::Chersonesus if !golden_hour() => Mood {
-            sun: Vec3::new(-0.72, 0.62, 0.22),
-            sun_color: Color::srgb(1.0, 0.93, 0.8),
-            lux: 15_000.0,
-            ambient: (Color::srgb(0.6, 0.7, 0.9), 250.0),
-            horizon: Vec3::new(0.62, 0.72, 0.86),
-            horizon_sun: (Vec3::new(0.35, 0.28, 0.15), 8.0),
-            zenith: Vec3::new(0.07, 0.2, 0.62),
-            clouds: 0.45,
-            fog_far: (Color::srgb(0.55, 0.64, 0.78), Color::srgb(0.80, 0.78, 0.72)),
-            visibility: 1100.0,
-            shadow_distance: 220.0,
-            day: true,
-            sky_light: 900.0,
-        },
-        // Золотой час: солнце (≈10° над горизонтом) садится в море на северо-западе (−X, −Z).
-        // Длинные тёплые тени, золотая дорожка на воде, облака подсвечены снизу; тени —
-        // холодные от синего неба, вдали — тёплая дымка, горы Таврики в розовом отсвете.
-        crate::level::LevelKind::Chersonesus => Mood {
-            sun: Vec3::new(-0.80, 0.175, -0.42),
-            sun_color: Color::srgb(1.0, 0.8, 0.6),
-            lux: 9_500.0,
-            ambient: (Color::srgb(0.55, 0.58, 0.8), 110.0),
-            horizon: Vec3::new(0.56, 0.48, 0.54),
-            horizon_sun: (Vec3::new(1.5, 0.78, 0.24), 5.0),
-            zenith: Vec3::new(0.11, 0.2, 0.46),
-            clouds: 0.55,
-            fog_far: (Color::srgb(0.5, 0.5, 0.56), Color::srgb(0.8, 0.77, 0.74)),
-            visibility: 1600.0,
-            shadow_distance: 240.0,
-            day: false,
-            sky_light: 950.0,
-        },
+        crate::level::LevelKind::Castle => castle_mood(),
+        crate::level::LevelKind::Chersonesus => mood_at(frozen_time().unwrap_or(crate::world_clock::WorldClock::default().game)),
+    }
+}
+
+fn castle_mood() -> Mood {
+    Mood {
+        sun: SUN_DIR,
+        sun_color: Color::srgb(1.0, 0.84, 0.66),
+        lux: 11_000.0,
+        ambient: (Color::srgb(0.62, 0.62, 0.8), 200.0),
+        horizon: Vec3::new(0.44, 0.36, 0.46),
+        horizon_sun: (Vec3::new(0.8, 0.22, 0.0), 6.0),
+        zenith: Vec3::new(0.09, 0.11, 0.27),
+        clouds: 0.5,
+        fog_far: (Color::srgb(0.36, 0.36, 0.46), Color::srgb(0.62, 0.56, 0.60)),
+        visibility: 380.0,
+        shadow_distance: 160.0,
+        day: false,
+        sky_light: 700.0,
+        sun_sky: SUN_DIR,
+        dayness: 0.0,
+        night: 0.0,
+        overcast: 0.0,
+        moon: -SUN_DIR,
+        moon_light: 0.0,
+        wind: Vec2::ZERO,
+        rain: 0.0,
+        wet: 0.0,
+        haze: 0.03,
+        exposure: 0.2,
+    }
+}
+
+/// Ключевое освещение для одной высоты солнца (между ключами — плавно).
+#[derive(Clone, Copy)]
+struct Key {
+    sun_color: Vec3,
+    lux: f32,
+    ambient: (Vec3, f32),
+    horizon: Vec3,
+    horizon_sun: (Vec3, f32),
+    zenith: Vec3,
+    fog_far: (Vec3, Vec3),
+    visibility: f32,
+    sky_light: f32,
+    haze: f32,
+    exposure: f32,
+}
+
+impl Key {
+    fn lerp(&self, o: &Key, t: f32) -> Key {
+        let f = |a: f32, b: f32| a + (b - a) * t;
+        let v = |a: Vec3, b: Vec3| a.lerp(b, t);
+        Key {
+            sun_color: v(self.sun_color, o.sun_color),
+            lux: f(self.lux, o.lux),
+            ambient: (v(self.ambient.0, o.ambient.0), f(self.ambient.1, o.ambient.1)),
+            horizon: v(self.horizon, o.horizon),
+            horizon_sun: (v(self.horizon_sun.0, o.horizon_sun.0), f(self.horizon_sun.1, o.horizon_sun.1)),
+            zenith: v(self.zenith, o.zenith),
+            fog_far: (v(self.fog_far.0, o.fog_far.0), v(self.fog_far.1, o.fog_far.1)),
+            visibility: f(self.visibility, o.visibility),
+            sky_light: f(self.sky_light, o.sky_light),
+            haze: f(self.haze, o.haze),
+            exposure: f(self.exposure, o.exposure),
+        }
+    }
+}
+
+/// Ясный день: голубое небо, белое солнце.
+const DAY: Key = Key {
+    sun_color: Vec3::new(1.0, 0.93, 0.8),
+    lux: 15_000.0,
+    ambient: (Vec3::new(0.6, 0.7, 0.9), 250.0),
+    horizon: Vec3::new(0.62, 0.72, 0.86),
+    horizon_sun: (Vec3::new(0.35, 0.28, 0.15), 8.0),
+    zenith: Vec3::new(0.07, 0.2, 0.62),
+    fog_far: (Vec3::new(0.55, 0.64, 0.78), Vec3::new(0.80, 0.78, 0.72)),
+    visibility: 1100.0,
+    sky_light: 900.0,
+    haze: 0.0003,
+    exposure: 0.3,
+};
+
+/// Золотой час (солнце ≈10° над горизонтом): длинные тёплые тени, золотая дорожка на
+/// воде, облака подсвечены снизу; тени холодные от синего неба, вдали — тёплая дымка.
+const GOLD: Key = Key {
+    sun_color: Vec3::new(1.0, 0.8, 0.6),
+    lux: 9_500.0,
+    ambient: (Vec3::new(0.55, 0.58, 0.8), 110.0),
+    horizon: Vec3::new(0.56, 0.48, 0.54),
+    horizon_sun: (Vec3::new(1.5, 0.78, 0.24), 5.0),
+    zenith: Vec3::new(0.11, 0.2, 0.46),
+    fog_far: (Vec3::new(0.5, 0.5, 0.56), Vec3::new(0.8, 0.77, 0.74)),
+    visibility: 1600.0,
+    sky_light: 950.0,
+    haze: 0.0007,
+    exposure: 0.2,
+};
+
+/// Сумерки: солнце только что село, над морем — алая полоса, над головой густая синева.
+const DUSK: Key = Key {
+    sun_color: Vec3::new(1.0, 0.5, 0.32),
+    lux: 900.0,
+    ambient: (Vec3::new(0.42, 0.46, 0.78), 40.0),
+    horizon: Vec3::new(0.25, 0.18, 0.26),
+    horizon_sun: (Vec3::new(1.05, 0.38, 0.10), 4.0),
+    zenith: Vec3::new(0.035, 0.06, 0.17),
+    fog_far: (Vec3::new(0.16, 0.16, 0.24), Vec3::new(0.34, 0.26, 0.3)),
+    visibility: 1300.0,
+    sky_light: 900.0,
+    haze: 0.0016,
+    exposure: 0.25,
+};
+
+/// Ночь: тёмная синева, свет луны, звёзды; жёлтые пятна факелов и очагов.
+const NIGHT: Key = Key {
+    sun_color: Vec3::new(0.62, 0.72, 1.0),
+    lux: 0.0,
+    ambient: (Vec3::new(0.32, 0.40, 0.78), 11.0),
+    horizon: Vec3::new(0.026, 0.034, 0.062),
+    horizon_sun: (Vec3::new(0.012, 0.012, 0.02), 4.0),
+    zenith: Vec3::new(0.005, 0.009, 0.03),
+    fog_far: (Vec3::new(0.025, 0.032, 0.06), Vec3::new(0.04, 0.05, 0.08)),
+    visibility: 900.0,
+    sky_light: 900.0,
+    haze: 0.0018,
+    exposure: 0.45,
+};
+
+fn smooth01(x: f32) -> f32 {
+    let t = x.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Свет Херсонеса в момент `game` (секунды игровых часов): солнце и луна по небу,
+/// закат, сумерки, ночь и погода (тучи, дождь, туман, ветер).
+pub fn mood_at(game: f64) -> Mood {
+    use crate::world_clock as wc;
+    let sun = wc::sun_dir(game);
+    let moon = wc::moon_dir(game);
+    let moon_light = wc::moon_light(game);
+    let w = wc::weather_at(game);
+    let e = sun.y;
+    let key = if e >= 0.45 {
+        DAY
+    } else if e >= 0.12 {
+        GOLD.lerp(&DAY, smooth01((e - 0.12) / 0.33))
+    } else if e >= -0.06 {
+        DUSK.lerp(&GOLD, smooth01((e + 0.06) / 0.18))
+    } else {
+        NIGHT.lerp(&DUSK, smooth01((e + 0.22) / 0.16))
+    };
+    let dayness = smooth01((e - 0.12) / 0.33);
+    let night = 1.0 - smooth01((e + 0.22) / 0.16);
+    let overcast = smooth01((w.clouds - 0.55) / 0.45);
+    let grey = |c: Vec3, k: f32| {
+        let l = c.dot(Vec3::new(0.3, 0.6, 0.1));
+        c.lerp(Vec3::new(l * 0.96, l * 0.99, l * 1.04), k)
+    };
+    let dim = 1.0 - 0.25 * w.rain;
+    let horizon = grey(key.horizon, 0.75 * overcast) * dim;
+    let zenith = grey(key.zenith, 0.8 * overcast).lerp(horizon * 0.9, 0.5 * overcast) * dim;
+    let horizon_sun = (key.horizon_sun.0 * (1.0 - 0.85 * overcast), key.horizon_sun.1);
+    // Главный свет: солнце (пока оно над горизонтом), ночью — луна.
+    // Под сплошными тучами прямого солнца почти нет: тени расплываются, свет идёт от неба.
+    let sun_lux = key.lux * smooth01((e + 0.02) / 0.08) * (1.0 - 0.97 * overcast) * (1.0 - 0.4 * w.rain);
+    let moon_lux = (12.0 + 190.0 * moon_light) * smooth01((moon.y - 0.02) / 0.15) * night * (1.0 - 0.85 * overcast);
+    let (light_dir, light_color, lux) = if sun_lux >= moon_lux {
+        // Под низким солнцем свет не должен идти снизу.
+        let d = Vec3::new(sun.x, sun.y.max(0.05), sun.z).normalize();
+        (d, key.sun_color, sun_lux)
+    } else {
+        (moon, Vec3::new(0.62, 0.72, 1.0), moon_lux)
+    };
+    let fog = w.fog;
+    let fog_tint = |c: Vec3| c.lerp(horizon * 1.1, 0.6 * fog.max(overcast * 0.5));
+    let visibility = (key.visibility * (1.0 - 0.94 * fog) * (1.0 - 0.55 * w.rain)).max(55.0);
+    let c = |v: Vec3| Color::linear_rgb(v.x, v.y, v.z);
+    Mood {
+        sun: light_dir,
+        sun_color: c(light_color),
+        lux,
+        ambient: (c(key.ambient.0.lerp(Vec3::splat(0.7), 0.5 * overcast)), key.ambient.1 * (1.0 + 0.35 * overcast * dayness.max(0.3))),
+        horizon,
+        horizon_sun,
+        zenith,
+        clouds: 0.22 + 0.78 * w.clouds,
+        fog_far: (c(fog_tint(key.fog_far.0)), c(fog_tint(key.fog_far.1))),
+        visibility,
+        shadow_distance: 240.0,
+        day: e > 0.3,
+        sky_light: key.sky_light * (1.0 - 0.3 * overcast),
+
+        sun_sky: sun,
+        dayness,
+        night,
+        overcast,
+        moon,
+        moon_light,
+        wind: w.wind,
+        rain: w.rain,
+        wet: wc::wetness(game),
+        haze: key.haze + 0.03 * fog * fog + 0.004 * w.rain,
+        // Под тучами и в дождь мир темнее и глуше (глаз не успевает подстроиться полностью).
+        exposure: key.exposure - 0.35 * overcast - 0.25 * w.rain,
     }
 }
 
@@ -281,7 +483,7 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
     ExtendedMaterial {
         base: StandardMaterial { base_color: a, perceptual_roughness: rough, metallic: metal, reflectance: 0.4, ..default() },
         extension: SurfaceExt {
-            color_b: lin(b),
+            color_b: lin(b).truncate().extend(wet_capacity(mat)),
             params: Vec4::new(pattern, scale, var, bump),
             params2: Vec4::new(moss, grime, glow, 0.0),
             photo: if has_photo { Vec4::new(top as f32, 1.0 / layer(top).meters, side as f32, 1.0 / layer(side).meters) } else { Vec4::new(-1.0, 1.0, -1.0, 1.0) },
@@ -291,6 +493,21 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
             albedo: tex.map(|t| t.0.clone()),
             nrm: tex.map(|t| t.1.clone()),
         },
+    }
+}
+
+/// Насколько материал мокнет под дождём (0 — внутри домов или не меняется: ткань, металл, листья).
+fn wet_capacity(mat: Mat) -> f32 {
+    match mat {
+        Mat::Paving | Mat::Cobble => 1.0,
+        Mat::Earth => 0.9,
+        Mat::Tile | Mat::Roof => 0.8,
+        Mat::Terrain => 0.7,
+        Mat::Marble => 0.6,
+        Mat::Limestone | Mat::Stone | Mat::DarkStone | Mat::Rubble | Mat::Trim | Mat::OpusMixtum | Mat::Brick => 0.5,
+        Mat::Grass | Mat::Wood | Mat::Thatch => 0.45,
+        Mat::Plaster | Mat::Signinum => 0.3,
+        _ => 0.0,
     }
 }
 
@@ -491,12 +708,14 @@ fn billboard_flames(cameras: Query<&GlobalTransform, With<Camera3d>>, mut flames
     }
 }
 
-fn flicker_lights(time: Res<Time>, mut lights: Query<(&mut PointLight, &Flicker)>) {
+fn flicker_lights(time: Res<Time>, mood: Option<Res<crate::daylight::CurrentMood>>, mut lights: Query<(&mut PointLight, &Flicker)>) {
     let t = time.elapsed_secs();
+    // Ночью глаз привыкает к темноте: огонь кажется ярче и светит дальше.
+    let boost = 1.0 + 1.3 * mood.map_or(0.0, |m| m.0.night);
     for (mut light, f) in &mut lights {
         let p = f.phase;
         let n = (t * 9.1 + p).sin() * 0.5 + (t * 23.7 + p * 2.3).sin() * 0.3 + (t * 4.3 + p * 0.7).sin() * 0.2;
-        light.intensity = f.base * (0.85 + 0.12 * n);
+        light.intensity = f.base * boost * (0.85 + 0.12 * n);
     }
 }
 
@@ -521,7 +740,7 @@ fn cull_far_lights(time: Res<Time>, settings: Res<crate::settings::Settings>, mu
 // ---------- Небо ----------
 
 #[derive(Component)]
-struct SkyDome;
+pub struct SkyDome;
 
 /// Сфера, вывернутая внутрь (камера внутри неё).
 fn sky_mesh(radius: f32) -> Mesh {
@@ -576,31 +795,40 @@ fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
         NotShadowReceiver,
     ));
 
-    // Закатное солнце.
+    // Солнце (ночью — луна): направление, цвет и сила ведёт `daylight.rs` по часам мира.
     commands.spawn((
         DirectionalLight { color: m.sun_color, illuminance: m.lux, shadow_maps_enabled: true, ..default() },
         Transform::from_translation(sun * 100.0).looking_at(Vec3::ZERO, Vec3::Y),
         CascadeShadowConfigBuilder { num_cascades: 4, first_cascade_far_bound: 12.0, maximum_distance: m.shadow_distance, ..default() }.build(),
         VolumetricLight,
+        SunLight,
     ));
-    // Лёгкая дымка: в ней видны лучи низкого солнца между домами, из окон и от факелов
-    // (днём у моря её нет). В Херсонесе она гуще у земли — вечерний дым очагов и морская мгла.
-    match (m.day, crate::level::active()) {
-        (true, _) => {}
-        (false, crate::level::LevelKind::Castle) => {
+    // Лёгкая дымка: в ней видны лучи низкого солнца между домами, из окон и от факелов.
+    // В Херсонесе она гуще у земли — вечерний дым очагов и морская мгла, утром бывает туман.
+    match crate::level::active() {
+        crate::level::LevelKind::Castle => {
             commands.spawn((
                 FogVolume { fog_color: Color::srgb(0.85, 0.8, 0.8), density_factor: 0.03, absorption: 0.0, scattering: 0.25, scattering_asymmetry: 0.6, ..default() },
                 Transform::from_xyz(0.0, 20.0, 0.0).with_scale(Vec3::new(600.0, 40.0, 600.0)),
             ));
         }
-        (false, crate::level::LevelKind::Chersonesus) => {
+        crate::level::LevelKind::Chersonesus => {
             commands.spawn((
-                FogVolume { fog_color: Color::srgb(0.95, 0.9, 0.88), density_factor: 0.0012, absorption: 0.0, scattering: 0.3, scattering_asymmetry: 0.72, ..default() },
+                FogVolume { fog_color: Color::srgb(0.95, 0.9, 0.88), density_factor: m.haze, absorption: 0.0, scattering: 0.3, scattering_asymmetry: 0.72, ..default() },
                 Transform::from_xyz(0.0, 6.0, 0.0).with_scale(Vec3::new(1800.0, 14.0, 1800.0)),
+                HazeVolume,
             ));
         }
     }
 }
+
+/// Солнце уровня (ночью им светит луна).
+#[derive(Component)]
+pub struct SunLight;
+
+/// Объёмная дымка у земли.
+#[derive(Component)]
+pub struct HazeVolume;
 
 const SKY_RADIUS: f32 = 900.0;
 
@@ -644,10 +872,11 @@ pub fn distance_fog(m: &Mood, draw_distance: f32) -> DistanceFog {
 
 /// Цветокоррекция: чуть больше контраста в средних тонах, насыщенные света (закатное
 /// золото), чуть приглушённые тени — как на плёнке.
-fn color_grading(m: &Mood) -> ColorGrading {
+pub fn color_grading(m: &Mood) -> ColorGrading {
     let section = |saturation: f32, contrast: f32| ColorGradingSection { saturation, contrast, ..default() };
     ColorGrading {
-        global: ColorGradingGlobal { exposure: if m.day { 0.3 } else { 0.2 }, post_saturation: 1.06, ..default() },
+        // Ночью глаз привыкает к темноте, но краски уходят (сумеречное зрение).
+        global: ColorGradingGlobal { exposure: m.exposure, post_saturation: 1.06 - 0.3 * m.night - 0.15 * m.overcast, ..default() },
         shadows: section(0.92, 1.0),
         midtones: section(1.04, 1.08),
         highlights: section(1.1, 1.0),

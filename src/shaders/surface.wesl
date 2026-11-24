@@ -821,6 +821,24 @@ fn fragment(
         rough = mix(rough, 0.35, ground * grime_amount * 0.5);
     }
 
+    // Дождь: камень и земля темнеют и блестят, на ровном — лужи (params2.w — мокрость города,
+    // color_b.w — насколько этот материал вообще мокнет; под крышей полы не мокнут).
+    let wet = clamp(surface.params2.w, 0.0, 1.0) * surface.color_b.w;
+    if wet > 0.002 && !water {
+        let up = clamp(n.y, 0.0, 1.0);
+        let pn = fbm(wp.xz * 0.23 + 1.7) * 0.7 + fbm(wp.xz * 1.3) * 0.3;
+        let flat_ground = smoothstep(0.93, 0.99, up);
+        let puddle = smoothstep(0.6, 0.67, pn + (wet - 1.0) * 0.35) * flat_ground * smoothstep(0.35, 0.8, wet);
+        // Потёки по стенам: мокрее у швов и книзу.
+        let runs = smoothstep(0.35, 0.75, fbm(vec2<f32>(wp.x + wp.z, wp.y * 0.15) * 2.3)) * (1.0 - up);
+        color *= 1.0 - wet * (0.22 + 0.18 * up + 0.12 * runs);
+        color = mix(color, color * 0.6 + vec3<f32>(0.004, 0.005, 0.007), puddle);
+        rough = mix(rough, rough * mix(0.65, 0.3, up), wet);
+        rough = mix(rough, 0.04, puddle);
+        // В луже рельеф камня тонет: поверхность ровная, как зеркало.
+        N = normalize(mix(N, n, puddle * 0.92 + wet * up * 0.25));
+    }
+
     pbr_input.material.base_color = vec4<f32>(max(color, vec3<f32>(0.0)), 1.0);
     pbr_input.material.perceptual_roughness = rough;
     pbr_input.N = N;

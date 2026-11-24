@@ -31,7 +31,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Ширина растёт с высотой, ось сносит ветром и слегка колышет.
     let sway = (vnoise(vec2<f32>(h * 2.0 - t * 0.15, seed)) - 0.5) * 0.25 * h;
-    let center = 0.5 + h * h * 0.22 + sway;
+    let center = 0.5 + h * h * (0.08 + 0.035 * length(smoke.sky.extra.zw)) + sway;
     let width = mix(0.05, 0.42, pow(h, 0.7));
     let x = (u - center) / width;
     let profile = exp(-x * x * 2.2);
@@ -50,7 +50,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let fwd = pow(max(dot(v, sun), 0.0), 6.0);
     let hor = horizon_color(v, smoke.sky);
     let lit = mix(hor * 0.85, vec3<f32>(1.25, 0.8, 0.5), 0.35 + 0.35 * n) + vec3<f32>(1.6, 0.9, 0.4) * fwd * 0.6;
-    var col = smoke.tint.rgb * lit;
+    // Ночью дым едва виден: тёмный на тёмном небе, лишь у основания отсвет огня.
+    let night = clamp(smoke.sky.extra.x, 0.0, 1.0);
+    let lit_n = mix(lit * mix(0.55, 1.0, clamp(smoke.sky.sun.w, 0.0, 1.0) * 0.5 + 0.5), hor * 0.9 + vec3<f32>(0.01), night);
+    var col = smoke.tint.rgb * lit_n;
     // Отсвет огня у основания.
     col += vec3<f32>(1.4, 0.45, 0.1) * (1.0 - smoothstep(0.0, 0.12, h)) * profile * 0.8;
     // Вдали дым тонет в дымке.
