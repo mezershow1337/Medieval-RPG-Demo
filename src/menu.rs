@@ -325,6 +325,9 @@ enum Field {
     Fov,
     Sensitivity,
     Volume,
+    Music,
+    Sfx,
+    Ambient,
     ShowFps,
 }
 
@@ -459,6 +462,9 @@ fn adjust(s: &mut Settings, f: Field, d: i32) {
         Field::Fov => s.fov = (s.fov + 5.0 * d as f32).clamp(60.0, 110.0),
         Field::Sensitivity => s.sensitivity = ((s.sensitivity + 0.1 * d as f32) * 10.0).round().clamp(1.0, 50.0) / 10.0,
         Field::Volume => s.volume = ((s.volume + 0.1 * d as f32) * 10.0).round().clamp(0.0, 10.0) / 10.0,
+        Field::Music => s.music = ((s.music + 0.1 * d as f32) * 10.0).round().clamp(0.0, 10.0) / 10.0,
+        Field::Sfx => s.sfx = ((s.sfx + 0.1 * d as f32) * 10.0).round().clamp(0.0, 10.0) / 10.0,
+        Field::Ambient => s.ambient = ((s.ambient + 0.1 * d as f32) * 10.0).round().clamp(0.0, 10.0) / 10.0,
         Field::ShowFps => s.show_fps = !s.show_fps,
     }
 }
@@ -478,6 +484,9 @@ fn value_text(s: &Settings, f: Field) -> String {
         Field::Fov => format!("{:.0}°", s.fov),
         Field::Sensitivity => format!("{:.1}", s.sensitivity),
         Field::Volume => format!("{:.0} %", s.volume * 100.0),
+        Field::Music => format!("{:.0} %", s.music * 100.0),
+        Field::Sfx => format!("{:.0} %", s.sfx * 100.0),
+        Field::Ambient => format!("{:.0} %", s.ambient * 100.0),
         Field::ShowFps => yes(s.show_fps),
     }
 }
@@ -728,6 +737,9 @@ fn settings_body(p: &mut ChildSpawnerCommands, fonts: &UiFonts, s: &Settings) {
             row(c, fonts, s, "Угол обзора", Field::Fov, None);
             row(c, fonts, s, "Чувствит. мыши", Field::Sensitivity, None);
             row(c, fonts, s, "Громкость", Field::Volume, None);
+            row(c, fonts, s, "Музыка", Field::Music, None);
+            row(c, fonts, s, "Эффекты", Field::Sfx, None);
+            row(c, fonts, s, "Окружение", Field::Ambient, None);
         });
     });
     p.spawn(Node { width: percent(100), justify_content: JustifyContent::Center, margin: UiRect::top(px(8)), ..default() }).with_children(|r| {

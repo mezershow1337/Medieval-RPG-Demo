@@ -332,8 +332,15 @@ fn play(commands: &mut Commands, sound: &Handle<Synth>, at: Vec3, ear: Vec3, gai
     if d > FX_RANGE {
         return;
     }
+    // Громкость по расстоянию, панораму и каналы громкости ведёт `crate::audio`.
     let v = gain / (1.0 + d * 0.25);
-    commands.spawn((AudioPlayer(sound.clone()), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(v)).with_speed(speed)));
+    let emitter = crate::audio::Emitter { at: Some(at), follow: None, gain, near: 4.0, range: FX_RANGE, channel: crate::audio::Channel::Sfx, fade: 1.0 };
+    commands.spawn((
+        AudioPlayer(sound.clone()),
+        PlaybackSettings::DESPAWN.with_volume(Volume::Linear(v)).with_speed(speed).with_spatial(true),
+        Transform::from_translation(ear + (at - ear).normalize_or(Vec3::NEG_Z)),
+        emitter,
+    ));
 }
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod alchemy_fx;
+mod audio;
 mod bot;
 mod brewing;
 mod brewing_client;

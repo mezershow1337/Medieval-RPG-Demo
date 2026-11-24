@@ -75,7 +75,7 @@ fn held_item(r: &RemoteActor) -> Option<u16> {
 
 /// Летящая стрела: двигаем её сами между снимками.
 #[derive(Component)]
-struct ArrowVisual {
+pub struct ArrowVisual {
     vel: Vec3,
 }
 
@@ -185,6 +185,7 @@ pub fn run(start: crate::menu::Start) {
         .add_plugins(crate::trade_client::TradeClientPlugin)
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))
         .add_plugins(crate::smithing_client::SmithingClientPlugin)
+        .add_plugins(crate::audio::GameAudioPlugin)
         .add_plugins(crate::towns_client::TownClientPlugin)
         .add_plugins(crate::ui_theme::UiThemePlugin)
         .add_plugins((crate::skill_book::SkillBookPlugin, crate::hints::HintsPlugin))

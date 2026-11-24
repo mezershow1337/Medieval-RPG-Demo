@@ -45,6 +45,10 @@ pub struct Settings {
     pub sensitivity: f32,
     /// Общая громкость 0..1.
     pub volume: f32,
+    /// Громкость музыки, эффектов и окружения 0..1 (поверх общей, см. `audio::AudioSettings`).
+    pub music: f32,
+    pub sfx: f32,
+    pub ambient: f32,
     /// Показывать FPS и пинг в углу экрана.
     pub show_fps: bool,
     /// Последний адрес, к которому подключались (поле «Подключиться»).
@@ -99,6 +103,9 @@ impl Default for Settings {
             fov: 80.0,
             sensitivity: 1.0,
             volume: 0.8,
+            music: 0.6,
+            sfx: 0.9,
+            ambient: 0.8,
             show_fps: false,
             last_address: String::new(),
             // Для начала — имя пользователя Windows; его можно сменить в главном меню.
@@ -167,6 +174,9 @@ impl Settings {
         self.fov = self.fov.clamp(55.0, 110.0);
         self.sensitivity = self.sensitivity.clamp(0.1, 5.0);
         self.volume = self.volume.clamp(0.0, 1.0);
+        self.music = self.music.clamp(0.0, 1.0);
+        self.sfx = self.sfx.clamp(0.0, 1.0);
+        self.ambient = self.ambient.clamp(0.0, 1.0);
     }
 
     pub fn to_text(&self) -> String {
@@ -174,7 +184,7 @@ impl Settings {
         format!(
             "# Настройки Medieval RPG. Можно править руками; неизвестные строки пропускаются.\n\
              draw_distance = {}\nshadows = {}\nwater = {}\neffects = {}\ntextures = {}\nrender_scale = {}\n\
-             vsync = {}\nwindow_mode = {}\nfov = {}\nsensitivity = {}\nvolume = {}\nshow_fps = {}\nlast_address = {}\nnickname = {}\n",
+             vsync = {}\nwindow_mode = {}\nfov = {}\nsensitivity = {}\nvolume = {}\nmusic = {}\nsfx = {}\nambient = {}\nshow_fps = {}\nlast_address = {}\nnickname = {}\n",
             self.draw_distance,
             self.shadows,
             self.water,
@@ -186,6 +196,9 @@ impl Settings {
             self.fov,
             self.sensitivity,
             self.volume,
+            self.music,
+            self.sfx,
+            self.ambient,
             b(self.show_fps),
             self.last_address,
             self.nickname,
@@ -220,6 +233,9 @@ impl Settings {
                 "fov" => s.fov = f(s.fov),
                 "sensitivity" => s.sensitivity = f(s.sensitivity),
                 "volume" => s.volume = f(s.volume),
+                "music" => s.music = f(s.music),
+                "sfx" => s.sfx = f(s.sfx),
+                "ambient" => s.ambient = f(s.ambient),
                 "show_fps" => s.show_fps = b(s.show_fps),
                 "last_address" => s.last_address = v.to_string(),
                 "nickname" => s.nickname = crate::protocol::clean_name(v),
@@ -308,9 +324,14 @@ fn apply_window(settings: Res<Settings>, mut window: Single<&mut Window, With<Pr
     }
 }
 
-fn apply_audio(settings: Res<Settings>, mut volume: ResMut<GlobalVolume>) {
+fn apply_audio(settings: Res<Settings>, mut volume: ResMut<GlobalVolume>, audio: Option<ResMut<crate::audio::AudioSettings>>) {
     if settings.is_changed() {
         volume.volume = Volume::Linear(settings.volume);
+        if let Some(mut a) = audio {
+            a.music = settings.music;
+            a.sfx = settings.sfx;
+            a.ambient = settings.ambient;
+        }
     }
 }
 
