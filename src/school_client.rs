@@ -184,7 +184,7 @@ fn school_clicks(buttons: Query<(&Interaction, &SchoolButton, &crate::ui_theme::
 
 /// Снимок окна (`MRPG_SHOT_UI=school` или `school:notary|scribe|grammarian|logograph|copyist|philosopher`):
 /// открыть окно учителя, как только сервер пришлёт мастеров.
-fn shot_school(mut ui: ResMut<SchoolUi>, view: Res<LoreView>, mut done: Local<bool>) {
+fn shot_school(mut ui: ResMut<SchoolUi>, mut view: ResMut<LoreView>, mut knowledge: ResMut<MyKnowledge>, mut done: Local<bool>, mut frames: Local<u32>) {
     if *done {
         return;
     }
@@ -208,7 +208,23 @@ fn shot_school(mut ui: ResMut<SchoolUi>, view: Res<LoreView>, mut done: Local<bo
     if let Some(id) = view.masters_iter().find(|m| m.teacher == teacher).map(|m| m.id) {
         ui.show(id);
         *done = true;
+        return;
     }
+    // Без сервера (облачные снимки идут по кадру в секунды, и связь рвётся) — учитель из
+    // раскладки уровня, а ученик уже знает азбуку и начал чтение.
+    *frames += 1;
+    if *frames < 20 {
+        return;
+    }
+    let people: Vec<crate::school::Townsman> = crate::level::layout().residents.iter().map(|r| crate::school::Townsman { role: Some(r.role), pos: r.pos, yaw: r.yaw }).collect();
+    if let Some(t) = crate::school::tutors(&people).into_iter().find(|t| t.teacher == teacher) {
+        let id = 9_000;
+        view.insert_demo_master(MasterView { id, teacher, pos: t.pos.into(), yaw: t.yaw, price: t.price, wage: t.wage, resident: t.resident.map(|r| r as u32), hours: t.hours, present: true, place: t.place.to_string() });
+        knowledge.0.learn(Lore::Alphabet);
+        knowledge.0.lessons.insert(Lore::Read(crate::lore::Language::Greek), 0.35);
+        ui.show(id);
+    }
+    *done = true;
 }
 
 /// Сколько примерно уроков осталось до знания (урок засчитывается за 0.5–1.3 часа).

@@ -241,7 +241,8 @@ pub struct WaitingCamera;
 /// Снимки уровня (MRPG_CAM): прячем интерфейс.
 fn hide_ui_for_shots(mut roots: Query<(&mut Visibility, Has<crate::civil_client::ShotKeep>), (With<Node>, Without<ChildOf>)>) {
     // Снимок окна стражи (`MRPG_LAW_DEMO`): его окна оставляем.
-    let law = std::env::var_os("MRPG_LAW_DEMO").is_some();
+    // И окна школы/табличка (`MRPG_SHOT_UI=school…`, `MRPG_WORK_DEMO`).
+    let law = std::env::var_os("MRPG_LAW_DEMO").is_some() || std::env::var_os("MRPG_WORK_DEMO").is_some() || std::env::var("MRPG_SHOT_UI").is_ok_and(|s| s.starts_with("school"));
     for (mut v, keep) in &mut roots {
         if !(law && keep) {
             *v = Visibility::Hidden;

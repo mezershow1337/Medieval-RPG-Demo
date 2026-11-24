@@ -62,6 +62,11 @@ impl LoreView {
         self.masters.get(&id).map(|(m, _)| m)
     }
 
+    /// Для снимков без сервера: мастер только в списке, без тела.
+    pub fn insert_demo_master(&mut self, m: MasterView) {
+        self.masters.insert(m.id, (m, Entity::PLACEHOLDER));
+    }
+
     /// Все мастера, о которых сказал сервер.
     pub fn masters_iter(&self) -> impl Iterator<Item = &MasterView> {
         self.masters.values().map(|(m, _)| m)

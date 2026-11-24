@@ -508,6 +508,7 @@ fn spawn_tool(
     work: Res<MyWork>,
     assets: Option<Res<ToolAssets>>,
     camera: Query<Entity, With<PlayerCamera>>,
+    waiting: Query<Entity, (With<crate::client::WaitingCamera>, Without<PlayerCamera>)>,
     tools: Query<(Entity, &WorkTool)>,
 ) {
     let want = work.meter.as_ref().map(|m| m.drill);
@@ -520,7 +521,9 @@ fn spawn_tool(
     if tools.iter().any(|(_, t)| t.0 == drill) {
         return;
     }
-    let (Some(a), Ok(cam)) = (assets, camera.single()) else { return };
+    // Снимки с камеры ожидания (`MRPG_CAM`) — инструмент у неё.
+    let cam = camera.single().or_else(|_| waiting.single());
+    let (Some(a), Ok(cam)) = (assets, cam) else { return };
     let part = |mesh: &Handle<Mesh>, mat: &Handle<StandardMaterial>, t: Transform| (Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), t);
     let root = commands
         .spawn((WorkTool(drill), Transform::from_xyz(0.0, -0.24, -0.5), Visibility::default()))
