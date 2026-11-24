@@ -129,6 +129,64 @@ impl Violence {
     }
 }
 
+/// Преступление, за которое могут донести страже.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Crime {
+    Violence(Violence),
+    /// Кража (furtum manifestum: пойман с поличным — пеня в четверную цену вещи).
+    Theft { value: u32 },
+    /// Залез ночью в чужой дом.
+    Trespass,
+}
+
+impl Crime {
+    pub fn fine(self) -> u32 {
+        match self {
+            Crime::Violence(v) => v.fine(),
+            Crime::Theft { value } => (value * 4).max(40),
+            Crime::Trespass => 200,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Crime::Violence(v) => v.name(),
+            Crime::Theft { .. } => "кража",
+            Crime::Trespass => "вторжение в чужой дом",
+        }
+    }
+
+    pub fn rep(self) -> f32 {
+        match self {
+            Crime::Violence(v) => v.rep(),
+            Crime::Theft { value } => -(4.0 + (value as f32 / 60.0).min(10.0)),
+            Crime::Trespass => -4.0,
+        }
+    }
+
+    /// Насколько тяжкое (чтобы одно преступление против той же жертвы заменяло другое).
+    pub fn weight(self) -> u32 {
+        self.fine()
+    }
+
+    /// Насильственное (стража и жители берутся за оружие, а не просто кричат «держи вора»).
+    pub fn violent(self) -> bool {
+        matches!(self, Crime::Violence(_))
+    }
+}
+
+/// Сколько секунд у вора, чтобы заставить свидетеля замолчать: потом тот добегает до стражи
+/// (или кричит так, что слышит весь квартал). Время идёт, пока вы не рядом со свидетелем.
+pub const WITNESS_SECS: f32 = 10.0;
+
+/// Удастся ли уговорить стражника отпустить (0..1): от красноречия, тяжести вины и того,
+/// как гарнизон к вам относится. Каждая неудачная попытка за разговор — хуже.
+pub fn persuade_chance(eloquence: f32, fine: u32, garrison_rep: f32) -> f32 {
+    let skill = eloquence.clamp(0.0, 100.0) / 100.0;
+    let guilt = (fine as f32 / 7200.0).min(2.0);
+    (0.12 + 0.6 * skill + garrison_rep.clamp(-100.0, 100.0) * 0.003 - 0.32 * guilt).clamp(0.03, 0.92)
+}
+
 /// Сколько секунд сидеть в карцере за такую пеню (время в игре идёт быстрее, чем в жизни).
 pub fn jail_secs(fine: u32) -> f32 {
     (30.0 + fine as f32 / 120.0).min(240.0)
@@ -143,6 +201,8 @@ pub enum LawAnswer {
     Jail,
     /// Сопротивляться.
     Resist,
+    /// Уговорить отпустить (навык «Красноречие»).
+    Persuade,
 }
 
 /// Сервер -> клиент: закон и мирные люди.
@@ -150,8 +210,12 @@ pub enum LawAnswer {
 pub enum LawMessage {
     /// Короткое сообщение внизу экрана.
     Notice(String),
-    /// Стражник остановил вас: за вами пеня.
-    Halt { fine: u32, crimes: Vec<String>, purse: u32 },
+    /// Стражник остановил вас: за вами пеня. `persuade` — можно ли ещё попробовать уговорить
+    /// (и красноречие для подсказки).
+    Halt { fine: u32, crimes: Vec<String>, purse: u32, persuade: Option<u8> },
+    /// Вас видели: сколько живых свидетелей и сколько секунд, пока они не донесли
+    /// (`count == 0` — опасность миновала).
+    Witnessed { count: u8, secs: f32 },
     /// Разговор со стражником окончен (ушли, уплатили, сдались или драка).
     HaltEnd,
     /// Вы в карцере ещё столько секунд.
@@ -168,6 +232,16 @@ mod tests {
         assert!(Violence::Murder.fine() > Violence::Assault.fine() * 10);
         assert!(jail_secs(Violence::MurderGuard.fine()) <= 240.0);
         assert!(jail_secs(Violence::Assault.fine()) >= 30.0);
+    }
+
+    #[test]
+    fn persuading_is_harder_for_worse_crimes() {
+        let thief = persuade_chance(50.0, Crime::Theft { value: 30 }.fine(), 0.0);
+        let killer = persuade_chance(50.0, Crime::Violence(Violence::Murder).fine(), 0.0);
+        assert!(thief > killer + 0.2, "{thief} {killer}");
+        assert!(persuade_chance(90.0, 120, 0.0) > persuade_chance(5.0, 120, 0.0));
+        assert!(persuade_chance(100.0, 0, 100.0) <= 0.92 && persuade_chance(0.0, 100_000, -100.0) >= 0.03);
+        assert!(Crime::Theft { value: 10 }.fine() >= 40);
     }
 
     #[test]

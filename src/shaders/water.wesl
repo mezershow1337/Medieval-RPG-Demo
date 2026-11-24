@@ -109,13 +109,18 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let ggx = a2 / (3.14159265 * dd * dd);
     let nl = max(dot(N, sun), 0.0);
     let f_sun = 0.02 + 0.98 * pow(1.0 - max(dot(hv, v), 0.0), 5.0);
-    var sun_col: vec3<f32>;
-    if s.sun.w > 0.5 {
-        sun_col = vec3<f32>(1.0, 0.95, 0.85);
-    } else {
-        sun_col = vec3<f32>(1.0, 0.62, 0.28);
-    }
+    // Цвет блика: днём белый, на закате золотой; ниже горизонта солнца нет — ночью
+    // дорожку на воде даёт луна; в ненастье блика почти не видно.
+    var sun_col = mix(vec3<f32>(1.0, 0.62, 0.28), vec3<f32>(1.0, 0.95, 0.85), clamp(s.sun.w, 0.0, 1.0));
+    sun_col *= smoothstep(-0.02, 0.03, sun.y) * (1.0 - 0.85 * clamp(s.extra.y, 0.0, 1.0));
     let spec = sun_col * ggx * f_sun * nl / max(4.0 * nv * nl + 0.05, 0.05) * water.params.x;
+    // Лунная дорожка.
+    let moon = normalize(s.moon.xyz);
+    let hm = normalize(moon + v);
+    let nhm = max(dot(N, hm), 0.0);
+    let dm = nhm * nhm * (a2 - 1.0) + 1.0;
+    let moon_k = s.moon.w * clamp(s.extra.x, 0.0, 1.0) * smoothstep(0.0, 0.08, moon.y) * (1.0 - 0.9 * clamp(s.extra.y, 0.0, 1.0));
+    let spec_moon = vec3<f32>(0.55, 0.6, 0.7) * a2 / (3.14159265 * dm * dm) * f_sun * max(dot(N, moon), 0.0) / max(4.0 * nv * max(dot(N, moon), 0.0) + 0.05, 0.05) * water.params.x * 0.08 * moon_k;
 
     // Толща: на мелководье видно дно (альфа меньше), глубже — тёмно-зелёная вода Понта.
     let absorb = 1.0 - exp(-thick * water.deep.w);
@@ -133,7 +138,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     var out: FragmentOutput;
     var col = apply_pbr_lighting(pbr_input);
     // Отражение и блик — в единицах неба (без экспозиции), как купол.
-    let mirror = (refl * fres + spec + water.deep.rgb * sss * sun_col) * (1.0 - foam);
+    let mirror = (refl * fres + spec + spec_moon + water.deep.rgb * sss * sun_col) * (1.0 - foam);
     col = vec4<f32>(col.rgb + mirror, 1.0);
     // Прозрачность: у берега и при взгляде сверху вниз видно дно; под углом — зеркало.
     let alpha = clamp(max(max(absorb, fres), foam) * 0.92 + 0.08, 0.0, 1.0);

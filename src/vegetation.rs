@@ -415,13 +415,22 @@ fn spawn_plants(
     commands.remove_resource::<PendingPlants>();
 }
 
-fn update_wind(time: Res<Time>, wind: Option<Res<WindMaterials>>, mut mats: ResMut<Assets<FoliageMaterial>>, mut prev: Local<f32>) {
+fn update_wind(time: Res<Time>, clock: Option<Res<crate::world_clock::WorldClock>>, wind: Option<Res<WindMaterials>>, mut mats: ResMut<Assets<FoliageMaterial>>, mut prev: Local<f32>) {
     let Some(wind) = wind else { return };
     let t = time.elapsed_secs_wrapped();
-    for (h, _) in &wind.0 {
+    // Сила и направление ветра — по погоде (в тихую погоду листва едва шевелится,
+    // в ненастье деревья гнёт и треплет).
+    let w = clock.map(|c| crate::world_clock::weather_at(crate::graphics::frozen_time().unwrap_or(c.game)).wind).unwrap_or(Vec2::new(3.0, 1.7));
+    let speed = w.length();
+    let gain = (0.35 + 0.16 * speed).clamp(0.3, 2.2);
+    let dir = if speed > 0.1 { w / speed } else { Vec2::new(0.87, 0.49) };
+    for (h, kind) in &wind.0 {
         if let Some(mut m) = mats.get_mut(h) {
             m.extension.wind.x = t;
             m.extension.wind.w = *prev;
+            m.extension.wind.y = wind_of(*kind).0 * gain;
+            m.extension.dir.x = dir.x;
+            m.extension.dir.y = dir.y;
         }
     }
     *prev = t;

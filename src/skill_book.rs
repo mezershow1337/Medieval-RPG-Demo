@@ -151,6 +151,7 @@ fn short(s: Skill) -> &'static str {
         Skill::Medicine => "Врач.",
         Skill::Letters => "Книжн.",
         Skill::Trade => "Торг",
+        Skill::Eloquence => "Речь",
     }
 }
 

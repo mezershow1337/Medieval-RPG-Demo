@@ -62,6 +62,10 @@ impl Actor {
     pub fn forget_spawn(&mut self) {
         self.spawn = None;
     }
+    /// Пост, на котором NPC стоит (и где возродится после смерти).
+    pub fn spawn_point(&self) -> Option<NpcSpawn> {
+        self.spawn
+    }
 }
 
 /// Тело на земле. Предметы для обыска добавит система лута.
@@ -134,7 +138,8 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
     };
     let transport = NetcodeServerTransport::new(config, socket).expect("не удалось запустить сервер");
     let layout = level::layout();
-    let civil = crate::civil_server::CivilWorld::new(&layout.residents);
+    let mut civil = crate::civil_server::CivilWorld::new(&layout.residents);
+    civil.set_lights(&layout);
     let level = level::colliders(layout);
     let mut world = GameWorld {
         actors: HashMap::new(),
@@ -185,6 +190,23 @@ impl GameWorld {
             a.forget_spawn();
         }
         id
+    }
+
+    /// Горожанин схватился за оружие: боец с заданным id (по нему клиент узнаёт, чья одежда),
+    /// без выучки, с тем, что было под рукой. После смерти не возрождается.
+    #[allow(clippy::too_many_arguments)]
+    pub fn spawn_militia(&mut self, level: &LevelColliders, id: u64, spawn: NpcSpawn, weapon: crate::combat::WeaponKind, item: Option<u16>, hp: f32, now: f64) {
+        let tmp = spawn_npc(self, level, spawn, now);
+        let Some(mut a) = self.actors.remove(&tmp) else { return };
+        a.forget_spawn();
+        a.fighter.weapon = weapon;
+        a.fighter.max_hp = a.fighter.max_hp.min(hp.max(20.0));
+        a.fighter.hp = a.fighter.max_hp;
+        a.gear.main_hand = item;
+        if let Some(b) = a.brain.as_mut() {
+            b.training = npc::Training::Recruit;
+        }
+        self.actors.insert(id, a);
     }
 
     /// Убрать NPC из мира (налётчики ушли в степь).

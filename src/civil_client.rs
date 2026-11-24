@@ -39,8 +39,10 @@ pub struct Fallen;
 /// Разговор со стражником, карцер и короткие сообщения.
 #[derive(Resource, Default)]
 pub struct LawUi {
-    /// Стражник остановил: пеня, за что и сколько денег при себе.
-    pub halt: Option<(u32, Vec<String>, u32)>,
+    /// Стражник остановил: пеня, за что, сколько денег при себе и шанс уговорить (%).
+    pub halt: Option<(u32, Vec<String>, u32, Option<u8>)>,
+    /// Вас видели: сколько свидетелей и когда первый добежит до стражи.
+    witnessed: Option<(u8, f32)>,
     pub jailed_until: Option<f32>,
     notice: String,
     notice_until: f32,
@@ -61,6 +63,11 @@ struct LawText;
 struct NoticeText;
 #[derive(Component)]
 struct LawButton(LawAnswer);
+/// Кнопка «Уговорить»: видна, если есть надежда, и показывает шанс.
+#[derive(Component)]
+struct PersuadeButton;
+#[derive(Component)]
+struct WitnessText;
 
 const SCREAMS: [&str; 4] = ["«Помогите! Убивают!»", "«Стража! Стража!»", "«Не надо! Пощади!»", "«Люди добрые, разбой!»"];
 
@@ -142,7 +149,8 @@ fn apply_civil(
                     ui.notice = text;
                     ui.notice_until = now + 6.0;
                 }
-                LawMessage::Halt { fine, crimes, purse } => ui.halt = Some((fine, crimes, purse)),
+                LawMessage::Halt { fine, crimes, purse, persuade } => ui.halt = Some((fine, crimes, purse, persuade)),
+                LawMessage::Witnessed { count, secs } => ui.witnessed = (count > 0).then_some((count, now + secs)),
                 LawMessage::HaltEnd => ui.halt = None,
                 LawMessage::Jailed { secs } => {
                     ui.halt = None;
@@ -169,6 +177,20 @@ fn setup_law_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
         .spawn(Node { position_type: PositionType::Absolute, width: percent(100), bottom: percent(17), justify_content: JustifyContent::Center, ..default() })
         .with_children(|p| {
             p.spawn((NoticeText, Text::new(""), font(18.0, false), TextColor(Color::srgb(0.98, 0.86, 0.6)), TextLayout::justify(Justify::Center), TextShadow::default()));
+        });
+    // Свидетели бегут к страже — сверху по центру, на коже.
+    commands
+        .spawn(Node { position_type: PositionType::Absolute, width: percent(100), top: px(64), justify_content: JustifyContent::Center, ..default() })
+        .with_children(|p| {
+            p.spawn((
+                WitnessText,
+                Node { padding: crate::ui_theme::Skin::Leather.padding(), ..default() },
+                crate::ui_theme::theme().skin(crate::ui_theme::Skin::Leather),
+                Visibility::Hidden,
+            ))
+            .with_children(|b| {
+                b.spawn((Text::new(""), font(19.0, true), TextColor(Color::srgb(1.0, 0.72, 0.45)), TextShadow::default()));
+            });
         });
     // Разговор со стражником.
     commands
@@ -199,6 +221,7 @@ fn setup_law_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
                 ] {
                     crate::ui_theme::theme().button_sized(w, label, 17.0, LawButton(answer), true);
                 }
+                crate::ui_theme::theme().button_sized(w, "4. Уговорить", 17.0, (LawButton(LawAnswer::Persuade), PersuadeButton), true);
             });
         });
 }
@@ -224,8 +247,9 @@ fn law_input(
         cursor.grab_mode = CursorGrabMode::None;
         cursor.visible = true;
     }
-    for (key, answer) in [(KeyCode::Digit1, LawAnswer::Pay), (KeyCode::Digit2, LawAnswer::Jail), (KeyCode::Digit3, LawAnswer::Resist)] {
-        if keys.just_pressed(key) {
+    let can_persuade = ui.halt.as_ref().is_some_and(|h| h.3.is_some());
+    for (key, answer) in [(KeyCode::Digit1, LawAnswer::Pay), (KeyCode::Digit2, LawAnswer::Jail), (KeyCode::Digit3, LawAnswer::Resist), (KeyCode::Digit4, LawAnswer::Persuade)] {
+        if keys.just_pressed(key) && (answer != LawAnswer::Persuade || can_persuade) {
             send_answer(&mut client, answer);
         }
     }
@@ -237,19 +261,23 @@ fn law_input(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn draw_law_ui(
     time: Res<Time>,
     ui: Res<LawUi>,
-    mut root: Single<&mut Visibility, With<LawRoot>>,
+    mut root: Single<&mut Visibility, (With<LawRoot>, Without<WitnessText>)>,
     mut text: Single<&mut Text, (With<LawText>, Without<NoticeText>)>,
     mut notice: Single<&mut Text, (With<NoticeText>, Without<LawText>)>,
+    mut persuade: Single<(&mut Node, &Children), With<PersuadeButton>>,
+    mut witness: Single<(&mut Visibility, &Children), (With<WitnessText>, Without<LawRoot>)>,
+    mut texts: Query<&mut Text, (Without<LawText>, Without<NoticeText>)>,
 ) {
     let now = time.elapsed_secs();
     let want = if ui.open() { Visibility::Inherited } else { Visibility::Hidden };
     if **root != want {
         **root = want;
     }
-    if let Some((fine, crimes, purse)) = &ui.halt {
+    if let Some((fine, crimes, purse, chance)) = &ui.halt {
         let why = if crimes.is_empty() { "кража или сбыт краденого".to_string() } else { crimes.join(", ") };
         let line = format!(
             "«Стой! Ты нарушил закон: {why}.\nПеня — {}. Плати сейчас, иди в карцер или пеняй на себя».\n\nПри вас: {}.",
@@ -258,6 +286,44 @@ fn draw_law_ui(
         );
         if text.0 != line {
             text.0 = line;
+        }
+        let (node, children) = &mut *persuade;
+        let display = if chance.is_some() { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
+        }
+        if let Some(c) = chance {
+            let label = format!("4. Уговорить (красноречие, шанс {c}%)");
+            for child in children.iter() {
+                if let Ok(mut t) = texts.get_mut(child)
+                    && t.0 != label
+                {
+                    t.0 = label.clone();
+                }
+            }
+        }
+    }
+    // Свидетели: сколько их и сколько секунд, пока первый не добежит до стражи.
+    let (vis, children) = &mut *witness;
+    let seen = ui.witnessed.filter(|_| ui.jailed_until.is_none_or(|u| u < now));
+    let want = if seen.is_some() { Visibility::Inherited } else { Visibility::Hidden };
+    if **vis != want {
+        **vis = want;
+    }
+    if let Some((count, until)) = seen {
+        let left = (until - now).ceil().max(0.0) as u32;
+        let who = match count {
+            1 => "1 свидетель".to_string(),
+            2..=4 => format!("{count} свидетеля"),
+            _ => format!("{count} свидетелей"),
+        };
+        let label = format!("Вас видели: {who} — до стражи {left} с");
+        for child in children.iter() {
+            if let Ok(mut t) = texts.get_mut(child)
+                && t.0 != label
+            {
+                t.0 = label.clone();
+            }
         }
     }
     let line = if let Some(until) = ui.jailed_until.filter(|u| *u > now) {
