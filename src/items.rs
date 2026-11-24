@@ -20,10 +20,7 @@ impl Rng {
     }
 
     pub fn from_time() -> Self {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(1);
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1);
         Self::new(nanos)
     }
 
@@ -85,14 +82,7 @@ pub enum Quality {
 }
 
 impl Quality {
-    pub const ALL: [Quality; 6] = [
-        Quality::Poor,
-        Quality::Common,
-        Quality::Uncommon,
-        Quality::Rare,
-        Quality::Epic,
-        Quality::Legendary,
-    ];
+    pub const ALL: [Quality; 6] = [Quality::Poor, Quality::Common, Quality::Uncommon, Quality::Rare, Quality::Epic, Quality::Legendary];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -195,10 +185,7 @@ impl Stat {
     /// Как показывать число.
     pub fn format(self, value: f32) -> String {
         match self {
-            Stat::MoveSpeed
-            | Stat::ActionSpeed
-            | Stat::BlockStability
-            | Stat::HeadshotReduction => format!("{value:+.1}%"),
+            Stat::MoveSpeed | Stat::ActionSpeed | Stat::BlockStability | Stat::HeadshotReduction => format!("{value:+.1}%"),
             Stat::ParryWindow => format!("{value:+.0} мс"),
             Stat::WeaponDamage | Stat::Armor => format!("{value:.0}"),
             _ => format!("{value:+.0}"),
@@ -219,11 +206,7 @@ impl StatTotals {
     }
 
     pub fn get(&self, stat: Stat) -> f32 {
-        self.0
-            .iter()
-            .find(|(s, _)| *s == stat)
-            .map(|(_, v)| *v)
-            .unwrap_or(0.0)
+        self.0.iter().find(|(s, _)| *s == stat).map(|(_, v)| *v).unwrap_or(0.0)
     }
 }
 
@@ -315,55 +298,15 @@ pub struct ItemBase {
     pub has_quality: bool,
 }
 
-const WEAPON_AFFIXES: &[Stat] = &[
-    Stat::BonusDamage,
-    Stat::Strength,
-    Stat::Agility,
-    Stat::ActionSpeed,
-    Stat::ParryWindow,
-];
-const SHIELD_AFFIXES: &[Stat] = &[
-    Stat::MaxHealth,
-    Stat::Strength,
-    Stat::BlockStability,
-    Stat::ParryWindow,
-];
-const ARMOR_AFFIXES: &[Stat] = &[
-    Stat::MaxHealth,
-    Stat::Strength,
-    Stat::Agility,
-    Stat::MoveSpeed,
-    Stat::Luck,
-];
-const HELMET_AFFIXES: &[Stat] = &[
-    Stat::MaxHealth,
-    Stat::HeadshotReduction,
-    Stat::Strength,
-    Stat::Luck,
-];
-const JEWEL_AFFIXES: &[Stat] = &[
-    Stat::MaxHealth,
-    Stat::Strength,
-    Stat::Agility,
-    Stat::MoveSpeed,
-    Stat::ActionSpeed,
-    Stat::Luck,
-    Stat::BonusDamage,
-];
+const WEAPON_AFFIXES: &[Stat] = &[Stat::BonusDamage, Stat::Strength, Stat::Agility, Stat::ActionSpeed, Stat::ParryWindow];
+const SHIELD_AFFIXES: &[Stat] = &[Stat::MaxHealth, Stat::Strength, Stat::BlockStability, Stat::ParryWindow];
+const ARMOR_AFFIXES: &[Stat] = &[Stat::MaxHealth, Stat::Strength, Stat::Agility, Stat::MoveSpeed, Stat::Luck];
+const HELMET_AFFIXES: &[Stat] = &[Stat::MaxHealth, Stat::HeadshotReduction, Stat::Strength, Stat::Luck];
+const JEWEL_AFFIXES: &[Stat] = &[Stat::MaxHealth, Stat::Strength, Stat::Agility, Stat::MoveSpeed, Stat::ActionSpeed, Stat::Luck, Stat::BonusDamage];
 
 macro_rules! base {
     ($name:expr, $short:expr, $slot:expr, $size:expr, $stat:expr, $stack:expr, $affixes:expr, $shape:expr, $quality:expr) => {
-        ItemBase {
-            name: $name,
-            short: $short,
-            slot: $slot,
-            size: $size,
-            base_stat: $stat,
-            max_stack: $stack,
-            affix_pool: $affixes,
-            shape: $shape,
-            has_quality: $quality,
-        }
+        ItemBase { name: $name, short: $short, slot: $slot, size: $size, base_stat: $stat, max_stack: $stack, affix_pool: $affixes, shape: $shape, has_quality: $quality }
     };
 }
 
@@ -373,3333 +316,343 @@ use ItemShape as Sh;
 /// Все виды предметов. Индекс в этом массиве — [`ItemBaseId`].
 pub const ITEM_BASES: &[ItemBase] = &[
     // Оружие
-    base!(
-        "Спата",
-        "Спата",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 30.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Кавалерийская спата",
-        "Длинная спата",
-        Some(S::MainHand),
-        (1, 4),
-        Some((Stat::WeaponDamage, 42.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Булава",
-        "Булава",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 34.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Боевой топор",
-        "Топор",
-        Some(S::MainHand),
-        (2, 3),
-        Some((Stat::WeaponDamage, 38.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Пехотное копьё",
-        "Копьё",
-        Some(S::MainHand),
-        (1, 5),
-        Some((Stat::WeaponDamage, 50.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Кинжал",
-        "Кинжал",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 20.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
+    base!("Спата", "Спата", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Кавалерийская спата", "Длинная спата", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 42.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Булава", "Булава", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 34.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Боевой топор", "Топор", Some(S::MainHand), (2, 3), Some((Stat::WeaponDamage, 38.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Пехотное копьё", "Копьё", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 50.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Кинжал", "Кинжал", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 20.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
     // Щиты
-    base!(
-        "Овальный щит",
-        "Щит",
-        Some(S::OffHand),
-        (2, 3),
-        Some((Stat::Armor, 20.0)),
-        1,
-        SHIELD_AFFIXES,
-        Sh::Shield,
-        true
-    ),
-    base!(
-        "Круглый щит",
-        "Круглый щит",
-        Some(S::OffHand),
-        (2, 2),
-        Some((Stat::Armor, 10.0)),
-        1,
-        SHIELD_AFFIXES,
-        Sh::Shield,
-        true
-    ),
+    base!("Овальный щит", "Щит", Some(S::OffHand), (2, 3), Some((Stat::Armor, 20.0)), 1, SHIELD_AFFIXES, Sh::Shield, true),
+    base!("Круглый щит", "Круглый щит", Some(S::OffHand), (2, 2), Some((Stat::Armor, 10.0)), 1, SHIELD_AFFIXES, Sh::Shield, true),
     // Шлемы
-    base!(
-        "Спангенхельм",
-        "Спангенхельм",
-        Some(S::Head),
-        (2, 2),
-        Some((Stat::Armor, 18.0)),
-        1,
-        HELMET_AFFIXES,
-        Sh::Helmet,
-        true
-    ),
-    base!(
-        "Гребенчатый шлем",
-        "Шлем",
-        Some(S::Head),
-        (2, 2),
-        Some((Stat::Armor, 11.0)),
-        1,
-        HELMET_AFFIXES,
-        Sh::Helmet,
-        true
-    ),
+    base!("Спангенхельм", "Спангенхельм", Some(S::Head), (2, 2), Some((Stat::Armor, 18.0)), 1, HELMET_AFFIXES, Sh::Helmet, true),
+    base!("Гребенчатый шлем", "Шлем", Some(S::Head), (2, 2), Some((Stat::Armor, 11.0)), 1, HELMET_AFFIXES, Sh::Helmet, true),
     // Торс
-    base!(
-        "Стёганая туника",
-        "Стёганка",
-        Some(S::Chest),
-        (2, 3),
-        Some((Stat::Armor, 14.0)),
-        1,
-        ARMOR_AFFIXES,
-        Sh::Armor,
-        true
-    ),
-    base!(
-        "Кольчуга",
-        "Кольчуга",
-        Some(S::Chest),
-        (2, 3),
-        Some((Stat::Armor, 26.0)),
-        1,
-        ARMOR_AFFIXES,
-        Sh::Armor,
-        true
-    ),
-    base!(
-        "Ламеллярный панцирь",
-        "Панцирь",
-        Some(S::Chest),
-        (2, 3),
-        Some((Stat::Armor, 38.0)),
-        1,
-        ARMOR_AFFIXES,
-        Sh::Armor,
-        true
-    ),
+    base!("Стёганая туника", "Стёганка", Some(S::Chest), (2, 3), Some((Stat::Armor, 14.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    base!("Кольчуга", "Кольчуга", Some(S::Chest), (2, 3), Some((Stat::Armor, 26.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    base!("Ламеллярный панцирь", "Панцирь", Some(S::Chest), (2, 3), Some((Stat::Armor, 38.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
     // Руки, ноги
-    base!(
-        "Ламеллярные наручи",
-        "Наручи",
-        Some(S::Hands),
-        (2, 2),
-        Some((Stat::Armor, 9.0)),
-        1,
-        ARMOR_AFFIXES,
-        Sh::Armor,
-        true
-    ),
-    base!(
-        "Кожаные перчатки",
-        "Перчатки",
-        Some(S::Hands),
-        (2, 2),
-        Some((Stat::Armor, 4.0)),
-        1,
-        ARMOR_AFFIXES,
-        Sh::Armor,
-        true
-    ),
-    base!(
-        "Железные поножи",
-        "Поножи",
-        Some(S::Legs),
-        (2, 3),
-        Some((Stat::Armor, 16.0)),
-        1,
-        ARMOR_AFFIXES,
-        Sh::Armor,
-        true
-    ),
-    base!(
-        "Кожаные сапоги",
-        "Сапоги",
-        Some(S::Feet),
-        (2, 2),
-        Some((Stat::Armor, 5.0)),
-        1,
-        ARMOR_AFFIXES,
-        Sh::Armor,
-        true
-    ),
+    base!("Ламеллярные наручи", "Наручи", Some(S::Hands), (2, 2), Some((Stat::Armor, 9.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    base!("Кожаные перчатки", "Перчатки", Some(S::Hands), (2, 2), Some((Stat::Armor, 4.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    base!("Железные поножи", "Поножи", Some(S::Legs), (2, 3), Some((Stat::Armor, 16.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
+    base!("Кожаные сапоги", "Сапоги", Some(S::Feet), (2, 2), Some((Stat::Armor, 5.0)), 1, ARMOR_AFFIXES, Sh::Armor, true),
     // Украшения
-    base!(
-        "Серебряный перстень",
-        "Перстень",
-        Some(S::Ring),
-        (1, 1),
-        None,
-        1,
-        JEWEL_AFFIXES,
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Нательный крест",
-        "Крест",
-        Some(S::Necklace),
-        (1, 1),
-        None,
-        1,
-        JEWEL_AFFIXES,
-        Sh::Small,
-        true
-    ),
+    base!("Серебряный перстень", "Перстень", Some(S::Ring), (1, 1), None, 1, JEWEL_AFFIXES, Sh::Small, true),
+    base!("Нательный крест", "Крест", Some(S::Necklace), (1, 1), None, 1, JEWEL_AFFIXES, Sh::Small, true),
     // Расходники и ценности
     // Золотой солид (номисма) Анастасия: 1/72 римского фунта золота, 4,5 г. См. economy.rs.
-    base!(
-        "Солид",
-        "Солид",
-        None,
-        (1, 1),
-        None,
-        100,
-        &[],
-        Sh::Coins,
-        false
-    ),
+    base!("Солид", "Солид", None, (1, 1), None, 100, &[], Sh::Coins, false),
     base!("Бинт", "Бинт", None, (1, 1), None, 5, &[], Sh::Small, false),
-    base!(
-        "Целебное зелье",
-        "Зелье",
-        None,
-        (1, 2),
-        None,
-        3,
-        &[],
-        Sh::Flask,
-        false
-    ),
-    base!(
-        "Рубин",
-        "Рубин",
-        None,
-        (1, 1),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
+    base!("Целебное зелье", "Зелье", None, (1, 2), None, 3, &[], Sh::Flask, false),
+    base!("Рубин", "Рубин", None, (1, 1), None, 1, &[], Sh::Small, false),
     // --- Торговля (economy.rs, trade.rs): монеты реформы Анастасия 498 г. и товары Херсона ---
-    base!(
-        "Тремисс",
-        "Тремисс",
-        None,
-        (1, 1),
-        None,
-        100,
-        &[],
-        Sh::Coins,
-        false
-    ),
-    base!(
-        "Фоллис",
-        "Фоллис",
-        None,
-        (1, 1),
-        None,
-        100,
-        &[],
-        Sh::Coins,
-        false
-    ),
-    base!(
-        "Декануммий",
-        "Декан.",
-        None,
-        (1, 1),
-        None,
-        100,
-        &[],
-        Sh::Coins,
-        false
-    ),
-    base!(
-        "Амфора вина",
-        "Вино",
-        None,
-        (2, 3),
-        None,
-        1,
-        &[],
-        Sh::Flask,
-        false
-    ),
-    base!(
-        "Амфора оливкового масла",
-        "Масло",
-        None,
-        (2, 3),
-        None,
-        1,
-        &[],
-        Sh::Flask,
-        false
-    ),
-    base!(
-        "Стеклянная чаша",
-        "Чаша",
-        None,
-        (1, 1),
-        None,
-        4,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Отрез льна",
-        "Лён",
-        None,
-        (2, 2),
-        None,
-        3,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Отрез шерсти",
-        "Шерсть",
-        None,
-        (2, 2),
-        None,
-        3,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Солёная рыба",
-        "Рыба",
-        None,
-        (1, 2),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Мешок соли",
-        "Соль",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Сырая шкура",
-        "Шкура",
-        None,
-        (2, 2),
-        None,
-        3,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Овчина",
-        "Овчина",
-        None,
-        (2, 2),
-        None,
-        3,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Войлок",
-        "Войлок",
-        None,
-        (2, 2),
-        None,
-        3,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Воск",
-        "Воск",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Горшок мёда",
-        "Мёд",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        false
-    ),
+    base!("Тремисс", "Тремисс", None, (1, 1), None, 100, &[], Sh::Coins, false),
+    base!("Фоллис", "Фоллис", None, (1, 1), None, 100, &[], Sh::Coins, false),
+    base!("Декануммий", "Декан.", None, (1, 1), None, 100, &[], Sh::Coins, false),
+    base!("Амфора вина", "Вино", None, (2, 3), None, 1, &[], Sh::Flask, false),
+    base!("Амфора оливкового масла", "Масло", None, (2, 3), None, 1, &[], Sh::Flask, false),
+    base!("Стеклянная чаша", "Чаша", None, (1, 1), None, 4, &[], Sh::Small, false),
+    base!("Отрез льна", "Лён", None, (2, 2), None, 3, &[], Sh::Small, false),
+    base!("Отрез шерсти", "Шерсть", None, (2, 2), None, 3, &[], Sh::Small, false),
+    base!("Солёная рыба", "Рыба", None, (1, 2), None, 5, &[], Sh::Small, false),
+    base!("Мешок соли", "Соль", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Сырая шкура", "Шкура", None, (2, 2), None, 3, &[], Sh::Small, false),
+    base!("Овчина", "Овчина", None, (2, 2), None, 3, &[], Sh::Small, false),
+    base!("Войлок", "Войлок", None, (2, 2), None, 3, &[], Sh::Small, false),
+    base!("Воск", "Воск", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Горшок мёда", "Мёд", None, (1, 1), None, 5, &[], Sh::Flask, false),
     // -----------------------------------------------------------------------
     // Травничество, медицина и алхимия (данные о свойствах — в src/lore.rs).
     // Новые предметы добавляйте ниже; ищите всегда по имени.
     // -----------------------------------------------------------------------
     // Местные травы (собираются за стенами).
-    base!(
-        "Шалфей",
-        "Шалфей",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Чабрец",
-        "Чабрец",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Зверобой",
-        "Зверобой",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Белена",
-        "Белена",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Ягоды можжевельника",
-        "Можжевельник",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Полынь",
-        "Полынь",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Тысячелистник",
-        "Тысячелистник",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Подорожник",
-        "Подорожник",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Шиповник",
-        "Шиповник",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Просвирник",
-        "Просвирник",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Маковые коробочки",
-        "Мак",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Мята",
-        "Мята",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Корень марены",
-        "Марена",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Вайда",
-        "Вайда",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Дубовые галлы",
-        "Галлы",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Корень окопника",
-        "Окопник",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Корень девясила",
-        "Девясил",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
+    base!("Шалфей", "Шалфей", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Чабрец", "Чабрец", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Зверобой", "Зверобой", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Белена", "Белена", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Ягоды можжевельника", "Можжевельник", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Полынь", "Полынь", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Тысячелистник", "Тысячелистник", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Подорожник", "Подорожник", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Шиповник", "Шиповник", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Просвирник", "Просвирник", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Маковые коробочки", "Мак", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Мята", "Мята", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Корень марены", "Марена", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Вайда", "Вайда", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Дубовые галлы", "Галлы", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Корень окопника", "Окопник", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Корень девясила", "Девясил", None, (1, 1), None, 10, &[], Sh::Small, false),
     // Степь (бартер у кочевников).
-    base!(
-        "Солодковый корень",
-        "Солодка",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Ревень понтийский",
-        "Ревень",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Бараний жир",
-        "Жир",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        false
-    ),
+    base!("Солодковый корень", "Солодка", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Ревень понтийский", "Ревень", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Бараний жир", "Жир", None, (1, 1), None, 5, &[], Sh::Small, false),
     // Привозное (порт).
-    base!(
-        "Мирра",
-        "Мирра",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Ладан",
-        "Ладан",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Сера",
-        "Сера",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Квасцы",
-        "Квасцы",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Киноварь",
-        "Киноварь",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Опий",
-        "Опий",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Перец",
-        "Перец",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Шафран",
-        "Шафран",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Корица",
-        "Корица",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Хиосская мастика",
-        "Мастика",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Нефть",
-        "Нефть",
-        None,
-        (1, 2),
-        None,
-        3,
-        &[],
-        Sh::Flask,
-        false
-    ),
-    base!(
-        "Натр",
-        "Натр",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Камедь",
-        "Камедь",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
+    base!("Мирра", "Мирра", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Ладан", "Ладан", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Сера", "Сера", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Квасцы", "Квасцы", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Киноварь", "Киноварь", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Опий", "Опий", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Перец", "Перец", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Шафран", "Шафран", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Корица", "Корица", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Хиосская мастика", "Мастика", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Нефть", "Нефть", None, (1, 2), None, 3, &[], Sh::Flask, false),
+    base!("Натр", "Натр", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Камедь", "Камедь", None, (1, 1), None, 10, &[], Sh::Small, false),
     // Материалы.
-    base!(
-        "Сосновая смола",
-        "Смола",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Негашёная известь",
-        "Известь",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Медный купорос",
-        "Купорос",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Свинец",
-        "Свинец",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Медный лом",
-        "Медь",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Древесная зола",
-        "Зола",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Кувшин вина",
-        "Вино",
-        None,
-        (1, 2),
-        None,
-        2,
-        &[],
-        Sh::Flask,
-        false
-    ),
-    base!(
-        "Кувшин оливкового масла",
-        "Масло",
-        None,
-        (1, 2),
-        None,
-        2,
-        &[],
-        Sh::Flask,
-        false
-    ),
+    base!("Сосновая смола", "Смола", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Негашёная известь", "Известь", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Медный купорос", "Купорос", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Свинец", "Свинец", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Медный лом", "Медь", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Древесная зола", "Зола", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Кувшин вина", "Вино", None, (1, 2), None, 2, &[], Sh::Flask, false),
+    base!("Кувшин оливкового масла", "Масло", None, (1, 2), None, 2, &[], Sh::Flask, false),
     // Посуда и инструменты.
-    base!(
-        "Ступка с пестиком",
-        "Ступка",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Blunt,
-        false
-    ),
-    base!(
-        "Глиняный горшок",
-        "Горшок",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Медный котелок",
-        "Котелок",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Весы с гирями",
-        "Весы",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Пустой флакон",
-        "Флакон",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        false
-    ),
-    base!(
-        "Тигель",
-        "Тигель",
-        None,
-        (1, 1),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Алембик",
-        "Алембик",
-        None,
-        (2, 3),
-        None,
-        1,
-        &[],
-        Sh::Flask,
-        false
-    ),
-    base!(
-        "Стеклянная реторта",
-        "Реторта",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Flask,
-        false
-    ),
-    base!(
-        "Керотакис",
-        "Керотакис",
-        None,
-        (2, 3),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
+    base!("Ступка с пестиком", "Ступка", None, (2, 2), None, 1, &[], Sh::Blunt, false),
+    base!("Глиняный горшок", "Горшок", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Медный котелок", "Котелок", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Весы с гирями", "Весы", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Пустой флакон", "Флакон", None, (1, 1), None, 5, &[], Sh::Flask, false),
+    base!("Тигель", "Тигель", None, (1, 1), None, 1, &[], Sh::Small, false),
+    base!("Алембик", "Алембик", None, (2, 3), None, 1, &[], Sh::Flask, false),
+    base!("Стеклянная реторта", "Реторта", None, (2, 2), None, 1, &[], Sh::Flask, false),
+    base!("Керотакис", "Керотакис", None, (2, 3), None, 1, &[], Sh::Small, false),
     // Тексты.
-    base!(
-        "Обрывок травника",
-        "Обрывок",
-        None,
-        (1, 1),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Диоскорид. О лекарственных веществах",
-        "Диоскорид",
-        None,
-        (1, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Иллюстрированный травник",
-        "Травник",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Гиппократ. О язвах",
-        "Гиппократ",
-        None,
-        (1, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Гален. О простых лекарствах",
-        "Гален",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Гален. О противоядиях",
-        "Гален",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Орибасий. Синопсис",
-        "Орибасий",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Зосим. О приборах и печах",
-        "Зосим",
-        None,
-        (1, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Книга красильщика",
-        "Красильщик",
-        None,
-        (1, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Эней Тактик. Об обороне городов",
-        "Эней",
-        None,
-        (1, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Феофраст. О камнях",
-        "Феофраст",
-        None,
-        (1, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Цельс. О медицине",
-        "Цельс",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
+    base!("Обрывок травника", "Обрывок", None, (1, 1), None, 1, &[], Sh::Small, false),
+    base!("Диоскорид. О лекарственных веществах", "Диоскорид", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Иллюстрированный травник", "Травник", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Гиппократ. О язвах", "Гиппократ", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Гален. О простых лекарствах", "Гален", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Гален. О противоядиях", "Гален", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Орибасий. Синопсис", "Орибасий", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Зосим. О приборах и печах", "Зосим", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Книга красильщика", "Красильщик", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Эней Тактик. Об обороне городов", "Эней", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Феофраст. О камнях", "Феофраст", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Цельс. О медицине", "Цельс", None, (2, 2), None, 1, &[], Sh::Small, false),
     // Снадобья и продукты (качество = мастерство изготовителя).
-    base!(
-        "Кровоостанавливающая припарка",
-        "Припарка",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Отвар шалфея",
-        "Шалфей",
-        None,
-        (1, 2),
-        None,
-        3,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Отвар чабреца",
-        "Чабрец",
-        None,
-        (1, 2),
-        None,
-        3,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Маковый отвар",
-        "Мак",
-        None,
-        (1, 2),
-        None,
-        3,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Зверобойное масло",
-        "Масло",
-        None,
-        (1, 2),
-        None,
-        3,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Ранозаживляющая мазь",
-        "Мазь",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Оксимель",
-        "Оксимель",
-        None,
-        (1, 2),
-        None,
-        3,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Териак",
-        "Териак",
-        None,
-        (1, 1),
-        None,
-        3,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Винный уксус",
-        "Уксус",
-        None,
-        (1, 2),
-        None,
-        2,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Ртуть",
-        "Ртуть",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        false
-    ),
-    base!(
-        "Серная вода",
-        "Серн. вода",
-        None,
-        (1, 2),
-        None,
-        3,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Смоляное масло",
-        "Смол. масло",
-        None,
-        (1, 2),
-        None,
-        3,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Ярь-медянка",
-        "Ярь",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Свинцовые белила",
-        "Белила",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Сурик",
-        "Сурик",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Мареновый лак",
-        "Марена",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Вайдовая синь",
-        "Синь",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Чернила",
-        "Чернила",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Щёлок",
-        "Щёлок",
-        None,
-        (1, 2),
-        None,
-        3,
-        &[],
-        Sh::Flask,
-        false
-    ),
+    base!("Кровоостанавливающая припарка", "Припарка", None, (1, 1), None, 5, &[], Sh::Small, true),
+    base!("Отвар шалфея", "Шалфей", None, (1, 2), None, 3, &[], Sh::Flask, true),
+    base!("Отвар чабреца", "Чабрец", None, (1, 2), None, 3, &[], Sh::Flask, true),
+    base!("Маковый отвар", "Мак", None, (1, 2), None, 3, &[], Sh::Flask, true),
+    base!("Зверобойное масло", "Масло", None, (1, 2), None, 3, &[], Sh::Flask, true),
+    base!("Ранозаживляющая мазь", "Мазь", None, (1, 1), None, 5, &[], Sh::Small, true),
+    base!("Оксимель", "Оксимель", None, (1, 2), None, 3, &[], Sh::Flask, true),
+    base!("Териак", "Териак", None, (1, 1), None, 3, &[], Sh::Small, true),
+    base!("Винный уксус", "Уксус", None, (1, 2), None, 2, &[], Sh::Flask, true),
+    base!("Ртуть", "Ртуть", None, (1, 1), None, 5, &[], Sh::Flask, false),
+    base!("Серная вода", "Серн. вода", None, (1, 2), None, 3, &[], Sh::Flask, true),
+    base!("Смоляное масло", "Смол. масло", None, (1, 2), None, 3, &[], Sh::Flask, true),
+    base!("Ярь-медянка", "Ярь", None, (1, 1), None, 10, &[], Sh::Small, true),
+    base!("Свинцовые белила", "Белила", None, (1, 1), None, 10, &[], Sh::Small, true),
+    base!("Сурик", "Сурик", None, (1, 1), None, 10, &[], Sh::Small, true),
+    base!("Мареновый лак", "Марена", None, (1, 1), None, 10, &[], Sh::Small, true),
+    base!("Вайдовая синь", "Синь", None, (1, 1), None, 10, &[], Sh::Small, true),
+    base!("Чернила", "Чернила", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Щёлок", "Щёлок", None, (1, 2), None, 3, &[], Sh::Flask, false),
     base!("Мыло", "Мыло", None, (1, 1), None, 5, &[], Sh::Small, true),
-    base!(
-        "Зажигательный горшок",
-        "Огонь",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        true
-    ),
+    base!("Зажигательный горшок", "Огонь", None, (2, 2), None, 1, &[], Sh::Small, true),
     // Неудачная варка (brewing.rs).
-    base!(
-        "Испорченное варево",
-        "Бурда",
-        None,
-        (1, 1),
-        None,
-        3,
-        &[],
-        Sh::Flask,
-        false
-    ),
+    base!("Испорченное варево", "Бурда", None, (1, 1), None, 3, &[], Sh::Flask, false),
     // Отвары (brewing.rs) и рабочее место алхимика (жаровня, стол).
-    base!(
-        "Отвар полыни",
-        "Полынь",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Мятный отвар",
-        "Мята",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Отвар шиповника",
-        "Шиповн.",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Отвар девясила",
-        "Девясил",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Жаровня",
-        "Жаровня",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Алхимический стол",
-        "Стол",
-        None,
-        (3, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
+    base!("Отвар полыни", "Полынь", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Мятный отвар", "Мята", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Отвар шиповника", "Шиповн.", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Отвар девясила", "Девясил", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Жаровня", "Жаровня", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Алхимический стол", "Стол", None, (3, 2), None, 1, &[], Sh::Small, false),
     // Топливо для жаровни.
-    base!(
-        "Древесный уголь",
-        "Уголь",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
+    base!("Древесный уголь", "Уголь", None, (1, 1), None, 10, &[], Sh::Small, false),
     // -----------------------------------------------------------------------
     // Кузнечное и литейное дело (smithing.rs). Качество полос и криц — чистота железа.
     // -----------------------------------------------------------------------
     // Боспорская руда с Керченского полуострова (бурый железняк), уголь из горных лесов.
-    base!(
-        "Железная руда",
-        "Руда",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Крица",
-        "Крица",
-        None,
-        (1, 1),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Железная полоса",
-        "Железо",
-        None,
-        (1, 2),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Стальная полоса",
-        "Сталь",
-        None,
-        (1, 2),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Железный лом",
-        "Лом",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Олово",
-        "Олово",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Бронзовый лом",
-        "Бронза",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Серебряный лом",
-        "Серебро",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Чугунная корка",
-        "Чугун",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Ясеневая заготовка",
-        "Ясень",
-        None,
-        (1, 3),
-        None,
-        3,
-        &[],
-        Sh::Polearm,
-        false
-    ),
-    base!(
-        "Гончарная глина",
-        "Глина",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Каменная литейная форма",
-        "Форма",
-        None,
-        (2, 1),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
+    base!("Железная руда", "Руда", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Крица", "Крица", None, (1, 1), None, 1, &[], Sh::Small, true),
+    base!("Железная полоса", "Железо", None, (1, 2), None, 5, &[], Sh::Small, true),
+    base!("Стальная полоса", "Сталь", None, (1, 2), None, 5, &[], Sh::Small, true),
+    base!("Железный лом", "Лом", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Олово", "Олово", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Бронзовый лом", "Бронза", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Серебряный лом", "Серебро", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Чугунная корка", "Чугун", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Ясеневая заготовка", "Ясень", None, (1, 3), None, 3, &[], Sh::Polearm, false),
+    base!("Гончарная глина", "Глина", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Каменная литейная форма", "Форма", None, (2, 1), None, 1, &[], Sh::Small, false),
     // Изделия.
-    base!(
-        "Наконечники стрел",
-        "Стрелы",
-        None,
-        (1, 1),
-        None,
-        30,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Бронзовая пряжка",
-        "Пряжка",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Бронзовая фибула",
-        "Фибула",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Бронзовое навершие",
-        "Навершие",
-        None,
-        (1, 1),
-        None,
-        3,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Свинцовые грузила",
-        "Грузила",
-        None,
-        (1, 1),
-        None,
-        30,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Плиний. Естественная история",
-        "Плиний",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
+    base!("Наконечники стрел", "Стрелы", None, (1, 1), None, 30, &[], Sh::Small, true),
+    base!("Бронзовая пряжка", "Пряжка", None, (1, 1), None, 5, &[], Sh::Small, true),
+    base!("Бронзовая фибула", "Фибула", None, (1, 1), None, 5, &[], Sh::Small, true),
+    base!("Бронзовое навершие", "Навершие", None, (1, 1), None, 3, &[], Sh::Small, true),
+    base!("Свинцовые грузила", "Грузила", None, (1, 1), None, 30, &[], Sh::Small, false),
+    base!("Плиний. Естественная история", "Плиний", None, (2, 2), None, 1, &[], Sh::Small, false),
     // Сушёные травы, толчёное сырьё, соки и вытяжки (brewing.rs: подготовка сырья).
-    base!(
-        "Сушёный шалфей",
-        "С.шалфей",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Сушёный чабрец",
-        "С.чабрец",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Сушёный зверобой",
-        "С.звероб",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Сушёный подорожник",
-        "С.подоро",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Сушёный тысячелистник",
-        "С.тысяче",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Сушёный просвирник",
-        "С.просви",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Сушёная мята",
-        "С.мята",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Сушёная полынь",
-        "С.полынь",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Сушёный шиповник",
-        "С.шиповн",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Толчёный корень девясила",
-        "Т.девяси",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Толчёный корень окопника",
-        "Т.окопни",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Толчёный корень марены",
-        "Т.марены",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Толчёный солодковый корень",
-        "Т.корень",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Толчёная мирра",
-        "Т.мирра",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Толчёный ладан",
-        "Т.ладан",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Толчёные галлы",
-        "Т.галлы",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Толчёная сера",
-        "Т.сера",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Толчёная киноварь",
-        "Т.кинова",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Сок подорожника",
-        "Сок",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Маковый сок",
-        "Мекон",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Полынное вино",
-        "Пол.вино",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Чабрецовый уксус",
-        "Ч.уксус",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Мазь из окопника",
-        "Мазь",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Сушильная решётка",
-        "Решётка",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Вино с миррой",
-        "Мирр.вино",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Отвар ревеня",
-        "Ревень",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Вяжущая мазь",
-        "Вяж.мазь",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        true
-    ),
-    base!(
-        "Мазь от ожогов",
-        "Ож.мазь",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Flask,
-        true
-    ),
+    base!("Сушёный шалфей", "С.шалфей", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Сушёный чабрец", "С.чабрец", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Сушёный зверобой", "С.звероб", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Сушёный подорожник", "С.подоро", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Сушёный тысячелистник", "С.тысяче", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Сушёный просвирник", "С.просви", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Сушёная мята", "С.мята", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Сушёная полынь", "С.полынь", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Сушёный шиповник", "С.шиповн", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Толчёный корень девясила", "Т.девяси", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Толчёный корень окопника", "Т.окопни", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Толчёный корень марены", "Т.марены", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Толчёный солодковый корень", "Т.корень", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Толчёная мирра", "Т.мирра", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Толчёный ладан", "Т.ладан", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Толчёные галлы", "Т.галлы", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Толчёная сера", "Т.сера", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Толчёная киноварь", "Т.кинова", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Сок подорожника", "Сок", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Маковый сок", "Мекон", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Полынное вино", "Пол.вино", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Чабрецовый уксус", "Ч.уксус", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Мазь из окопника", "Мазь", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Сушильная решётка", "Решётка", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Вино с миррой", "Мирр.вино", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Отвар ревеня", "Ревень", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Вяжущая мазь", "Вяж.мазь", None, (1, 1), None, 5, &[], Sh::Flask, true),
+    base!("Мазь от ожогов", "Ож.мазь", None, (1, 1), None, 5, &[], Sh::Flask, true),
     // <arsenal> — создано tools/gen_arsenal.py
-    base!(
-        "Семиспата",
-        "Семиспата",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 26.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Солдатская спата",
-        "Спата солд.",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 29.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Меч букеллария",
-        "Меч букел.",
-        Some(S::MainHand),
-        (1, 4),
-        Some((Stat::WeaponDamage, 36.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Спата с бронзовой гардой",
-        "Спата бронз.",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 30.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Парадная спата",
-        "Спата парад.",
-        Some(S::MainHand),
-        (1, 4),
-        Some((Stat::WeaponDamage, 33.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Старый гладиус",
-        "Гладиус",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 24.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Готская спата с кольцом",
-        "Спата гот.",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 31.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Готская узорчатая спата",
-        "Спата узор.",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 32.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Гепидская спата",
-        "Спата гепид.",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 30.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Франкская спата",
-        "Спата франк.",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 30.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Вандальская спата",
-        "Спата ванд.",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 29.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Лангобардская спата",
-        "Спата ланг.",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 31.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Аланский длинный меч",
-        "Меч алан.",
-        Some(S::MainHand),
-        (1, 4),
-        Some((Stat::WeaponDamage, 35.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Меч с кольцевым навершием",
-        "Меч кольц.",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 30.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Гуннский длинный меч",
-        "Меч гунн.",
-        Some(S::MainHand),
-        (1, 4),
-        Some((Stat::WeaponDamage, 36.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Степной изогнутый меч",
-        "Изогн. меч",
-        Some(S::MainHand),
-        (1, 4),
-        Some((Stat::WeaponDamage, 33.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Сасанидский меч",
-        "Меч перс.",
-        Some(S::MainHand),
-        (1, 4),
-        Some((Stat::WeaponDamage, 34.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Короткий конный меч",
-        "Меч конн.",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 28.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Герульская спата",
-        "Спата герул.",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 31.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Боспорский меч",
-        "Меч босп.",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 30.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Лазский меч",
-        "Меч лазск.",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 31.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Скрамасакс",
-        "Скрамасакс",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 22.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Длинный сакс",
-        "Длинный сакс",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 26.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Узкий сакс",
-        "Узкий сакс",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 20.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Боевой нож",
-        "Боевой нож",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 19.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Пугион",
-        "Пугион",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 20.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Гуннский кинжал",
-        "Кинжал гунн.",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 21.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Персидский кинжал",
-        "Кинжал перс.",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 21.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Засапожный нож",
-        "Засап. нож",
-        Some(S::MainHand),
-        (1, 1),
-        Some((Stat::WeaponDamage, 15.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Охотничий нож",
-        "Охот. нож",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 17.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Сика",
-        "Сика",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 21.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Тесак",
-        "Тесак",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 23.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blade,
-        true
-    ),
-    base!(
-        "Франциска",
-        "Франциска",
-        Some(S::MainHand),
-        (2, 2),
-        Some((Stat::WeaponDamage, 30.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Бородовидная секира",
-        "Секира бород.",
-        Some(S::MainHand),
-        (2, 3),
-        Some((Stat::WeaponDamage, 37.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Широкая секира",
-        "Широк. секира",
-        Some(S::MainHand),
-        (2, 4),
-        Some((Stat::WeaponDamage, 45.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Узколезвийный топор",
-        "Топор узк.",
-        Some(S::MainHand),
-        (2, 3),
-        Some((Stat::WeaponDamage, 34.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Долабра",
-        "Долабра",
-        Some(S::MainHand),
-        (2, 3),
-        Some((Stat::WeaponDamage, 33.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Плотничий топор",
-        "Топор плотн.",
-        Some(S::MainHand),
-        (2, 3),
-        Some((Stat::WeaponDamage, 30.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Аланский топорик",
-        "Топорик алан.",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 31.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Славянский топорик",
-        "Топорик слав.",
-        Some(S::MainHand),
-        (2, 2),
-        Some((Stat::WeaponDamage, 29.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Метательный топорик",
-        "Топорик метат.",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 26.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Гуннский боевой топор",
-        "Топор гунн.",
-        Some(S::MainHand),
-        (2, 3),
-        Some((Stat::WeaponDamage, 35.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Армянский топор",
-        "Топор арм.",
-        Some(S::MainHand),
-        (2, 3),
-        Some((Stat::WeaponDamage, 36.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Гранёная булава",
-        "Булава гран.",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 35.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Шипастая булава",
-        "Булава шип.",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 37.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Сасанидская булава",
-        "Булава перс.",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 38.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Кистень",
-        "Кистень",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 33.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Гирька на ремне",
-        "Гирька",
-        Some(S::MainHand),
-        (1, 1),
-        Some((Stat::WeaponDamage, 27.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Боевой молот",
-        "Молот",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 38.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Клевец",
-        "Клевец",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 34.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Окованная палица",
-        "Палица",
-        Some(S::MainHand),
-        (1, 3),
-        Some((Stat::WeaponDamage, 30.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Шаровая булава",
-        "Булава шар.",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 34.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Blunt,
-        true
-    ),
-    base!(
-        "Контос",
-        "Контос",
-        Some(S::MainHand),
-        (1, 6),
-        Some((Stat::WeaponDamage, 56.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Аланское копьё",
-        "Копьё алан.",
-        Some(S::MainHand),
-        (1, 6),
-        Some((Stat::WeaponDamage, 54.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Ланкия",
-        "Ланкия",
-        Some(S::MainHand),
-        (1, 5),
-        Some((Stat::WeaponDamage, 40.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Менавлон",
-        "Менавлон",
-        Some(S::MainHand),
-        (1, 5),
-        Some((Stat::WeaponDamage, 52.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Ангон",
-        "Ангон",
-        Some(S::MainHand),
-        (1, 5),
-        Some((Stat::WeaponDamage, 44.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Плюмбата",
-        "Плюмбата",
-        Some(S::MainHand),
-        (1, 2),
-        Some((Stat::WeaponDamage, 24.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Пилум",
-        "Пилум",
-        Some(S::MainHand),
-        (1, 5),
-        Some((Stat::WeaponDamage, 46.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Спикулум",
-        "Спикулум",
-        Some(S::MainHand),
-        (1, 5),
-        Some((Stat::WeaponDamage, 42.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Верут",
-        "Верут",
-        Some(S::MainHand),
-        (1, 4),
-        Some((Stat::WeaponDamage, 32.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Дротик",
-        "Дротик",
-        Some(S::MainHand),
-        (1, 4),
-        Some((Stat::WeaponDamage, 34.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Крылатое копьё",
-        "Копьё крыл.",
-        Some(S::MainHand),
-        (1, 5),
-        Some((Stat::WeaponDamage, 50.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Гуннское копьё",
-        "Копьё гунн.",
-        Some(S::MainHand),
-        (1, 5),
-        Some((Stat::WeaponDamage, 48.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Рогатина",
-        "Рогатина",
-        Some(S::MainHand),
-        (1, 5),
-        Some((Stat::WeaponDamage, 52.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Рыбацкая острога",
-        "Острога",
-        Some(S::MainHand),
-        (1, 5),
-        Some((Stat::WeaponDamage, 36.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Копьё с ромбическим пером",
-        "Копьё ромб.",
-        Some(S::MainHand),
-        (1, 5),
-        Some((Stat::WeaponDamage, 50.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Пехотная пика",
-        "Пика",
-        Some(S::MainHand),
-        (1, 6),
-        Some((Stat::WeaponDamage, 54.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Копьё с бандоном",
-        "Копьё флаж.",
-        Some(S::MainHand),
-        (1, 6),
-        Some((Stat::WeaponDamage, 52.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Выпрямленная коса",
-        "Коса",
-        Some(S::MainHand),
-        (1, 5),
-        Some((Stat::WeaponDamage, 44.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Франкское копьё",
-        "Копьё франк.",
-        Some(S::MainHand),
-        (1, 5),
-        Some((Stat::WeaponDamage, 48.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Персидское копьё",
-        "Копьё перс.",
-        Some(S::MainHand),
-        (1, 6),
-        Some((Stat::WeaponDamage, 55.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Копьё-жало",
-        "Копьё-жало",
-        Some(S::MainHand),
-        (1, 5),
-        Some((Stat::WeaponDamage, 46.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Исаврийский дротик",
-        "Дротик исавр.",
-        Some(S::MainHand),
-        (1, 4),
-        Some((Stat::WeaponDamage, 35.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Бронебойные наконечники",
-        "Бронебойные",
-        None,
-        (1, 1),
-        None,
-        30,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Трёхлопастные наконечники",
-        "Трёхлопаст.",
-        None,
-        (1, 1),
-        None,
-        30,
-        &[],
-        Sh::Small,
-        true
-    ),
-    base!(
-        "Срезни",
-        "Срезни",
-        None,
-        (1, 1),
-        None,
-        30,
-        &[],
-        Sh::Small,
-        true
-    ),
+    base!("Семиспата", "Семиспата", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 26.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Солдатская спата", "Спата солд.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 29.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Меч букеллария", "Меч букел.", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 36.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Спата с бронзовой гардой", "Спата бронз.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Парадная спата", "Спата парад.", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 33.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Старый гладиус", "Гладиус", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 24.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Готская спата с кольцом", "Спата гот.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 31.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Готская узорчатая спата", "Спата узор.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 32.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Гепидская спата", "Спата гепид.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Франкская спата", "Спата франк.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Вандальская спата", "Спата ванд.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 29.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Лангобардская спата", "Спата ланг.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 31.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Аланский длинный меч", "Меч алан.", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 35.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Меч с кольцевым навершием", "Меч кольц.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Гуннский длинный меч", "Меч гунн.", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 36.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Степной изогнутый меч", "Изогн. меч", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 33.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Сасанидский меч", "Меч перс.", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 34.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Короткий конный меч", "Меч конн.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 28.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Герульская спата", "Спата герул.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 31.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Боспорский меч", "Меч босп.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Лазский меч", "Меч лазск.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 31.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Скрамасакс", "Скрамасакс", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 22.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Длинный сакс", "Длинный сакс", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 26.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Узкий сакс", "Узкий сакс", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 20.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Боевой нож", "Боевой нож", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 19.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Пугион", "Пугион", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 20.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Гуннский кинжал", "Кинжал гунн.", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 21.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Персидский кинжал", "Кинжал перс.", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 21.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Засапожный нож", "Засап. нож", Some(S::MainHand), (1, 1), Some((Stat::WeaponDamage, 15.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Охотничий нож", "Охот. нож", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 17.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Сика", "Сика", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 21.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Тесак", "Тесак", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 23.0)), 1, WEAPON_AFFIXES, Sh::Blade, true),
+    base!("Франциска", "Франциска", Some(S::MainHand), (2, 2), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Бородовидная секира", "Секира бород.", Some(S::MainHand), (2, 3), Some((Stat::WeaponDamage, 37.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Широкая секира", "Широк. секира", Some(S::MainHand), (2, 4), Some((Stat::WeaponDamage, 45.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Узколезвийный топор", "Топор узк.", Some(S::MainHand), (2, 3), Some((Stat::WeaponDamage, 34.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Долабра", "Долабра", Some(S::MainHand), (2, 3), Some((Stat::WeaponDamage, 33.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Плотничий топор", "Топор плотн.", Some(S::MainHand), (2, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Аланский топорик", "Топорик алан.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 31.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Славянский топорик", "Топорик слав.", Some(S::MainHand), (2, 2), Some((Stat::WeaponDamage, 29.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Метательный топорик", "Топорик метат.", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 26.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Гуннский боевой топор", "Топор гунн.", Some(S::MainHand), (2, 3), Some((Stat::WeaponDamage, 35.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Армянский топор", "Топор арм.", Some(S::MainHand), (2, 3), Some((Stat::WeaponDamage, 36.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Гранёная булава", "Булава гран.", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 35.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Шипастая булава", "Булава шип.", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 37.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Сасанидская булава", "Булава перс.", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 38.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Кистень", "Кистень", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 33.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Гирька на ремне", "Гирька", Some(S::MainHand), (1, 1), Some((Stat::WeaponDamage, 27.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Боевой молот", "Молот", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 38.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Клевец", "Клевец", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 34.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Окованная палица", "Палица", Some(S::MainHand), (1, 3), Some((Stat::WeaponDamage, 30.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Шаровая булава", "Булава шар.", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 34.0)), 1, WEAPON_AFFIXES, Sh::Blunt, true),
+    base!("Контос", "Контос", Some(S::MainHand), (1, 6), Some((Stat::WeaponDamage, 56.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Аланское копьё", "Копьё алан.", Some(S::MainHand), (1, 6), Some((Stat::WeaponDamage, 54.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Ланкия", "Ланкия", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 40.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Менавлон", "Менавлон", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 52.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Ангон", "Ангон", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 44.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Плюмбата", "Плюмбата", Some(S::MainHand), (1, 2), Some((Stat::WeaponDamage, 24.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Пилум", "Пилум", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 46.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Спикулум", "Спикулум", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 42.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Верут", "Верут", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 32.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Дротик", "Дротик", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 34.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Крылатое копьё", "Копьё крыл.", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 50.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Гуннское копьё", "Копьё гунн.", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 48.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Рогатина", "Рогатина", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 52.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Рыбацкая острога", "Острога", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 36.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Копьё с ромбическим пером", "Копьё ромб.", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 50.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Пехотная пика", "Пика", Some(S::MainHand), (1, 6), Some((Stat::WeaponDamage, 54.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Копьё с бандоном", "Копьё флаж.", Some(S::MainHand), (1, 6), Some((Stat::WeaponDamage, 52.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Выпрямленная коса", "Коса", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 44.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Франкское копьё", "Копьё франк.", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 48.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Персидское копьё", "Копьё перс.", Some(S::MainHand), (1, 6), Some((Stat::WeaponDamage, 55.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Копьё-жало", "Копьё-жало", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 46.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Исаврийский дротик", "Дротик исавр.", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 35.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Бронебойные наконечники", "Бронебойные", None, (1, 1), None, 30, &[], Sh::Small, true),
+    base!("Трёхлопастные наконечники", "Трёхлопаст.", None, (1, 1), None, 30, &[], Sh::Small, true),
+    base!("Срезни", "Срезни", None, (1, 1), None, 30, &[], Sh::Small, true),
     // </arsenal>
     // Луки и стрелы (archery.rs).
-    base!(
-        "Простой лук",
-        "Лук",
-        Some(S::MainHand),
-        (1, 4),
-        Some((Stat::WeaponDamage, 26.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Гуннский составной лук",
-        "Составной лук",
-        Some(S::MainHand),
-        (1, 4),
-        Some((Stat::WeaponDamage, 36.0)),
-        1,
-        WEAPON_AFFIXES,
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Стрелы",
-        "Стрелы",
-        None,
-        (1, 2),
-        None,
-        30,
-        &[],
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Бронебойные стрелы",
-        "Бронеб.",
-        None,
-        (1, 2),
-        None,
-        30,
-        &[],
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Трёхлопастные стрелы",
-        "Трёхлоп.",
-        None,
-        (1, 2),
-        None,
-        30,
-        &[],
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Стрелы-срезни",
-        "Срезни",
-        None,
-        (1, 2),
-        None,
-        30,
-        &[],
-        Sh::Polearm,
-        true
-    ),
-    base!(
-        "Древки стрел",
-        "Древки",
-        None,
-        (1, 2),
-        None,
-        30,
-        &[],
-        Sh::Polearm,
-        false
-    ),
-    base!(
-        "Маховые перья",
-        "Перья",
-        None,
-        (1, 1),
-        None,
-        90,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Рыбий клей",
-        "Клей",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Сухожилия",
-        "Жилы",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
+    base!("Простой лук", "Лук", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 26.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Гуннский составной лук", "Составной лук", Some(S::MainHand), (1, 4), Some((Stat::WeaponDamage, 36.0)), 1, WEAPON_AFFIXES, Sh::Polearm, true),
+    base!("Стрелы", "Стрелы", None, (1, 2), None, 30, &[], Sh::Polearm, true),
+    base!("Бронебойные стрелы", "Бронеб.", None, (1, 2), None, 30, &[], Sh::Polearm, true),
+    base!("Трёхлопастные стрелы", "Трёхлоп.", None, (1, 2), None, 30, &[], Sh::Polearm, true),
+    base!("Стрелы-срезни", "Срезни", None, (1, 2), None, 30, &[], Sh::Polearm, true),
+    base!("Древки стрел", "Древки", None, (1, 2), None, 30, &[], Sh::Polearm, false),
+    base!("Маховые перья", "Перья", None, (1, 1), None, 90, &[], Sh::Small, false),
+    base!("Рыбий клей", "Клей", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Сухожилия", "Жилы", None, (1, 1), None, 10, &[], Sh::Small, false),
     // Две-три липовые дощечки и тесьма: лубок на сломанную руку или ногу (Гиппократ, «О переломах»).
-    base!(
-        "Лубок",
-        "Лубок",
-        None,
-        (1, 2),
-        None,
-        4,
-        &[],
-        Sh::Small,
-        false
-    ), // Домашняя утварь и мелочи горожан (вещи хозяев в домах, см. level/city/cozy.rs).
-    base!(
-        "Глиняный светильник",
-        "Светильник",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Бронзовый светильник",
-        "Светильник",
-        None,
-        (1, 1),
-        None,
-        2,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Краснолаковая миска",
-        "Миска",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Глиняная кружка",
-        "Кружка",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Стеклянный кубок",
-        "Кубок",
-        None,
-        (1, 1),
-        None,
-        4,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Бронзовый кувшин",
-        "Кувшин",
-        None,
-        (1, 2),
-        None,
-        1,
-        &[],
-        Sh::Flask,
-        false
-    ),
-    base!(
-        "Серебряная ложка",
-        "Ложка",
-        None,
-        (1, 1),
-        None,
-        6,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Кухонный нож",
-        "Нож",
-        None,
-        (1, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Каравай хлеба",
-        "Хлеб",
-        None,
-        (1, 1),
-        None,
-        4,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Головка сыра",
-        "Сыр",
-        None,
-        (1, 1),
-        None,
-        3,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Сушёные смоквы",
-        "Смоквы",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Костяной гребень",
-        "Гребень",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Бронзовое зеркальце",
-        "Зеркальце",
-        None,
-        (1, 1),
-        None,
-        2,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Ампула святого Мины",
-        "Ампула",
-        None,
-        (1, 1),
-        None,
-        4,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Энколпион",
-        "Энколпион",
-        None,
-        (1, 1),
-        None,
-        2,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Игральные кости",
-        "Кости",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Деревянная лошадка",
-        "Лошадка",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Веретено с пряслицем",
-        "Веретено",
-        None,
-        (1, 2),
-        None,
-        3,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Моток пряжи",
-        "Пряжа",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Железные ножницы",
-        "Ножницы",
-        None,
-        (1, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Деревянная шкатулка",
-        "Шкатулка",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Доска для тавлей",
-        "Тавлеи",
-        None,
-        (3, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
+    base!("Лубок", "Лубок", None, (1, 2), None, 4, &[], Sh::Small, false),    // Домашняя утварь и мелочи горожан (вещи хозяев в домах, см. level/city/cozy.rs).
+    base!("Глиняный светильник", "Светильник", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Бронзовый светильник", "Светильник", None, (1, 1), None, 2, &[], Sh::Small, false),
+    base!("Краснолаковая миска", "Миска", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Глиняная кружка", "Кружка", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Стеклянный кубок", "Кубок", None, (1, 1), None, 4, &[], Sh::Small, false),
+    base!("Бронзовый кувшин", "Кувшин", None, (1, 2), None, 1, &[], Sh::Flask, false),
+    base!("Серебряная ложка", "Ложка", None, (1, 1), None, 6, &[], Sh::Small, false),
+    base!("Кухонный нож", "Нож", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Каравай хлеба", "Хлеб", None, (1, 1), None, 4, &[], Sh::Small, false),
+    base!("Головка сыра", "Сыр", None, (1, 1), None, 3, &[], Sh::Small, false),
+    base!("Сушёные смоквы", "Смоквы", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Костяной гребень", "Гребень", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Бронзовое зеркальце", "Зеркальце", None, (1, 1), None, 2, &[], Sh::Small, false),
+    base!("Ампула святого Мины", "Ампула", None, (1, 1), None, 4, &[], Sh::Small, false),
+    base!("Энколпион", "Энколпион", None, (1, 1), None, 2, &[], Sh::Small, false),
+    base!("Игральные кости", "Кости", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Деревянная лошадка", "Лошадка", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Веретено с пряслицем", "Веретено", None, (1, 2), None, 3, &[], Sh::Small, false),
+    base!("Моток пряжи", "Пряжа", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Железные ножницы", "Ножницы", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Деревянная шкатулка", "Шкатулка", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Доска для тавлей", "Тавлеи", None, (3, 2), None, 1, &[], Sh::Small, false),
     // Грамота: школьные книги и письменный прибор (school.rs, knowledge.rs: переписка).
-    base!(
-        "Псалтирь",
-        "Псалтирь",
-        None,
-        (1, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Дионисий Фракиец. Искусство грамматики",
-        "Дионисий",
-        None,
-        (1, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Никомах. Введение в арифметику",
-        "Никомах",
-        None,
-        (1, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Восковая табличка",
-        "Табличка",
-        None,
-        (2, 1),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Тростниковое перо",
-        "Калам",
-        None,
-        (1, 1),
-        None,
-        5,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Тетрадь пергамента",
-        "Пергамент",
-        None,
-        (1, 1),
-        None,
-        20,
-        &[],
-        Sh::Small,
-        false
-    ),
+    base!("Псалтирь", "Псалтирь", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Дионисий Фракиец. Искусство грамматики", "Дионисий", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Никомах. Введение в арифметику", "Никомах", None, (1, 2), None, 1, &[], Sh::Small, false),
+    base!("Восковая табличка", "Табличка", None, (2, 1), None, 1, &[], Sh::Small, false),
+    base!("Тростниковое перо", "Калам", None, (1, 1), None, 5, &[], Sh::Small, false),
+    base!("Тетрадь пергамента", "Пергамент", None, (1, 1), None, 20, &[], Sh::Small, false),
     // -----------------------------------------------------------------------
     // Горное дело и углежжение (mining.rs): руда, обжиг, дрова, камень, инструмент.
     // -----------------------------------------------------------------------
-    base!(
-        "Болотная руда",
-        "Бол.руда",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Обожжённая руда",
-        "Обож.руда",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Пустая порода",
-        "Порода",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Дрова",
-        "Дрова",
-        None,
-        (1, 2),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Морской песок",
-        "Песок",
-        None,
-        (1, 1),
-        None,
-        10,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Известняковый блок",
-        "Известняк",
-        None,
-        (2, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
-    base!(
-        "Кайло рудокопа",
-        "Кайло",
-        None,
-        (1, 3),
-        None,
-        1,
-        &[],
-        Sh::Polearm,
-        false
-    ),
-    base!(
-        "Заступ",
-        "Заступ",
-        None,
-        (1, 3),
-        None,
-        1,
-        &[],
-        Sh::Polearm,
-        false
-    ),
-    base!(
-        "Топор дровосека",
-        "Топор др.",
-        None,
-        (1, 3),
-        None,
-        1,
-        &[],
-        Sh::Polearm,
-        false
-    ),
-    base!(
-        "Феофраст. Исследование о растениях",
-        "Феофр.раст",
-        None,
-        (1, 2),
-        None,
-        1,
-        &[],
-        Sh::Small,
-        false
-    ),
+    base!("Болотная руда", "Бол.руда", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Обожжённая руда", "Обож.руда", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Пустая порода", "Порода", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Дрова", "Дрова", None, (1, 2), None, 10, &[], Sh::Small, false),
+    base!("Морской песок", "Песок", None, (1, 1), None, 10, &[], Sh::Small, false),
+    base!("Известняковый блок", "Известняк", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Кайло рудокопа", "Кайло", None, (1, 3), None, 1, &[], Sh::Polearm, false),
+    base!("Заступ", "Заступ", None, (1, 3), None, 1, &[], Sh::Polearm, false),
+    base!("Топор дровосека", "Топор др.", None, (1, 3), None, 1, &[], Sh::Polearm, false),
+    base!("Феофраст. Исследование о растениях", "Феофр.раст", None, (1, 2), None, 1, &[], Sh::Small, false),
 ];
 
 /// Старое название → новое (предметы переименованы под VI век).
@@ -3722,11 +675,7 @@ pub const RENAMED: &[(&str, &str)] = &[
 
 /// Нынешнее название предмета по старому (или то же самое).
 pub fn canonical_name(name: &str) -> &str {
-    RENAMED
-        .iter()
-        .find(|(old, _)| *old == name)
-        .map(|(_, new)| *new)
-        .unwrap_or(name)
+    RENAMED.iter().find(|(old, _)| *old == name).map(|(_, new)| *new).unwrap_or(name)
 }
 
 /// Номер вида предмета в [`ITEM_BASES`].
@@ -3743,10 +692,7 @@ impl ItemBaseId {
     pub fn find(name: &str) -> Option<ItemBaseId> {
         // Старые названия (до переноса действия в Херсонес 510 г.) продолжают работать.
         let name = canonical_name(name);
-        ITEM_BASES
-            .iter()
-            .position(|b| b.name == name)
-            .map(|i| ItemBaseId(i as u16))
+        ITEM_BASES.iter().position(|b| b.name == name).map(|i| ItemBaseId(i as u16))
     }
 
     pub fn by_name(name: &str) -> ItemBaseId {
@@ -3868,29 +814,12 @@ impl Make {
     pub fn stock(base: &ItemBase, quality: Quality) -> Make {
         let q = quality.index() as f32;
         let dur_max = (base_durability(base) * (0.75 + 0.1 * q)).round();
-        Make {
-            smith: String::new(),
-            finish: (0.3 + 0.13 * q).min(1.0),
-            edge: if base.slot == Some(EquipSlot::MainHand) {
-                0.4 + 0.1 * q
-            } else {
-                0.0
-            },
-            balance: 0.0,
-            flaws: Vec::new(),
-            dur: dur_max,
-            dur_max,
-            carbon: 0.0,
-        }
+        Make { smith: String::new(), finish: (0.3 + 0.13 * q).min(1.0), edge: if base.slot == Some(EquipSlot::MainHand) { 0.4 + 0.1 * q } else { 0.0 }, balance: 0.0, flaws: Vec::new(), dur: dur_max, dur_max, carbon: 0.0 }
     }
 
     /// Доля прочности 0..1 (у вещей без прочности — 1).
     pub fn condition(&self) -> f32 {
-        if self.dur_max <= 0.0 {
-            1.0
-        } else {
-            (self.dur / self.dur_max).clamp(0.0, 1.0)
-        }
+        if self.dur_max <= 0.0 { 1.0 } else { (self.dur / self.dur_max).clamp(0.0, 1.0) }
     }
 
     pub fn broken(&self) -> bool {
@@ -3927,27 +856,18 @@ impl Item {
 
     pub fn display_name(&self) -> String {
         let base = self.info();
-        if self.count > 1 {
-            format!("{} ×{}", base.name, self.count)
-        } else {
-            base.name.to_string()
-        }
+        if self.count > 1 { format!("{} ×{}", base.name, self.count) } else { base.name.to_string() }
     }
 
     /// Основная характеристика с учётом качества и износа.
     pub fn main_stat(&self) -> Option<(Stat, f32)> {
         let wear = self.make.as_ref().map_or(1.0, |m| m.wear_mult());
-        self.info()
-            .base_stat
-            .map(|(s, v)| (s, (v * self.quality.stat_multiplier() * wear).round()))
+        self.info().base_stat.map(|(s, v)| (s, (v * self.quality.stat_multiplier() * wear).round()))
     }
 
     /// Прочность сейчас и наибольшая, если у вещи она есть.
     pub fn durability(&self) -> Option<(f32, f32)> {
-        self.make
-            .as_ref()
-            .filter(|m| m.dur_max > 0.0)
-            .map(|m| (m.dur, m.dur_max))
+        self.make.as_ref().filter(|m| m.dur_max > 0.0).map(|m| (m.dur, m.dur_max))
     }
 
     /// Как выглядит поверхность: 0 — грубая и ржавая, 1 — полированная.
@@ -3974,9 +894,7 @@ impl Item {
         {
             totals.add(Stat::ActionSpeed, a.speed);
         }
-        if let Some((_, _, speed)) = crate::archery::BOWS
-            .iter()
-            .find(|(n, ..)| *n == self.info().name)
+        if let Some((_, _, speed)) = crate::archery::BOWS.iter().find(|(n, ..)| *n == self.info().name)
             && *speed != 0.0
         {
             totals.add(Stat::ActionSpeed, *speed);
@@ -3991,10 +909,7 @@ impl Item {
     }
 
     pub fn can_stack_with(&self, other: &Item) -> bool {
-        self.base == other.base
-            && self.info().max_stack > 1
-            && self.quality == other.quality
-            && self.make == other.make
+        self.base == other.base && self.info().max_stack > 1 && self.quality == other.quality && self.make == other.make
     }
 }
 
@@ -4026,19 +941,9 @@ impl UidGen {
 }
 
 /// Создаёт предмет заданного вида и качества со случайными свойствами.
-pub fn roll_item(
-    base_id: ItemBaseId,
-    quality: Quality,
-    count: u16,
-    rng: &mut Rng,
-    uids: &mut UidGen,
-) -> Item {
+pub fn roll_item(base_id: ItemBaseId, quality: Quality, count: u16, rng: &mut Rng, uids: &mut UidGen) -> Item {
     let base = base_id.base();
-    let quality = if base.has_quality {
-        quality
-    } else {
-        Quality::Common
-    };
+    let quality = if base.has_quality { quality } else { Quality::Common };
     let mut pool: Vec<Stat> = base.affix_pool.to_vec();
     let mut affixes = Vec::new();
     for _ in 0..quality.affix_count().min(pool.len()) {
@@ -4048,44 +953,18 @@ pub fn roll_item(
         let floor = (quality.index() as f32 - 2.0).max(0.0) * 0.12;
         let t = rng.range_f32(floor.min(0.9), 1.0);
         let value = (lo + (hi - lo) * t) * quality.stat_multiplier();
-        let value = if stat == Stat::ParryWindow {
-            value.round()
-        } else {
-            (value * 10.0).round() / 10.0
-        };
+        let value = if stat == Stat::ParryWindow { value.round() } else { (value * 10.0).round() / 10.0 };
         affixes.push((stat, value));
     }
-    let make = if base_durability(base) > 0.0 {
-        Some(Box::new(Make::stock(base, quality)))
-    } else {
-        None
-    };
-    Item {
-        uid: uids.next(),
-        base: base_id,
-        quality,
-        affixes,
-        count: count.clamp(1, base.max_stack),
-        make,
-    }
+    let make = if base_durability(base) > 0.0 { Some(Box::new(Make::stock(base, quality))) } else { None };
+    Item { uid: uids.next(), base: base_id, quality, affixes, count: count.clamp(1, base.max_stack), make }
 }
 
 /// Предмет без случайных свойств (сырьё, изделия кузнеца — у них свойства от работы).
 pub fn plain_item(base_id: ItemBaseId, quality: Quality, count: u16, uids: &mut UidGen) -> Item {
     let base = base_id.base();
-    let quality = if base.has_quality {
-        quality
-    } else {
-        Quality::Common
-    };
-    Item {
-        uid: uids.next(),
-        base: base_id,
-        quality,
-        affixes: Vec::new(),
-        count: count.clamp(1, base.max_stack),
-        make: None,
-    }
+    let quality = if base.has_quality { quality } else { Quality::Common };
+    Item { uid: uids.next(), base: base_id, quality, affixes: Vec::new(), count: count.clamp(1, base.max_stack), make: None }
 }
 
 // ---------------------------------------------------------------------------
@@ -4109,18 +988,8 @@ pub struct Consumable {
 impl ItemBaseId {
     pub fn consumable(self) -> Option<Consumable> {
         match self.base().name {
-            "Бинт" => Some(Consumable {
-                use_time: 3.0,
-                heal: 30.0,
-                heal_over: 0.0,
-                verb: "Перевязка",
-            }),
-            "Целебное зелье" => Some(Consumable {
-                use_time: 1.0,
-                heal: 50.0,
-                heal_over: 10.0,
-                verb: "Пьёте зелье",
-            }),
+            "Бинт" => Some(Consumable { use_time: 3.0, heal: 30.0, heal_over: 0.0, verb: "Перевязка" }),
+            "Целебное зелье" => Some(Consumable { use_time: 1.0, heal: 50.0, heal_over: 10.0, verb: "Пьёте зелье" }),
             _ => None,
         }
     }
@@ -4478,35 +1347,20 @@ impl LootTableId {
 /// сдвигает шансы к лучшему качеству.
 pub fn roll_quality(weights: [f32; 6], luck: f32, rng: &mut Rng) -> Quality {
     let boost = 1.0 + luck.max(0.0) / 100.0;
-    let list: Vec<(Quality, f32)> = Quality::ALL
-        .iter()
-        .map(|q| (*q, weights[q.index()] * boost.powi(q.index() as i32)))
-        .collect();
-    rng.weighted(&list)
-        .map(|i| list[i].0)
-        .unwrap_or(Quality::Common)
+    let list: Vec<(Quality, f32)> = Quality::ALL.iter().map(|q| (*q, weights[q.index()] * boost.powi(q.index() as i32))).collect();
+    rng.weighted(&list).map(|i| list[i].0).unwrap_or(Quality::Common)
 }
 
 /// Бросок таблицы добычи: список предметов (золото — отдельной стопкой).
 pub fn roll_loot(table: LootTableId, luck: f32, rng: &mut Rng, uids: &mut UidGen) -> Vec<Item> {
     let t = table.table();
     let mut items = Vec::new();
-    let entries: Vec<(ItemBaseId, f32)> = t
-        .entries
-        .iter()
-        .map(|(n, w)| (ItemBaseId::by_name(n), *w))
-        .collect();
+    let entries: Vec<(ItemBaseId, f32)> = t.entries.iter().map(|(n, w)| (ItemBaseId::by_name(n), *w)).collect();
     for _ in 0..rng.range_u32(t.rolls.0, t.rolls.1) {
-        let Some(i) = rng.weighted(&entries) else {
-            break;
-        };
+        let Some(i) = rng.weighted(&entries) else { break };
         let base = entries[i].0;
         let quality = roll_quality(t.quality_weights, luck, rng);
-        let count = if base.base().max_stack > 1 {
-            rng.range_u32(1, base.base().max_stack.min(3) as u32) as u16
-        } else {
-            1
-        };
+        let count = if base.base().max_stack > 1 { rng.range_u32(1, base.base().max_stack.min(3) as u32) as u16 } else { 1 };
         items.push(roll_item(base, quality, count, rng, uids));
     }
     if t.gold.1 > 0 {
@@ -4555,10 +1409,7 @@ mod tests {
         let w = LootTableId::Knight.table().quality_weights;
         let avg = |luck: f32| {
             let mut rng = Rng::new(42);
-            (0..5000)
-                .map(|_| roll_quality(w, luck, &mut rng).index() as f32)
-                .sum::<f32>()
-                / 5000.0
+            (0..5000).map(|_| roll_quality(w, luck, &mut rng).index() as f32).sum::<f32>() / 5000.0
         };
         assert!(avg(100.0) > avg(0.0));
     }

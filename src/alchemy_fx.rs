@@ -12,8 +12,8 @@
 
 use crate::brewing::{Heat, Vessel};
 use crate::graphics::{Billboard, FlameMaterial, Flicker};
-use crate::items::Rng;
 use crate::lore_net::{BurstFx, WorkView};
+use crate::items::Rng;
 use bevy::asset::RenderAssetUsages;
 use bevy::light::{NotShadowCaster, NotShadowReceiver};
 use bevy::prelude::*;
@@ -33,20 +33,7 @@ impl Plugin for AlchemyFxPlugin {
             .insert_resource(Works::default())
             .insert_resource(FxRng(Rng::from_time()))
             .add_systems(Startup, setup_fx_assets)
-            .add_systems(
-                Update,
-                (
-                    apply_queue,
-                    light_braziers,
-                    emit,
-                    update_particles,
-                    face_camera,
-                    animate_rigs,
-                    fade_flashes,
-                )
-                    .chain()
-                    .in_set(AlchemyFxSet),
-            );
+            .add_systems(Update, (apply_queue, light_braziers, emit, update_particles, face_camera, animate_rigs, fade_flashes).chain().in_set(AlchemyFxSet));
     }
 }
 
@@ -146,43 +133,19 @@ fn soft_puff_image() -> Image {
             data.extend_from_slice(&[255, 255, 255, (alpha * grain * 255.0) as u8]);
         }
     }
-    Image::new(
-        Extent3d {
-            width: N,
-            height: N,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        data,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD,
-    )
+    Image::new(Extent3d { width: N, height: N, depth_or_array_layers: 1 }, TextureDimension::D2, data, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD)
 }
 
-fn setup_fx_assets(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut images: ResMut<Assets<Image>>,
-    mut flames: ResMut<Assets<FlameMaterial>>,
-) {
+fn setup_fx_assets(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>, mut images: ResMut<Assets<Image>>, mut flames: ResMut<Assets<FlameMaterial>>) {
     let tex = images.add(soft_puff_image());
     let mut cloud = |c: Color, alpha: f32, add: bool| -> [Handle<StandardMaterial>; FADE_STEPS] {
         std::array::from_fn(|i| {
             let k = 1.0 - i as f32 / FADE_STEPS as f32;
-            let base = if add {
-                c.to_linear() * k
-            } else {
-                c.with_alpha(alpha * k).to_linear()
-            };
+            let base = if add { c.to_linear() * k } else { c.with_alpha(alpha * k).to_linear() };
             materials.add(StandardMaterial {
                 base_color: base.into(),
                 base_color_texture: Some(tex.clone()),
-                alpha_mode: if add {
-                    AlphaMode::Add
-                } else {
-                    AlphaMode::Blend
-                },
+                alpha_mode: if add { AlphaMode::Add } else { AlphaMode::Blend },
                 unlit: true,
                 cull_mode: None,
                 double_sided: true,
@@ -191,122 +154,32 @@ fn setup_fx_assets(
         })
     };
     let clouds = HashMap::from([
-        (
-            Cloud::Steam,
-            cloud(Color::srgb(0.97, 0.97, 0.99), 0.5, false),
-        ),
-        (
-            Cloud::Smoke,
-            cloud(Color::srgb(0.42, 0.4, 0.38), 0.5, false),
-        ),
-        (
-            Cloud::Soot,
-            cloud(Color::srgb(0.07, 0.06, 0.06), 0.78, false),
-        ),
-        (
-            Cloud::Toxic,
-            cloud(Color::srgb(0.66, 0.72, 0.24), 0.5, false),
-        ),
-        (
-            Cloud::Chad,
-            cloud(Color::srgb(0.36, 0.25, 0.14), 0.6, false),
-        ),
+        (Cloud::Steam, cloud(Color::srgb(0.97, 0.97, 0.99), 0.5, false)),
+        (Cloud::Smoke, cloud(Color::srgb(0.42, 0.4, 0.38), 0.5, false)),
+        (Cloud::Soot, cloud(Color::srgb(0.07, 0.06, 0.06), 0.78, false)),
+        (Cloud::Toxic, cloud(Color::srgb(0.66, 0.72, 0.24), 0.5, false)),
+        (Cloud::Chad, cloud(Color::srgb(0.36, 0.25, 0.14), 0.6, false)),
         (Cloud::Dust, cloud(Color::srgb(0.78, 0.7, 0.55), 0.4, false)),
-        (
-            Cloud::Fire,
-            cloud(Color::linear_rgb(5.0, 1.6, 0.35), 1.0, true),
-        ),
+        (Cloud::Fire, cloud(Color::linear_rgb(5.0, 1.6, 0.35), 1.0, true)),
     ]);
-    let glow = |materials: &mut Assets<StandardMaterial>, c: Color, e: LinearRgba| {
-        materials.add(StandardMaterial {
-            base_color: c,
-            emissive: e,
-            unlit: true,
-            ..default()
-        })
-    };
+    let glow = |materials: &mut Assets<StandardMaterial>, c: Color, e: LinearRgba| materials.add(StandardMaterial { base_color: c, emissive: e, unlit: true, ..default() });
     let bits = HashMap::from([
-        (
-            Bit::Spark,
-            glow(
-                &mut materials,
-                Color::srgb(1.0, 0.6, 0.2),
-                LinearRgba::rgb(9.0, 3.2, 0.6),
-            ),
-        ),
-        (
-            Bit::Glint,
-            glow(
-                &mut materials,
-                Color::srgb(1.0, 0.95, 0.7),
-                LinearRgba::rgb(5.0, 4.4, 2.4),
-            ),
-        ),
+        (Bit::Spark, glow(&mut materials, Color::srgb(1.0, 0.6, 0.2), LinearRgba::rgb(9.0, 3.2, 0.6))),
+        (Bit::Glint, glow(&mut materials, Color::srgb(1.0, 0.95, 0.7), LinearRgba::rgb(5.0, 4.4, 2.4))),
         (
             Bit::Drip,
-            materials.add(StandardMaterial {
-                base_color: Color::srgba(0.78, 0.86, 0.9, 0.8),
-                emissive: LinearRgba::rgb(0.25, 0.3, 0.32),
-                perceptual_roughness: 0.05,
-                alpha_mode: AlphaMode::Blend,
-                ..default()
-            }),
+            materials.add(StandardMaterial { base_color: Color::srgba(0.78, 0.86, 0.9, 0.8), emissive: LinearRgba::rgb(0.25, 0.3, 0.32), perceptual_roughness: 0.05, alpha_mode: AlphaMode::Blend, ..default() }),
         ),
-        (
-            Bit::Spatter,
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(0.32, 0.22, 0.1),
-                perceptual_roughness: 0.1,
-                ..default()
-            }),
-        ),
-        (
-            Bit::Bubble,
-            materials.add(StandardMaterial {
-                base_color: Color::srgba(0.95, 0.92, 0.85, 0.55),
-                perceptual_roughness: 0.05,
-                alpha_mode: AlphaMode::Blend,
-                ..default()
-            }),
-        ),
+        (Bit::Spatter, materials.add(StandardMaterial { base_color: Color::srgb(0.32, 0.22, 0.1), perceptual_roughness: 0.1, ..default() })),
+        (Bit::Bubble, materials.add(StandardMaterial { base_color: Color::srgba(0.95, 0.92, 0.85, 0.55), perceptual_roughness: 0.05, alpha_mode: AlphaMode::Blend, ..default() })),
         (
             Bit::GlassShard,
-            materials.add(StandardMaterial {
-                base_color: Color::srgba(0.8, 0.92, 0.88, 0.5),
-                perceptual_roughness: 0.02,
-                reflectance: 0.9,
-                alpha_mode: AlphaMode::Blend,
-                cull_mode: None,
-                ..default()
-            }),
+            materials.add(StandardMaterial { base_color: Color::srgba(0.8, 0.92, 0.88, 0.5), perceptual_roughness: 0.02, reflectance: 0.9, alpha_mode: AlphaMode::Blend, cull_mode: None, ..default() }),
         ),
-        (
-            Bit::ClayShard,
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(0.55, 0.3, 0.18),
-                perceptual_roughness: 0.95,
-                ..default()
-            }),
-        ),
-        (
-            Bit::Leaf,
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(0.25, 0.45, 0.17),
-                perceptual_roughness: 0.8,
-                cull_mode: None,
-                double_sided: true,
-                ..default()
-            }),
-        ),
+        (Bit::ClayShard, materials.add(StandardMaterial { base_color: Color::srgb(0.55, 0.3, 0.18), perceptual_roughness: 0.95, ..default() })),
+        (Bit::Leaf, materials.add(StandardMaterial { base_color: Color::srgb(0.25, 0.45, 0.17), perceptual_roughness: 0.8, cull_mode: None, double_sided: true, ..default() })),
     ]);
-    let flat = |materials: &mut Assets<StandardMaterial>, c: Color, metal: f32, rough: f32| {
-        materials.add(StandardMaterial {
-            base_color: c,
-            metallic: metal,
-            perceptual_roughness: rough,
-            ..default()
-        })
-    };
+    let flat = |materials: &mut Assets<StandardMaterial>, c: Color, metal: f32, rough: f32| materials.add(StandardMaterial { base_color: c, metallic: metal, perceptual_roughness: rough, ..default() });
     commands.insert_resource(FxAssets {
         quad: meshes.add(Rectangle::new(1.0, 1.0)),
         ball: meshes.add(Sphere::new(0.5).mesh().ico(1).unwrap()),
@@ -321,12 +194,7 @@ fn setup_fx_assets(
         copper: flat(&mut materials, Color::srgb(0.74, 0.42, 0.26), 0.9, 0.35),
         stone: flat(&mut materials, Color::srgb(0.55, 0.53, 0.5), 0.0, 0.85),
         wood: flat(&mut materials, Color::srgb(0.35, 0.24, 0.15), 0.0, 0.9),
-        char_wood: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.08, 0.06, 0.05),
-            emissive: LinearRgba::rgb(0.45, 0.09, 0.015),
-            perceptual_roughness: 1.0,
-            ..default()
-        }),
+        char_wood: materials.add(StandardMaterial { base_color: Color::srgb(0.08, 0.06, 0.05), emissive: LinearRgba::rgb(0.45, 0.09, 0.015), perceptual_roughness: 1.0, ..default() }),
         glass: materials.add(StandardMaterial {
             base_color: Color::srgba(0.72, 0.86, 0.82, 0.42),
             emissive: LinearRgba::rgb(0.04, 0.06, 0.06),
@@ -335,30 +203,10 @@ fn setup_fx_assets(
             alpha_mode: AlphaMode::Blend,
             ..default()
         }),
-        brew: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.27, 0.2, 0.09),
-            perceptual_roughness: 0.08,
-            reflectance: 0.6,
-            ..default()
-        }),
-        distillate: materials.add(StandardMaterial {
-            base_color: Color::srgba(0.62, 0.5, 0.25, 0.75),
-            perceptual_roughness: 0.05,
-            alpha_mode: AlphaMode::Blend,
-            ..default()
-        }),
-        hot_crucible: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.5, 0.25, 0.12),
-            emissive: LinearRgba::rgb(2.4, 0.7, 0.12),
-            perceptual_roughness: 0.8,
-            ..default()
-        }),
-        melt: materials.add(StandardMaterial {
-            base_color: Color::srgb(1.0, 0.7, 0.3),
-            emissive: LinearRgba::rgb(8.0, 3.5, 0.8),
-            unlit: true,
-            ..default()
-        }),
+        brew: materials.add(StandardMaterial { base_color: Color::srgb(0.27, 0.2, 0.09), perceptual_roughness: 0.08, reflectance: 0.6, ..default() }),
+        distillate: materials.add(StandardMaterial { base_color: Color::srgba(0.62, 0.5, 0.25, 0.75), perceptual_roughness: 0.05, alpha_mode: AlphaMode::Blend, ..default() }),
+        hot_crucible: materials.add(StandardMaterial { base_color: Color::srgb(0.5, 0.25, 0.12), emissive: LinearRgba::rgb(2.4, 0.7, 0.12), perceptual_roughness: 0.8, ..default() }),
+        melt: materials.add(StandardMaterial { base_color: Color::srgb(1.0, 0.7, 0.3), emissive: LinearRgba::rgb(8.0, 3.5, 0.8), unlit: true, ..default() }),
     });
 }
 
@@ -399,25 +247,11 @@ struct P {
 fn spawn_cloud(commands: &mut Commands, a: &FxAssets, kind: Cloud, p: P) {
     let mat = a.clouds[&kind][0].clone();
     commands.spawn((
-        Particle {
-            vel: p.vel,
-            age: -p.delay,
-            life: p.life,
-            size: p.size,
-            drag: p.drag,
-            lift: p.lift,
-            cloud: Some(kind),
-            step: 0,
-            spin: Vec3::ZERO,
-        },
+        Particle { vel: p.vel, age: -p.delay, life: p.life, size: p.size, drag: p.drag, lift: p.lift, cloud: Some(kind), step: 0, spin: Vec3::ZERO },
         FaceCamera,
         Mesh3d(a.quad.clone()),
         MeshMaterial3d(mat),
-        Transform::from_translation(p.pos).with_scale(Vec3::splat(if p.delay > 0.0 {
-            0.0
-        } else {
-            p.size.0
-        })),
+        Transform::from_translation(p.pos).with_scale(Vec3::splat(if p.delay > 0.0 { 0.0 } else { p.size.0 })),
         NotShadowCaster,
         NotShadowReceiver,
     ));
@@ -429,39 +263,15 @@ fn spawn_bit(commands: &mut Commands, a: &FxAssets, kind: Bit, p: P, spin: Vec3)
         _ => a.ball.clone(),
     };
     commands.spawn((
-        Particle {
-            vel: p.vel,
-            age: -p.delay,
-            life: p.life,
-            size: p.size,
-            drag: p.drag,
-            lift: p.lift,
-            cloud: None,
-            step: 0,
-            spin,
-        },
+        Particle { vel: p.vel, age: -p.delay, life: p.life, size: p.size, drag: p.drag, lift: p.lift, cloud: None, step: 0, spin },
         Mesh3d(mesh),
         MeshMaterial3d(a.bits[&kind].clone()),
-        Transform::from_translation(p.pos).with_scale(Vec3::splat(if p.delay > 0.0 {
-            0.0
-        } else {
-            p.size.0
-        })),
+        Transform::from_translation(p.pos).with_scale(Vec3::splat(if p.delay > 0.0 { 0.0 } else { p.size.0 })),
         NotShadowCaster,
     ));
 }
 
-fn update_particles(
-    mut commands: Commands,
-    time: Res<Time>,
-    assets: Option<Res<FxAssets>>,
-    mut q: Query<(
-        Entity,
-        &mut Particle,
-        &mut Transform,
-        &mut MeshMaterial3d<StandardMaterial>,
-    )>,
-) {
+fn update_particles(mut commands: Commands, time: Res<Time>, assets: Option<Res<FxAssets>>, mut q: Query<(Entity, &mut Particle, &mut Transform, &mut MeshMaterial3d<StandardMaterial>)>) {
     let Some(assets) = assets else { return };
     let dt = time.delta_secs().min(0.1);
     for (e, mut p, mut t, mut mat) in &mut q {
@@ -479,22 +289,14 @@ fn update_particles(
         p.vel *= drag;
         t.translation += p.vel * dt;
         // Облака быстро набухают и медленно расползаются; мелочь к концу уменьшается.
-        let s = if p.cloud.is_some() {
-            p.size.0 + (p.size.1 - p.size.0) * (1.0 - (1.0 - k).powi(2))
-        } else {
-            p.size.0 + (p.size.1 - p.size.0) * k
-        };
+        let s = if p.cloud.is_some() { p.size.0 + (p.size.1 - p.size.0) * (1.0 - (1.0 - k).powi(2)) } else { p.size.0 + (p.size.1 - p.size.0) * k };
         t.scale = Vec3::splat(s.max(0.0));
         if p.spin != Vec3::ZERO {
             t.rotate(Quat::from_scaled_axis(p.spin * dt));
         }
         if let Some(c) = p.cloud {
             // Сначала проявляется, потом тает.
-            let step = if k < 0.12 {
-                ((0.12 - k) / 0.12 * 2.0) as usize
-            } else {
-                ((k - 0.12) / 0.88 * FADE_STEPS as f32) as usize
-            };
+            let step = if k < 0.12 { ((0.12 - k) / 0.12 * 2.0) as usize } else { ((k - 0.12) / 0.88 * FADE_STEPS as f32) as usize };
             let step = step.min(FADE_STEPS - 1);
             if step != p.step {
                 p.step = step;
@@ -504,13 +306,8 @@ fn update_particles(
     }
 }
 
-fn face_camera(
-    cameras: Query<&GlobalTransform, With<Camera3d>>,
-    mut q: Query<&mut Transform, With<FaceCamera>>,
-) {
-    let Some(cam) = cameras.iter().next() else {
-        return;
-    };
+fn face_camera(cameras: Query<&GlobalTransform, With<Camera3d>>, mut q: Query<&mut Transform, With<FaceCamera>>) {
+    let Some(cam) = cameras.iter().next() else { return };
     let c = cam.translation();
     for mut t in &mut q {
         let d = c - t.translation;
@@ -553,21 +350,10 @@ struct Emitter {
 }
 
 fn emitter(kind: Emit, rate: f32) -> Emitter {
-    Emitter {
-        kind,
-        rate,
-        acc: 0.0,
-    }
+    Emitter { kind, rate, acc: 0.0 }
 }
 
-fn emit(
-    mut commands: Commands,
-    time: Res<Time>,
-    assets: Option<Res<FxAssets>>,
-    mut rng: ResMut<FxRng>,
-    mut emitters: Query<(&mut Emitter, &GlobalTransform, &InheritedVisibility)>,
-    live: Query<(), With<Particle>>,
-) {
+fn emit(mut commands: Commands, time: Res<Time>, assets: Option<Res<FxAssets>>, mut rng: ResMut<FxRng>, mut emitters: Query<(&mut Emitter, &GlobalTransform, &InheritedVisibility)>, live: Query<(), With<Particle>>) {
     let Some(a) = assets else { return };
     let dt = time.delta_secs().min(0.1);
     let mut room = MAX_PARTICLES.saturating_sub(live.iter().count());
@@ -589,15 +375,12 @@ fn emit(
                 let d = radius * r.f32().sqrt();
                 Vec3::new(a.cos() * d, 0.0, a.sin() * d)
             };
-            let jitter =
-                |r: &mut Rng, s: f32| Vec3::new(r.range_f32(-s, s), 0.0, r.range_f32(-s, s));
+            let jitter = |r: &mut Rng, s: f32| Vec3::new(r.range_f32(-s, s), 0.0, r.range_f32(-s, s));
             match em.kind {
                 Emit::Steam { radius, power } => {
                     let p = P {
                         pos: at + disc(r, radius),
-                        vel: Vec3::Y * r.range_f32(0.25, 0.5) * power
-                            + jitter(r, 0.08)
-                            + Vec3::new(0.05, 0.0, 0.02),
+                        vel: Vec3::Y * r.range_f32(0.25, 0.5) * power + jitter(r, 0.08) + Vec3::new(0.05, 0.0, 0.02),
                         life: r.range_f32(1.4, 2.4) * power.sqrt(),
                         size: (radius * 0.8, r.range_f32(0.3, 0.5) * power.sqrt()),
                         drag: 0.35,
@@ -608,40 +391,16 @@ fn emit(
                 }
                 Emit::Bubbles { radius } => {
                     let s = r.range_f32(0.012, 0.03);
-                    let p = P {
-                        pos: at + disc(r, radius * 0.9),
-                        vel: Vec3::Y * 0.03,
-                        life: r.range_f32(0.25, 0.6),
-                        size: (s * 0.4, s),
-                        drag: 0.0,
-                        lift: 0.0,
-                        delay: 0.0,
-                    };
+                    let p = P { pos: at + disc(r, radius * 0.9), vel: Vec3::Y * 0.03, life: r.range_f32(0.25, 0.6), size: (s * 0.4, s), drag: 0.0, lift: 0.0, delay: 0.0 };
                     spawn_bit(&mut commands, &a, Bit::Bubble, p, Vec3::ZERO);
                 }
                 Emit::Drips { fall } => {
                     let life = (2.0 * fall / 9.8).sqrt();
-                    let p = P {
-                        pos: at,
-                        vel: Vec3::ZERO,
-                        life,
-                        size: (0.012, 0.016),
-                        drag: 0.0,
-                        lift: -9.8,
-                        delay: 0.0,
-                    };
+                    let p = P { pos: at, vel: Vec3::ZERO, life, size: (0.012, 0.016), drag: 0.0, lift: -9.8, delay: 0.0 };
                     spawn_bit(&mut commands, &a, Bit::Drip, p, Vec3::ZERO);
                 }
                 Emit::Wisp => {
-                    let p = P {
-                        pos: at + jitter(r, 0.02),
-                        vel: Vec3::Y * 0.2 + jitter(r, 0.1),
-                        life: r.range_f32(0.8, 1.4),
-                        size: (0.04, 0.18),
-                        drag: 0.5,
-                        lift: 0.1,
-                        delay: 0.0,
-                    };
+                    let p = P { pos: at + jitter(r, 0.02), vel: Vec3::Y * 0.2 + jitter(r, 0.1), life: r.range_f32(0.8, 1.4), size: (0.04, 0.18), drag: 0.5, lift: 0.1, delay: 0.0 };
                     spawn_cloud(&mut commands, &a, Cloud::Steam, p);
                 }
                 Emit::Embers { radius } => {
@@ -659,9 +418,7 @@ fn emit(
                 Emit::Smoke { radius } => {
                     let p = P {
                         pos: at + disc(r, radius) + Vec3::Y * 0.15,
-                        vel: Vec3::Y * r.range_f32(0.3, 0.5)
-                            + jitter(r, 0.06)
-                            + Vec3::new(0.06, 0.0, 0.03),
+                        vel: Vec3::Y * r.range_f32(0.3, 0.5) + jitter(r, 0.06) + Vec3::new(0.06, 0.0, 0.03),
                         life: r.range_f32(2.5, 4.0),
                         size: (0.08, r.range_f32(0.5, 0.8)),
                         drag: 0.2,
@@ -671,15 +428,7 @@ fn emit(
                     spawn_cloud(&mut commands, &a, Cloud::Smoke, p);
                 }
                 Emit::Dust => {
-                    let p = P {
-                        pos: at + disc(r, 0.06),
-                        vel: Vec3::Y * r.range_f32(0.08, 0.2) + jitter(r, 0.12),
-                        life: r.range_f32(0.7, 1.2),
-                        size: (0.04, 0.16),
-                        drag: 1.2,
-                        lift: -0.05,
-                        delay: 0.0,
-                    };
+                    let p = P { pos: at + disc(r, 0.06), vel: Vec3::Y * r.range_f32(0.08, 0.2) + jitter(r, 0.12), life: r.range_f32(0.7, 1.2), size: (0.04, 0.16), drag: 1.2, lift: -0.05, delay: 0.0 };
                     spawn_cloud(&mut commands, &a, Cloud::Dust, p);
                 }
                 Emit::Forge => {
@@ -695,15 +444,7 @@ fn emit(
                         };
                         spawn_bit(&mut commands, &a, Bit::Spark, p, Vec3::ZERO);
                     } else {
-                        let p = P {
-                            pos: at,
-                            vel: Vec3::Y * 0.6 + jitter(r, 0.05),
-                            life: 1.2,
-                            size: (0.05, 0.3),
-                            drag: 0.3,
-                            lift: 0.1,
-                            delay: 0.0,
-                        };
+                        let p = P { pos: at, vel: Vec3::Y * 0.6 + jitter(r, 0.05), life: 1.2, size: (0.05, 0.3), drag: 0.3, lift: 0.1, delay: 0.0 };
                         spawn_cloud(&mut commands, &a, Cloud::Smoke, p);
                     }
                 }
@@ -744,13 +485,7 @@ fn heat_power(h: Heat) -> f32 {
     }
 }
 
-fn apply_queue(
-    mut commands: Commands,
-    mut queue: ResMut<FxQueue>,
-    mut works: ResMut<Works>,
-    assets: Option<Res<FxAssets>>,
-    mut rng: ResMut<FxRng>,
-) {
+fn apply_queue(mut commands: Commands, mut queue: ResMut<FxQueue>, mut works: ResMut<Works>, assets: Option<Res<FxAssets>>, mut rng: ResMut<FxRng>) {
     let Some(a) = assets else { return };
     if queue.works.is_empty() && queue.bursts.is_empty() {
         return;
@@ -774,35 +509,23 @@ fn spawn_rig(commands: &mut Commands, a: &FxAssets, w: &WorkView) -> Entity {
     let pos: Vec3 = w.pos.into();
     let fire = w.heat != Heat::None;
     let power = heat_power(w.heat);
-    let part = |mesh: &Handle<Mesh>, mat: &Handle<StandardMaterial>, t: Transform| {
-        (Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), t)
-    };
+    let part = |mesh: &Handle<Mesh>, mat: &Handle<StandardMaterial>, t: Transform| (Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), t);
     commands
-        .spawn((
-            Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(w.yaw)),
-            Visibility::default(),
-        ))
+        .spawn((Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(w.yaw)), Visibility::default()))
         .with_children(|c| {
             // Свой костерок: камни, поленца, пламя и свет. Сосуд стоит на камнях.
             let lift = if w.own_fire && fire { 0.2 } else { 0.0 };
             if w.own_fire && fire {
                 for i in 0..3 {
                     let ang = i as f32 * std::f32::consts::TAU / 3.0 + 0.3;
-                    c.spawn(part(
-                        &a.ball,
-                        &a.stone,
-                        Transform::from_xyz(ang.cos() * 0.16, 0.08, ang.sin() * 0.16)
-                            .with_scale(Vec3::new(0.14, 0.2, 0.14)),
-                    ));
+                    c.spawn(part(&a.ball, &a.stone, Transform::from_xyz(ang.cos() * 0.16, 0.08, ang.sin() * 0.16).with_scale(Vec3::new(0.14, 0.2, 0.14))));
                 }
                 for i in 0..4 {
                     let ang = i as f32 * 0.8;
                     c.spawn(part(
                         &a.cube,
                         &a.char_wood,
-                        Transform::from_xyz(0.0, 0.03, 0.0)
-                            .with_rotation(Quat::from_rotation_y(ang))
-                            .with_scale(Vec3::new(0.32, 0.035, 0.035)),
+                        Transform::from_xyz(0.0, 0.03, 0.0).with_rotation(Quat::from_rotation_y(ang)).with_scale(Vec3::new(0.32, 0.035, 0.035)),
                     ));
                 }
                 // Языки пламени выбиваются из-под сосуда между камнями.
@@ -813,258 +536,89 @@ fn spawn_rig(commands: &mut Commands, a: &FxAssets, w: &WorkView) -> Entity {
                     c.spawn((
                         Mesh3d(a.flame_mesh.clone()),
                         MeshMaterial3d(a.flame.clone()),
-                        Transform::from_xyz(ang.cos() * r, 0.25 * k, ang.sin() * r)
-                            .with_scale(Vec3::splat(k)),
+                        Transform::from_xyz(ang.cos() * r, 0.25 * k, ang.sin() * r).with_scale(Vec3::splat(k)),
                         Billboard,
                         NotShadowCaster,
                         NotShadowReceiver,
                     ));
                 }
-                c.spawn((
-                    Transform::from_xyz(0.0, 0.05, 0.0),
-                    Visibility::default(),
-                    emitter(Emit::Embers { radius: 0.08 }, 3.0 * power),
-                ));
+                c.spawn((Transform::from_xyz(0.0, 0.05, 0.0), Visibility::default(), emitter(Emit::Embers { radius: 0.08 }, 3.0 * power)));
                 let intensity = 6000.0 + 5000.0 * power;
                 c.spawn((
-                    PointLight {
-                        color: Color::srgb(1.0, 0.55, 0.25),
-                        intensity,
-                        range: 5.0,
-                        shadow_maps_enabled: false,
-                        ..default()
-                    },
+                    PointLight { color: Color::srgb(1.0, 0.55, 0.25), intensity, range: 5.0, shadow_maps_enabled: false, ..default() },
                     Transform::from_xyz(0.0, 0.3, 0.0),
-                    Flicker {
-                        base: intensity,
-                        phase: pos.x + pos.z,
-                    },
+                    Flicker { base: intensity, phase: pos.x + pos.z },
                 ));
             }
             let y0 = lift;
             match w.vessel {
                 Vessel::ClayPot | Vessel::CopperKettle => {
-                    let mat = if w.vessel == Vessel::ClayPot {
-                        &a.clay
-                    } else {
-                        &a.copper
-                    };
-                    let (r, h) = if w.vessel == Vessel::ClayPot {
-                        (0.13, 0.2)
-                    } else {
-                        (0.14, 0.17)
-                    };
-                    c.spawn(part(
-                        &a.ball,
-                        mat,
-                        Transform::from_xyz(0.0, y0 + h * 0.45, 0.0).with_scale(Vec3::new(
-                            r * 2.0,
-                            h * 0.95,
-                            r * 2.0,
-                        )),
-                    ));
-                    c.spawn(part(
-                        &a.cylinder,
-                        mat,
-                        Transform::from_xyz(0.0, y0 + h * 0.86, 0.0).with_scale(Vec3::new(
-                            r * 1.55,
-                            h * 0.28,
-                            r * 1.55,
-                        )),
-                    ));
+                    let mat = if w.vessel == Vessel::ClayPot { &a.clay } else { &a.copper };
+                    let (r, h) = if w.vessel == Vessel::ClayPot { (0.13, 0.2) } else { (0.14, 0.17) };
+                    c.spawn(part(&a.ball, mat, Transform::from_xyz(0.0, y0 + h * 0.45, 0.0).with_scale(Vec3::new(r * 2.0, h * 0.95, r * 2.0))));
+                    c.spawn(part(&a.cylinder, mat, Transform::from_xyz(0.0, y0 + h * 0.86, 0.0).with_scale(Vec3::new(r * 1.55, h * 0.28, r * 1.55))));
                     let surface = y0 + h * 0.97;
-                    c.spawn((
-                        part(
-                            &a.cylinder,
-                            &a.brew,
-                            Transform::from_xyz(0.0, surface, 0.0).with_scale(Vec3::new(
-                                r * 1.45,
-                                0.006,
-                                r * 1.45,
-                            )),
-                        ),
-                        Simmer {
-                            base: surface,
-                            amp: 0.004 * power,
-                        },
-                    ));
+                    c.spawn((part(&a.cylinder, &a.brew, Transform::from_xyz(0.0, surface, 0.0).with_scale(Vec3::new(r * 1.45, 0.006, r * 1.45))), Simmer { base: surface, amp: 0.004 * power }));
                     if w.vessel == Vessel::CopperKettle {
                         // Дужка.
-                        c.spawn(part(
-                            &a.cylinder,
-                            &a.copper,
-                            Transform::from_xyz(0.0, y0 + h * 1.35, 0.0)
-                                .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2))
-                                .with_scale(Vec3::new(0.012, r * 2.1, 0.012)),
-                        ));
+                        c.spawn(part(&a.cylinder, &a.copper, Transform::from_xyz(0.0, y0 + h * 1.35, 0.0).with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)).with_scale(Vec3::new(0.012, r * 2.1, 0.012))));
                     }
                     if fire {
-                        c.spawn((
-                            Transform::from_xyz(0.0, surface + 0.02, 0.0),
-                            Visibility::default(),
-                            emitter(
-                                Emit::Steam {
-                                    radius: r * 0.6,
-                                    power,
-                                },
-                                2.0 + 7.0 * power,
-                            ),
-                        ));
+                        c.spawn((Transform::from_xyz(0.0, surface + 0.02, 0.0), Visibility::default(), emitter(Emit::Steam { radius: r * 0.6, power }, 2.0 + 7.0 * power)));
                         if w.heat >= Heat::Medium {
-                            c.spawn((
-                                Transform::from_xyz(0.0, surface + 0.005, 0.0),
-                                Visibility::default(),
-                                emitter(Emit::Bubbles { radius: r * 0.7 }, 8.0 * power),
-                            ));
+                            c.spawn((Transform::from_xyz(0.0, surface + 0.005, 0.0), Visibility::default(), emitter(Emit::Bubbles { radius: r * 0.7 }, 8.0 * power)));
                         }
                     } else {
                         // Настой: редкие пузырьки.
-                        c.spawn((
-                            Transform::from_xyz(0.0, surface + 0.005, 0.0),
-                            Visibility::default(),
-                            emitter(Emit::Bubbles { radius: r * 0.6 }, 0.8),
-                        ));
+                        c.spawn((Transform::from_xyz(0.0, surface + 0.005, 0.0), Visibility::default(), emitter(Emit::Bubbles { radius: r * 0.6 }, 0.8)));
                     }
                 }
                 Vessel::Mortar => {
-                    c.spawn(part(
-                        &a.cylinder,
-                        &a.stone,
-                        Transform::from_xyz(0.0, y0 + 0.05, 0.0)
-                            .with_scale(Vec3::new(0.2, 0.1, 0.2)),
-                    ));
-                    c.spawn(part(
-                        &a.cylinder,
-                        &a.brew,
-                        Transform::from_xyz(0.0, y0 + 0.1, 0.0)
-                            .with_scale(Vec3::new(0.15, 0.004, 0.15)),
-                    ));
-                    c.spawn((
-                        Pestle,
-                        Transform::from_xyz(0.0, y0 + 0.1, 0.0),
-                        Visibility::default(),
-                    ))
-                    .with_children(|p| {
-                        p.spawn(part(
-                            &a.cylinder,
-                            &a.wood,
-                            Transform::from_xyz(0.0, 0.1, 0.0)
-                                .with_scale(Vec3::new(0.032, 0.24, 0.032)),
-                        ));
+                    c.spawn(part(&a.cylinder, &a.stone, Transform::from_xyz(0.0, y0 + 0.05, 0.0).with_scale(Vec3::new(0.2, 0.1, 0.2))));
+                    c.spawn(part(&a.cylinder, &a.brew, Transform::from_xyz(0.0, y0 + 0.1, 0.0).with_scale(Vec3::new(0.15, 0.004, 0.15))));
+                    c.spawn((Pestle, Transform::from_xyz(0.0, y0 + 0.1, 0.0), Visibility::default())).with_children(|p| {
+                        p.spawn(part(&a.cylinder, &a.wood, Transform::from_xyz(0.0, 0.1, 0.0).with_scale(Vec3::new(0.032, 0.24, 0.032))));
                     });
-                    c.spawn((
-                        Transform::from_xyz(0.0, y0 + 0.11, 0.0),
-                        Visibility::default(),
-                        emitter(Emit::Dust, 4.0),
-                    ));
+                    c.spawn((Transform::from_xyz(0.0, y0 + 0.11, 0.0), Visibility::default(), emitter(Emit::Dust, 4.0)));
                 }
                 Vessel::Alembic | Vessel::Retort | Vessel::Kerotakis => {
                     let glass = w.vessel != Vessel::Kerotakis;
                     let body_mat = if glass { &a.glass } else { &a.copper };
                     // Куб (кукурбита) с варевом внутри.
-                    c.spawn(part(
-                        &a.ball,
-                        body_mat,
-                        Transform::from_xyz(0.0, y0 + 0.11, 0.0).with_scale(Vec3::splat(0.23)),
-                    ));
+                    c.spawn(part(&a.ball, body_mat, Transform::from_xyz(0.0, y0 + 0.11, 0.0).with_scale(Vec3::splat(0.23))));
                     if glass {
-                        c.spawn((
-                            part(
-                                &a.ball,
-                                &a.brew,
-                                Transform::from_xyz(0.0, y0 + 0.07, 0.0)
-                                    .with_scale(Vec3::new(0.15, 0.1, 0.15)),
-                            ),
-                            Simmer {
-                                base: y0 + 0.07,
-                                amp: 0.003 * power,
-                            },
-                        ));
+                        c.spawn((part(&a.ball, &a.brew, Transform::from_xyz(0.0, y0 + 0.07, 0.0).with_scale(Vec3::new(0.15, 0.1, 0.15))), Simmer { base: y0 + 0.07, amp: 0.003 * power }));
                     }
                     let (tip, recv) = if w.vessel == Vessel::Retort {
                         // Реторта: шея уходит вбок и вниз прямо в приёмник.
-                        c.spawn(part(
-                            &a.cylinder,
-                            &a.glass,
-                            Transform::from_xyz(0.17, y0 + 0.17, 0.0)
-                                .with_rotation(Quat::from_rotation_z(-1.15))
-                                .with_scale(Vec3::new(0.035, 0.3, 0.035)),
-                        ));
+                        c.spawn(part(&a.cylinder, &a.glass, Transform::from_xyz(0.17, y0 + 0.17, 0.0).with_rotation(Quat::from_rotation_z(-1.15)).with_scale(Vec3::new(0.035, 0.3, 0.035))));
                         (Vec3::new(0.3, y0 + 0.1, 0.0), Vec3::new(0.34, 0.0, 0.0))
                     } else {
                         // Шлем-амбик с носиком.
-                        c.spawn(part(
-                            &a.ball,
-                            body_mat,
-                            Transform::from_xyz(0.0, y0 + 0.23, 0.0)
-                                .with_scale(Vec3::new(0.15, 0.11, 0.15)),
-                        ));
-                        c.spawn(part(
-                            &a.cylinder,
-                            body_mat,
-                            Transform::from_xyz(0.17, y0 + 0.2, 0.0)
-                                .with_rotation(Quat::from_rotation_z(-1.25))
-                                .with_scale(Vec3::new(0.022, 0.26, 0.022)),
-                        ));
+                        c.spawn(part(&a.ball, body_mat, Transform::from_xyz(0.0, y0 + 0.23, 0.0).with_scale(Vec3::new(0.15, 0.11, 0.15))));
+                        c.spawn(part(&a.cylinder, body_mat, Transform::from_xyz(0.17, y0 + 0.2, 0.0).with_rotation(Quat::from_rotation_z(-1.25)).with_scale(Vec3::new(0.022, 0.26, 0.022))));
                         (Vec3::new(0.29, y0 + 0.15, 0.0), Vec3::new(0.34, 0.0, 0.0))
                     };
                     // Приёмник: колба рядом, на земле или на столе.
                     let recv_pos = recv;
-                    c.spawn(part(
-                        &a.ball,
-                        &a.glass,
-                        Transform::from_translation(recv_pos + Vec3::Y * 0.05)
-                            .with_scale(Vec3::splat(0.11)),
-                    ));
-                    c.spawn(part(
-                        &a.cylinder,
-                        &a.glass,
-                        Transform::from_translation(recv_pos + Vec3::Y * 0.12)
-                            .with_scale(Vec3::new(0.035, 0.07, 0.035)),
-                    ));
-                    c.spawn(part(
-                        &a.ball,
-                        &a.distillate,
-                        Transform::from_translation(recv_pos + Vec3::Y * 0.03)
-                            .with_scale(Vec3::new(0.085, 0.05, 0.085)),
-                    ));
+                    c.spawn(part(&a.ball, &a.glass, Transform::from_translation(recv_pos + Vec3::Y * 0.05).with_scale(Vec3::splat(0.11))));
+                    c.spawn(part(&a.cylinder, &a.glass, Transform::from_translation(recv_pos + Vec3::Y * 0.12).with_scale(Vec3::new(0.035, 0.07, 0.035))));
+                    c.spawn(part(&a.ball, &a.distillate, Transform::from_translation(recv_pos + Vec3::Y * 0.03).with_scale(Vec3::new(0.085, 0.05, 0.085))));
                     if fire {
                         let fall = (tip.y - (recv_pos.y + 0.06)).max(0.05);
-                        c.spawn((
-                            Transform::from_translation(tip),
-                            Visibility::default(),
-                            emitter(Emit::Drips { fall }, 1.2 + 2.0 * power),
-                        ));
+                        c.spawn((Transform::from_translation(tip), Visibility::default(), emitter(Emit::Drips { fall }, 1.2 + 2.0 * power)));
                         // Керотакис закрыт: пар наружу не идёт.
                         if glass {
-                            c.spawn((
-                                Transform::from_xyz(0.0, y0 + 0.2, 0.0),
-                                Visibility::default(),
-                                emitter(Emit::Wisp, 1.5 * power),
-                            ));
-                            c.spawn((
-                                Transform::from_xyz(0.0, y0 + 0.06, 0.0),
-                                Visibility::default(),
-                                emitter(Emit::Bubbles { radius: 0.05 }, 6.0 * power),
-                            ));
+                            c.spawn((Transform::from_xyz(0.0, y0 + 0.2, 0.0), Visibility::default(), emitter(Emit::Wisp, 1.5 * power)));
+                            c.spawn((Transform::from_xyz(0.0, y0 + 0.06, 0.0), Visibility::default(), emitter(Emit::Bubbles { radius: 0.05 }, 6.0 * power)));
                         }
                     }
                 }
                 Vessel::DryingTray => {
                     // Плетёная решётка на двух брусках, на ней разложены листья.
-                    c.spawn(part(
-                        &a.cube,
-                        &a.wood,
-                        Transform::from_xyz(0.0, y0 + 0.08, 0.0)
-                            .with_scale(Vec3::new(0.62, 0.025, 0.42)),
-                    ));
+                    c.spawn(part(&a.cube, &a.wood, Transform::from_xyz(0.0, y0 + 0.08, 0.0).with_scale(Vec3::new(0.62, 0.025, 0.42))));
                     for x in [-0.25, 0.25] {
-                        c.spawn(part(
-                            &a.cube,
-                            &a.wood,
-                            Transform::from_xyz(x, y0 + 0.035, 0.0)
-                                .with_scale(Vec3::new(0.05, 0.07, 0.44)),
-                        ));
+                        c.spawn(part(&a.cube, &a.wood, Transform::from_xyz(x, y0 + 0.035, 0.0).with_scale(Vec3::new(0.05, 0.07, 0.44))));
                     }
                     let mut r = Rng::new(pos.x.to_bits() as u64 ^ 0x5eed);
                     for _ in 0..22 {
@@ -1072,53 +626,24 @@ fn spawn_rig(commands: &mut Commands, a: &FxAssets, w: &WorkView) -> Entity {
                         c.spawn(part(
                             &a.chip,
                             &a.bits[&Bit::Leaf],
-                            Transform::from_xyz(x, y0 + 0.1, z)
-                                .with_rotation(Quat::from_rotation_y(r.f32() * 6.3))
-                                .with_scale(Vec3::new(0.07, 0.02, 0.04)),
+                            Transform::from_xyz(x, y0 + 0.1, z).with_rotation(Quat::from_rotation_y(r.f32() * 6.3)).with_scale(Vec3::new(0.07, 0.02, 0.04)),
                         ));
                     }
                     if fire {
-                        c.spawn((
-                            Transform::from_xyz(0.0, y0 + 0.12, 0.0),
-                            Visibility::default(),
-                            emitter(Emit::Wisp, 1.2),
-                        ));
+                        c.spawn((Transform::from_xyz(0.0, y0 + 0.12, 0.0), Visibility::default(), emitter(Emit::Wisp, 1.2)));
                     }
                 }
                 Vessel::Crucible => {
                     let mat = if fire { &a.hot_crucible } else { &a.clay };
-                    c.spawn(part(
-                        &a.cylinder,
-                        mat,
-                        Transform::from_xyz(0.0, y0 + 0.06, 0.0)
-                            .with_scale(Vec3::new(0.12, 0.12, 0.12)),
-                    ));
+                    c.spawn(part(&a.cylinder, mat, Transform::from_xyz(0.0, y0 + 0.06, 0.0).with_scale(Vec3::new(0.12, 0.12, 0.12))));
                     if fire {
-                        c.spawn(part(
-                            &a.cylinder,
-                            &a.melt,
-                            Transform::from_xyz(0.0, y0 + 0.121, 0.0)
-                                .with_scale(Vec3::new(0.1, 0.004, 0.1)),
-                        ));
-                        c.spawn((
-                            Transform::from_xyz(0.0, y0 + 0.13, 0.0),
-                            Visibility::default(),
-                            emitter(Emit::Forge, 6.0 + 6.0 * power),
-                        ));
+                        c.spawn(part(&a.cylinder, &a.melt, Transform::from_xyz(0.0, y0 + 0.121, 0.0).with_scale(Vec3::new(0.1, 0.004, 0.1))));
+                        c.spawn((Transform::from_xyz(0.0, y0 + 0.13, 0.0), Visibility::default(), emitter(Emit::Forge, 6.0 + 6.0 * power)));
                         let intensity = 3000.0 * power;
                         c.spawn((
-                            PointLight {
-                                color: Color::srgb(1.0, 0.5, 0.2),
-                                intensity,
-                                range: 3.0,
-                                shadow_maps_enabled: false,
-                                ..default()
-                            },
+                            PointLight { color: Color::srgb(1.0, 0.5, 0.2), intensity, range: 3.0, shadow_maps_enabled: false, ..default() },
                             Transform::from_xyz(0.0, y0 + 0.3, 0.0),
-                            Flicker {
-                                base: intensity,
-                                phase: pos.z,
-                            },
+                            Flicker { base: intensity, phase: pos.z },
                         ));
                     }
                 }
@@ -1127,11 +652,7 @@ fn spawn_rig(commands: &mut Commands, a: &FxAssets, w: &WorkView) -> Entity {
         .id()
 }
 
-fn animate_rigs(
-    time: Res<Time>,
-    mut pestles: Query<&mut Transform, (With<Pestle>, Without<Simmer>)>,
-    mut simmers: Query<(&mut Transform, &Simmer), Without<Pestle>>,
-) {
+fn animate_rigs(time: Res<Time>, mut pestles: Query<&mut Transform, (With<Pestle>, Without<Simmer>)>, mut simmers: Query<(&mut Transform, &Simmer), Without<Pestle>>) {
     let t = time.elapsed_secs();
     for mut p in &mut pestles {
         // Пестик наклонён и ходит по кругу, то нажимая, то отпуская.
@@ -1142,49 +663,25 @@ fn animate_rigs(
     }
     for (mut tr, s) in &mut simmers {
         if s.amp > 0.0 {
-            tr.translation.y =
-                s.base + s.amp * ((t * 17.0).sin() * 0.6 + (t * 29.0 + 1.3).sin() * 0.4);
+            tr.translation.y = s.base + s.amp * ((t * 17.0).sin() * 0.6 + (t * 29.0 + 1.3).sin() * 0.4);
         }
     }
 }
 
 /// Поставленным жаровням — пламя над углями, искры и дымок.
-fn light_braziers(
-    mut commands: Commands,
-    assets: Option<Res<FxAssets>>,
-    new: Query<(Entity, &BrazierFire), Added<BrazierFire>>,
-) {
+fn light_braziers(mut commands: Commands, assets: Option<Res<FxAssets>>, new: Query<(Entity, &BrazierFire), Added<BrazierFire>>) {
     let Some(a) = assets else { return };
     for (e, b) in &new {
         let k = b.scale;
         commands.entity(e).with_children(|c| {
-            c.spawn((
-                Mesh3d(a.flame_mesh.clone()),
-                MeshMaterial3d(a.flame.clone()),
-                Transform::from_xyz(0.0, 0.1 * k, 0.0).with_scale(Vec3::splat(0.55 * k)),
-                Billboard,
-                NotShadowCaster,
-                NotShadowReceiver,
-            ));
-            c.spawn((
-                Transform::default(),
-                Visibility::default(),
-                emitter(Emit::Embers { radius: 0.12 * k }, 4.0),
-            ));
-            c.spawn((
-                Transform::default(),
-                Visibility::default(),
-                emitter(Emit::Smoke { radius: 0.08 * k }, 0.8),
-            ));
+            c.spawn((Mesh3d(a.flame_mesh.clone()), MeshMaterial3d(a.flame.clone()), Transform::from_xyz(0.0, 0.1 * k, 0.0).with_scale(Vec3::splat(0.55 * k)), Billboard, NotShadowCaster, NotShadowReceiver));
+            c.spawn((Transform::default(), Visibility::default(), emitter(Emit::Embers { radius: 0.12 * k }, 4.0)));
+            c.spawn((Transform::default(), Visibility::default(), emitter(Emit::Smoke { radius: 0.08 * k }, 0.8)));
         });
     }
 }
 
-fn fade_flashes(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut q: Query<(Entity, &mut Flash, &mut PointLight)>,
-) {
+fn fade_flashes(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Flash, &mut PointLight)>) {
     let dt = time.delta_secs().min(0.1);
     for (e, mut f, mut l) in &mut q {
         f.age += dt;
@@ -1202,192 +699,74 @@ fn fade_flashes(
 // ---------------------------------------------------------------------------
 
 fn flash(commands: &mut Commands, pos: Vec3, color: Color, intensity: f32, range: f32, life: f32) {
-    commands.spawn((
-        PointLight {
-            color,
-            intensity,
-            range,
-            shadow_maps_enabled: false,
-            ..default()
-        },
-        Transform::from_translation(pos),
-        Flash {
-            age: 0.0,
-            life,
-            base: intensity,
-        },
-    ));
+    commands.spawn((PointLight { color, intensity, range, shadow_maps_enabled: false, ..default() }, Transform::from_translation(pos), Flash { age: 0.0, life, base: intensity }));
 }
 
 fn burst(commands: &mut Commands, a: &FxAssets, r: &mut Rng, pos: Vec3, fx: BurstFx) {
     let ball = |r: &mut Rng, speed: (f32, f32), up: f32| {
         let ang = r.f32() * std::f32::consts::TAU;
         let s = r.range_f32(speed.0, speed.1);
-        Vec3::new(
-            ang.cos() * s,
-            r.range_f32(up * 0.5, up * 1.2),
-            ang.sin() * s,
-        )
+        Vec3::new(ang.cos() * s, r.range_f32(up * 0.5, up * 1.2), ang.sin() * s)
     };
-    let spin = |r: &mut Rng| {
-        Vec3::new(
-            r.range_f32(-14.0, 14.0),
-            r.range_f32(-14.0, 14.0),
-            r.range_f32(-14.0, 14.0),
-        )
-    };
+    let spin = |r: &mut Rng| Vec3::new(r.range_f32(-14.0, 14.0), r.range_f32(-14.0, 14.0), r.range_f32(-14.0, 14.0));
     match fx {
         BurstFx::Done => {
             for _ in 0..14 {
-                let p = P {
-                    pos: pos + Vec3::Y * 0.2,
-                    vel: ball(r, (0.1, 0.4), 0.8),
-                    life: r.range_f32(1.4, 2.2),
-                    size: (0.1, 0.5),
-                    drag: 0.8,
-                    lift: 0.2,
-                    delay: r.range_f32(0.0, 0.25),
-                };
+                let p = P { pos: pos + Vec3::Y * 0.2, vel: ball(r, (0.1, 0.4), 0.8), life: r.range_f32(1.4, 2.2), size: (0.1, 0.5), drag: 0.8, lift: 0.2, delay: r.range_f32(0.0, 0.25) };
                 spawn_cloud(commands, a, Cloud::Steam, p);
             }
             for _ in 0..8 {
-                let p = P {
-                    pos: pos + Vec3::Y * 0.25,
-                    vel: ball(r, (0.05, 0.25), 0.5),
-                    life: r.range_f32(0.8, 1.4),
-                    size: (0.02, 0.0),
-                    drag: 1.0,
-                    lift: 0.0,
-                    delay: r.range_f32(0.0, 0.4),
-                };
+                let p = P { pos: pos + Vec3::Y * 0.25, vel: ball(r, (0.05, 0.25), 0.5), life: r.range_f32(0.8, 1.4), size: (0.02, 0.0), drag: 1.0, lift: 0.0, delay: r.range_f32(0.0, 0.4) };
                 spawn_bit(commands, a, Bit::Glint, p, Vec3::ZERO);
             }
         }
         BurstFx::Spoiled => {
             for _ in 0..16 {
-                let p = P {
-                    pos: pos + Vec3::Y * 0.2,
-                    vel: ball(r, (0.05, 0.25), 0.4),
-                    life: r.range_f32(2.5, 4.0),
-                    size: (0.12, 0.7),
-                    drag: 0.4,
-                    lift: 0.08,
-                    delay: r.range_f32(0.0, 0.8),
-                };
+                let p = P { pos: pos + Vec3::Y * 0.2, vel: ball(r, (0.05, 0.25), 0.4), life: r.range_f32(2.5, 4.0), size: (0.12, 0.7), drag: 0.4, lift: 0.08, delay: r.range_f32(0.0, 0.8) };
                 spawn_cloud(commands, a, Cloud::Chad, p);
             }
         }
         BurstFx::BoilOver => {
             for _ in 0..22 {
-                let p = P {
-                    pos: pos + Vec3::Y * 0.2,
-                    vel: ball(r, (0.4, 1.2), 1.8),
-                    life: r.range_f32(0.4, 0.7),
-                    size: (0.025, 0.015),
-                    drag: 0.2,
-                    lift: -9.8,
-                    delay: 0.0,
-                };
+                let p = P { pos: pos + Vec3::Y * 0.2, vel: ball(r, (0.4, 1.2), 1.8), life: r.range_f32(0.4, 0.7), size: (0.025, 0.015), drag: 0.2, lift: -9.8, delay: 0.0 };
                 spawn_bit(commands, a, Bit::Spatter, p, Vec3::ZERO);
             }
             for _ in 0..16 {
-                let p = P {
-                    pos: pos + Vec3::Y * 0.2,
-                    vel: ball(r, (0.3, 0.7), 1.0),
-                    life: r.range_f32(1.0, 1.8),
-                    size: (0.1, 0.55),
-                    drag: 1.2,
-                    lift: 0.2,
-                    delay: 0.0,
-                };
+                let p = P { pos: pos + Vec3::Y * 0.2, vel: ball(r, (0.3, 0.7), 1.0), life: r.range_f32(1.0, 1.8), size: (0.1, 0.55), drag: 1.2, lift: 0.2, delay: 0.0 };
                 spawn_cloud(commands, a, Cloud::Steam, p);
             }
         }
         BurstFx::Shatter { glass } => {
-            let kind = if glass {
-                Bit::GlassShard
-            } else {
-                Bit::ClayShard
-            };
+            let kind = if glass { Bit::GlassShard } else { Bit::ClayShard };
             for _ in 0..26 {
                 let s = r.range_f32(0.02, 0.06);
-                let p = P {
-                    pos: pos + Vec3::Y * 0.12,
-                    vel: ball(r, (0.8, 2.6), 2.2),
-                    life: r.range_f32(0.7, 1.2),
-                    size: (s, s * 0.8),
-                    drag: 0.3,
-                    lift: -9.8,
-                    delay: 0.0,
-                };
+                let p = P { pos: pos + Vec3::Y * 0.12, vel: ball(r, (0.8, 2.6), 2.2), life: r.range_f32(0.7, 1.2), size: (s, s * 0.8), drag: 0.3, lift: -9.8, delay: 0.0 };
                 spawn_bit(commands, a, kind, p, spin(r));
             }
             for _ in 0..14 {
-                let p = P {
-                    pos: pos + Vec3::Y * 0.15,
-                    vel: ball(r, (0.6, 1.4), 0.8),
-                    life: r.range_f32(0.8, 1.6),
-                    size: (0.1, 0.6),
-                    drag: 2.0,
-                    lift: 0.3,
-                    delay: 0.0,
-                };
+                let p = P { pos: pos + Vec3::Y * 0.15, vel: ball(r, (0.6, 1.4), 0.8), life: r.range_f32(0.8, 1.6), size: (0.1, 0.6), drag: 2.0, lift: 0.3, delay: 0.0 };
                 spawn_cloud(commands, a, Cloud::Steam, p);
             }
             for _ in 0..10 {
-                let p = P {
-                    pos: pos + Vec3::Y * 0.1,
-                    vel: ball(r, (0.5, 1.6), 1.6),
-                    life: r.range_f32(0.3, 0.6),
-                    size: (0.014, 0.004),
-                    drag: 0.5,
-                    lift: -6.0,
-                    delay: 0.0,
-                };
+                let p = P { pos: pos + Vec3::Y * 0.1, vel: ball(r, (0.5, 1.6), 1.6), life: r.range_f32(0.3, 0.6), size: (0.014, 0.004), drag: 0.5, lift: -6.0, delay: 0.0 };
                 spawn_bit(commands, a, Bit::Spark, p, Vec3::ZERO);
             }
-            flash(
-                commands,
-                pos + Vec3::Y * 0.3,
-                Color::srgb(1.0, 0.8, 0.6),
-                30_000.0,
-                6.0,
-                0.25,
-            );
+            flash(commands, pos + Vec3::Y * 0.3, Color::srgb(1.0, 0.8, 0.6), 30_000.0, 6.0, 0.25);
         }
         BurstFx::Ignition => {
             // Огненный шар, искры, потом столб жирной копоти.
             for _ in 0..30 {
-                let p = P {
-                    pos: pos + Vec3::Y * 0.2,
-                    vel: ball(r, (0.4, 1.6), 1.6),
-                    life: r.range_f32(0.45, 0.9),
-                    size: (0.15, r.range_f32(0.6, 1.0)),
-                    drag: 2.5,
-                    lift: 1.5,
-                    delay: r.range_f32(0.0, 0.15),
-                };
+                let p = P { pos: pos + Vec3::Y * 0.2, vel: ball(r, (0.4, 1.6), 1.6), life: r.range_f32(0.45, 0.9), size: (0.15, r.range_f32(0.6, 1.0)), drag: 2.5, lift: 1.5, delay: r.range_f32(0.0, 0.15) };
                 spawn_cloud(commands, a, Cloud::Fire, p);
             }
             for _ in 0..28 {
-                let p = P {
-                    pos: pos + Vec3::Y * 0.25,
-                    vel: ball(r, (0.6, 2.5), 3.0),
-                    life: r.range_f32(0.6, 1.3),
-                    size: (0.016, 0.004),
-                    drag: 0.6,
-                    lift: -3.0,
-                    delay: 0.0,
-                };
+                let p = P { pos: pos + Vec3::Y * 0.25, vel: ball(r, (0.6, 2.5), 3.0), life: r.range_f32(0.6, 1.3), size: (0.016, 0.004), drag: 0.6, lift: -3.0, delay: 0.0 };
                 spawn_bit(commands, a, Bit::Spark, p, Vec3::ZERO);
             }
             for _ in 0..34 {
                 let p = P {
-                    pos: pos
-                        + Vec3::Y * 0.5
-                        + Vec3::new(r.range_f32(-0.2, 0.2), 0.0, r.range_f32(-0.2, 0.2)),
-                    vel: Vec3::Y * r.range_f32(0.6, 1.3)
-                        + Vec3::new(r.range_f32(-0.15, 0.15), 0.0, r.range_f32(-0.15, 0.15)),
+                    pos: pos + Vec3::Y * 0.5 + Vec3::new(r.range_f32(-0.2, 0.2), 0.0, r.range_f32(-0.2, 0.2)),
+                    vel: Vec3::Y * r.range_f32(0.6, 1.3) + Vec3::new(r.range_f32(-0.15, 0.15), 0.0, r.range_f32(-0.15, 0.15)),
                     life: r.range_f32(3.0, 5.0),
                     size: (0.25, r.range_f32(1.0, 1.6)),
                     drag: 0.25,
@@ -1396,14 +775,7 @@ fn burst(commands: &mut Commands, a: &FxAssets, r: &mut Rng, pos: Vec3, fx: Burs
                 };
                 spawn_cloud(commands, a, Cloud::Soot, p);
             }
-            flash(
-                commands,
-                pos + Vec3::Y * 0.6,
-                Color::srgb(1.0, 0.55, 0.2),
-                160_000.0,
-                12.0,
-                0.9,
-            );
+            flash(commands, pos + Vec3::Y * 0.6, Color::srgb(1.0, 0.55, 0.2), 160_000.0, 12.0, 0.9);
         }
         BurstFx::Fumes => {
             for _ in 0..30 {
@@ -1421,76 +793,29 @@ fn burst(commands: &mut Commands, a: &FxAssets, r: &mut Rng, pos: Vec3, fx: Burs
         }
         BurstFx::Bellows => {
             for _ in 0..16 {
-                let p = P {
-                    pos: pos + Vec3::Y * 0.05,
-                    vel: ball(r, (0.1, 0.5), 1.8),
-                    life: r.range_f32(0.5, 1.1),
-                    size: (0.016, 0.004),
-                    drag: 0.5,
-                    lift: 0.2,
-                    delay: 0.0,
-                };
+                let p = P { pos: pos + Vec3::Y * 0.05, vel: ball(r, (0.1, 0.5), 1.8), life: r.range_f32(0.5, 1.1), size: (0.016, 0.004), drag: 0.5, lift: 0.2, delay: 0.0 };
                 spawn_bit(commands, a, Bit::Spark, p, Vec3::ZERO);
             }
             for _ in 0..4 {
-                let p = P {
-                    pos: pos + Vec3::Y * 0.1,
-                    vel: ball(r, (0.05, 0.2), 0.8),
-                    life: r.range_f32(0.25, 0.45),
-                    size: (0.08, 0.3),
-                    drag: 2.0,
-                    lift: 1.0,
-                    delay: 0.0,
-                };
+                let p = P { pos: pos + Vec3::Y * 0.1, vel: ball(r, (0.05, 0.2), 0.8), life: r.range_f32(0.25, 0.45), size: (0.08, 0.3), drag: 2.0, lift: 1.0, delay: 0.0 };
                 spawn_cloud(commands, a, Cloud::Fire, p);
             }
-            flash(
-                commands,
-                pos + Vec3::Y * 0.3,
-                Color::srgb(1.0, 0.6, 0.25),
-                12_000.0,
-                4.0,
-                0.35,
-            );
+            flash(commands, pos + Vec3::Y * 0.3, Color::srgb(1.0, 0.6, 0.25), 12_000.0, 4.0, 0.35);
         }
         BurstFx::Hiss => {
             for _ in 0..12 {
-                let p = P {
-                    pos,
-                    vel: ball(r, (0.3, 0.8), 0.6),
-                    life: r.range_f32(0.6, 1.1),
-                    size: (0.06, 0.32),
-                    drag: 2.5,
-                    lift: 0.4,
-                    delay: 0.0,
-                };
+                let p = P { pos, vel: ball(r, (0.3, 0.8), 0.6), life: r.range_f32(0.6, 1.1), size: (0.06, 0.32), drag: 2.5, lift: 0.4, delay: 0.0 };
                 spawn_cloud(commands, a, Cloud::Steam, p);
             }
         }
         BurstFx::Gathered => {
             for _ in 0..12 {
                 let s = r.range_f32(0.03, 0.06);
-                let p = P {
-                    pos: pos + Vec3::Y * 0.3,
-                    vel: ball(r, (0.2, 0.8), 1.2),
-                    life: r.range_f32(0.8, 1.3),
-                    size: (s, s),
-                    drag: 1.5,
-                    lift: -2.5,
-                    delay: 0.0,
-                };
+                let p = P { pos: pos + Vec3::Y * 0.3, vel: ball(r, (0.2, 0.8), 1.2), life: r.range_f32(0.8, 1.3), size: (s, s), drag: 1.5, lift: -2.5, delay: 0.0 };
                 spawn_bit(commands, a, Bit::Leaf, p, spin(r) * 0.5);
             }
             for _ in 0..6 {
-                let p = P {
-                    pos: pos + Vec3::Y * 0.1,
-                    vel: ball(r, (0.1, 0.4), 0.3),
-                    life: r.range_f32(0.8, 1.2),
-                    size: (0.08, 0.35),
-                    drag: 1.5,
-                    lift: 0.0,
-                    delay: 0.0,
-                };
+                let p = P { pos: pos + Vec3::Y * 0.1, vel: ball(r, (0.1, 0.4), 0.3), life: r.range_f32(0.8, 1.2), size: (0.08, 0.35), drag: 1.5, lift: 0.0, delay: 0.0 };
                 spawn_cloud(commands, a, Cloud::Dust, p);
             }
         }

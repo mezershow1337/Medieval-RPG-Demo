@@ -18,10 +18,7 @@ pub struct HintsPlugin;
 impl Plugin for HintsPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Hints::load())
-            .add_systems(
-                Startup,
-                setup_hint_ui.after(crate::inventory_ui::setup_fonts),
-            )
+            .add_systems(Startup, setup_hint_ui.after(crate::inventory_ui::setup_fonts))
             .add_systems(Update, (watch_situations, show_hints).chain());
     }
 }
@@ -43,21 +40,12 @@ pub struct Hints {
 
 impl Hints {
     fn path() -> std::path::PathBuf {
-        std::env::var("MRPG_HINTS_FILE")
-            .map(Into::into)
-            .unwrap_or_else(|_| "mrpg_hints.txt".into())
+        std::env::var("MRPG_HINTS_FILE").map(Into::into).unwrap_or_else(|_| "mrpg_hints.txt".into())
     }
 
     fn load() -> Self {
         let persist = std::env::var("MRPG_SHOT").is_err();
-        let mut h = Hints {
-            enabled: true,
-            seen: HashSet::new(),
-            queue: VecDeque::new(),
-            current: None,
-            next_at: 0.0,
-            persist,
-        };
+        let mut h = Hints { enabled: true, seen: HashSet::new(), queue: VecDeque::new(), current: None, next_at: 0.0, persist };
         if persist && let Ok(text) = std::fs::read_to_string(Self::path()) {
             for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
                 match line {
@@ -173,18 +161,13 @@ fn watch_situations(
     );
     if let Some(inv) = loot.inventory.as_ref() {
         let items: Vec<_> = inv.all_items().collect();
-        if items
-            .iter()
-            .any(|i| Substance::from_item(i.base).is_some_and(|s| !k.identifies(s)))
-        {
+        if items.iter().any(|i| Substance::from_item(i.base).is_some_and(|s| !k.identifies(s))) {
             hints.offer(
                 "unknown_herb",
                 "Вы не знаете, что за трава у вас в сумке. Узнавать травы учат Харитон-ризотом у главных ворот и знахарка в готском селении, а ещё — травники с рисунками.",
             );
         }
-        if items.iter().any(|i| Book::from_item(i.base).is_some())
-            && !k.knows(Lore::Read(Language::Greek))
-        {
+        if items.iter().any(|i| Book::from_item(i.base).is_some()) && !k.knows(Lore::Read(Language::Greek)) {
             hints.offer(
                 "illiterate_book",
                 "Без грамоты книга — закорючки. Грамоте учат церковный писец в западной церкви и Иоанн-книжник на агоре.",
@@ -256,11 +239,7 @@ fn show_hints(
         hints.save();
         hints.current = Some((line, now + SHOW_SECS));
     }
-    let want = if hints.current.is_some() {
-        Display::Flex
-    } else {
-        Display::None
-    };
+    let want = if hints.current.is_some() { Display::Flex } else { Display::None };
     if ui.display != want {
         ui.display = want;
     }
@@ -277,14 +256,7 @@ mod tests {
 
     #[test]
     fn each_hint_once_and_off_switch() {
-        let mut h = Hints {
-            enabled: true,
-            seen: HashSet::new(),
-            queue: VecDeque::new(),
-            current: None,
-            next_at: 0.0,
-            persist: false,
-        };
+        let mut h = Hints { enabled: true, seen: HashSet::new(), queue: VecDeque::new(), current: None, next_at: 0.0, persist: false };
         h.offer("a", "x");
         h.offer("a", "x");
         assert_eq!(h.queue.len(), 1);

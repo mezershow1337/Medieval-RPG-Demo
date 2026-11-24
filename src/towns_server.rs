@@ -69,13 +69,10 @@ impl Locks {
     /// Можно ли игроку открыть или закрыть дверь `door`.
     pub fn door(&mut self, door: u32, player: u64) -> bool {
         if self.frozen.contains(&door) {
-            self.denied
-                .push((player, "Дом ещё строится: двери не навешены".into()));
+            self.denied.push((player, "Дом ещё строится: двери не навешены".into()));
             return false;
         }
-        let Some(e) = self.door_estate.get(&door) else {
-            return true;
-        };
+        let Some(e) = self.door_estate.get(&door) else { return true };
         match self.allowed.get(e) {
             Some(who) if !who.contains(&player) => {
                 self.denied.push((player, "Заперто: это чужой дом".into()));
@@ -87,21 +84,15 @@ impl Locks {
 
     /// Сундук стоит в доме этого игрока (купленном, снятом или где он гость).
     pub fn own_container(&self, container: u32, player: u64) -> bool {
-        self.container_estate
-            .get(&container)
-            .and_then(|e| self.allowed.get(e))
-            .is_some_and(|who| who.contains(&player))
+        self.container_estate.get(&container).and_then(|e| self.allowed.get(e)).is_some_and(|who| who.contains(&player))
     }
 
     /// Можно ли игроку открыть сундук уровня номер `container`.
     pub fn container(&mut self, container: u32, player: u64) -> bool {
-        let Some(e) = self.container_estate.get(&container) else {
-            return true;
-        };
+        let Some(e) = self.container_estate.get(&container) else { return true };
         match self.allowed.get(e) {
             Some(who) if !who.contains(&player) => {
-                self.denied
-                    .push((player, "Сундук заперт на замок: это чужой дом".into()));
+                self.denied.push((player, "Сундук заперт на замок: это чужой дом".into()));
                 false
             }
             _ => true,
@@ -154,32 +145,16 @@ impl TownWorld {
     pub fn new_or_load() -> Self {
         let cat = estates();
         let path = save_path();
-        let mut loaded: Option<SaveFile> = path
-            .as_ref()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|s| serde_json::from_str(&s).ok());
-        let seed = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(9);
-        let mut towns = loaded
-            .as_ref()
-            .map(|s| s.towns.clone())
-            .unwrap_or_else(|| Towns::new(cat.sites, seed));
+        let mut loaded: Option<SaveFile> = path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok());
+        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(9);
+        let mut towns = loaded.as_ref().map(|s| s.towns.clone()).unwrap_or_else(|| Towns::new(cat.sites, seed));
         towns.fit_sites(cat.sites);
         towns.reseed(seed);
-        let mut list: Vec<EstateState> = loaded
-            .as_mut()
-            .map(|s| std::mem::take(&mut s.estates))
-            .unwrap_or_default();
+        let mut list: Vec<EstateState> = loaded.as_mut().map(|s| std::mem::take(&mut s.estates)).unwrap_or_default();
         list.resize(cat.estates.len(), EstateState::default());
         for (e, spec) in list.iter_mut().zip(&cat.estates) {
             e.furnish.resize(spec.rooms.len(), None);
-            e.orders.retain(|(r, k, _)| {
-                spec.rooms
-                    .get(*r as usize)
-                    .is_some_and(|room| room.kinds.contains(k))
-            });
+            e.orders.retain(|(r, k, _)| spec.rooms.get(*r as usize).is_some_and(|room| room.kinds.contains(k)));
             for (r, f) in e.furnish.iter_mut().enumerate() {
                 if f.is_some_and(|k| !spec.rooms[r].kinds.contains(&k)) {
                     *f = None;
@@ -237,15 +212,8 @@ impl TownWorld {
     /// Кто из игроков в сети может входить.
     fn access(&self, id: u16) -> Vec<u64> {
         let e = &self.estates[id as usize];
-        let Some(owner) = e.owner else {
-            return Vec::new();
-        };
-        let mut v: Vec<u64> = self
-            .players
-            .iter()
-            .filter(|(_, p)| p.key == owner || e.guests.iter().any(|(k, _)| *k == p.key))
-            .map(|(c, _)| *c)
-            .collect();
+        let Some(owner) = e.owner else { return Vec::new() };
+        let mut v: Vec<u64> = self.players.iter().filter(|(_, p)| p.key == owner || e.guests.iter().any(|(k, _)| *k == p.key)).map(|(c, _)| *c).collect();
         v.sort();
         v
     }
@@ -253,15 +221,7 @@ impl TownWorld {
     fn brief(&self, id: u16) -> EstateBrief {
         let e = &self.estates[id as usize];
         let price = self.price(id);
-        EstateBrief {
-            id,
-            status: self.status(id),
-            owner: e.owner_name.clone(),
-            access: self.access(id),
-            price,
-            rent: rent_price(price),
-            furnish: e.furnish.clone(),
-        }
+        EstateBrief { id, status: self.status(id), owner: e.owner_name.clone(), access: self.access(id), price, rent: rent_price(price), furnish: e.furnish.clone() }
     }
 
     fn detail(&self, id: u16, player: u64) -> EstateDetail {
@@ -277,27 +237,12 @@ impl TownWorld {
             .map(|(r, room)| RoomView {
                 now: e.furnish[r],
                 kinds: room.kinds.clone(),
-                order: e
-                    .orders
-                    .iter()
-                    .find(|o| o.0 as usize == r)
-                    .map(|o| (o.1, o.2.saturating_sub(week).max(1))),
+                order: e.orders.iter().find(|o| o.0 as usize == r).map(|o| (o.1, o.2.saturating_sub(week).max(1))),
                 upper: room.min.y > spec.min.y + 1.5,
             })
             .collect();
         let players = if mine {
-            let mut v: Vec<(u64, String, bool)> = self
-                .players
-                .iter()
-                .filter(|(c, p)| **c != player && Some(p.key) != e.owner)
-                .map(|(c, p)| {
-                    (
-                        *c,
-                        p.name.clone(),
-                        e.guests.iter().any(|(k, _)| *k == p.key),
-                    )
-                })
-                .collect();
+            let mut v: Vec<(u64, String, bool)> = self.players.iter().filter(|(c, p)| **c != player && Some(p.key) != e.owner).map(|(c, p)| (*c, p.name.clone(), e.guests.iter().any(|(k, _)| *k == p.key))).collect();
             v.sort_by(|a, b| a.1.cmp(&b.1));
             v
         } else {
@@ -339,14 +284,7 @@ impl TownWorld {
         let est = (0..cat.estates.len() as u16)
             .map(|i| {
                 let price = self.price(i);
-                (
-                    i,
-                    cat.estates[i as usize].name.clone(),
-                    price,
-                    rent_price(price),
-                    self.status(i),
-                    self.estates[i as usize].owner_name.clone(),
-                )
+                (i, cat.estates[i as usize].name.clone(), price, rent_price(price), self.status(i), self.estates[i as usize].owner_name.clone())
             })
             .collect();
         NewsView {
@@ -354,12 +292,7 @@ impl TownWorld {
             month: month_name(week).to_string(),
             sea_open: sea_open(week),
             towns: self.towns.towns.iter().map(town_view).collect(),
-            news: self
-                .towns
-                .latest(30)
-                .into_iter()
-                .map(|n| (date_text(n.week), n.town, n.text.clone()))
-                .collect(),
+            news: self.towns.latest(30).into_iter().map(|n| (date_text(n.week), n.town, n.text.clone())).collect(),
             market,
             estates: est,
             sites: self.towns.sites.clone(),
@@ -392,18 +325,7 @@ impl Plugin for TownServerPlugin {
             .insert_resource(Locks::default())
             .add_observer(on_connection)
             .add_systems(PostStartup, setup_world)
-            .add_systems(
-                Update,
-                (
-                    receive_town_messages,
-                    tick_towns,
-                    end_raids,
-                    send_changes,
-                    tell_denied,
-                    save_world,
-                )
-                    .chain(),
-            );
+            .add_systems(Update, (receive_town_messages, tick_towns, end_raids, send_changes, tell_denied, save_world).chain());
     }
 }
 
@@ -419,30 +341,18 @@ fn notice(server: &mut RenetServer, player: u64, text: impl Into<String>) {
 /// Для снимков: `MRPG_SITE_STAGES=0,1,2,3` — стройки стоят на заданных стадиях и не двигаются.
 fn pinned_sites() -> Option<Vec<u8>> {
     let v = std::env::var("MRPG_SITE_STAGES").ok()?;
-    Some(
-        v.split(',')
-            .filter_map(|s| s.trim().parse::<u8>().ok())
-            .map(|s| s.min(crate::towns::SITE_DONE))
-            .collect(),
-    )
+    Some(v.split(',').filter_map(|s| s.trim().parse::<u8>().ok()).map(|s| s.min(crate::towns::SITE_DONE)).collect())
 }
 
 fn pin_sites(towns: &mut Towns) -> bool {
-    let Some(pin) = pinned_sites() else {
-        return false;
-    };
+    let Some(pin) = pinned_sites() else { return false };
     for (site, st) in towns.sites.iter_mut().zip(pin) {
         *site = st;
     }
     true
 }
 
-fn setup_world(
-    mut tw: ResMut<TownWorld>,
-    mut locks: ResMut<Locks>,
-    level: Res<LevelColliders>,
-    mut loot: ResMut<LootWorld>,
-) {
+fn setup_world(mut tw: ResMut<TownWorld>, mut locks: ResMut<Locks>, level: Res<LevelColliders>, mut loot: ResMut<LootWorld>) {
     let cat = estates();
     for (i, spec) in cat.estates.iter().enumerate() {
         for d in &spec.doors {
@@ -463,9 +373,7 @@ fn setup_world(
         let id = CONTAINER_ID_BASE + c as u64;
         let mut placed = Vec::new();
         for s in items {
-            let Some(base) = ItemBaseId::find(&s.name) else {
-                continue;
-            };
+            let Some(base) = ItemBaseId::find(&s.name) else { continue };
             let mut p = s.placed;
             p.item.base = base;
             p.item.uid = loot.uids.next();
@@ -488,17 +396,8 @@ fn apply_switches(tw: &TownWorld, level: &LevelColliders, locks: &mut Locks) {
     let cat = estates();
     for (g, key) in cat.keys.iter().enumerate() {
         let on = match *key {
-            SwitchKey::Site { site, stage } => {
-                tw.towns.sites.get(site as usize).copied().unwrap_or(0) == stage
-            }
-            SwitchKey::Furnish { estate, room, kind } => {
-                tw.estates
-                    .get(estate as usize)
-                    .and_then(|e| e.furnish.get(room as usize))
-                    .copied()
-                    .flatten()
-                    == Some(kind)
-            }
+            SwitchKey::Site { site, stage } => tw.towns.sites.get(site as usize).copied().unwrap_or(0) == stage,
+            SwitchKey::Furnish { estate, room, kind } => tw.estates.get(estate as usize).and_then(|e| e.furnish.get(room as usize)).copied().flatten() == Some(kind),
         };
         level.set_switch(g, on);
     }
@@ -518,9 +417,7 @@ fn refresh_access(tw: &TownWorld, locks: &mut Locks) {
     locks.allowed.clear();
     for i in 0..tw.estates.len() {
         if tw.estates[i].owner.is_some() {
-            locks
-                .allowed
-                .insert(i as u16, tw.access(i as u16).into_iter().collect());
+            locks.allowed.insert(i as u16, tw.access(i as u16).into_iter().collect());
         }
     }
 }
@@ -535,32 +432,13 @@ fn on_connection(
     match &event.0 {
         ServerEvent::ClientConnected { client_id } => {
             let id = *client_id;
-            let profile = transport
-                .as_ref()
-                .and_then(|t| t.0.user_data(id))
-                .and_then(|d| unpack_profile(&d))
-                .unwrap_or_else(|| Profile {
-                    key: id ^ 0x5EED_0000_0000_0000,
-                    name: "Путник".into(),
-                    look: Default::default(),
-                    kit: Default::default(),
-                });
+            let profile = transport.as_ref().and_then(|t| t.0.user_data(id)).and_then(|d| unpack_profile(&d)).unwrap_or_else(|| Profile { key: id ^ 0x5EED_0000_0000_0000, name: "Путник".into(), look: Default::default(), kit: Default::default() });
             info!("Игрок {id}: профиль «{}»", profile.name);
             tw.players.insert(id, profile);
             let cat = estates();
             let briefs = (0..cat.estates.len() as u16).map(|i| tw.brief(i)).collect();
             let week = tw.towns.week;
-            send(
-                &mut server,
-                id,
-                &TownServerMessage::Init {
-                    week,
-                    date: date_text(week),
-                    sites: tw.towns.sites.clone(),
-                    estates: briefs,
-                    you: id,
-                },
-            );
+            send(&mut server, id, &TownServerMessage::Init { week, date: date_text(week), sites: tw.towns.sites.clone(), estates: briefs, you: id });
             // Свои дома: двери и сундуки теперь открываются.
             for i in 0..tw.estates.len() as u16 {
                 if tw.estates[i as usize].owner.is_some() {
@@ -584,31 +462,22 @@ fn on_connection(
 /// Стоит ли игрок у дома (у входа или внутри).
 fn near_estate(game: &GameWorld, player: u64, id: u16) -> bool {
     let spec = &estates().estates[id as usize];
-    let Some(a) = game.actors.get(&player).filter(|a| a.alive) else {
-        return false;
-    };
+    let Some(a) = game.actors.get(&player).filter(|a| a.alive) else { return false };
     let p = a.pose.feet;
     spec.contains(p) || p.distance(spec.entrance) < DEAL_RANGE
 }
 
 fn sync_inventory(server: &mut RenetServer, loot: &LootWorld, player: u64) {
     if let Some(inv) = loot.inventories.get(&player) {
-        server.send_message(
-            player,
-            CH_LOOT,
-            encode(&LootServerMessage::Inventory(inv.clone())),
-        );
+        server.send_message(player, CH_LOOT, encode(&LootServerMessage::Inventory(inv.clone())));
     }
 }
 
 /// Заплатить из сумки. Ошибка — текст для игрока.
 fn pay(loot: &mut LootWorld, player: u64, nummi: u32) -> Result<(), String> {
     let mut uids = loot.uids.clone();
-    let Some(inv) = loot.inventories.get_mut(&player) else {
-        return Err("Нет сумки".into());
-    };
-    let r = take_money(inv, nummi, &mut uids)
-        .map_err(|e| format!("{}: нужно {}", e.message(), format_money(nummi)));
+    let Some(inv) = loot.inventories.get_mut(&player) else { return Err("Нет сумки".into()) };
+    let r = take_money(inv, nummi, &mut uids).map_err(|e| format!("{}: нужно {}", e.message(), format_money(nummi)));
     loot.uids = uids;
     r
 }
@@ -625,27 +494,16 @@ fn receive_town_messages(
     let cat = estates();
     for pid in server.clients_id() {
         while let Some(bytes) = server.receive_message(pid, CH_TOWN) {
-            let Some(msg) = decode::<TownClientMessage>(&bytes) else {
-                continue;
-            };
+            let Some(msg) = decode::<TownClientMessage>(&bytes) else { continue };
             let estate = match &msg {
-                TownClientMessage::Open { estate }
-                | TownClientMessage::Buy { estate }
-                | TownClientMessage::Rent { estate, .. }
-                | TownClientMessage::Sell { estate }
-                | TownClientMessage::Furnish { estate, .. }
-                | TownClientMessage::Guest { estate, .. } => Some(*estate),
+                TownClientMessage::Open { estate } | TownClientMessage::Buy { estate } | TownClientMessage::Rent { estate, .. } | TownClientMessage::Sell { estate } | TownClientMessage::Furnish { estate, .. } | TownClientMessage::Guest { estate, .. } => Some(*estate),
                 TownClientMessage::News => None,
             };
             if estate.is_some_and(|e| e as usize >= cat.estates.len()) {
                 continue;
             }
             let Some(key) = tw.key(pid) else { continue };
-            let name = tw
-                .players
-                .get(&pid)
-                .map(|p| p.name.clone())
-                .unwrap_or_default();
+            let name = tw.players.get(&pid).map(|p| p.name.clone()).unwrap_or_default();
             match msg {
                 TownClientMessage::News => {
                     let v = tw.news_view();
@@ -661,27 +519,16 @@ fn receive_town_messages(
             }
             let id = estate.unwrap();
             if !near_estate(&game, pid, id) {
-                notice(
-                    &mut server,
-                    pid,
-                    "Сделки по дому — у его дверей: подойдите к входу",
-                );
+                notice(&mut server, pid, "Сделки по дому — у его дверей: подойдите к входу");
                 continue;
             }
             let spec = &cat.estates[id as usize];
             let week = tw.towns.week;
             match msg {
-                TownClientMessage::Buy { estate: _ }
-                | TownClientMessage::Rent { estate: _, .. } => {
-                    let months = if let TownClientMessage::Rent { months, .. } = msg {
-                        Some(months.clamp(1, 12) as u32)
-                    } else {
-                        None
-                    };
+                TownClientMessage::Buy { estate: _ } | TownClientMessage::Rent { estate: _, .. } => {
+                    let months = if let TownClientMessage::Rent { months, .. } = msg { Some(months.clamp(1, 12) as u32) } else { None };
                     let status = tw.status(id);
-                    let extend = matches!(status, Status::Rented { .. })
-                        && tw.is_owner(id, pid)
-                        && months.is_some();
+                    let extend = matches!(status, Status::Rented { .. }) && tw.is_owner(id, pid) && months.is_some();
                     if status != Status::ForSale && !extend {
                         let why = match status {
                             Status::Building => "Дом ещё строится".to_string(),
@@ -706,11 +553,7 @@ fn receive_town_messages(
                     e.warned = false;
                     match months {
                         Some(m) => {
-                            let from = if extend {
-                                e.rented_until.unwrap_or(week)
-                            } else {
-                                week
-                            };
+                            let from = if extend { e.rented_until.unwrap_or(week) } else { week };
                             e.rented_until = Some(from + m * RENT_WEEKS);
                         }
                         None => e.rented_until = None,
@@ -719,45 +562,18 @@ fn receive_town_messages(
                     for d in &spec.doors {
                         if level.door_open(*d as usize) && !locks.frozen.contains(d) {
                             level.set_door_open(*d as usize, false);
-                            server.broadcast_message(
-                                crate::doors::CH_DOOR,
-                                encode(&crate::doors::DoorServerMessage::Set {
-                                    id: *d,
-                                    open: false,
-                                }),
-                            );
+                            server.broadcast_message(crate::doors::CH_DOOR, encode(&crate::doors::DoorServerMessage::Set { id: *d, open: false }));
                         }
                     }
                     let text = match months {
-                        Some(m) if extend => format!(
-                            "Аренда продлена на {m} мес. Заплачено {}",
-                            format_money(cost)
-                        ),
-                        Some(m) => format!(
-                            "Табуларий записал договор: «{}» ваша на {m} мес. Заплачено {}. Ключ у вас.",
-                            spec.name,
-                            format_money(cost)
-                        ),
-                        None => format!(
-                            "Купчая записана у табулария: «{}» теперь ваша. Заплачено {}. Ключ у вас.",
-                            spec.name,
-                            format_money(cost)
-                        ),
+                        Some(m) if extend => format!("Аренда продлена на {m} мес. Заплачено {}", format_money(cost)),
+                        Some(m) => format!("Табуларий записал договор: «{}» ваша на {m} мес. Заплачено {}. Ключ у вас.", spec.name, format_money(cost)),
+                        None => format!("Купчая записана у табулария: «{}» теперь ваша. Заплачено {}. Ключ у вас.", spec.name, format_money(cost)),
                     };
                     notice(&mut server, pid, text);
                     if !extend {
-                        let what = if months.is_some() {
-                            "снял"
-                        } else {
-                            "купил"
-                        };
-                        tw.towns.news.push(News {
-                            week,
-                            town: spec.town,
-                            kind: NewsKind::People,
-                            text: format!("{name} {what} дом: {}.", spec.name.to_lowercase()),
-                            loud: false,
-                        });
+                        let what = if months.is_some() { "снял" } else { "купил" };
+                        tw.towns.news.push(News { week, town: spec.town, kind: NewsKind::People, text: format!("{name} {what} дом: {}.", spec.name.to_lowercase()), loud: false });
                     }
                     tw.changed.insert(id);
                     tw.dirty = true;
@@ -771,34 +587,16 @@ fn receive_town_messages(
                     if owned {
                         let pay_back = buyback_price(tw.price(id));
                         let mut uids = loot.uids.clone();
-                        let ok = loot
-                            .inventories
-                            .get_mut(&pid)
-                            .map(|inv| give_money(inv, pay_back, &mut uids));
+                        let ok = loot.inventories.get_mut(&pid).map(|inv| give_money(inv, pay_back, &mut uids));
                         loot.uids = uids;
                         if !matches!(ok, Some(Ok(()))) {
-                            notice(
-                                &mut server,
-                                pid,
-                                "Деньги некуда положить: освободите место в сумке",
-                            );
+                            notice(&mut server, pid, "Деньги некуда положить: освободите место в сумке");
                             continue;
                         }
                         sync_inventory(&mut server, &loot, pid);
-                        notice(
-                            &mut server,
-                            pid,
-                            format!(
-                                "Курия выкупила дом за {}. Что осталось в сундуках — уже не ваше.",
-                                format_money(pay_back)
-                            ),
-                        );
+                        notice(&mut server, pid, format!("Курия выкупила дом за {}. Что осталось в сундуках — уже не ваше.", format_money(pay_back)));
                     } else {
-                        notice(
-                            &mut server,
-                            pid,
-                            "Вы съехали. Что осталось в сундуках — уже не ваше.",
-                        );
+                        notice(&mut server, pid, "Вы съехали. Что осталось в сундуках — уже не ваше.");
                     }
                     tw.release(id);
                 }
@@ -807,19 +605,13 @@ fn receive_town_messages(
                         notice(&mut server, pid, "Обставлять может только хозяин");
                         continue;
                     }
-                    let Some(r) = spec.rooms.get(room as usize) else {
-                        continue;
-                    };
+                    let Some(r) = spec.rooms.get(room as usize) else { continue };
                     match kind {
                         None => {
                             let e = &mut tw.estates[id as usize];
                             e.furnish[room as usize] = None;
                             e.orders.retain(|o| o.0 != room);
-                            notice(
-                                &mut server,
-                                pid,
-                                "Комнату освободили: вещи раздали бедным при ксеноне",
-                            );
+                            notice(&mut server, pid, "Комнату освободили: вещи раздали бедным при ксеноне");
                         }
                         Some(k) => {
                             if !r.kinds.contains(&k) {
@@ -837,17 +629,7 @@ fn receive_town_messages(
                             let e = &mut tw.estates[id as usize];
                             e.orders.retain(|o| o.0 != room);
                             e.orders.push((room, k, week + k.weeks()));
-                            notice(
-                                &mut server,
-                                pid,
-                                format!(
-                                    "Мастера взялись: «{}» ({}) — через {} нед. Заплачено {}",
-                                    k.name(),
-                                    k.what(),
-                                    k.weeks(),
-                                    format_money(k.price())
-                                ),
-                            );
+                            notice(&mut server, pid, format!("Мастера взялись: «{}» ({}) — через {} нед. Заплачено {}", k.name(), k.what(), k.weeks(), format_money(k.price())));
                         }
                     }
                     tw.changed.insert(id);
@@ -857,18 +639,12 @@ fn receive_town_messages(
                     if !tw.is_owner(id, pid) {
                         continue;
                     }
-                    let Some(guest) = tw.players.get(&player).cloned() else {
-                        continue;
-                    };
+                    let Some(guest) = tw.players.get(&player).cloned() else { continue };
                     let e = &mut tw.estates[id as usize];
                     e.guests.retain(|(k, _)| *k != guest.key);
                     if allow {
                         e.guests.push((guest.key, guest.name.clone()));
-                        notice(
-                            &mut server,
-                            player,
-                            format!("{name} дал вам ключ от дома: {}", spec.name.to_lowercase()),
-                        );
+                        notice(&mut server, player, format!("{name} дал вам ключ от дома: {}", spec.name.to_lowercase()));
                     }
                     tw.changed.insert(id);
                     tw.dirty = true;
@@ -925,13 +701,7 @@ fn tick_towns(
                     if let Some(doors) = cat.site_doors.get(site as usize) {
                         for d in doors {
                             level.set_door_open(*d as usize, false);
-                            server.broadcast_message(
-                                crate::doors::CH_DOOR,
-                                encode(&crate::doors::DoorServerMessage::Set {
-                                    id: *d,
-                                    open: false,
-                                }),
-                            );
+                            server.broadcast_message(crate::doors::CH_DOOR, encode(&crate::doors::DoorServerMessage::Set { id: *d, open: false }));
                         }
                     }
                 }
@@ -954,12 +724,7 @@ fn tick_towns(
     let mut ended = Vec::new();
     for i in 0..tw.estates.len() {
         let e = &mut tw.estates[i];
-        let ready: Vec<(u8, FurnishKind)> = e
-            .orders
-            .iter()
-            .filter(|o| o.2 <= week)
-            .map(|o| (o.0, o.1))
-            .collect();
+        let ready: Vec<(u8, FurnishKind)> = e.orders.iter().filter(|o| o.2 <= week).map(|o| (o.0, o.1)).collect();
         if !ready.is_empty() {
             e.orders.retain(|o| o.2 > week);
             for (r, k) in &ready {
@@ -969,10 +734,7 @@ fn tick_towns(
             }
             let owner = e.owner;
             let names: Vec<&str> = ready.iter().map(|(_, k)| k.name()).collect();
-            let text = format!(
-                "Мастера закончили работу в вашем доме: {}",
-                names.join(", ").to_lowercase()
-            );
+            let text = format!("Мастера закончили работу в вашем доме: {}", names.join(", ").to_lowercase());
             for (c, p) in tw.players.clone() {
                 if Some(p.key) == owner {
                     notice(&mut server, c, text.clone());
@@ -989,14 +751,7 @@ fn tick_towns(
                 let owner = e.owner;
                 for (c, p) in tw.players.clone() {
                     if Some(p.key) == owner {
-                        notice(
-                            &mut server,
-                            c,
-                            format!(
-                                "Через неделю кончается аренда: {}. Продлите у дверей дома (U), иначе вещи из сундуков достанутся новому жильцу.",
-                                cat.estates[i].name.to_lowercase()
-                            ),
-                        );
+                        notice(&mut server, c, format!("Через неделю кончается аренда: {}. Продлите у дверей дома (U), иначе вещи из сундуков достанутся новому жильцу.", cat.estates[i].name.to_lowercase()));
                     }
                 }
             }
@@ -1006,14 +761,7 @@ fn tick_towns(
         let owner = tw.estates[i as usize].owner;
         for (c, p) in tw.players.clone() {
             if Some(p.key) == owner {
-                notice(
-                    &mut server,
-                    c,
-                    format!(
-                        "Аренда кончилась: {}. Дом снова сдаётся.",
-                        cat.estates[i as usize].name.to_lowercase()
-                    ),
-                );
+                notice(&mut server, c, format!("Аренда кончилась: {}. Дом снова сдаётся.", cat.estates[i as usize].name.to_lowercase()));
             }
         }
         tw.release(i);
@@ -1031,11 +779,7 @@ fn tick_towns(
     let date = date_text(week);
     server.broadcast_message(CH_TOWN, encode(&TownServerMessage::Week { week, date }));
     // Глашатай: громкие вести этой недели.
-    let fresh: Vec<String> = tw.towns.news[news_before.min(tw.towns.news.len())..]
-        .iter()
-        .filter(|n| n.loud)
-        .map(|n| n.text.clone())
-        .collect();
+    let fresh: Vec<String> = tw.towns.news[news_before.min(tw.towns.news.len())..].iter().filter(|n| n.loud).map(|n| n.text.clone()).collect();
     let _ = last_news_week;
     for text in fresh {
         server.broadcast_message(CH_TOWN, encode(&TownServerMessage::Crier(text)));
@@ -1044,38 +788,19 @@ fn tick_towns(
 }
 
 /// Налётчики у селения: со стороны степи, по двое-трое.
-fn spawn_raid(
-    game: &mut GameWorld,
-    level: &LevelColliders,
-    town: TownId,
-    n: u32,
-    now: f64,
-) -> Vec<u64> {
-    let Some(place) = town.def().place.and_then(crate::level::place_pos) else {
-        return Vec::new();
-    };
+fn spawn_raid(game: &mut GameWorld, level: &LevelColliders, town: TownId, n: u32, now: f64) -> Vec<u64> {
+    let Some(place) = town.def().place.and_then(crate::level::place_pos) else { return Vec::new() };
     // Херсон: налёт на клеры (усадьба с виноградниками за стенами).
-    let center = if town == TownId::Herson {
-        crate::level::place_pos("kleros").unwrap_or(place)
-    } else {
-        place
-    };
+    let center = if town == TownId::Herson { crate::level::place_pos("kleros").unwrap_or(place) } else { place };
     // Степь — на востоке и юге карты.
-    let from = (crate::level::place_pos("steppe_camp")
-        .unwrap_or(center + Vec3::new(200.0, 0.0, 200.0))
-        - center)
-        .normalize_or(Vec3::Z);
+    let from = (crate::level::place_pos("steppe_camp").unwrap_or(center + Vec3::new(200.0, 0.0, 200.0)) - center).normalize_or(Vec3::Z);
     let mut ids = Vec::new();
     for k in 0..n.min(8) {
         let a = k as f32 * 1.3;
         let off = from * 26.0 + Vec3::new(a.cos(), 0.0, a.sin()) * 5.0;
         let mut pos = center + off;
         pos.y = crate::level::ground_y(pos.x, pos.z);
-        let kind = if k % 3 == 2 {
-            ActorKind::GothWarrior
-        } else {
-            ActorKind::HunArcher
-        };
+        let kind = if k % 3 == 2 { ActorKind::GothWarrior } else { ActorKind::HunArcher };
         let to = center - pos;
         let mut spawn = crate::npc::NpcSpawn::brigand(kind, pos, (-to.x).atan2(-to.z));
         spawn.wander = 14.0;
@@ -1084,16 +809,9 @@ fn spawn_raid(
     ids
 }
 
-fn end_raids(
-    mut server: ResMut<RenetServer>,
-    time: Res<Time>,
-    mut tw: ResMut<TownWorld>,
-    mut game: ResMut<GameWorld>,
-) {
+fn end_raids(mut server: ResMut<RenetServer>, time: Res<Time>, mut tw: ResMut<TownWorld>, mut game: ResMut<GameWorld>) {
     let now = time.elapsed_secs_f64();
-    let (done, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut tw.raids)
-        .into_iter()
-        .partition(|r| r.0 <= now);
+    let (done, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut tw.raids).into_iter().partition(|r| r.0 <= now);
     tw.raids = rest;
     for (_, ids, town) in done {
         let mut left = 0;
@@ -1104,21 +822,9 @@ fn end_raids(
             game.remove_npc(&mut server, id);
         }
         if left > 0 {
-            server.broadcast_message(
-                CH_TOWN,
-                encode(&TownServerMessage::Crier(format!(
-                    "Налётчики ушли в степь с добычей ({}).",
-                    town.def().name
-                ))),
-            );
+            server.broadcast_message(CH_TOWN, encode(&TownServerMessage::Crier(format!("Налётчики ушли в степь с добычей ({}).", town.def().name))));
         } else {
-            server.broadcast_message(
-                CH_TOWN,
-                encode(&TownServerMessage::Crier(format!(
-                    "{}: набег отбит, налётчики перебиты.",
-                    town.def().name
-                ))),
-            );
+            server.broadcast_message(CH_TOWN, encode(&TownServerMessage::Crier(format!("{}: набег отбит, налётчики перебиты.", town.def().name))));
         }
     }
 }
@@ -1138,10 +844,7 @@ fn apply_market(tw: &TownWorld, trade: &mut crate::trade_server::TradeWorld) {
 
 fn category_at(i: usize) -> Category {
     use Category::*;
-    [
-        Weapon, Armor, Jewelry, Coin, Remedy, Herb, SteppeGood, Import, Material, Vessel, Book,
-        WineOil, Textile, Hide, Food, Gem, Dye,
-    ][i]
+    [Weapon, Armor, Jewelry, Coin, Remedy, Herb, SteppeGood, Import, Material, Vessel, Book, WineOil, Textile, Hide, Food, Gem, Dye][i]
 }
 
 fn send_changes(mut server: ResMut<RenetServer>, mut tw: ResMut<TownWorld>) {
@@ -1170,45 +873,20 @@ fn save_world(time: Res<Time>, mut tw: ResMut<TownWorld>, loot: Res<LootWorld>) 
     }
     tw.last_save = now;
     tw.dirty = false;
-    let Some(path) = tw.save_path.clone() else {
-        return;
-    };
+    let Some(path) = tw.save_path.clone() else { return };
     let cat = estates();
     let mut storage = Vec::new();
     for spec in &cat.estates {
         for c in &spec.containers {
-            let Some(inv) = loot
-                .corpses
-                .get(&(CONTAINER_ID_BASE + *c as u64))
-                .map(|c| &c.inv)
-            else {
-                continue;
-            };
+            let Some(inv) = loot.corpses.get(&(CONTAINER_ID_BASE + *c as u64)).map(|c| &c.inv) else { continue };
             if inv.grid.items.is_empty() {
                 continue;
             }
-            storage.push((
-                *c,
-                inv.grid
-                    .items
-                    .iter()
-                    .map(|p| SavedPlaced {
-                        name: p.item.info().name.to_string(),
-                        placed: p.clone(),
-                    })
-                    .collect(),
-            ));
+            storage.push((*c, inv.grid.items.iter().map(|p| SavedPlaced { name: p.item.info().name.to_string(), placed: p.clone() }).collect()));
         }
     }
-    let file = SaveFile {
-        version: 1,
-        towns: tw.towns.clone(),
-        estates: tw.estates.clone(),
-        storage,
-    };
-    let Ok(json) = serde_json::to_string(&file) else {
-        return;
-    };
+    let file = SaveFile { version: 1, towns: tw.towns.clone(), estates: tw.estates.clone(), storage };
+    let Ok(json) = serde_json::to_string(&file) else { return };
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -1248,45 +926,17 @@ mod tests {
         tw.estates[0].owner = Some(42);
         tw.estates[0].owner_name = "Феодор".into();
         tw.estates[0].furnish[0] = Some(FurnishKind::Living);
-        let file = SaveFile {
-            version: 1,
-            towns: tw.towns.clone(),
-            estates: tw.estates.clone(),
-            storage: vec![],
-        };
+        let file = SaveFile { version: 1, towns: tw.towns.clone(), estates: tw.estates.clone(), storage: vec![] };
         let json = serde_json::to_string(&file).unwrap();
         let back: SaveFile = serde_json::from_str(&json).unwrap();
         assert_eq!(back.estates[0], tw.estates[0]);
-        tw.players.insert(
-            7,
-            Profile {
-                key: 42,
-                name: "Феодор".into(),
-                look: Default::default(),
-                kit: Default::default(),
-            },
-        );
-        tw.players.insert(
-            8,
-            Profile {
-                key: 43,
-                name: "Гость".into(),
-                look: Default::default(),
-                kit: Default::default(),
-            },
-        );
+        tw.players.insert(7, Profile { key: 42, name: "Феодор".into(), look: Default::default(), kit: Default::default() });
+        tw.players.insert(8, Profile { key: 43, name: "Гость".into(), look: Default::default(), kit: Default::default() });
         assert!(tw.is_owner(0, 7));
         assert!(!tw.is_owner(0, 8));
         assert_eq!(tw.access(0), vec![7]);
         tw.estates[0].guests.push((43, "Гость".into()));
         assert_eq!(tw.access(0), vec![7, 8]);
-        assert_eq!(
-            tw.status(0),
-            if estates().estates[0].site.is_some() {
-                Status::Building
-            } else {
-                Status::Owned
-            }
-        );
+        assert_eq!(tw.status(0), if estates().estates[0].site.is_some() { Status::Building } else { Status::Owned });
     }
 }

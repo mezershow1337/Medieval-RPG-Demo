@@ -21,9 +21,7 @@ use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 #[path = "rig_dims.rs"]
 mod dims;
-use dims::{
-    ANKLE_HEIGHT, FOREARM, GRIP_AXIS_L, GRIP_AXIS_R, GRIP_L, GRIP_R, REST, SHIN, THIGH, UPPER_ARM,
-};
+use dims::{ANKLE_HEIGHT, FOREARM, GRIP_AXIS_L, GRIP_AXIS_R, GRIP_L, GRIP_R, REST, SHIN, THIGH, UPPER_ARM};
 
 pub const MODEL_PATH: &str = "models/humans.glb";
 /// Доспехи игроков сверх тех, что носят враги (поддоспешник, перчатки, наручи, поножи,
@@ -57,23 +55,7 @@ pub enum Bone {
     FootL,
 }
 
-const PARENT: [Option<usize>; BONES] = [
-    None,
-    Some(0),
-    Some(1),
-    Some(1),
-    Some(3),
-    Some(4),
-    Some(1),
-    Some(6),
-    Some(7),
-    Some(0),
-    Some(9),
-    Some(10),
-    Some(0),
-    Some(12),
-    Some(13),
-];
+const PARENT: [Option<usize>; BONES] = [None, Some(0), Some(1), Some(1), Some(3), Some(4), Some(1), Some(6), Some(7), Some(0), Some(9), Some(10), Some(0), Some(12), Some(13)];
 
 const PELVIS_HEIGHT: f32 = REST[0].y;
 
@@ -306,11 +288,7 @@ impl Outfit {
             Some(ArmPiece::Vambraces) => ArmGear::Vambraces,
         };
         self.greaves = gear.greaves();
-        self.feet = if gear.boots() {
-            FootGear::Boots
-        } else {
-            FootGear::Shoes
-        };
+        self.feet = if gear.boots() { FootGear::Boots } else { FootGear::Shoes };
         // Высокие сапоги обуваются на штаны, обмотки под ними не наматывают.
         if self.feet == FootGear::Boots {
             self.legs = LegGear::Trousers;
@@ -411,12 +389,7 @@ pub struct BladeTints(HashMap<(AssetId<StandardMaterial>, u8), Handle<StandardMa
 
 impl BladeTints {
     /// Материал клинка для вида `finish` (0..255). Хороший клинок — как в модели.
-    pub fn get(
-        &mut self,
-        materials: &mut Assets<StandardMaterial>,
-        base: &Handle<StandardMaterial>,
-        finish: u8,
-    ) -> Handle<StandardMaterial> {
+    pub fn get(&mut self, materials: &mut Assets<StandardMaterial>, base: &Handle<StandardMaterial>, finish: u8) -> Handle<StandardMaterial> {
         let bucket = finish / 32;
         if bucket >= 5 {
             return base.clone();
@@ -424,20 +397,13 @@ impl BladeTints {
         if let Some(h) = self.0.get(&(base.id(), bucket)) {
             return h.clone();
         }
-        let Some(mut m) = materials.get(base).cloned() else {
-            return base.clone();
-        };
+        let Some(mut m) = materials.get(base).cloned() else { return base.clone() };
         // 0 — бурая ржа и окалина, 4 — чуть тусклее модели.
         // Дерево и кожа рукояти не ржавеют — только темнеют от грязи.
         let k = (1.0 - bucket as f32 / 5.0) * if m.metallic > 0.25 { 1.0 } else { 0.35 };
         let c = m.base_color.to_srgba();
         let rust = Srgba::new(0.36, 0.25, 0.18, c.alpha);
-        m.base_color = Color::Srgba(Srgba::new(
-            c.red + (rust.red - c.red) * k,
-            c.green + (rust.green - c.green) * k,
-            c.blue + (rust.blue - c.blue) * k,
-            c.alpha,
-        ));
+        m.base_color = Color::Srgba(Srgba::new(c.red + (rust.red - c.red) * k, c.green + (rust.green - c.green) * k, c.blue + (rust.blue - c.blue) * k, c.alpha));
         m.metallic *= 1.0 - k * 0.6;
         m.perceptual_roughness = m.perceptual_roughness + (0.9 - m.perceptual_roughness) * k;
         let h = materials.add(m);
@@ -483,15 +449,7 @@ pub struct Blade(pub Handle<StandardMaterial>);
 
 impl CharacterModels {
     /// Создаёт примитивы детали как дочерние сущности. `skin` — суставы для скинованной детали.
-    fn spawn_part(
-        &mut self,
-        parent: &mut ChildSpawnerCommands,
-        materials: &mut Assets<StandardMaterial>,
-        name: &str,
-        outfit: Option<&Outfit>,
-        skin: Option<&[Entity]>,
-        blade: bool,
-    ) {
+    fn spawn_part(&mut self, parent: &mut ChildSpawnerCommands, materials: &mut Assets<StandardMaterial>, name: &str, outfit: Option<&Outfit>, skin: Option<&[Entity]>, blade: bool) {
         let Some(prims) = self.parts.get(name).cloned() else {
             warn!("в {MODEL_PATH} нет детали {name}");
             return;
@@ -501,26 +459,14 @@ impl CharacterModels {
                 Some(c) => self.tint(materials, &mat_name, &mat, c),
                 None => mat,
             };
-            let mut e = parent.spawn((
-                Mesh3d(mesh),
-                MeshMaterial3d(mat.clone()),
-                Transform::default(),
-            ));
+            let mut e = parent.spawn((Mesh3d(mesh), MeshMaterial3d(mat.clone()), Transform::default()));
             // Телосложение и черты лица: веса целей формы по облику.
             if !targets.is_empty() {
                 let shape = outfit.map(|o| o.shape).unwrap_or_default();
-                e.insert(MeshMorphWeights::Value {
-                    weights: targets.iter().map(|t| shape.weight(t)).collect(),
-                });
+                e.insert(MeshMorphWeights::Value { weights: targets.iter().map(|t| shape.weight(t)).collect() });
             }
             if let Some(joints) = skin {
-                e.insert((
-                    SkinnedMesh {
-                        inverse_bindposes: self.bindposes.clone(),
-                        joints: joints.to_vec(),
-                    },
-                    NoFrustumCulling,
-                ));
+                e.insert((SkinnedMesh { inverse_bindposes: self.bindposes.clone(), joints: joints.to_vec() }, NoFrustumCulling));
             }
             if blade {
                 e.insert(Blade(mat));
@@ -528,13 +474,7 @@ impl CharacterModels {
         }
     }
 
-    fn tint(
-        &mut self,
-        materials: &mut Assets<StandardMaterial>,
-        name: &str,
-        base: &Handle<StandardMaterial>,
-        color: Color,
-    ) -> Handle<StandardMaterial> {
+    fn tint(&mut self, materials: &mut Assets<StandardMaterial>, name: &str, base: &Handle<StandardMaterial>, color: Color) -> Handle<StandardMaterial> {
         let key = (name.to_string(), color.to_srgba().to_u8_array());
         if let Some(h) = self.tinted.get(&key) {
             return h.clone();
@@ -548,10 +488,7 @@ impl CharacterModels {
 }
 
 fn load_models(mut commands: Commands, server: Res<AssetServer>) {
-    commands.insert_resource(ModelsHandle(vec![
-        server.load(MODEL_PATH),
-        server.load(ARMOR_PATH),
-    ]));
+    commands.insert_resource(ModelsHandle(vec![server.load(MODEL_PATH), server.load(ARMOR_PATH)]));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -567,29 +504,17 @@ fn finish_models(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // Файл доспехов необязателен: если его нет (не собран), загружаем только людей.
-    let failed = |h: &Handle<Gltf>| {
-        matches!(
-            server.get_load_state(h),
-            Some(bevy::asset::LoadState::Failed(_))
-        )
-    };
-    if handle
-        .0
-        .iter()
-        .any(|h| !server.is_loaded_with_dependencies(h) && !failed(h))
-    {
+    let failed = |h: &Handle<Gltf>| matches!(server.get_load_state(h), Some(bevy::asset::LoadState::Failed(_)));
+    if handle.0.iter().any(|h| !server.is_loaded_with_dependencies(h) && !failed(h)) {
         return;
     }
-    let Some(gltf) = gltfs.get(&handle.0[0]) else {
-        return;
-    };
+    let Some(gltf) = gltfs.get(&handle.0[0]) else { return };
     let Some(skin) = gltf.skins.first().and_then(|h| gltf_skins.get(h)) else {
         error!("в {MODEL_PATH} нет скелета");
         commands.remove_resource::<ModelsHandle>();
         return;
     };
-    let mut by_handle: HashMap<AssetId<GltfMaterial>, (Handle<StandardMaterial>, String)> =
-        HashMap::new();
+    let mut by_handle: HashMap<AssetId<GltfMaterial>, (Handle<StandardMaterial>, String)> = HashMap::new();
     let fallback = materials.add(Color::srgb(0.6, 0.6, 0.6));
     let mut parts = HashMap::new();
     for gltf in handle.0.iter().filter_map(|h| gltfs.get(h)) {
@@ -602,42 +527,22 @@ fn finish_models(
             }
         }
         for (name, h) in &gltf.named_meshes {
-            let Some(mesh) = gltf_meshes.get(h) else {
-                continue;
-            };
+            let Some(mesh) = gltf_meshes.get(h) else { continue };
             let prims = mesh
                 .primitives
                 .iter()
                 .map(|p| {
-                    let (mat, mat_name) = p
-                        .material
-                        .as_ref()
-                        .and_then(|m| by_handle.get(&m.id()).cloned())
-                        .unwrap_or((fallback.clone(), String::new()));
-                    let targets = meshes
-                        .get(&p.mesh)
-                        .filter(|m| m.try_has_morph_targets().unwrap_or(true))
-                        .and_then(|m| m.try_morph_target_names().ok().flatten())
-                        .map(|n| n.to_vec())
-                        .unwrap_or_default();
+                    let (mat, mat_name) = p.material.as_ref().and_then(|m| by_handle.get(&m.id()).cloned()).unwrap_or((fallback.clone(), String::new()));
+                    let targets = meshes.get(&p.mesh).filter(|m| m.try_has_morph_targets().unwrap_or(true)).and_then(|m| m.try_morph_target_names().ok().flatten()).map(|n| n.to_vec()).unwrap_or_default();
                     (p.mesh.clone(), mat, mat_name, targets)
                 })
                 .collect();
             parts.insert(name.to_string(), prims);
         }
     }
-    let blade = by_handle
-        .values()
-        .find(|(_, n)| n == "blade")
-        .map(|(h, _)| h.clone())
-        .unwrap_or(fallback);
+    let blade = by_handle.values().find(|(_, n)| n == "blade").map(|(h, _)| h.clone()).unwrap_or(fallback);
     info!("Модели людей загружены: {} деталей", parts.len());
-    commands.insert_resource(CharacterModels {
-        parts,
-        tinted: HashMap::new(),
-        bindposes: skin.inverse_bind_matrices.clone(),
-        blade,
-    });
+    commands.insert_resource(CharacterModels { parts, tinted: HashMap::new(), bindposes: skin.inverse_bind_matrices.clone(), blade });
     commands.remove_resource::<ModelsHandle>();
 }
 
@@ -665,11 +570,7 @@ pub struct RigPose {
 
 impl Default for RigPose {
     fn default() -> Self {
-        Self {
-            pelvis: REST[0],
-            rot: [Quat::IDENTITY; BONES],
-            free: [false; 2],
-        }
+        Self { pelvis: REST[0], rot: [Quat::IDENTITY; BONES], free: [false; 2] }
     }
 }
 
@@ -739,106 +640,50 @@ fn attach_rigs(
         let mut joints = [Entity::PLACEHOLDER; BONES];
         for bone in 0..BONES {
             let parent = PARENT[bone].map(|p| joints[p]).unwrap_or(e);
-            let joint = commands
-                .spawn((
-                    Transform::from_translation(REST[bone]),
-                    Visibility::default(),
-                ))
-                .id();
+            let joint = commands.spawn((Transform::from_translation(REST[bone]), Visibility::default())).id();
             commands.entity(parent).add_child(joint);
             joints[bone] = joint;
         }
         commands.entity(e).with_children(|p| {
             for layer in outfit.layers() {
-                models.spawn_part(
-                    p,
-                    &mut materials,
-                    layer,
-                    Some(&outfit),
-                    Some(&joints),
-                    false,
-                );
+                models.spawn_part(p, &mut materials, layer, Some(&outfit), Some(&joints), false);
             }
         });
-        commands.entity(e).remove::<NeedsRig>().insert((
-            Rig { joints },
-            RigPose::default(),
-            RigBulk(outfit.shape.heavy),
-        ));
+        commands.entity(e).remove::<NeedsRig>().insert((Rig { joints }, RigPose::default(), RigBulk(outfit.shape.heavy)));
     }
     for (e, need) in &weapons {
         let Some(name) = weapon_mesh(need.0) else {
             commands.entity(e).remove::<NeedsWeapon>();
             continue;
         };
-        commands
-            .entity(e)
-            .remove::<NeedsWeapon>()
-            .with_children(|w| {
-                models.spawn_part(
-                    w,
-                    &mut materials,
-                    &format!("{name}.blade"),
-                    None,
-                    None,
-                    true,
-                );
-                models.spawn_part(
-                    w,
-                    &mut materials,
-                    &format!("{name}.hilt"),
-                    None,
-                    None,
-                    false,
-                );
-            });
+        commands.entity(e).remove::<NeedsWeapon>().with_children(|w| {
+            models.spawn_part(w, &mut materials, &format!("{name}.blade"), None, None, true);
+            models.spawn_part(w, &mut materials, &format!("{name}.hilt"), None, None, false);
+        });
     }
     for (e, need) in &shields {
         let name = match need.0 {
             ShieldKind::Oval => "shield_oval",
             ShieldKind::Round => "shield_round",
         };
-        commands
-            .entity(e)
-            .remove::<NeedsShield>()
-            .with_children(|s| {
-                models.spawn_part(
-                    s,
-                    &mut materials,
-                    &format!("{name}.body"),
-                    None,
-                    None,
-                    false,
-                );
-                models.spawn_part(
-                    s,
-                    &mut materials,
-                    &format!("{name}.boss"),
-                    None,
-                    None,
-                    false,
-                );
-            });
+        commands.entity(e).remove::<NeedsShield>().with_children(|s| {
+            models.spawn_part(s, &mut materials, &format!("{name}.body"), None, None, false);
+            models.spawn_part(s, &mut materials, &format!("{name}.boss"), None, None, false);
+        });
     }
     for (e, need) in &arms {
         let my_id = net.as_ref().and_then(|n| n.my_id).unwrap_or(0);
-        let outfit = need
-            .0
-            .unwrap_or_else(|| Outfit::for_actor(ActorKind::Player, my_id));
+        let outfit = need.0.unwrap_or_else(|| Outfit::for_actor(ActorKind::Player, my_id));
         // Настоящие только плечо, предплечье и кисть правой руки; остальные кости — одна
         // сущность с нулевым масштабом у плеча, всё, что на них висит, схлопывается в точку.
         let mut arm = [Entity::PLACEHOLDER; 3];
         for i in 0..3 {
             let parent = if i == 0 { e } else { arm[i - 1] };
-            let joint = commands
-                .spawn((Transform::default(), Visibility::default()))
-                .id();
+            let joint = commands.spawn((Transform::default(), Visibility::default())).id();
             commands.entity(parent).add_child(joint);
             arm[i] = joint;
         }
-        let hidden = commands
-            .spawn((Transform::from_scale(Vec3::ZERO), Visibility::default()))
-            .id();
+        let hidden = commands.spawn((Transform::from_scale(Vec3::ZERO), Visibility::default())).id();
         commands.entity(arm[0]).add_child(hidden);
         let mut joints = [hidden; BONES];
         joints[Bone::UpperArmR as usize] = arm[0];
@@ -846,35 +691,16 @@ fn attach_rigs(
         joints[Bone::HandR as usize] = arm[2];
         commands.entity(e).with_children(|p| {
             for layer in outfit.layers() {
-                if layer.starts_with("body.hands")
-                    || layer.starts_with("tunic")
-                    || matches!(
-                        layer,
-                        "mail" | "lamellar" | "gambeson" | "gloves" | "vambraces"
-                    )
-                {
-                    models.spawn_part(
-                        p,
-                        &mut materials,
-                        layer,
-                        Some(&outfit),
-                        Some(&joints),
-                        false,
-                    );
+                if layer.starts_with("body.hands") || layer.starts_with("tunic") || matches!(layer, "mail" | "lamellar" | "gambeson" | "gloves" | "vambraces") {
+                    models.spawn_part(p, &mut materials, layer, Some(&outfit), Some(&joints), false);
                 }
             }
         });
-        commands
-            .entity(e)
-            .remove::<NeedsViewArm>()
-            .insert(ViewArm { joints: arm });
+        commands.entity(e).remove::<NeedsViewArm>().insert(ViewArm { joints: arm });
     }
 }
 
-fn apply_poses(
-    rigs: Query<(&Rig, &RigPose, Option<&RigBulk>), Changed<RigPose>>,
-    mut joints: Query<&mut Transform>,
-) {
+fn apply_poses(rigs: Query<(&Rig, &RigPose, Option<&RigBulk>), Changed<RigPose>>, mut joints: Query<&mut Transform>) {
     for (rig, pose, bulk) in &rigs {
         let bulk = bulk.map_or(0.0, |b| b.0);
         for bone in 0..BONES {
@@ -914,31 +740,15 @@ pub fn view_arm_pose(shoulder: Vec3, grip: Vec3, axis: Vec3) -> [(Vec3, Quat); 3
     // Плечо «подтягиваем» к рукояти: от первого лица его не видно, а оружие всегда в руке.
     let reach = UPPER_ARM + FOREARM + GRIP_R.length() - 0.03;
     let to = grip - shoulder;
-    let shoulder = if to.length() > reach {
-        grip - to.normalize() * reach
-    } else {
-        shoulder
-    };
-    let arm = solve_arm(
-        shoulder,
-        Some((grip, axis)),
-        Vec3::new(1.0, -1.0, 0.6),
-        Vec3::NEG_Z,
-        0,
-    );
+    let shoulder = if to.length() > reach { grip - to.normalize() * reach } else { shoulder };
+    let arm = solve_arm(shoulder, Some((grip, axis)), Vec3::new(1.0, -1.0, 0.6), Vec3::NEG_Z, 0);
     let q_up = arm.rot[0];
     let q_fore = arm.rot[1];
     let q_hand = arm.rot[2];
     [
         (shoulder, q_up),
-        (
-            q_up.inverse() * (arm.elbow - shoulder),
-            q_up.inverse() * q_fore,
-        ),
-        (
-            q_fore.inverse() * (arm.wrist - arm.elbow),
-            q_fore.inverse() * q_hand,
-        ),
+        (q_up.inverse() * (arm.elbow - shoulder), q_up.inverse() * q_fore),
+        (q_fore.inverse() * (arm.wrist - arm.elbow), q_fore.inverse() * q_hand),
     ]
 }
 
@@ -1033,21 +843,9 @@ struct Arm {
 }
 
 /// IK руки к рукояти. side 0 — правая, 1 — левая. `front` — «перёд» торса для плеча.
-fn solve_arm(
-    shoulder: Vec3,
-    target: Option<(Vec3, Vec3)>,
-    pole: Vec3,
-    front: Vec3,
-    side: usize,
-) -> Arm {
-    let (grip_c, hole) = if side == 0 {
-        (GRIP_R, GRIP_AXIS_R)
-    } else {
-        (GRIP_L, GRIP_AXIS_L)
-    };
-    let Some((grip, axis)) = target else {
-        unreachable!()
-    };
+fn solve_arm(shoulder: Vec3, target: Option<(Vec3, Vec3)>, pole: Vec3, front: Vec3, side: usize) -> Arm {
+    let (grip_c, hole) = if side == 0 { (GRIP_R, GRIP_AXIS_R) } else { (GRIP_L, GRIP_AXIS_L) };
+    let Some((grip, axis)) = target else { unreachable!() };
     let mut fore = (grip - shoulder).normalize_or(Vec3::NEG_Y);
     let mut hand = fist_rot(axis, fore, hole);
     let mut joints = (shoulder, shoulder);
@@ -1061,12 +859,7 @@ fn solve_arm(
     let up = (elbow - shoulder).normalize_or(Vec3::NEG_Y);
     let q_up = bone_rot(up, fore, front);
     let q_fore = Quat::from_rotation_arc(up, fore) * q_up;
-    Arm {
-        elbow,
-        wrist,
-        rot: [q_up, q_fore, hand],
-        grip: wrist + hand * grip_c,
-    }
+    Arm { elbow, wrist, rot: [q_up, q_fore, hand], grip: wrist + hand * grip_c }
 }
 
 /// Походка: где стопа (вперёд-назад, подъём), наклон носка и доля опоры в цикле шага.
@@ -1121,15 +914,9 @@ fn gait(u: f32, speed: f32) -> Step {
         // Бегом пятка подлетает высоко назад.
         let e = smooth01(t);
         // К концу переноса пятка опускается к высоте удара (носок ещё поднят).
-        let lift = (t * PI).sin() * (0.085 + 0.16 * run)
-            + 0.09 * (1.0 - smooth01(t / 0.3))
-            + 0.018 * (1.0 - run) * smooth01((t - 0.6) / 0.4);
+        let lift = (t * PI).sin() * (0.085 + 0.16 * run) + 0.09 * (1.0 - smooth01(t / 0.3)) + 0.018 * (1.0 - run) * smooth01((t - 0.6) / 0.4);
         let kick = 0.12 * run * (t * PI).sin() * (1.0 - t);
-        Step {
-            z: half - 2.0 * half * e + back + kick,
-            lift,
-            pitch: -0.55 + (0.77 - 0.22 * run) * smooth01((t - 0.1) / 0.9),
-        }
+        Step { z: half - 2.0 * half * e + back + kick, lift, pitch: -0.55 + (0.77 - 0.22 * run) * smooth01((t - 0.1) / 0.9) }
     }
 }
 
@@ -1158,17 +945,11 @@ pub fn solve_pose(inp: &PoseInput) -> Solved {
     // Стоя: человек не замирает — медленно переносит вес с ноги на ногу.
     let stance_mid = 0.5 * stance_share(speed);
     let twice = (2.0 * (cyc - TAU * stance_mid)).cos();
-    let bob = walk * (0.035 * (1.0 - run) * (0.5 - 0.5 * twice) + 0.05 * run * (0.5 + 0.5 * twice))
-        + 0.05 * run;
+    let bob = walk * (0.035 * (1.0 - run) * (0.5 - 0.5 * twice) + 0.05 * run * (0.5 + 0.5 * twice)) + 0.05 * run;
     let sway_walk = (cyc - TAU * stance_mid).cos();
     let shift = (t * 0.31).sin() * 0.7 + (t * 0.53 + 1.3).sin() * 0.3;
-    let pelvis_x =
-        0.028 * walk * (1.0 - 0.5 * run) * sway_walk + 0.022 * idle * shift * (1.0 - crouch);
-    let pelvis = Vec3::new(
-        pelvis_x,
-        PELVIS_HEIGHT - 0.5 * crouch - bob - 0.008 * idle * shift.abs(),
-        REST[0].z + 0.08 * crouch,
-    );
+    let pelvis_x = 0.028 * walk * (1.0 - 0.5 * run) * sway_walk + 0.022 * idle * shift * (1.0 - crouch);
+    let pelvis = Vec3::new(pelvis_x, PELVIS_HEIGHT - 0.5 * crouch - bob - 0.008 * idle * shift.abs(), REST[0].z + 0.08 * crouch);
     let hip_roll = 0.045 * walk * sway_walk + 0.04 * idle * shift * (1.0 - crouch);
     let hip_yaw = (0.1 - 0.03 * run) * walk * cyc.cos();
     local[0] = Quat::from_rotation_y(-inp.twist * 0.3 + hip_yaw) * Quat::from_rotation_z(hip_roll);
@@ -1182,31 +963,20 @@ pub fn solve_pose(inp: &PoseInput) -> Solved {
     let look = (inp.pitch * 0.8).clamp(-1.1, 1.0);
     let chest = inp.lean - 0.35 * crouch + 0.3 * look - 0.06 * walk - 0.14 * run;
     let drift = idle * (0.035 * (t * 0.19 + 0.4).sin() + 0.02 * (t * 0.43).sin());
-    local[1] = Quat::from_rotation_y(inp.twist * 0.7 - 1.7 * hip_yaw + drift)
-        * Quat::from_rotation_z(-0.85 * hip_roll)
-        * Quat::from_rotation_x(chest + breathe);
+    local[1] = Quat::from_rotation_y(inp.twist * 0.7 - 1.7 * hip_yaw + drift) * Quat::from_rotation_z(-0.85 * hip_roll) * Quat::from_rotation_x(chest + breathe);
     world[1] = world[0] * local[1];
     // Голова держит взгляд: гасит качание плеч, а стоя изредка поглядывает по сторонам.
-    let glance =
-        idle * (0.09 * (t * 0.23).sin() + 0.05 * (t * 0.61 + 2.0).sin()) * (1.0 - crouch * 0.5);
+    let glance = idle * (0.09 * (t * 0.23).sin() + 0.05 * (t * 0.61 + 2.0).sin()) * (1.0 - crouch * 0.5);
     let nod = idle * 0.025 * (t * 0.37 + 0.8).sin();
     let head_pitch = (look - chest - breathe * 0.5 + nod).clamp(-0.5, 0.5);
-    local[2] = Quat::from_rotation_y(-inp.twist * 0.6 + 0.7 * hip_yaw - drift + glance)
-        * Quat::from_rotation_z(-0.15 * hip_roll)
-        * Quat::from_rotation_x(head_pitch);
+    local[2] = Quat::from_rotation_y(-inp.twist * 0.6 + 0.7 * hip_yaw - drift + glance) * Quat::from_rotation_z(-0.15 * hip_roll) * Quat::from_rotation_x(head_pitch);
     world[2] = world[1] * local[2];
 
     let torso_pos = pelvis + world[0] * REST[1];
     let mut grips = [Vec3::ZERO; 2];
     let mut free = [false; 2];
     // Руки: 0 — правая, 1 — левая.
-    for (side, (target, axis)) in [
-        (inp.right_grip, inp.right_axis),
-        (inp.left_grip, inp.left_axis),
-    ]
-    .into_iter()
-    .enumerate()
-    {
+    for (side, (target, axis)) in [(inp.right_grip, inp.right_axis), (inp.left_grip, inp.left_axis)].into_iter().enumerate() {
         let (ua, fa, hd) = if side == 0 { (3, 4, 5) } else { (6, 7, 8) };
         let sign = if side == 0 { 1.0 } else { -1.0 };
         let shoulder = torso_pos + world[1] * REST[ua];
@@ -1214,19 +984,8 @@ pub fn solve_pose(inp: &PoseInput) -> Solved {
             Some(grip) => {
                 let pole = world[1] * Vec3::new(0.7 * sign, -0.8, 0.5);
                 // Без оси рукоять считается продолжением предплечья (кулак «смотрит» вперёд).
-                let axis = axis.unwrap_or_else(|| {
-                    (grip - shoulder)
-                        .normalize_or(Vec3::NEG_Z)
-                        .cross(world[1] * Vec3::X * sign)
-                        .normalize_or(Vec3::Y)
-                });
-                let arm = solve_arm(
-                    shoulder,
-                    Some((grip, axis)),
-                    pole,
-                    world[1] * Vec3::NEG_Z,
-                    side,
-                );
+                let axis = axis.unwrap_or_else(|| (grip - shoulder).normalize_or(Vec3::NEG_Z).cross(world[1] * Vec3::X * sign).normalize_or(Vec3::Y));
+                let arm = solve_arm(shoulder, Some((grip, axis)), pole, world[1] * Vec3::NEG_Z, side);
                 world[ua] = arm.rot[0];
                 world[fa] = arm.rot[1];
                 world[hd] = arm.rot[2];
@@ -1239,13 +998,9 @@ pub fn solve_pose(inp: &PoseInput) -> Solved {
                 // Бегом руки согнуты в локтях почти под прямым углом и машут сильнее.
                 let swing = -(0.42 + 0.25 * run) * walk * cyc.cos() * sign;
                 let rest_hang = 0.06 + 0.03 * (t * 0.7 + side as f32).sin() * idle + 0.15 * run;
-                local[ua] = Quat::from_rotation_x(swing + rest_hang)
-                    * Quat::from_rotation_z((0.09 + 0.015 * breathe / 0.014) * sign);
-                local[fa] = Quat::from_rotation_x(
-                    0.22 + 0.12 * walk + 0.5 * swing.max(0.0) * (1.0 - run) + 1.15 * run,
-                );
-                local[hd] =
-                    Quat::from_rotation_x(-0.12 * swing) * Quat::from_rotation_z(0.12 * sign);
+                local[ua] = Quat::from_rotation_x(swing + rest_hang) * Quat::from_rotation_z((0.09 + 0.015 * breathe / 0.014) * sign);
+                local[fa] = Quat::from_rotation_x(0.22 + 0.12 * walk + 0.5 * swing.max(0.0) * (1.0 - run) + 1.15 * run);
+                local[hd] = Quat::from_rotation_x(-0.12 * swing) * Quat::from_rotation_z(0.12 * sign);
                 world[ua] = world[1] * local[ua];
                 world[fa] = world[ua] * local[fa];
                 world[hd] = world[fa] * local[hd];
@@ -1266,11 +1021,7 @@ pub fn solve_pose(inp: &PoseInput) -> Solved {
         // При приседе одна нога выставлена вперёд, другая отставлена.
         let crouch_offset = crouch * if side == 0 { -0.18 } else { 0.2 };
         let z = step.z * walk + stand_z * idle + crouch_offset;
-        let ankle = Vec3::new(
-            (0.11 + 0.01 * idle) * sign,
-            ANKLE_HEIGHT + step.lift * walk,
-            z,
-        );
+        let ankle = Vec3::new((0.11 + 0.01 * idle) * sign, ANKLE_HEIGHT + step.lift * walk, z);
         let pole = world[0] * Vec3::new(0.15 * sign, 0.0, -1.0);
         let (knee, ankle) = two_bone(hip, ankle, THIGH, SHIN, pole);
         let up = (knee - hip).normalize_or(Vec3::NEG_Y);
@@ -1278,8 +1029,7 @@ pub fn solve_pose(inp: &PoseInput) -> Solved {
         world[th] = bone_rot(up, -down, world[0] * Vec3::NEG_Z);
         world[sh] = Quat::from_rotation_arc(up, down) * world[th];
         // Стопа: носок чуть наружу, при ходьбе — перекат с пятки на носок.
-        world[ft] = Quat::from_rotation_y(-(0.1 + 0.05 * idle) * sign)
-            * Quat::from_rotation_x(step.pitch * walk);
+        world[ft] = Quat::from_rotation_y(-(0.1 + 0.05 * idle) * sign) * Quat::from_rotation_x(step.pitch * walk);
     }
 
     // Мировые повороты -> локальные.
@@ -1288,15 +1038,7 @@ pub fn solve_pose(inp: &PoseInput) -> Solved {
             local[bone] = (world[p].inverse() * world[bone]).normalize();
         }
     }
-    Solved {
-        pose: RigPose {
-            pelvis,
-            rot: local,
-            free,
-        },
-        right_grip: grips[0],
-        left_grip: grips[1],
-    }
+    Solved { pose: RigPose { pelvis, rot: local, free }, right_grip: grips[0], left_grip: grips[1] }
 }
 
 /// Поза тела на спине (для смерти): руки раскинуты, ноги чуть согнуты.
@@ -1314,11 +1056,7 @@ pub fn dead_pose(seed: u64) -> RigPose {
     rot[12] = Quat::from_rotation_x(0.05 * s) * Quat::from_rotation_z(-0.15);
     rot[13] = Quat::from_rotation_x(-0.15);
     rot[14] = Quat::from_rotation_x(0.9);
-    RigPose {
-        pelvis: REST[0],
-        rot,
-        free: [false; 2],
-    }
+    RigPose { pelvis: REST[0], rot, free: [false; 2] }
 }
 
 /// Смешивает две позы (k = 0 — первая, 1 — вторая).
@@ -1327,23 +1065,14 @@ pub fn blend(a: &RigPose, b: &RigPose, k: f32) -> RigPose {
     for (r, t) in rot.iter_mut().zip(b.rot.iter()) {
         *r = r.slerp(*t, k);
     }
-    RigPose {
-        pelvis: a.pelvis.lerp(b.pelvis, k),
-        rot,
-        free: if k < 0.5 { a.free } else { b.free },
-    }
+    RigPose { pelvis: a.pelvis.lerp(b.pelvis, k), rot, free: if k < 0.5 { a.free } else { b.free } }
 }
 
 /// Тело падает навзничь: доля 0..1 -> поворот и подъём корня скелета.
 pub fn fall_transform(k: f32) -> Transform {
     // Ускоряющееся падение с небольшим отскоком в конце.
-    let e = if k < 0.85 {
-        (k / 0.85).powi(2)
-    } else {
-        1.0 - ((k - 0.85) / 0.15 * PI).sin() * 0.04
-    };
-    Transform::from_xyz(0.0, 0.13 * e.min(1.0), 0.0)
-        .with_rotation(Quat::from_rotation_x(FRAC_PI_2 * e))
+    let e = if k < 0.85 { (k / 0.85).powi(2) } else { 1.0 - ((k - 0.85) / 0.15 * PI).sin() * 0.04 };
+    Transform::from_xyz(0.0, 0.13 * e.min(1.0), 0.0).with_rotation(Quat::from_rotation_x(FRAC_PI_2 * e))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1358,17 +1087,9 @@ impl Plugin for RigPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BladeTints>()
             .add_systems(Startup, load_models)
-            .add_systems(
-                Update,
-                finish_models.run_if(resource_exists::<ModelsHandle>),
-            )
+            .add_systems(Update, finish_models.run_if(resource_exists::<ModelsHandle>))
             .add_systems(PostUpdate, apply_look_tints)
-            .add_systems(
-                Update,
-                attach_rigs
-                    .run_if(resource_exists::<CharacterModels>)
-                    .before(PoseSet),
-            )
+            .add_systems(Update, attach_rigs.run_if(resource_exists::<CharacterModels>).before(PoseSet))
             .add_systems(Update, apply_poses.after(PoseSet));
     }
 }
@@ -1390,21 +1111,9 @@ mod tests {
     #[test]
     fn hand_reaches_grip() {
         let grip = Vec3::new(0.25, 1.2, -0.35);
-        for axis in [
-            None,
-            Some(Vec3::Y),
-            Some(Vec3::new(0.3, 0.5, -0.8).normalize()),
-        ] {
-            let s = solve_pose(&PoseInput {
-                right_grip: Some(grip),
-                right_axis: axis,
-                ..default()
-            });
-            assert!(
-                s.right_grip.distance(grip) < 0.02,
-                "кулак в {:?} (ось {axis:?})",
-                s.right_grip
-            );
+        for axis in [None, Some(Vec3::Y), Some(Vec3::new(0.3, 0.5, -0.8).normalize())] {
+            let s = solve_pose(&PoseInput { right_grip: Some(grip), right_axis: axis, ..default() });
+            assert!(s.right_grip.distance(grip) < 0.02, "кулак в {:?} (ось {axis:?})", s.right_grip);
         }
     }
 
@@ -1418,10 +1127,7 @@ mod tests {
     #[test]
     fn far_grip_is_clamped() {
         let grip = Vec3::new(0.3, 1.2, -2.0);
-        let s = solve_pose(&PoseInput {
-            right_grip: Some(grip),
-            ..default()
-        });
+        let s = solve_pose(&PoseInput { right_grip: Some(grip), ..default() });
         assert!(s.right_grip.distance(grip) > 1.0);
         assert!(s.right_grip.z < -0.3);
     }
@@ -1435,24 +1141,13 @@ mod tests {
             let a = gait(0.2 * beta, speed);
             let b = gait(0.6 * beta, speed);
             let body = step_cycle(speed) * (0.4 * beta);
-            assert!(
-                ((b.z - a.z) - body).abs() < 0.01,
-                "стопа {} при пути тела {body}",
-                b.z - a.z
-            );
+            assert!(((b.z - a.z) - body).abs() < 0.01, "стопа {} при пути тела {body}", b.z - a.z);
             // В переносе стопа поднята.
             assert!(gait(beta + 0.5 * (1.0 - beta), speed).lift > 0.05);
             // Цикл непрерывный: конец переноса совпадает с началом опоры.
             let end = gait(0.9999, speed);
             let start = gait(0.0, speed);
-            assert!(
-                (end.z - start.z).abs() < 0.01
-                    && (end.lift - start.lift).abs() < 0.01
-                    && (end.pitch - start.pitch).abs() < 0.02,
-                "{speed}: {:?} {:?}",
-                (end.z, end.lift, end.pitch),
-                (start.z, start.lift, start.pitch)
-            );
+            assert!((end.z - start.z).abs() < 0.01 && (end.lift - start.lift).abs() < 0.01 && (end.pitch - start.pitch).abs() < 0.02, "{speed}: {:?} {:?}", (end.z, end.lift, end.pitch), (start.z, start.lift, start.pitch));
         }
         // Шагом в середине опоры стопа на земле и ровная.
         let mid = gait(0.4 * stance_share(1.3), 1.3);
@@ -1464,19 +1159,11 @@ mod tests {
         // Шагом колено не выпрямляется до отказа: стопа достаёт до земли во всём цикле.
         for k in 0..40 {
             let u = k as f32 / 40.0;
-            let s = solve_pose(&PoseInput {
-                walk: 1.0,
-                walk_phase: u * TAU,
-                ..default()
-            });
+            let s = solve_pose(&PoseInput { walk: 1.0, walk_phase: u * TAU, ..default() });
             let step = gait(u, 1.3);
             let hip = s.pose.pelvis + s.pose.rot[0] * REST[9];
             let ankle = Vec3::new(0.11, ANKLE_HEIGHT + step.lift, step.z);
-            assert!(
-                hip.distance(ankle) < THIGH + SHIN + 0.012,
-                "u = {u}: {}",
-                hip.distance(ankle)
-            );
+            assert!(hip.distance(ankle) < THIGH + SHIN + 0.012, "u = {u}: {}", hip.distance(ankle));
         }
     }
 
@@ -1484,20 +1171,10 @@ mod tests {
     fn walk_cycle_keeps_feet_on_ground_and_limbs_sane() {
         for speed in [0.0, 1.3, 4.0, 6.5] {
             for k in 0..32 {
-                let s = solve_pose(&PoseInput {
-                    walk: 1.0,
-                    speed,
-                    walk_phase: k as f32 / 32.0 * TAU,
-                    time: k as f32 * 0.3,
-                    ..default()
-                });
+                let s = solve_pose(&PoseInput { walk: 1.0, speed, walk_phase: k as f32 / 32.0 * TAU, time: k as f32 * 0.3, ..default() });
                 assert!(s.pose.rot.iter().all(|r| r.is_normalized()));
                 // Таз не проваливается и не взлетает.
-                assert!(
-                    (s.pose.pelvis.y - PELVIS_HEIGHT).abs() < 0.12,
-                    "{}",
-                    s.pose.pelvis.y
-                );
+                assert!((s.pose.pelvis.y - PELVIS_HEIGHT).abs() < 0.12, "{}", s.pose.pelvis.y);
             }
         }
     }
@@ -1512,42 +1189,22 @@ mod tests {
     fn every_outfit_part_exists_in_model() {
         // Имена слоёв должны совпадать с build_humans.py / build_armor.py — проверяем по самим glb.
         let json_of = |path: &str| {
-            let glb = std::fs::read(format!("{}/assets/{path}", env!("CARGO_MANIFEST_DIR")))
-                .unwrap_or_else(|_| panic!("нет {path}"));
+            let glb = std::fs::read(format!("{}/assets/{path}", env!("CARGO_MANIFEST_DIR"))).unwrap_or_else(|_| panic!("нет {path}"));
             let len = u32::from_le_bytes(glb[12..16].try_into().unwrap()) as usize;
             String::from_utf8_lossy(&glb[20..20 + len]).to_string()
         };
         let json = json_of(MODEL_PATH) + &json_of(ARMOR_PATH);
-        let mut names: Vec<String> = Outfit::for_actor(ActorKind::Player, 1)
-            .layers()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let mut names: Vec<String> = Outfit::for_actor(ActorKind::Player, 1).layers().iter().map(|s| s.to_string()).collect();
         for kind in ActorKind::ENEMIES {
             for id in 0..8 {
-                names.extend(
-                    Outfit::for_actor(kind, id)
-                        .layers()
-                        .iter()
-                        .map(|s| s.to_string()),
-                );
+                names.extend(Outfit::for_actor(kind, id).layers().iter().map(|s| s.to_string()));
             }
         }
         // Любая причёска и борода из окна облика.
         for hair in 0..crate::appearance::HAIR_STYLES.len() {
             for beard in 0..crate::appearance::BEARD_STYLES.len() {
-                let look = Look {
-                    hair: hair as u8,
-                    beard: beard as u8,
-                    ..Look::PLAYER_DEFAULT
-                };
-                names.extend(
-                    Outfit::for_actor(ActorKind::Player, 1)
-                        .with_look(look)
-                        .layers()
-                        .iter()
-                        .map(|s| s.to_string()),
-                );
+                let look = Look { hair: hair as u8, beard: beard as u8, ..Look::PLAYER_DEFAULT };
+                names.extend(Outfit::for_actor(ActorKind::Player, 1).with_look(look).layers().iter().map(|s| s.to_string()));
             }
         }
         // Игрок в любой надеваемой вещи.
@@ -1555,41 +1212,17 @@ mod tests {
             use crate::items::EquipSlot as S;
             let id = Some(i as u16);
             let gear = match b.slot {
-                Some(S::Head) => crate::gear_look::Gear {
-                    head: id,
-                    ..default()
-                },
-                Some(S::Chest) => crate::gear_look::Gear {
-                    chest: id,
-                    ..default()
-                },
-                Some(S::Hands) => crate::gear_look::Gear {
-                    hands: id,
-                    ..default()
-                },
-                Some(S::Legs) => crate::gear_look::Gear {
-                    legs: id,
-                    ..default()
-                },
-                Some(S::Feet) => crate::gear_look::Gear {
-                    feet: id,
-                    ..default()
-                },
+                Some(S::Head) => crate::gear_look::Gear { head: id, ..default() },
+                Some(S::Chest) => crate::gear_look::Gear { chest: id, ..default() },
+                Some(S::Hands) => crate::gear_look::Gear { hands: id, ..default() },
+                Some(S::Legs) => crate::gear_look::Gear { legs: id, ..default() },
+                Some(S::Feet) => crate::gear_look::Gear { feet: id, ..default() },
                 _ => continue,
             };
-            names.extend(
-                Outfit::for_actor(ActorKind::Player, 1)
-                    .with_gear(&gear)
-                    .layers()
-                    .iter()
-                    .map(|s| s.to_string()),
-            );
+            names.extend(Outfit::for_actor(ActorKind::Player, 1).with_gear(&gear).layers().iter().map(|s| s.to_string()));
         }
         for n in names {
-            assert!(
-                json.contains(&format!("\"name\":\"{n}\"")),
-                "в humans.glb и armor.glb нет детали {n}"
-            );
+            assert!(json.contains(&format!("\"name\":\"{n}\"")), "в humans.glb и armor.glb нет детали {n}");
         }
     }
 }

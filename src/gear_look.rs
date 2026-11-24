@@ -44,10 +44,7 @@ impl Gear {
             holstered: false,
             neck: id(EquipSlot::Necklace),
             ring: id(EquipSlot::Ring),
-            quiver: inv
-                .all_items()
-                .find(|i| crate::archery::arrow_type(i.info().name).is_some())
-                .map(|i| i.base.0),
+            quiver: inv.all_items().find(|i| crate::archery::arrow_type(i.info().name).is_some()).map(|i| i.base.0),
             look: Default::default(),
         }
     }
@@ -69,21 +66,13 @@ impl Gear {
     }
     pub fn shield(&self) -> Option<ShieldLook> {
         let n = name(self.off_hand)?;
-        has(n, &["щит"]).then(|| {
-            if has(n, &["кругл"]) {
-                ShieldLook::Round
-            } else {
-                ShieldLook::Oval
-            }
-        })
+        has(n, &["щит"]).then(|| if has(n, &["кругл"]) { ShieldLook::Round } else { ShieldLook::Oval })
     }
 }
 
 fn name(id: Option<u16>) -> Option<&'static str> {
     let id = id? as usize;
-    crate::items::ITEM_BASES
-        .get(id)
-        .map(|_| ItemBaseId(id as u16).base().name)
+    crate::items::ITEM_BASES.get(id).map(|_| ItemBaseId(id as u16).base().name)
 }
 
 fn has(name: &str, words: &[&str]) -> bool {
@@ -133,8 +122,7 @@ impl BodyPiece {
             Some(BodyPiece::Mail)
         } else if has(n, &["ламелл", "панцир", "чешу"]) {
             Some(BodyPiece::Lamellar)
-        } else if has(n, &["стёган", "стеган", "тегиляй", "поддоспеш"])
-        {
+        } else if has(n, &["стёган", "стеган", "тегиляй", "поддоспеш"]) {
             Some(BodyPiece::Gambeson)
         } else {
             None
@@ -176,24 +164,14 @@ mod tests {
     fn every_wearable_has_a_look() {
         for (i, b) in ITEM_BASES.iter().enumerate() {
             let g = |slot| Some(i as u16).filter(|_| b.slot == Some(slot));
-            let gear = Gear {
-                head: g(EquipSlot::Head),
-                chest: g(EquipSlot::Chest),
-                hands: g(EquipSlot::Hands),
-                legs: g(EquipSlot::Legs),
-                feet: g(EquipSlot::Feet),
-                off_hand: g(EquipSlot::OffHand),
-                ..Default::default()
-            };
+            let gear = Gear { head: g(EquipSlot::Head), chest: g(EquipSlot::Chest), hands: g(EquipSlot::Hands), legs: g(EquipSlot::Legs), feet: g(EquipSlot::Feet), off_hand: g(EquipSlot::OffHand), ..Default::default() };
             match b.slot {
                 Some(EquipSlot::Head) => assert!(gear.helmet().is_some(), "{}", b.name),
                 Some(EquipSlot::Chest) => assert!(gear.body().is_some(), "{}", b.name),
                 Some(EquipSlot::Hands) => assert!(gear.arms().is_some(), "{}", b.name),
                 Some(EquipSlot::Legs) => assert!(gear.greaves(), "{}", b.name),
                 Some(EquipSlot::Feet) => assert!(gear.boots(), "{}", b.name),
-                Some(EquipSlot::OffHand) if b.shape == ItemShape::Shield => {
-                    assert!(gear.shield().is_some(), "{}", b.name)
-                }
+                Some(EquipSlot::OffHand) if b.shape == ItemShape::Shield => assert!(gear.shield().is_some(), "{}", b.name),
                 _ => {}
             }
         }
@@ -203,21 +181,9 @@ mod tests {
     fn names_map_to_looks() {
         assert_eq!(Helmet::from_name("Спангенхельм"), Some(Helmet::Spangenhelm));
         assert_eq!(Helmet::from_name("Гребенчатый шлем"), Some(Helmet::Ridge));
-        assert_eq!(
-            BodyPiece::from_name("Стёганая туника"),
-            Some(BodyPiece::Gambeson)
-        );
-        assert_eq!(
-            BodyPiece::from_name("Ламеллярный панцирь"),
-            Some(BodyPiece::Lamellar)
-        );
-        assert_eq!(
-            ArmPiece::from_name("Ламеллярные наручи"),
-            Some(ArmPiece::Vambraces)
-        );
-        assert_eq!(
-            ArmPiece::from_name("Кожаные перчатки"),
-            Some(ArmPiece::Gloves)
-        );
+        assert_eq!(BodyPiece::from_name("Стёганая туника"), Some(BodyPiece::Gambeson));
+        assert_eq!(BodyPiece::from_name("Ламеллярный панцирь"), Some(BodyPiece::Lamellar));
+        assert_eq!(ArmPiece::from_name("Ламеллярные наручи"), Some(ArmPiece::Vambraces));
+        assert_eq!(ArmPiece::from_name("Кожаные перчатки"), Some(ArmPiece::Gloves));
     }
 }

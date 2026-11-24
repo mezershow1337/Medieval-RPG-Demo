@@ -39,18 +39,7 @@ pub enum Drill {
 
 impl Drill {
     #[allow(dead_code)] // в тестах
-    pub const ALL: [Drill; 10] = [
-        Drill::Grind,
-        Drill::Stir,
-        Drill::Pump,
-        Drill::Rhythm,
-        Drill::Track,
-        Drill::Tension,
-        Drill::Mimic,
-        Drill::Trace,
-        Drill::Scribe,
-        Drill::Count,
-    ];
+    pub const ALL: [Drill; 10] = [Drill::Grind, Drill::Stir, Drill::Pump, Drill::Rhythm, Drill::Track, Drill::Tension, Drill::Mimic, Drill::Trace, Drill::Scribe, Drill::Count];
 
     /// Работа на табличке (рисуется восковой табличкой или абаком, а не шкалой).
     pub fn tablet(self) -> bool {
@@ -118,14 +107,7 @@ pub struct Effort {
 impl Effort {
     /// `secs` — сколько длилось бы занятие у умелого работника.
     pub fn new(drill: Drill, secs: f32) -> Self {
-        Effort {
-            drill,
-            need: (secs / drill.period() * 0.8).max(2.0),
-            done: 0.0,
-            q_sum: 0.0,
-            n: 0,
-            since: f32::MAX / 4.0,
-        }
+        Effort { drill, need: (secs / drill.period() * 0.8).max(2.0), done: 0.0, q_sum: 0.0, n: 0, since: f32::MAX / 4.0 }
     }
 
     pub fn tick(&mut self, dt: f32) {
@@ -156,11 +138,7 @@ impl Effort {
 
     /// Среднее качество работы 0..1 (без единого мазка — посредственно).
     pub fn quality(&self) -> f32 {
-        if self.n == 0 {
-            0.5
-        } else {
-            self.q_sum / self.n as f32
-        }
+        if self.n == 0 { 0.5 } else { self.q_sum / self.n as f32 }
     }
 
     /// Сколько секунд игрок ничего не делал.
@@ -628,11 +606,7 @@ impl Meter {
         let round = (1.0 - (radius - 0.9).abs() / 0.6).clamp(0.0, 1.0);
         let q = with_skill(0.65 * speed + 0.35 * round, self.skill);
         let note = if self.rev_t < ideal * 0.5 {
-            if self.drill == Drill::Stir {
-                "расплёскиваете — медленнее"
-            } else {
-                "частите — медленнее"
-            }
+            if self.drill == Drill::Stir { "расплёскиваете — медленнее" } else { "частите — медленнее" }
         } else if self.rev_t > ideal * 2.0 {
             "слишком вяло"
         } else if round < 0.5 {
@@ -677,21 +651,11 @@ impl Meter {
         }
         let pos = self.swing();
         let zone = self.zone();
-        let raw = if pos.abs() <= zone {
-            1.0 - 0.35 * pos.abs() / zone
-        } else {
-            (0.65 * (1.0 - (pos.abs() - zone) / (1.0 - zone).max(0.05))).max(0.0)
-        };
+        let raw = if pos.abs() <= zone { 1.0 - 0.35 * pos.abs() / zone } else { (0.65 * (1.0 - (pos.abs() - zone) / (1.0 - zone).max(0.05))).max(0.0) };
         // Маятник начинает новый замах с края.
         self.phase = 0.0;
         let q = with_skill(raw, self.skill);
-        let note = if pos.abs() <= zone {
-            "точно"
-        } else if pos.abs() < 0.8 {
-            "чуть мимо такта"
-        } else {
-            "мимо такта"
-        };
+        let note = if pos.abs() <= zone { "точно" } else if pos.abs() < 0.8 { "чуть мимо такта" } else { "мимо такта" };
         Some(Stroke { q, note })
     }
 
@@ -737,10 +701,7 @@ impl Meter {
                 self.window_t = 0.0;
                 self.on_t = 0.0;
                 self.snapped = false;
-                return Some(Stroke {
-                    q: 0.0,
-                    note: "перетянули!",
-                });
+                return Some(Stroke { q: 0.0, note: "перетянули!" });
             }
             return None;
         }
@@ -757,10 +718,7 @@ impl Meter {
         self.window_t = 0.0;
         self.on_t = 0.0;
         let q = with_skill(frac, self.skill);
-        Some(Stroke {
-            q,
-            note: if frac < 0.5 { bad } else { good },
-        })
+        Some(Stroke { q, note: if frac < 0.5 { bad } else { good } })
     }
 
     fn mimic(&mut self, inp: Input, dt: f32) -> Option<Stroke> {
@@ -792,11 +750,7 @@ impl Meter {
         self.flick *= 1.0 - (dt * 3.0).min(1.0);
         if self.seq_i < self.seq.len() && self.flick.length() >= 70.0 {
             let d = if self.flick.x.abs() > self.flick.y.abs() {
-                if self.flick.x > 0.0 {
-                    Dir::Right
-                } else {
-                    Dir::Left
-                }
+                if self.flick.x > 0.0 { Dir::Right } else { Dir::Left }
             } else if self.flick.y > 0.0 {
                 Dir::Up
             } else {
@@ -858,11 +812,7 @@ impl Meter {
         self.on_t = 0.0;
         self.off_t = 0.0;
         self.fixes = 0;
-        if let Some(first) = self
-            .glyph()
-            .and_then(|g| g.strokes.first())
-            .and_then(|s| s.first())
-        {
+        if let Some(first) = self.glyph().and_then(|g| g.strokes.first()).and_then(|s| s.first()) {
             self.nib = *first;
             if let Some(sc) = self.scratch.get_mut(self.letter_i) {
                 sc.clear();
@@ -873,9 +823,7 @@ impl Meter {
 
     /// Буква, которую выводим сейчас.
     pub fn glyph(&self) -> Option<&'static crate::letters::Glyph> {
-        self.letters
-            .get(self.letter_i)
-            .map(|i| crate::letters::glyph(*i))
+        self.letters.get(self.letter_i).map(|i| crate::letters::glyph(*i))
     }
 
     /// Допуск: насколько можно сойти с черты (в долях буквы).
@@ -885,11 +833,7 @@ impl Meter {
 
     /// За сколько секунд умелый выводит букву.
     fn letter_ideal(g: &crate::letters::Glyph) -> f32 {
-        0.6 + 0.8
-            * g.strokes
-                .iter()
-                .map(crate::letters::stroke_len)
-                .sum::<f32>()
+        0.6 + 0.8 * g.strokes.iter().map(crate::letters::stroke_len).sum::<f32>()
     }
 
     /// Куда вести стиль дальше (для показа и подсказки): точка чуть впереди на черте.
@@ -921,10 +865,7 @@ impl Meter {
                 self.off_t += dt;
             }
             let nib = self.nib;
-            if let Some(line) = self
-                .scratch
-                .get_mut(self.letter_i)
-                .and_then(|sc| sc.last_mut())
+            if let Some(line) = self.scratch.get_mut(self.letter_i).and_then(|sc| sc.last_mut())
                 && line.last().is_none_or(|p| p.distance(nib) > 0.012)
             {
                 line.push(nib);
@@ -939,11 +880,7 @@ impl Meter {
             if let Some(sc) = self.scratch.get_mut(self.letter_i) {
                 sc.push(vec![nib]);
             }
-            let note = if self.drill == Drill::Scribe {
-                "сбились — начните с того места"
-            } else {
-                "учитель поправил руку"
-            };
+            let note = if self.drill == Drill::Scribe { "сбились — начните с того места" } else { "учитель поправил руку" };
             // Не мазок: только подсказка на экране.
             self.last = Some(Stroke { q: 0.3, note });
             self.last_t = self.t;
@@ -985,21 +922,10 @@ impl Meter {
         // Слишком долго: учитель стирает табличку и даёт следующую букву.
         if self.letter_t > ideal * 4.0 + 3.0 {
             let total: f32 = g.strokes.iter().map(stroke_len).sum();
-            let done: f32 = g.strokes[..self.stroke_i]
-                .iter()
-                .map(stroke_len)
-                .sum::<f32>()
-                + self.along;
-            let q = if done <= 0.02 {
-                0.0
-            } else {
-                with_skill(0.35 * done / total.max(0.01), self.skill)
-            };
+            let done: f32 = g.strokes[..self.stroke_i].iter().map(stroke_len).sum::<f32>() + self.along;
+            let q = if done <= 0.02 { 0.0 } else { with_skill(0.35 * done / total.max(0.01), self.skill) };
             self.next_letter();
-            return Some(Stroke {
-                q,
-                note: "не успели — учитель стёр табличку",
-            });
+            return Some(Stroke { q, note: "не успели — учитель стёр табличку" });
         }
         None
     }
@@ -1007,8 +933,7 @@ impl Meter {
     fn next_letter(&mut self) {
         match self.drill {
             Drill::Trace => {
-                let next =
-                    (self.letters.first().copied().unwrap_or(0) + 1) % crate::letters::ALPHABET_LEN;
+                let next = (self.letters.first().copied().unwrap_or(0) + 1) % crate::letters::ALPHABET_LEN;
                 self.new_letters(vec![next]);
             }
             _ => {
@@ -1027,11 +952,7 @@ impl Meter {
     fn new_number(&mut self) {
         let r = self.rand() >> 3;
         // Сперва двузначные, потом и сотни.
-        self.number = if self.rounds < 2 {
-            10 + r % 90
-        } else {
-            100 + r % 900
-        };
+        self.number = if self.rounds < 2 { 10 + r % 90 } else { 100 + r % 900 };
         self.pebbles = [0; 3];
         // Без сотен — сразу к десяткам.
         self.col = if self.number < 100 { 1 } else { 0 };
@@ -1041,11 +962,7 @@ impl Meter {
 
     /// Цифры загаданного числа: сотни, десятки, единицы.
     pub fn digits(&self) -> [u8; 3] {
-        [
-            (self.number / 100) as u8,
-            ((self.number / 10) % 10) as u8,
-            (self.number % 10) as u8,
-        ]
+        [(self.number / 100) as u8, ((self.number / 10) % 10) as u8, (self.number % 10) as u8]
     }
 
     fn count(&mut self, inp: Input, dt: f32) -> Option<Stroke> {
@@ -1081,10 +998,7 @@ impl Meter {
         if self.show_t > ideal * 4.0 {
             self.rounds += 1;
             self.new_number();
-            return Some(Stroke {
-                q: 0.0,
-                note: "учитель не дождался",
-            });
+            return Some(Stroke { q: 0.0, note: "учитель не дождался" });
         }
         None
     }
@@ -1103,14 +1017,7 @@ pub fn chore_drill(teacher: crate::lore::Teacher) -> Drill {
         // Обрывать листья, вязать пучки — щипок в такт.
         T::Rhizotomos | T::Wisewoman | T::SteppeHealer => Drill::Rhythm,
         // Толочь корни, растирать чернила.
-        T::Apothecary
-        | T::Scribe
-        | T::Grammarian
-        | T::Grammatist
-        | T::Notary
-        | T::Copyist
-        | T::Philosopher
-        | T::Logograph => Drill::Grind,
+        T::Apothecary | T::Scribe | T::Grammarian | T::Grammatist | T::Notary | T::Copyist | T::Philosopher | T::Logograph => Drill::Grind,
         // Топить печь, качать мехи, носить дрова.
         T::Alchemist | T::Glassblower | T::Potter => Drill::Pump,
         // Мешать чан.
@@ -1231,10 +1138,7 @@ mod tests {
                 p - prev
             };
             prev = p;
-            Input {
-                delta: Vec2::new(d.x, -d.y) / SENS,
-                ..default_input()
-            }
+            Input { delta: Vec2::new(d.x, -d.y) / SENS, ..default_input() }
         }
     }
 
@@ -1272,10 +1176,7 @@ mod tests {
         // Полный ход (2 единицы вниз и вверх) за 1.1 с.
         let s = feed(&mut m, 660, 1.0 / 60.0, |t| {
             let v = (t / 1.1 * TAU).cos() * 2.4 / 1.1 * TAU / 60.0;
-            Input {
-                delta: Vec2::new(0.0, v / (SENS * 1.4)),
-                ..Input::default()
-            }
+            Input { delta: Vec2::new(0.0, v / (SENS * 1.4)), ..Input::default() }
         });
         assert!(s.len() >= 8, "качков {}", s.len());
         assert!(s.iter().skip(1).all(|s| s.q > 0.75), "{s:?}");
@@ -1293,22 +1194,13 @@ mod tests {
             if press {
                 since = 0.0;
             }
-            Input {
-                lmb_pressed: press,
-                ..Input::default()
-            }
+            Input { lmb_pressed: press, ..Input::default() }
         });
         assert!(!s.is_empty());
         assert!(s.iter().all(|s| s.q > 0.9), "{s:?}");
         // Нажатие на краю — плохо.
         let mut m = Meter::new(Drill::Rhythm, 0.0, 1);
-        let s = m
-            .update(Input {
-                dt: 0.01,
-                lmb_pressed: true,
-                ..Input::default()
-            })
-            .unwrap();
+        let s = m.update(Input { dt: 0.01, lmb_pressed: true, ..Input::default() }).unwrap();
         assert!(s.q < 0.2, "{s:?}");
     }
 
@@ -1318,11 +1210,7 @@ mod tests {
         let mut out = Vec::new();
         for _ in 0..600 {
             let want = m.target - m.cursor;
-            let inp = Input {
-                dt: 1.0 / 60.0,
-                delta: Vec2::new(want / (SENS * 0.5), 0.0),
-                ..Input::default()
-            };
+            let inp = Input { dt: 1.0 / 60.0, delta: Vec2::new(want / (SENS * 0.5), 0.0), ..Input::default() };
             if let Some(s) = m.update(inp) {
                 out.push(s.q);
             }
@@ -1334,21 +1222,14 @@ mod tests {
     #[test]
     fn tension_held_too_long_snaps() {
         let mut m = Meter::new(Drill::Tension, 0.0, 1);
-        let s = feed(&mut m, 300, 1.0 / 60.0, |_| Input {
-            lmb_held: true,
-            ..Input::default()
-        });
+        let s = feed(&mut m, 300, 1.0 / 60.0, |_| Input { lmb_held: true, ..Input::default() });
         assert!(s.iter().any(|s| s.note == "перетянули!"));
         // Держать по зоне — хорошо.
         let mut m = Meter::new(Drill::Tension, 0.0, 1);
         let mut out = Vec::new();
         for _ in 0..600 {
             let hold = m.tension < m.tension_center();
-            if let Some(s) = m.update(Input {
-                dt: 1.0 / 60.0,
-                lmb_held: hold,
-                ..Input::default()
-            }) {
+            if let Some(s) = m.update(Input { dt: 1.0 / 60.0, lmb_held: hold, ..Input::default() }) {
                 out.push(s.q);
             }
         }
@@ -1361,29 +1242,17 @@ mod tests {
         let mut m = Meter::new(Drill::Mimic, 0.0, 99);
         // Ждём конца показа.
         while m.showing {
-            m.update(Input {
-                dt: 0.05,
-                ..Input::default()
-            });
+            m.update(Input { dt: 0.05, ..Input::default() });
         }
         let seq = m.seq.clone();
         let mut got = None;
         for d in seq {
             // Пауза между движениями, затем рывок.
             for _ in 0..15 {
-                m.update(Input {
-                    dt: 1.0 / 60.0,
-                    ..Input::default()
-                });
+                m.update(Input { dt: 1.0 / 60.0, ..Input::default() });
             }
             let v = d.vec() * 100.0;
-            got = m
-                .update(Input {
-                    dt: 1.0 / 60.0,
-                    delta: Vec2::new(v.x, -v.y),
-                    ..Input::default()
-                })
-                .or(got);
+            got = m.update(Input { dt: 1.0 / 60.0, delta: Vec2::new(v.x, -v.y), ..Input::default() }).or(got);
         }
         let s = got.expect("урок засчитан");
         assert!(s.q > 0.95, "{s:?}");
@@ -1529,19 +1398,10 @@ mod tests {
 
     /// Ведёт стиль к точке чуть впереди на черте с умеренной скоростью (как умелый ученик).
     fn tracing_input(m: &Meter, dt: f32) -> Input {
-        let Some(goal) = m.nib_goal() else {
-            return Input {
-                dt,
-                ..Input::default()
-            };
-        };
+        let Some(goal) = m.nib_goal() else { return Input { dt, ..Input::default() } };
         let to = goal - m.nib;
         let step = to.clamp_length_max(1.3 * dt);
-        Input {
-            dt,
-            delta: Vec2::new(step.x, -step.y) * NIB_PX,
-            ..Input::default()
-        }
+        Input { dt, delta: Vec2::new(step.x, -step.y) * NIB_PX, ..Input::default() }
     }
 
     #[test]
@@ -1577,11 +1437,7 @@ mod tests {
         for i in 0..(60 * 40) {
             // Водит мышью кругами, не глядя на образец.
             let a = i as f32 * 0.15;
-            let inp = Input {
-                dt: 1.0 / 60.0,
-                delta: Vec2::new(a.cos(), a.sin()) * 9.0,
-                ..Input::default()
-            };
+            let inp = Input { dt: 1.0 / 60.0, delta: Vec2::new(a.cos(), a.sin()) * 9.0, ..Input::default() };
             if let Some(s) = m.update(inp) {
                 out.push(s.q);
             }
@@ -1601,22 +1457,11 @@ mod tests {
             while s.is_none() {
                 let col = m.col;
                 for _ in 0..30 {
-                    m.update(Input {
-                        dt: 1.0 / 60.0,
-                        ..Input::default()
-                    });
+                    m.update(Input { dt: 1.0 / 60.0, ..Input::default() });
                 }
                 let dy = -(want[col] as f32) * PEBBLE_PX;
-                m.update(Input {
-                    dt: 1.0 / 60.0,
-                    delta: Vec2::new(0.0, dy),
-                    ..Input::default()
-                });
-                s = m.update(Input {
-                    dt: 1.0 / 60.0,
-                    lmb_pressed: true,
-                    ..Input::default()
-                });
+                m.update(Input { dt: 1.0 / 60.0, delta: Vec2::new(0.0, dy), ..Input::default() });
+                s = m.update(Input { dt: 1.0 / 60.0, lmb_pressed: true, ..Input::default() });
             }
             out.push(s.unwrap());
         }
@@ -1626,11 +1471,7 @@ mod tests {
         let mut m = Meter::new(Drill::Count, 0.0, 3);
         let mut s = None;
         while s.is_none() {
-            s = m.update(Input {
-                dt: 0.05,
-                lmb_pressed: true,
-                ..Input::default()
-            });
+            s = m.update(Input { dt: 0.05, lmb_pressed: true, ..Input::default() });
         }
         let want = m.digits();
         let _ = want;

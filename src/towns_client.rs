@@ -34,23 +34,8 @@ impl Plugin for TownClientPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(TownUi::default())
             .add_systems(Startup, setup_hud.after(crate::inventory_ui::setup_fonts))
-            .add_systems(
-                Update,
-                (receive_town, aim_estate, input, town_tour)
-                    .chain()
-                    .run_if(bevy_renet::client_connected),
-            )
-            .add_systems(
-                Update,
-                (
-                    crate::level::sync_switch_visuals,
-                    hide_unbuilt_doors,
-                    rebuild,
-                    click,
-                    update_hud,
-                )
-                    .chain(),
-            );
+            .add_systems(Update, (receive_town, aim_estate, input, town_tour).chain().run_if(bevy_renet::client_connected))
+            .add_systems(Update, (crate::level::sync_switch_visuals, hide_unbuilt_doors, rebuild, click, update_hud).chain());
     }
 }
 
@@ -92,27 +77,13 @@ fn send(client: &mut RenetClient, msg: &TownClientMessage) {
     client.send_message(CH_TOWN, encode(msg));
 }
 
-fn receive_town(
-    mut client: ResMut<RenetClient>,
-    mut ui: ResMut<TownUi>,
-    level: Res<crate::collision::LevelColliders>,
-    mut loot: ResMut<LootState>,
-    time: Res<Time>,
-) {
+fn receive_town(mut client: ResMut<RenetClient>, mut ui: ResMut<TownUi>, level: Res<crate::collision::LevelColliders>, mut loot: ResMut<LootState>, time: Res<Time>) {
     let now = time.elapsed_secs();
     let mut switches = false;
     while let Some(bytes) = client.receive_message(CH_TOWN) {
-        let Some(msg) = decode::<TownServerMessage>(&bytes) else {
-            continue;
-        };
+        let Some(msg) = decode::<TownServerMessage>(&bytes) else { continue };
         match msg {
-            TownServerMessage::Init {
-                week,
-                date,
-                sites,
-                estates: list,
-                you,
-            } => {
+            TownServerMessage::Init { week, date, sites, estates: list, you } => {
                 ui.you = you;
                 ui.week = week;
                 ui.date = date;
@@ -178,29 +149,15 @@ fn apply_switches(ui: &TownUi, level: &crate::collision::LevelColliders) {
     let cat = estates();
     for (g, key) in cat.keys.iter().enumerate() {
         let on = match *key {
-            SwitchKey::Site { site, stage } => {
-                ui.sites.get(site as usize).copied().unwrap_or(0) == stage
-            }
-            SwitchKey::Furnish { estate, room, kind } => {
-                ui.estates
-                    .get(estate as usize)
-                    .and_then(|b| b.as_ref())
-                    .and_then(|b| b.furnish.get(room as usize))
-                    .copied()
-                    .flatten()
-                    == Some(kind)
-            }
+            SwitchKey::Site { site, stage } => ui.sites.get(site as usize).copied().unwrap_or(0) == stage,
+            SwitchKey::Furnish { estate, room, kind } => ui.estates.get(estate as usize).and_then(|b| b.as_ref()).and_then(|b| b.furnish.get(room as usize)).copied().flatten() == Some(kind),
         };
         level.set_switch(g, on);
     }
 }
 
 /// Створки дверей недостроенных домов не рисуем.
-fn hide_unbuilt_doors(
-    ui: Res<TownUi>,
-    mut leaves: Query<(&crate::doors::DoorLeaf, &mut Visibility)>,
-    mut done: Local<Vec<u8>>,
-) {
+fn hide_unbuilt_doors(ui: Res<TownUi>, mut leaves: Query<(&crate::doors::DoorLeaf, &mut Visibility)>, mut done: Local<Vec<u8>>) {
     if *done == ui.sites {
         return;
     }
@@ -210,11 +167,7 @@ fn hide_unbuilt_doors(
         for (s, doors) in cat.site_doors.iter().enumerate() {
             if doors.contains(&leaf.id) {
                 let built = ui.sites.get(s).copied().unwrap_or(0) >= SITE_DONE;
-                *vis = if built {
-                    Visibility::Inherited
-                } else {
-                    Visibility::Hidden
-                };
+                *vis = if built { Visibility::Inherited } else { Visibility::Hidden };
             }
         }
     }
@@ -228,15 +181,8 @@ fn aim_estate(mut ui: ResMut<TownUi>, player: Query<&Transform, With<crate::play
         .estates
         .iter()
         .enumerate()
-        .filter(|(_, e)| {
-            p.distance(e.entrance) < PROMPT_RANGE
-                || (e.contains(p) && p.distance(e.entrance) < 14.0)
-        })
-        .min_by(|a, b| {
-            a.1.entrance
-                .distance_squared(p)
-                .total_cmp(&b.1.entrance.distance_squared(p))
-        })
+        .filter(|(_, e)| p.distance(e.entrance) < PROMPT_RANGE || (e.contains(p) && p.distance(e.entrance) < 14.0))
+        .min_by(|a, b| a.1.entrance.distance_squared(p).total_cmp(&b.1.entrance.distance_squared(p)))
         .map(|(i, _)| i as u16);
     if ui.near != near {
         ui.near = near;
@@ -253,9 +199,7 @@ fn input(
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if ui.open() {
-        let close = keys.just_pressed(KeyCode::Escape)
-            || (ui.window == Window::Estate && keys.just_pressed(KeyCode::KeyU))
-            || (ui.window == Window::News && keys.just_pressed(KeyCode::KeyO));
+        let close = keys.just_pressed(KeyCode::Escape) || (ui.window == Window::Estate && keys.just_pressed(KeyCode::KeyU)) || (ui.window == Window::News && keys.just_pressed(KeyCode::KeyO));
         if close || loot.ui_open || trade.window_open() {
             ui.window = Window::None;
             ui.rev += 1;
@@ -300,26 +244,13 @@ struct CrierText;
 
 fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
     commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                width: percent(100),
-                top: percent(67),
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            Pickable::IGNORE,
-        ))
+        .spawn((Node { position_type: PositionType::Absolute, width: percent(100), top: percent(67), justify_content: JustifyContent::Center, ..default() }, Pickable::IGNORE))
         .with_children(|p| {
             theme().plaque(p).with_children(|p| {
                 p.spawn((
                     EstatePrompt,
                     Text::new(""),
-                    TextFont {
-                        font: fonts.bold.clone().into(),
-                        font_size: bevy::text::FontSize::Px(18.0),
-                        ..default()
-                    },
+                    TextFont { font: fonts.bold.clone().into(), font_size: bevy::text::FontSize::Px(18.0), ..default() },
                     TextColor(Color::srgb(1.0, 0.8, 0.5)),
                     TextShadow::default(),
                     TextLayout::justify(Justify::Center),
@@ -329,26 +260,13 @@ fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
         });
     commands
         // Глашатай — внизу слева, рядом с хотбаром: вверху тесно (компас, цель, подсказки, мини-карта).
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(12),
-                bottom: px(22),
-                max_width: px(350),
-                ..default()
-            },
-            Pickable::IGNORE,
-        ))
+        .spawn((Node { position_type: PositionType::Absolute, left: px(12), bottom: px(22), max_width: px(350), ..default() }, Pickable::IGNORE))
         .with_children(|p| {
             theme().plaque(p).with_children(|p| {
                 p.spawn((
                     CrierText,
                     Text::new(""),
-                    TextFont {
-                        font: fonts.regular.clone().into(),
-                        font_size: bevy::text::FontSize::Px(17.0),
-                        ..default()
-                    },
+                    TextFont { font: fonts.regular.clone().into(), font_size: bevy::text::FontSize::Px(17.0), ..default() },
                     TextColor(Color::srgb(0.98, 0.92, 0.78)),
                     TextShadow::default(),
                     TextLayout::justify(Justify::Center),
@@ -362,26 +280,15 @@ fn status_line(b: &EstateBrief, you: u64, week: u32) -> String {
     let mine = b.access.contains(&you);
     match b.status {
         Status::Building => "строится".into(),
-        Status::ForSale => format!(
-            "продаётся за {} · сдаётся за {} в месяц",
-            format_money(b.price),
-            format_money(b.rent)
-        ),
+        Status::ForSale => format!("продаётся за {} · сдаётся за {} в месяц", format_money(b.price), format_money(b.rent)),
         Status::Owned if mine => "ваш дом".into(),
         Status::Owned => format!("хозяин — {}", b.owner),
-        Status::Rented { until } if mine => {
-            format!("вы снимаете ещё {} нед.", until.saturating_sub(week))
-        }
+        Status::Rented { until } if mine => format!("вы снимаете ещё {} нед.", until.saturating_sub(week)),
         Status::Rented { .. } => format!("снимает {}", b.owner),
     }
 }
 
-fn update_hud(
-    ui: Res<TownUi>,
-    time: Res<Time>,
-    mut prompt: Single<&mut Text, (With<EstatePrompt>, Without<CrierText>)>,
-    mut crier: Single<&mut Text, (With<CrierText>, Without<EstatePrompt>)>,
-) {
+fn update_hud(ui: Res<TownUi>, time: Res<Time>, mut prompt: Single<&mut Text, (With<EstatePrompt>, Without<CrierText>)>, mut crier: Single<&mut Text, (With<CrierText>, Without<EstatePrompt>)>) {
     let line = match (ui.near, ui.open()) {
         (Some(id), false) => {
             let spec = &estates().estates[id as usize];
@@ -396,17 +303,8 @@ fn update_hud(
         prompt.0 = line;
     }
     let now = time.elapsed_secs();
-    let lines: Vec<&str> = ui
-        .crier
-        .iter()
-        .filter(|(_, t)| now - *t < 12.0)
-        .map(|(s, _)| s.as_str())
-        .collect();
-    let text = if lines.is_empty() || ui.open() {
-        String::new()
-    } else {
-        format!("Глашатай на агоре: «{}»", lines.join("» · «"))
-    };
+    let lines: Vec<&str> = ui.crier.iter().filter(|(_, t)| now - *t < 12.0).map(|(s, _)| s.as_str()).collect();
+    let text = if lines.is_empty() || ui.open() { String::new() } else { format!("Глашатай на агоре: «{}»", lines.join("» · «")) };
     if crier.0 != text {
         crier.0 = text;
     }
@@ -435,28 +333,8 @@ enum Act {
 #[derive(Component)]
 struct Enabled(bool);
 
-fn txt(
-    p: &mut ChildSpawnerCommands,
-    fonts: &UiFonts,
-    s: impl Into<String>,
-    size: f32,
-    color: Color,
-    bold: bool,
-) {
-    p.spawn((
-        Text::new(s),
-        TextFont {
-            font: if bold {
-                fonts.bold.clone()
-            } else {
-                fonts.regular.clone()
-            }
-            .into(),
-            font_size: bevy::text::FontSize::Px(size),
-            ..default()
-        },
-        TextColor(color),
-    ));
+fn txt(p: &mut ChildSpawnerCommands, fonts: &UiFonts, s: impl Into<String>, size: f32, color: Color, bold: bool) {
+    p.spawn((Text::new(s), TextFont { font: if bold { fonts.bold.clone() } else { fonts.regular.clone() }.into(), font_size: bevy::text::FontSize::Px(size), ..default() }, TextColor(color)));
 }
 
 /// Заголовок раздела: унциал бронзой.
@@ -465,13 +343,7 @@ fn heading(p: &mut ChildSpawnerCommands, s: impl Into<String>, size: f32) {
 }
 
 /// Кнопка темы; `on` — выбранная вкладка или то, что уже стоит в комнате.
-fn button(
-    p: &mut ChildSpawnerCommands,
-    label: impl Into<String>,
-    act: Act,
-    enabled: bool,
-    on: bool,
-) {
+fn button(p: &mut ChildSpawnerCommands, label: impl Into<String>, act: Act, enabled: bool, on: bool) {
     let label = label.into();
     if on {
         theme().toggle_button(p, &label, (act, Enabled(enabled)), true);
@@ -483,16 +355,7 @@ fn button(
 /// Окно на тёмной доске в бронзовой раме, с прокруткой колесом.
 fn panel(width: f32) -> impl Bundle {
     (
-        Node {
-            width: px(width),
-            max_height: percent(100),
-            flex_direction: FlexDirection::Column,
-            padding: Skin::Wood.padding(),
-            row_gap: px(6),
-            overflow: Overflow::scroll_y(),
-            overflow_clip_margin: OverflowClipMargin::content_box(),
-            ..default()
-        },
+        Node { width: px(width), max_height: percent(100), flex_direction: FlexDirection::Column, padding: Skin::Wood.padding(), row_gap: px(6), overflow: Overflow::scroll_y(), overflow_clip_margin: OverflowClipMargin::content_box(), ..default() },
         ScrollPosition::default(),
         ScrollWheel,
         theme().skin(Skin::Wood),
@@ -503,37 +366,14 @@ fn panel(width: f32) -> impl Bundle {
 
 /// Карточка внутри окна (комната, поселение): углубление с тонким ободком.
 fn card() -> impl Bundle {
-    (
-        Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: px(3),
-            padding: UiRect::axes(px(10), px(7)),
-            ..default()
-        },
-        theme().slot_image(false),
-        FocusPolicy::Pass,
-    )
+    (Node { flex_direction: FlexDirection::Column, row_gap: px(3), padding: UiRect::axes(px(10), px(7)), ..default() }, theme().slot_image(false), FocusPolicy::Pass)
 }
 
 fn row() -> Node {
-    Node {
-        flex_direction: FlexDirection::Row,
-        flex_wrap: FlexWrap::Wrap,
-        column_gap: px(6),
-        row_gap: px(4),
-        align_items: AlignItems::Center,
-        ..default()
-    }
+    Node { flex_direction: FlexDirection::Row, flex_wrap: FlexWrap::Wrap, column_gap: px(6), row_gap: px(4), align_items: AlignItems::Center, ..default() }
 }
 
-fn rebuild(
-    mut commands: Commands,
-    mut ui: ResMut<TownUi>,
-    fonts: Res<UiFonts>,
-    loot: Res<LootState>,
-    roots: Query<Entity, With<TownRoot>>,
-    mut shown: Local<Window>,
-) {
+fn rebuild(mut commands: Commands, mut ui: ResMut<TownUi>, fonts: Res<UiFonts>, loot: Res<LootState>, roots: Query<Entity, With<TownRoot>>, mut shown: Local<Window>) {
     if ui.built == ui.rev {
         return;
     }
@@ -551,19 +391,7 @@ fn rebuild(
         .spawn((
             TownRoot,
             // Снизу — место под хотбар и строку уведомлений.
-            Node {
-                position_type: PositionType::Absolute,
-                width: percent(100),
-                height: percent(100),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                padding: UiRect {
-                    top: px(16),
-                    bottom: px(150),
-                    ..default()
-                },
-                ..default()
-            },
+            Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), justify_content: JustifyContent::Center, align_items: AlignItems::Center, padding: UiRect { top: px(16), bottom: px(150), ..default() }, ..default() },
             theme().backdrop(),
             GlobalZIndex(13),
         ))
@@ -579,13 +407,7 @@ fn rebuild(
         });
 }
 
-fn estate_window(
-    root: &mut ChildSpawnerCommands,
-    fonts: &UiFonts,
-    d: &EstateDetail,
-    money: u32,
-    week: u32,
-) {
+fn estate_window(root: &mut ChildSpawnerCommands, fonts: &UiFonts, d: &EstateDetail, money: u32, week: u32) {
     let id = d.brief.id;
     root.spawn(panel(640.0)).with_children(|p| {
         heading(p, &d.name, 26.0);
@@ -594,129 +416,48 @@ fn estate_window(
             _ => d.town.def().name,
         };
         let rooms = d.rooms.len();
-        txt(
-            p,
-            fonts,
-            format!(
-                "{place} · {rooms} {} · {} {} · {}",
-                crate::economy::plural(rooms as u32, "комната", "комнаты", "комнат"),
-                d.chests,
-                crate::economy::plural(d.chests, "сундук", "сундука", "сундуков"),
-                d.date
-            ),
-            14.0,
-            DIM,
-            false,
-        );
+        txt(p, fonts, format!("{place} · {rooms} {} · {} {} · {}", crate::economy::plural(rooms as u32, "комната", "комнаты", "комнат"), d.chests, crate::economy::plural(d.chests, "сундук", "сундука", "сундуков"), d.date), 14.0, DIM, false);
         let status = match d.brief.status {
-            Status::Building => (
-                "Дом ещё строится: курия продаст его, когда положат черепицу.".to_string(),
-                DIM,
-            ),
-            Status::ForSale => (
-                format!(
-                    "Продаётся. Цена — {}; снять — {} в месяц.",
-                    format_money(d.brief.price),
-                    format_money(d.brief.rent)
-                ),
-                GOLD,
-            ),
-            Status::Owned if d.mine => (
-                "Это ваш дом: двери и сундуки открываются только вам и тем, кого вы пустите."
-                    .into(),
-                GOOD,
-            ),
+            Status::Building => ("Дом ещё строится: курия продаст его, когда положат черепицу.".to_string(), DIM),
+            Status::ForSale => (format!("Продаётся. Цена — {}; снять — {} в месяц.", format_money(d.brief.price), format_money(d.brief.rent)), GOLD),
+            Status::Owned if d.mine => ("Это ваш дом: двери и сундуки открываются только вам и тем, кого вы пустите.".into(), GOOD),
             Status::Owned => (format!("Хозяин — {}.", d.brief.owner), TEXT),
-            Status::Rented { .. } if d.mine => (
-                format!(
-                    "Вы снимаете этот дом: осталось {} нед. (до {}).",
-                    d.weeks_left.unwrap_or(0),
-                    crate::towns::date_text(week + d.weeks_left.unwrap_or(0))
-                ),
-                GOOD,
-            ),
+            Status::Rented { .. } if d.mine => (format!("Вы снимаете этот дом: осталось {} нед. (до {}).", d.weeks_left.unwrap_or(0), crate::towns::date_text(week + d.weeks_left.unwrap_or(0))), GOOD),
             Status::Rented { .. } => (format!("Дом снимает {}.", d.brief.owner), TEXT),
         };
         txt(p, fonts, status.0, 16.0, status.1, false);
-        txt(
-            p,
-            fonts,
-            format!("В кошельке: {}", format_money(money)),
-            14.0,
-            DIM,
-            false,
-        );
+        txt(p, fonts, format!("В кошельке: {}", format_money(money)), 14.0, DIM, false);
         p.spawn(row()).with_children(|r| match d.brief.status {
             Status::ForSale => {
-                button(
-                    r,
-                    format!("Купить — {}", format_money(d.brief.price)),
-                    Act::Buy(id),
-                    money >= d.brief.price,
-                    false,
-                );
+                button(r, format!("Купить — {}", format_money(d.brief.price)), Act::Buy(id), money >= d.brief.price, false);
                 for m in [1u8, 3, 6] {
                     let cost = d.brief.rent * m as u32;
-                    button(
-                        r,
-                        format!("Снять на {m} мес. — {}", format_money(cost)),
-                        Act::Rent(id, m),
-                        money >= cost,
-                        false,
-                    );
+                    button(r, format!("Снять на {m} мес. — {}", format_money(cost)), Act::Rent(id, m), money >= cost, false);
                 }
             }
             Status::Rented { .. } if d.mine => {
                 for m in [1u8, 3] {
                     let cost = d.brief.rent * m as u32;
-                    button(
-                        r,
-                        format!("Продлить на {m} мес. — {}", format_money(cost)),
-                        Act::Rent(id, m),
-                        money >= cost,
-                        false,
-                    );
+                    button(r, format!("Продлить на {m} мес. — {}", format_money(cost)), Act::Rent(id, m), money >= cost, false);
                 }
                 button(r, "Съехать", Act::Sell(id), true, false);
             }
             Status::Owned if d.mine => {
-                button(
-                    r,
-                    format!("Продать курии за {}", format_money(d.buyback)),
-                    Act::Sell(id),
-                    true,
-                    false,
-                );
+                button(r, format!("Продать курии за {}", format_money(d.buyback)), Act::Sell(id), true, false);
             }
             _ => {}
         });
         // Комнаты.
-        p.spawn(Node {
-            height: px(6),
-            ..default()
-        });
+        p.spawn(Node { height: px(6), ..default() });
         theme().divider(p);
         heading(p, "Комнаты", 20.0);
         if !d.mine {
-            txt(
-                p,
-                fonts,
-                "Обставить дом можно, когда он ваш: мастера сделают на заказ за неделю-две.",
-                13.0,
-                DIM,
-                false,
-            );
+            txt(p, fonts, "Обставить дом можно, когда он ваш: мастера сделают на заказ за неделю-две.", 13.0, DIM, false);
         }
         for (ri, room) in d.rooms.iter().enumerate() {
             p.spawn(card()).with_children(|c| {
                 let what = match (room.now, room.order) {
-                    (_, Some((k, weeks))) => (
-                        format!(
-                            "заказано: {} — будет через {weeks} нед.",
-                            k.name().to_lowercase()
-                        ),
-                        GOLD,
-                    ),
+                    (_, Some((k, weeks))) => (format!("заказано: {} — будет через {weeks} нед.", k.name().to_lowercase()), GOLD),
                     (Some(k), None) => (k.name().to_string(), GOOD),
                     (None, None) => ("пустая".to_string(), DIM),
                 };
@@ -729,27 +470,11 @@ fn estate_window(
                     c.spawn(row()).with_children(|r| {
                         for &k in &room.kinds {
                             let on = room.now == Some(k);
-                            let label = format!(
-                                "{} · {}",
-                                k.name(),
-                                crate::economy::format_money_short(k.price())
-                            );
-                            button(
-                                r,
-                                label,
-                                Act::Furnish(id, ri as u8, Some(k)),
-                                !on && money >= k.price(),
-                                on,
-                            );
+                            let label = format!("{} · {}", k.name(), crate::economy::format_money_short(k.price()));
+                            button(r, label, Act::Furnish(id, ri as u8, Some(k)), !on && money >= k.price(), on);
                         }
                         if room.now.is_some() {
-                            button(
-                                r,
-                                "Вынести всё",
-                                Act::Furnish(id, ri as u8, None),
-                                true,
-                                false,
-                            );
+                            button(r, "Вынести всё", Act::Furnish(id, ri as u8, None), true, false);
                         }
                     });
                 }
@@ -757,73 +482,30 @@ fn estate_window(
         }
         // Гости.
         if d.mine {
-            p.spawn(Node {
-                height: px(6),
-                ..default()
-            });
+            p.spawn(Node { height: px(6), ..default() });
             theme().divider(p);
             heading(p, "Ключи", 20.0);
             if d.players.is_empty() && d.guests.is_empty() {
-                txt(
-                    p,
-                    fonts,
-                    "Друзей в игре нет. Когда зайдут — здесь можно дать им ключ.",
-                    13.0,
-                    DIM,
-                    false,
-                );
+                txt(p, fonts, "Друзей в игре нет. Когда зайдут — здесь можно дать им ключ.", 13.0, DIM, false);
             }
             p.spawn(row()).with_children(|r| {
                 for (pid, name, has) in &d.players {
-                    button(
-                        r,
-                        if *has {
-                            format!("{name}: забрать ключ")
-                        } else {
-                            format!("{name}: дать ключ")
-                        },
-                        Act::Guest(id, *pid, !has),
-                        true,
-                        *has,
-                    );
+                    button(r, if *has { format!("{name}: забрать ключ") } else { format!("{name}: дать ключ") }, Act::Guest(id, *pid, !has), true, *has);
                 }
             });
             if !d.guests.is_empty() {
-                txt(
-                    p,
-                    fonts,
-                    format!("Ключи есть у: {}", d.guests.join(", ")),
-                    13.0,
-                    DIM,
-                    false,
-                );
+                txt(p, fonts, format!("Ключи есть у: {}", d.guests.join(", ")), 13.0, DIM, false);
             }
         }
-        p.spawn(Node {
-            height: px(4),
-            ..default()
-        });
+        p.spawn(Node { height: px(4), ..default() });
         p.spawn(row()).with_children(|r| {
             button(r, "Закрыть (Esc)", Act::Close, true, false);
-            txt(
-                r,
-                fonts,
-                "Вести и дома на продажу — клавиша O",
-                13.0,
-                DIM,
-                false,
-            );
+            txt(r, fonts, "Вести и дома на продажу — клавиша O", 13.0, DIM, false);
         });
     });
 }
 
-fn news_window(
-    root: &mut ChildSpawnerCommands,
-    fonts: &UiFonts,
-    v: Option<&NewsView>,
-    tab: u8,
-    you: u64,
-) {
+fn news_window(root: &mut ChildSpawnerCommands, fonts: &UiFonts, v: Option<&NewsView>, tab: u8, you: u64) {
     let _ = you;
     root.spawn(panel(820.0)).with_children(|p| {
         let Some(v) = v else {
@@ -831,11 +513,7 @@ fn news_window(
             return;
         };
         heading(p, "Вести Таврики", 28.0);
-        let sea = if v.sea_open {
-            "море открыто — корабли ходят"
-        } else {
-            "море закрыто до весны — кораблей нет"
-        };
+        let sea = if v.sea_open { "море открыто — корабли ходят" } else { "море закрыто до весны — кораблей нет" };
         txt(p, fonts, format!("{} · {sea}", v.date), 14.0, DIM, false);
         p.spawn(row()).with_children(|r| {
             button(r, "Поселения", Act::Tab(0), true, tab == 0);
@@ -851,59 +529,19 @@ fn news_window(
                     p.spawn(card()).with_children(|c| {
                         c.spawn(row()).with_children(|r| {
                             txt(r, fonts, d.name, 17.0, TITLE, true);
-                            txt(
-                                r,
-                                fonts,
-                                format!(
-                                    "· {} жителей, {} дворов · народ {}",
-                                    t.pop,
-                                    t.homes,
-                                    mood_word(t.mood)
-                                ),
-                                14.0,
-                                TEXT,
-                                false,
-                            );
+                            txt(r, fonts, format!("· {} жителей, {} дворов · народ {}", t.pop, t.homes, mood_word(t.mood)), 14.0, TEXT, false);
                             if !t.troubles.is_empty() {
-                                txt(
-                                    r,
-                                    fonts,
-                                    format!("· {}", t.troubles.join(", ")),
-                                    14.0,
-                                    BAD,
-                                    false,
-                                );
+                                txt(r, fonts, format!("· {}", t.troubles.join(", ")), 14.0, BAD, false);
                             }
                         });
                         txt(c, fonts, d.about, 13.0, DIM, false);
-                        let dear: Vec<String> = GOODS
-                            .iter()
-                            .filter(|g| (t.prices[**g as usize] - 1.0).abs() > 0.12)
-                            .map(|g| {
-                                format!(
-                                    "{} {}",
-                                    g.name().to_lowercase(),
-                                    price_word(t.prices[*g as usize])
-                                )
-                            })
-                            .collect();
+                        let dear: Vec<String> = GOODS.iter().filter(|g| (t.prices[**g as usize] - 1.0).abs() > 0.12).map(|g| format!("{} {}", g.name().to_lowercase(), price_word(t.prices[*g as usize]))).collect();
                         if !dear.is_empty() {
                             txt(c, fonts, dear.join("; "), 13.0, DIM, false);
                         }
                         if !t.projects.is_empty() {
-                            let pr: Vec<String> = t
-                                .projects
-                                .iter()
-                                .map(|(k, f)| format!("{} — {}%", k.name(), (f * 100.0) as u32))
-                                .collect();
-                            txt(
-                                c,
-                                fonts,
-                                format!("Строят: {}", pr.join(", ")),
-                                13.0,
-                                GOLD,
-                                false,
-                            );
+                            let pr: Vec<String> = t.projects.iter().map(|(k, f)| format!("{} — {}%", k.name(), (f * 100.0) as u32)).collect();
+                            txt(c, fonts, format!("Строят: {}", pr.join(", ")), 13.0, GOLD, false);
                         }
                     });
                 }
@@ -911,21 +549,8 @@ fn news_window(
                 heading(p, "Цены в лавках Херсона", 20.0);
                 p.spawn(row()).with_children(|r| {
                     for (name, m) in &v.market {
-                        let color = if *m > 1.1 {
-                            BAD
-                        } else if *m < 0.92 {
-                            GOOD
-                        } else {
-                            TEXT
-                        };
-                        txt(
-                            r,
-                            fonts,
-                            format!("{name}: {};", price_word(*m)),
-                            13.0,
-                            color,
-                            false,
-                        );
+                        let color = if *m > 1.1 { BAD } else if *m < 0.92 { GOOD } else { TEXT };
+                        txt(r, fonts, format!("{name}: {};", price_word(*m)), 13.0, color, false);
                     }
                 });
             }
@@ -935,84 +560,36 @@ fn news_window(
                 }
                 for (date, town, text) in &v.news {
                     p.spawn(row()).with_children(|r| {
-                        txt(
-                            r,
-                            fonts,
-                            format!("{} · {}:", date, town.def().name),
-                            13.0,
-                            DIM,
-                            false,
-                        );
+                        txt(r, fonts, format!("{} · {}:", date, town.def().name), 13.0, DIM, false);
                         txt(r, fonts, text, 15.0, TEXT, false);
                     });
                 }
             }
             _ => {
                 let stages = ["пепелище", "фундамент", "стены", "кровля", "готово"];
-                let s: Vec<String> = v
-                    .sites
-                    .iter()
-                    .enumerate()
-                    .map(|(i, st)| format!("площадка {}: {}", i + 1, stages[(*st as usize).min(4)]))
-                    .collect();
-                txt(
-                    p,
-                    fonts,
-                    format!("Стройки Херсона: {}", s.join("; ")),
-                    14.0,
-                    GOLD,
-                    false,
-                );
+                let s: Vec<String> = v.sites.iter().enumerate().map(|(i, st)| format!("площадка {}: {}", i + 1, stages[(*st as usize).min(4)])).collect();
+                txt(p, fonts, format!("Стройки Херсона: {}", s.join("; ")), 14.0, GOLD, false);
                 for (id, name, price, rent, status, owner) in &v.estates {
                     p.spawn(row()).with_children(|r| {
                         let st = match status {
                             Status::Building => "строится".to_string(),
-                            Status::ForSale => format!(
-                                "продаётся за {} · аренда {}/мес.",
-                                format_money(*price),
-                                format_money(*rent)
-                            ),
+                            Status::ForSale => format!("продаётся за {} · аренда {}/мес.", format_money(*price), format_money(*rent)),
                             Status::Owned => format!("хозяин — {owner}"),
                             Status::Rented { .. } => format!("снимает {owner}"),
                         };
                         txt(r, fonts, name, 15.0, TEXT, true);
-                        txt(
-                            r,
-                            fonts,
-                            st,
-                            14.0,
-                            if *status == Status::ForSale {
-                                GOLD
-                            } else {
-                                DIM
-                            },
-                            false,
-                        );
+                        txt(r, fonts, st, 14.0, if *status == Status::ForSale { GOLD } else { DIM }, false);
                         button(r, "Подробнее", Act::Show(*id), true, false);
                     });
                 }
-                txt(
-                    p,
-                    fonts,
-                    "Купить или снять — у дверей дома (клавиша U).",
-                    13.0,
-                    DIM,
-                    false,
-                );
+                txt(p, fonts, "Купить или снять — у дверей дома (клавиша U).", 13.0, DIM, false);
             }
         }
     });
 }
 
-fn click(
-    buttons: Query<(&Interaction, &Act, &Enabled), Changed<Interaction>>,
-    mut ui: ResMut<TownUi>,
-    mut client: Option<ResMut<RenetClient>>,
-    mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
-) {
-    let Some(client) = client.as_mut() else {
-        return;
-    };
+fn click(buttons: Query<(&Interaction, &Act, &Enabled), Changed<Interaction>>, mut ui: ResMut<TownUi>, mut client: Option<ResMut<RenetClient>>, mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>) {
+    let Some(client) = client.as_mut() else { return };
     for (interaction, act, enabled) in &buttons {
         if *interaction != Interaction::Pressed || !enabled.0 {
             continue;
@@ -1027,17 +604,8 @@ fn click(
             Act::Buy(estate) => send(client, &TownClientMessage::Buy { estate }),
             Act::Rent(estate, months) => send(client, &TownClientMessage::Rent { estate, months }),
             Act::Sell(estate) => send(client, &TownClientMessage::Sell { estate }),
-            Act::Furnish(estate, room, kind) => {
-                send(client, &TownClientMessage::Furnish { estate, room, kind })
-            }
-            Act::Guest(estate, player, allow) => send(
-                client,
-                &TownClientMessage::Guest {
-                    estate,
-                    player,
-                    allow,
-                },
-            ),
+            Act::Furnish(estate, room, kind) => send(client, &TownClientMessage::Furnish { estate, room, kind }),
+            Act::Guest(estate, player, allow) => send(client, &TownClientMessage::Guest { estate, player, allow }),
             Act::Tab(t) => {
                 ui.tab = t;
                 ui.rev += 1;
@@ -1063,9 +631,7 @@ fn town_tour(
     mut state: Local<(usize, u32, bool)>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    let Ok(tour) = std::env::var("MRPG_TOWN_TOUR") else {
-        return;
-    };
+    let Ok(tour) = std::env::var("MRPG_TOWN_TOUR") else { return };
     if ui.date.is_empty() {
         return;
     }
@@ -1079,10 +645,7 @@ fn town_tour(
         return;
     };
     let (head, cmds) = step.split_once('|').unwrap_or((step, ""));
-    let (name, wait) = head
-        .split_once('#')
-        .map(|(n, w)| (n.trim(), w.trim().parse().unwrap_or(24)))
-        .unwrap_or((head.trim(), 24));
+    let (name, wait) = head.split_once('#').map(|(n, w)| (n.trim(), w.trim().parse().unwrap_or(24))).unwrap_or((head.trim(), 24));
     if !*started {
         *started = true;
         *frames = 0;
@@ -1095,21 +658,9 @@ fn town_tour(
                 }
                 "!buy" => send(&mut client, &TownClientMessage::Buy { estate }),
                 "!furnish" => {
-                    let kinds = [
-                        FurnishKind::Living,
-                        FurnishKind::Bedroom,
-                        FurnishKind::Kitchen,
-                        FurnishKind::Storeroom,
-                    ];
+                    let kinds = [FurnishKind::Living, FurnishKind::Bedroom, FurnishKind::Kitchen, FurnishKind::Storeroom];
                     for (room, kind) in kinds.into_iter().enumerate() {
-                        send(
-                            &mut client,
-                            &TownClientMessage::Furnish {
-                                estate,
-                                room: room as u8,
-                                kind: Some(kind),
-                            },
-                        );
+                        send(&mut client, &TownClientMessage::Furnish { estate, room: room as u8, kind: Some(kind) });
                     }
                 }
                 "!news0" | "!news1" | "!news2" => {
@@ -1133,14 +684,11 @@ fn town_tour(
         if !name.is_empty() {
             let dir = std::env::var("MRPG_TOUR_DIR").unwrap_or_else(|_| ".".into());
             info!("обход городов: снимок {name}");
-            commands
-                .spawn(bevy::render::view::screenshot::Screenshot::primary_window())
-                .observe(bevy::render::view::screenshot::save_to_disk(format!(
-                    "{dir}/{name}.png"
-                )));
+            commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(format!("{dir}/{name}.png")));
         }
         *i += 1;
         *started = false;
         *frames = 0;
     }
 }
+

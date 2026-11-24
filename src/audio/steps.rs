@@ -13,10 +13,7 @@ pub struct StepsPlugin;
 
 impl Plugin for StepsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (local_steps, remote_steps, tired_breath).before(AudioSet),
-        );
+        app.add_systems(Update, (local_steps, remote_steps, tired_breath).before(AudioSet));
     }
 }
 
@@ -26,10 +23,7 @@ pub fn stride(speed: f32) -> f32 {
 }
 
 fn surface(surfaces: &Surfaces, feet: Vec3) -> Surface {
-    surfaces
-        .get()
-        .map(|m| m.surface_at(feet))
-        .unwrap_or(Surface::Dirt)
+    surfaces.get().map(|m| m.surface_at(feet)).unwrap_or(Surface::Dirt)
 }
 
 /// Громкость шага от поверхности: по земле и траве тише, по доскам громче.
@@ -53,12 +47,7 @@ struct LocalStepState {
     fall_speed: f32,
 }
 
-fn local_steps(
-    surfaces: Res<Surfaces>,
-    mut out: MessageWriter<Sfx>,
-    q: Query<(&LocalPlayer, &Transform)>,
-    mut st: Local<LocalStepState>,
-) {
+fn local_steps(surfaces: Res<Surfaces>, mut out: MessageWriter<Sfx>, q: Query<(&LocalPlayer, &Transform)>, mut st: Local<LocalStepState>) {
     let Ok((p, t)) = q.single() else { return };
     let feet = t.translation;
     let last = st.last.replace(feet).unwrap_or(feet);
@@ -72,11 +61,7 @@ fn local_steps(
         let s = surface(&surfaces, feet);
         let g = ((st.fall_speed - 4.0) / 6.0).clamp(0.3, 1.0);
         out.write(Sfx::at("land", feet).gain(0.55 * g).range(2.0, 30.0));
-        out.write(
-            Sfx::at(s.step_sound(), feet)
-                .gain(0.6 * surface_gain(s))
-                .range(2.0, 30.0),
-        );
+        out.write(Sfx::at(s.step_sound(), feet).gain(0.6 * surface_gain(s)).range(2.0, 30.0));
         st.dist = 0.0;
     }
     st.was_grounded = p.grounded;
@@ -101,12 +86,7 @@ fn local_steps(
         } else {
             0.3
         };
-        out.write(
-            Sfx::at(s.step_sound(), feet)
-                .gain(gain * surface_gain(s))
-                .range(2.0, 30.0)
-                .spread(0.08),
-        );
+        out.write(Sfx::at(s.step_sound(), feet).gain(gain * surface_gain(s)).range(2.0, 30.0).spread(0.08));
     }
 }
 
@@ -130,11 +110,7 @@ fn remote_steps(
     for (e, r, t) in &q {
         alive.push(e);
         let feet = t.translation;
-        let s = state.entry(e).or_insert(RemoteStep {
-            last: feet,
-            dist: 0.0,
-            count: 0,
-        });
+        let s = state.entry(e).or_insert(RemoteStep { last: feet, dist: 0.0, count: 0 });
         let moved = Vec2::new(feet.x - s.last.x, feet.z - s.last.z).length();
         s.last = feet;
         if moved > 3.0 || r.fighter.is_dead() {
@@ -157,36 +133,18 @@ fn remote_steps(
         }
         let surf = surface(&surfaces, feet);
         let gain = (0.22 + 0.06 * speed).min(0.55) * surface_gain(surf);
-        out.write(
-            Sfx::at(surf.step_sound(), feet)
-                .gain(gain)
-                .range(2.0, 32.0)
-                .spread(0.08),
-        );
+        out.write(Sfx::at(surf.step_sound(), feet).gain(gain).range(2.0, 32.0).spread(0.08));
         // Воины в доспехах звякают кольчугой и ремнями.
-        let armored = !matches!(
-            r.kind,
-            ActorKind::Player | ActorKind::HunArcher | ActorKind::GothWarrior
-        );
+        let armored = !matches!(r.kind, ActorKind::Player | ActorKind::HunArcher | ActorKind::GothWarrior);
         if armored && s.count % 2 == 0 {
-            out.write(
-                Sfx::at("gear", feet + Vec3::Y)
-                    .gain(0.18 + 0.04 * speed)
-                    .range(1.5, 20.0),
-            );
+            out.write(Sfx::at("gear", feet + Vec3::Y).gain(0.18 + 0.04 * speed).range(1.5, 20.0));
         }
     }
     state.retain(|e, _| alive.contains(e));
 }
 
 /// Выдохся — слышно своё тяжёлое дыхание.
-fn tired_breath(
-    time: Res<Time>,
-    mut out: MessageWriter<Sfx>,
-    q: Query<&LocalFighter>,
-    mut next: Local<f32>,
-    mut rng: ResMut<SfxRng>,
-) {
+fn tired_breath(time: Res<Time>, mut out: MessageWriter<Sfx>, q: Query<&LocalFighter>, mut next: Local<f32>, mut rng: ResMut<SfxRng>) {
     let Ok(f) = q.single() else { return };
     if f.fighter.is_dead() || f.fighter.max_stamina <= 0.0 {
         return;
@@ -201,11 +159,7 @@ fn tired_breath(
         return;
     }
     let tired = 1.0 - frac / 0.3;
-    out.write(
-        Sfx::ui("breath_tired")
-            .gain(0.25 + 0.35 * tired)
-            .spread(0.04),
-    );
+    out.write(Sfx::ui("breath_tired").gain(0.25 + 0.35 * tired).spread(0.04));
     *next = now + rng.range(1.05, 1.3) - 0.25 * tired;
 }
 

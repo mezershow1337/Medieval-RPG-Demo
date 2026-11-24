@@ -92,22 +92,14 @@ pub fn charge_richness(counts: &[(OreGrade, u32)]) -> u8 {
     if n == 0 {
         return 100;
     }
-    let r: f32 = counts
-        .iter()
-        .map(|(g, c)| g.richness() * *c as f32)
-        .sum::<f32>()
-        / n as f32;
+    let r: f32 = counts.iter().map(|(g, c)| g.richness() * *c as f32).sum::<f32>() / n as f32;
     (r * 100.0).round().clamp(50.0, 150.0) as u8
 }
 
 /// Прибавка к чистоте по средней богатости (×100).
 pub fn richness_purity(rich: u8) -> f32 {
     let r = rich as f32 / 100.0;
-    if r >= 1.0 {
-        (r - 1.0) / 0.25 * OreGrade::Roasted.purity()
-    } else {
-        (1.0 - r) / 0.2 * OreGrade::Bog.purity()
-    }
+    if r >= 1.0 { (r - 1.0) / 0.25 * OreGrade::Roasted.purity() } else { (1.0 - r) / 0.2 * OreGrade::Bog.purity() }
 }
 
 // ---------------------------------------------------------------------------
@@ -186,119 +178,20 @@ pub struct SiteInfo {
 }
 
 impl SiteKind {
-    pub const ALL: [SiteKind; 8] = [
-        SiteKind::BogOre,
-        SiteKind::Outcrop,
-        SiteKind::Adit,
-        SiteKind::Shaft,
-        SiteKind::Woodlot,
-        SiteKind::ClayPit,
-        SiteKind::Sand,
-        SiteKind::Quarry,
-    ];
+    pub const ALL: [SiteKind; 8] = [SiteKind::BogOre, SiteKind::Outcrop, SiteKind::Adit, SiteKind::Shaft, SiteKind::Woodlot, SiteKind::ClayPit, SiteKind::Sand, SiteKind::Quarry];
 
     pub fn info(self) -> SiteInfo {
         use SiteKind::*;
-        let i = |name, plain, verb, tool, drill, secs, charges, regrow, needs| SiteInfo {
-            name,
-            plain,
-            verb,
-            tool,
-            drill,
-            secs,
-            charges,
-            regrow,
-            needs,
-        };
+        let i = |name, plain, verb, tool, drill, secs, charges, regrow, needs| SiteInfo { name, plain, verb, tool, drill, secs, charges, regrow, needs };
         match self {
-            BogOre => i(
-                "Болотная руда",
-                "Рыжая мочажина",
-                "Режете дёрн, выбираете бурые комья",
-                Some(Tool::Spade),
-                Drill::Pump,
-                4.5,
-                4,
-                110.0,
-                None,
-            ),
-            Outcrop => i(
-                "Выход бурого железняка",
-                "Бурые камни на склоне",
-                "Бьёте кайлом по жиле",
-                Some(Tool::Pick),
-                Drill::Rhythm,
-                4.5,
-                3,
-                140.0,
-                None,
-            ),
-            Adit => i(
-                "Забой штольни",
-                "Забой штольни",
-                "Отбиваете руду в забое",
-                Some(Tool::Pick),
-                Drill::Rhythm,
-                5.0,
-                6,
-                80.0,
-                Some(Technique::Mining),
-            ),
-            Shaft => i(
-                "Ворот над шурфом",
-                "Ворот над шурфом",
-                "Крутите ворот, поднимаете бадью",
-                None,
-                Drill::Grind,
-                6.0,
-                8,
-                45.0,
-                None,
-            ),
-            Woodlot => i(
-                "Делянка",
-                "Делянка",
-                "Колете поленья",
-                Some(Tool::Axe),
-                Drill::Rhythm,
-                4.0,
-                5,
-                100.0,
-                None,
-            ),
-            ClayPit => i(
-                "Глиняный карьер",
-                "Глиняный карьер",
-                "Копаете глину",
-                Some(Tool::Spade),
-                Drill::Pump,
-                4.0,
-                6,
-                70.0,
-                None,
-            ),
-            Sand => i(
-                "Песчаный берег",
-                "Песчаный берег",
-                "Насыпаете песок в мешок",
-                None,
-                Drill::Pump,
-                3.0,
-                8,
-                30.0,
-                None,
-            ),
-            Quarry => i(
-                "Каменоломня",
-                "Каменоломня",
-                "Откалываете блок по клиньям",
-                Some(Tool::Pick),
-                Drill::Rhythm,
-                6.0,
-                4,
-                120.0,
-                None,
-            ),
+            BogOre => i("Болотная руда", "Рыжая мочажина", "Режете дёрн, выбираете бурые комья", Some(Tool::Spade), Drill::Pump, 4.5, 4, 110.0, None),
+            Outcrop => i("Выход бурого железняка", "Бурые камни на склоне", "Бьёте кайлом по жиле", Some(Tool::Pick), Drill::Rhythm, 4.5, 3, 140.0, None),
+            Adit => i("Забой штольни", "Забой штольни", "Отбиваете руду в забое", Some(Tool::Pick), Drill::Rhythm, 5.0, 6, 80.0, Some(Technique::Mining)),
+            Shaft => i("Ворот над шурфом", "Ворот над шурфом", "Крутите ворот, поднимаете бадью", None, Drill::Grind, 6.0, 8, 45.0, None),
+            Woodlot => i("Делянка", "Делянка", "Колете поленья", Some(Tool::Axe), Drill::Rhythm, 4.0, 5, 100.0, None),
+            ClayPit => i("Глиняный карьер", "Глиняный карьер", "Копаете глину", Some(Tool::Spade), Drill::Pump, 4.0, 6, 70.0, None),
+            Sand => i("Песчаный берег", "Песчаный берег", "Насыпаете песок в мешок", None, Drill::Pump, 3.0, 8, 30.0, None),
+            Quarry => i("Каменоломня", "Каменоломня", "Откалываете блок по клиньям", Some(Tool::Pick), Drill::Rhythm, 6.0, 4, 120.0, None),
         }
     }
 
@@ -354,9 +247,7 @@ pub fn dig_yield(kind: SiteKind, prospect: bool, skill: f32, q: f32, roll: [f32;
                 add(&mut items, ore, n);
                 add(&mut items, WASTE, 2 - n + (roll[1] < 0.5) as i32);
                 note = Some(match kind {
-                    SiteKind::BogOre => {
-                        "Рыжая глина, камни, какие-то комья — где тут руда, не разобрать"
-                    }
+                    SiteKind::BogOre => "Рыжая глина, камни, какие-то комья — где тут руда, не разобрать",
                     _ => "Набили камня, а какой из них руда — не понять",
                 });
             }
@@ -367,11 +258,7 @@ pub fn dig_yield(kind: SiteKind, prospect: bool, skill: f32, q: f32, roll: [f32;
                 add(&mut items, ORE, 1);
             }
         }
-        SiteKind::Woodlot => add(
-            &mut items,
-            WOOD,
-            2 + good as i32 + (roll[0] < s * 0.5) as i32 - bad as i32,
-        ),
+        SiteKind::Woodlot => add(&mut items, WOOD, 2 + good as i32 + (roll[0] < s * 0.5) as i32 - bad as i32),
         SiteKind::ClayPit => add(&mut items, CLAY, 2 + good as i32 - bad as i32),
         SiteKind::Sand => add(&mut items, SAND, 2 + good as i32),
         SiteKind::Quarry => {
@@ -535,8 +422,7 @@ impl Pile {
         if n == 0 {
             return 0;
         }
-        self.stack =
-            (self.stack * self.wood as f32 + q.clamp(0.0, 1.0) * n as f32) / (self.wood + n) as f32;
+        self.stack = (self.stack * self.wood as f32 + q.clamp(0.0, 1.0) * n as f32) / (self.wood + n) as f32;
         self.wood += n;
         n
     }
@@ -566,9 +452,7 @@ impl Pile {
     /// Сколько воздуха проходит в кучу.
     pub fn air(&self) -> f32 {
         match self.kind {
-            PileKind::Clamp => {
-                self.vents as f32 * 0.11 + self.cracks * 0.9 + (1.0 - self.cover) * 1.2
-            }
+            PileKind::Clamp => self.vents as f32 * 0.11 + self.cracks * 0.9 + (1.0 - self.cover) * 1.2,
             PileKind::Roast => 1.0,
         }
     }
@@ -591,8 +475,7 @@ impl Pile {
                     0.0
                 } else {
                     let load = (self.ore + self.bog).max(1) as f32;
-                    (0.45 + 0.42 * (self.wood as f32 * 2.0 / load).min(2.2))
-                        * (0.5 + 0.5 * fuel.sqrt())
+                    (0.45 + 0.42 * (self.wood as f32 * 2.0 / load).min(2.2)) * (0.5 + 0.5 * fuel.sqrt())
                 }
             }
         }
@@ -623,15 +506,9 @@ impl Pile {
     pub fn light(&mut self) -> Result<(), &'static str> {
         match (self.kind, self.stage) {
             (_, Stage::Burning) if !self.out => Err("Уже горит"),
-            (PileKind::Clamp, Stage::Stack | Stage::Cover) if self.wood < CLAMP_WOOD.0 => {
-                Err("Мало поленьев: куча не займётся")
-            }
-            (PileKind::Roast, Stage::Stack) if self.wood < ROAST_WOOD.0 => {
-                Err("Мало дров под рудой")
-            }
-            (PileKind::Roast, Stage::Stack) if self.ore + self.bog == 0 => {
-                Err("На кострище нет руды")
-            }
+            (PileKind::Clamp, Stage::Stack | Stage::Cover) if self.wood < CLAMP_WOOD.0 => Err("Мало поленьев: куча не займётся"),
+            (PileKind::Roast, Stage::Stack) if self.wood < ROAST_WOOD.0 => Err("Мало дров под рудой"),
+            (PileKind::Roast, Stage::Stack) if self.ore + self.bog == 0 => Err("На кострище нет руды"),
             (_, Stage::Cooling | Stage::Done) => Err("Сначала разберите"),
             _ => {
                 self.stage = Stage::Burning;
@@ -729,10 +606,7 @@ impl Pile {
             ev.push(PileEvent::Blue);
         }
         // Прогары: жарко и рыхло — кровля оседает и прорывается.
-        let p = dt
-            * (0.004 + 0.02 * (h - 0.9).max(0.0))
-            * (1.3 - self.stack * 0.6)
-            * (1.2 - self.cover * 0.4);
+        let p = dt * (0.004 + 0.02 * (h - 0.9).max(0.0)) * (1.3 - self.stack * 0.6) * (1.2 - self.cover * 0.4);
         if rnd < p {
             self.cracks = (self.cracks + 0.25).min(1.0);
             ev.push(PileEvent::Crack);
@@ -782,14 +656,7 @@ impl Pile {
                 let coal = (w * COAL_PER_WOOD * self.charred * care).floor() as u16;
                 let raw = 1.0 - self.charred - self.ash;
                 let brands = (w * raw * 0.85).floor() as u16;
-                Harvest {
-                    charcoal: coal,
-                    wood: brands,
-                    roasted: 0,
-                    ore: 0,
-                    bog: 0,
-                    waste: 0,
-                }
+                Harvest { charcoal: coal, wood: brands, roasted: 0, ore: 0, bog: 0, waste: 0 }
             }
             PileKind::Roast => {
                 let n = (self.ore + self.bog) as f32;
@@ -799,14 +666,7 @@ impl Pile {
                 // Недообожжённое возвращается как было: сначала болотная.
                 let bog = left.min(self.bog);
                 let ore = left - bog;
-                Harvest {
-                    charcoal: 0,
-                    wood: 0,
-                    roasted,
-                    ore,
-                    bog,
-                    waste,
-                }
+                Harvest { charcoal: 0, wood: 0, roasted, ore, bog, waste }
             }
         }
     }
@@ -892,11 +752,7 @@ pub fn roast_reading(p: &Pile, knows: bool) -> String {
             _ => "Перегрев — руда спекается! Ворошите",
         });
     } else {
-        v.push(if p.heat > 1.12 {
-            "Костёр ревёт, камни раскалены докрасна"
-        } else {
-            "Костёр горит, камни дымят"
-        });
+        v.push(if p.heat > 1.12 { "Костёр ревёт, камни раскалены докрасна" } else { "Костёр горит, камни дымят" });
     }
     if p.sinter > 0.08 {
         v.push("Местами руда сплавилась в корку");
@@ -933,13 +789,7 @@ mod tests {
         if p.cracks > 0.0 {
             p.patch(0.8);
         }
-        let want = if p.heat < 0.7 {
-            4
-        } else if p.heat > 1.0 {
-            1
-        } else {
-            2
-        };
+        let want = if p.heat < 0.7 { 4 } else if p.heat > 1.0 { 1 } else { 2 };
         p.set_vents(want);
         if p.smoke() == Smoke::Blue {
             p.smother();
@@ -951,11 +801,7 @@ mod tests {
         let mut p = clamp(20);
         burn(&mut p, 900.0, careful);
         assert_eq!(p.stage, Stage::Cooling, "куча так и не дошла: {p:?}");
-        assert!(
-            p.elapsed > 120.0 && p.elapsed < 600.0,
-            "горела {} с",
-            p.elapsed
-        );
+        assert!(p.elapsed > 120.0 && p.elapsed < 600.0, "горела {} с", p.elapsed);
         let h = p.harvest(0.9);
         assert!(h.charcoal >= 40, "угля мало: {h:?}, {p:?}");
     }
@@ -967,10 +813,7 @@ mod tests {
         let mut bad = clamp(20);
         burn(&mut bad, 900.0, |p, _| p.set_vents(VENTS));
         let (g, b) = (good.harvest(0.9), bad.harvest(0.9));
-        assert!(
-            b.charcoal * 2 < g.charcoal,
-            "с открытыми отдушинами: {b:?}, бережно: {g:?}"
-        );
+        assert!(b.charcoal * 2 < g.charcoal, "с открытыми отдушинами: {b:?}, бережно: {g:?}");
     }
 
     #[test]
@@ -1029,18 +872,8 @@ mod tests {
         let mut ore_k = 0;
         let mut ore_n = 0;
         for i in 0..200 {
-            let r = [
-                (i as f32 * 0.37).fract(),
-                (i as f32 * 0.61).fract(),
-                (i as f32 * 0.13).fract(),
-            ];
-            let count = |d: Dug| {
-                d.items
-                    .iter()
-                    .filter(|(n, _)| *n == ORE)
-                    .map(|(_, c)| *c as i32)
-                    .sum::<i32>()
-            };
+            let r = [(i as f32 * 0.37).fract(), (i as f32 * 0.61).fract(), (i as f32 * 0.13).fract()];
+            let count = |d: Dug| d.items.iter().filter(|(n, _)| *n == ORE).map(|(_, c)| *c as i32).sum::<i32>();
             ore_k += count(dig_yield(SiteKind::Outcrop, true, 20.0, 0.7, r));
             ore_n += count(dig_yield(SiteKind::Outcrop, false, 20.0, 0.7, r));
         }
@@ -1049,9 +882,7 @@ mod tests {
 
     #[test]
     fn richer_ore_gives_more_iron() {
-        assert!(
-            charge_richness(&[(OreGrade::Roasted, 6)]) > charge_richness(&[(OreGrade::Raw, 6)])
-        );
+        assert!(charge_richness(&[(OreGrade::Roasted, 6)]) > charge_richness(&[(OreGrade::Raw, 6)]));
         assert!(charge_richness(&[(OreGrade::Bog, 6)]) < 100);
         assert!(richness_purity(125) > 0.05 && richness_purity(80) < -0.04);
         assert_eq!(charge_richness(&[]), 100);
@@ -1059,36 +890,15 @@ mod tests {
 
     #[test]
     fn tools_are_recognised() {
-        assert!(
-            Tool::Axe.fits("Плотничий топор")
-                && Tool::Axe.fits(WOOD_AXE)
-                && Tool::Axe.fits("Бородовидная секира")
-        );
+        assert!(Tool::Axe.fits("Плотничий топор") && Tool::Axe.fits(WOOD_AXE) && Tool::Axe.fits("Бородовидная секира"));
         assert!(Tool::Pick.fits(PICK) && !Tool::Pick.fits(SPADE));
         assert!(Tool::Spade.fits(SPADE));
     }
 
     #[test]
     fn every_site_item_exists() {
-        for name in [
-            ORE,
-            BOG_ORE,
-            ROASTED_ORE,
-            WASTE,
-            WOOD,
-            CHARCOAL,
-            CLAY,
-            SAND,
-            LIMESTONE,
-            PICK,
-            SPADE,
-            WOOD_AXE,
-            THEOPHRASTUS_PLANTS,
-        ] {
-            assert!(
-                crate::items::ItemBaseId::find(name).is_some(),
-                "нет предмета {name}"
-            );
+        for name in [ORE, BOG_ORE, ROASTED_ORE, WASTE, WOOD, CHARCOAL, CLAY, SAND, LIMESTONE, PICK, SPADE, WOOD_AXE, THEOPHRASTUS_PLANTS] {
+            assert!(crate::items::ItemBaseId::find(name).is_some(), "нет предмета {name}");
         }
     }
 }

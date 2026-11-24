@@ -14,47 +14,21 @@ use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant, SystemTime};
 
 pub fn run(server_addr: SocketAddr, name: String) {
-    let client_id = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos() as u64;
+    let client_id = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
     let socket = UdpSocket::bind("0.0.0.0:0").expect("сокет бота");
-    let auth = ClientAuthentication::Unsecure {
-        protocol_id: PROTOCOL_ID,
-        client_id,
-        server_addr,
-        user_data: None,
-    };
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap();
+    let auth = ClientAuthentication::Unsecure { protocol_id: PROTOCOL_ID, client_id, server_addr, user_data: None };
+    let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
     let mut transport = NetcodeClientTransport::new(now, auth, socket).expect("подключение бота");
     let config = connection_config();
-    let channels: Vec<u8> = config
-        .server_channels_config
-        .iter()
-        .map(|c| c.channel_id)
-        .filter(|c| *c != CH_RELIABLE as u8)
-        .collect();
+    let channels: Vec<u8> = config.server_channels_config.iter().map(|c| c.channel_id).filter(|c| *c != CH_RELIABLE as u8).collect();
     let mut client = RenetClient::new(config);
     let level: LevelColliders = crate::level::level_colliders();
-    let mark = std::env::var("MRPG_MARK")
-        .ok()
-        .map(|s| {
-            s.split(',')
-                .filter_map(|t| t.trim().parse::<f32>().ok())
-                .collect::<Vec<_>>()
-        })
-        .filter(|v| v.len() == 2);
+    let mark = std::env::var("MRPG_MARK").ok().map(|s| s.split(',').filter_map(|t| t.trim().parse::<f32>().ok()).collect::<Vec<_>>()).filter(|v| v.len() == 2);
 
     // `MRPG_BOT_WALK="dx,dz"` — куда и насколько ходить от точки появления.
     let walk = std::env::var("MRPG_BOT_WALK")
         .ok()
-        .map(|s| {
-            s.split(',')
-                .filter_map(|t| t.trim().parse::<f32>().ok())
-                .collect::<Vec<_>>()
-        })
+        .map(|s| s.split(',').filter_map(|t| t.trim().parse::<f32>().ok()).collect::<Vec<_>>())
         .filter(|v| v.len() == 2)
         .map_or(Vec3::new(-30.0, 0.0, 0.0), |v| Vec3::new(v[0], 0.0, v[1]));
     let tick = Duration::from_secs_f64(1.0 / 30.0);
@@ -76,21 +50,14 @@ pub fn run(server_addr: SocketAddr, name: String) {
         if client.is_connected() {
             if !said_hello {
                 said_hello = true;
-                client.send_message(
-                    CH_MAP,
-                    encode(&MapClientMessage::Hello { name: name.clone() }),
-                );
+                client.send_message(CH_MAP, encode(&MapClientMessage::Hello { name: name.clone() }));
                 if let Some(v) = &mark {
-                    client.send_message(
-                        CH_MAP,
-                        encode(&MapClientMessage::SetMark(Some([v[0], v[1]]))),
-                    );
+                    client.send_message(CH_MAP, encode(&MapClientMessage::SetMark(Some([v[0], v[1]]))));
                 }
             }
             while let Some(bytes) = client.receive_message(CH_RELIABLE) {
                 match decode::<ServerMessage>(&bytes) {
-                    Some(ServerMessage::Welcome { spawn, .. })
-                    | Some(ServerMessage::Respawned { pos: spawn, .. }) => {
+                    Some(ServerMessage::Welcome { spawn, .. }) | Some(ServerMessage::Respawned { pos: spawn, .. }) => {
                         feet = Some(spawn.into());
                         home = spawn.into();
                         println!("Бот появился в {home}");
@@ -112,22 +79,11 @@ pub fn run(server_addr: SocketAddr, name: String) {
                 let mut d = target - *f;
                 d.y = 0.0;
                 let step = d.clamp_length_max(1.4 * dt.as_secs_f32());
-                let r = level.move_body(
-                    &Body::STANDING,
-                    f,
-                    step + Vec3::Y * -4.0 * dt.as_secs_f32(),
-                    grounded,
-                );
+                let r = level.move_body(&Body::STANDING, f, step + Vec3::Y * -4.0 * dt.as_secs_f32(), grounded);
                 grounded = r.grounded;
                 let dir = if phase < 1.0 { walk } else { -walk };
                 let yaw = (-dir.x).atan2(-dir.z);
-                let msg = ClientMessage::PlayerState {
-                    pos: (*f).into(),
-                    yaw,
-                    pitch: 0.0,
-                    crouching: false,
-                    sprinting: false,
-                };
+                let msg = ClientMessage::PlayerState { pos: (*f).into(), yaw, pitch: 0.0, crouching: false, sprinting: false };
                 client.send_message(CH_UNRELIABLE, encode(&msg));
             }
         }

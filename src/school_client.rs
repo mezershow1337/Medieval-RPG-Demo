@@ -24,14 +24,8 @@ pub struct SchoolClientPlugin;
 impl Plugin for SchoolClientPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(SchoolUi::default())
-            .add_systems(
-                Startup,
-                setup_school.after(crate::inventory_ui::setup_fonts),
-            )
-            .add_systems(
-                Update,
-                (shot_school, school_input, school_clicks, rebuild_school).chain(),
-            );
+            .add_systems(Startup, setup_school.after(crate::inventory_ui::setup_fonts))
+            .add_systems(Update, (shot_school, school_input, school_clicks, rebuild_school).chain());
     }
 }
 
@@ -169,14 +163,7 @@ fn school_input(
     *was_open = open;
 }
 
-fn school_clicks(
-    buttons: Query<
-        (&Interaction, &SchoolButton, &crate::ui_theme::ThemeButton),
-        Changed<Interaction>,
-    >,
-    mut ui: ResMut<SchoolUi>,
-    mut client: Option<ResMut<RenetClient>>,
-) {
+fn school_clicks(buttons: Query<(&Interaction, &SchoolButton, &crate::ui_theme::ThemeButton), Changed<Interaction>>, mut ui: ResMut<SchoolUi>, mut client: Option<ResMut<RenetClient>>) {
     let Some(master) = ui.master else { return };
     for (i, b, t) in &buttons {
         if *i != Interaction::Pressed || !t.enabled {
@@ -197,13 +184,7 @@ fn school_clicks(
 
 /// Снимок окна (`MRPG_SHOT_UI=school` или `school:notary|scribe|grammarian|logograph|copyist|philosopher`):
 /// открыть окно учителя, как только сервер пришлёт мастеров.
-fn shot_school(
-    mut ui: ResMut<SchoolUi>,
-    mut view: ResMut<LoreView>,
-    mut knowledge: ResMut<MyKnowledge>,
-    mut done: Local<bool>,
-    mut frames: Local<u32>,
-) {
+fn shot_school(mut ui: ResMut<SchoolUi>, mut view: ResMut<LoreView>, mut knowledge: ResMut<MyKnowledge>, mut done: Local<bool>, mut frames: Local<u32>) {
     if *done {
         return;
     }
@@ -224,11 +205,7 @@ fn shot_school(
         "philosopher" => Teacher::Philosopher,
         _ => Teacher::Grammatist,
     };
-    if let Some(id) = view
-        .masters_iter()
-        .find(|m| m.teacher == teacher)
-        .map(|m| m.id)
-    {
+    if let Some(id) = view.masters_iter().find(|m| m.teacher == teacher).map(|m| m.id) {
         ui.show(id);
         *done = true;
         return;
@@ -239,37 +216,12 @@ fn shot_school(
     if *frames < 20 {
         return;
     }
-    let people: Vec<crate::school::Townsman> = crate::level::layout()
-        .residents
-        .iter()
-        .map(|r| crate::school::Townsman {
-            role: Some(r.role),
-            pos: r.pos,
-            yaw: r.yaw,
-        })
-        .collect();
-    if let Some(t) = crate::school::tutors(&people)
-        .into_iter()
-        .find(|t| t.teacher == teacher)
-    {
+    let people: Vec<crate::school::Townsman> = crate::level::layout().residents.iter().map(|r| crate::school::Townsman { role: Some(r.role), pos: r.pos, yaw: r.yaw }).collect();
+    if let Some(t) = crate::school::tutors(&people).into_iter().find(|t| t.teacher == teacher) {
         let id = 9_000;
-        view.insert_demo_master(MasterView {
-            id,
-            teacher,
-            pos: t.pos.into(),
-            yaw: t.yaw,
-            price: t.price,
-            wage: t.wage,
-            resident: t.resident.map(|r| r as u32),
-            hours: t.hours,
-            present: true,
-            place: t.place.to_string(),
-        });
+        view.insert_demo_master(MasterView { id, teacher, pos: t.pos.into(), yaw: t.yaw, price: t.price, wage: t.wage, resident: t.resident.map(|r| r as u32), hours: t.hours, present: true, place: t.place.to_string() });
         knowledge.0.learn(Lore::Alphabet);
-        knowledge
-            .0
-            .lessons
-            .insert(Lore::Read(crate::lore::Language::Greek), 0.35);
+        knowledge.0.lessons.insert(Lore::Read(crate::lore::Language::Greek), 0.35);
         ui.show(id);
     }
     *done = true;
@@ -302,9 +254,7 @@ fn rebuild_school(
         ui.built = None;
         return;
     };
-    let Some(m) = view.master(id).cloned() else {
-        return;
-    };
+    let Some(m) = view.master(id).cloned() else { return };
     let hour = clock.as_ref().map_or(12.0, |c| c.hour());
     // Перестраиваем при смене учителя, знаний, присутствия или раз в игровой час (надпись «учит до…»).
     let key = (id, ui.rev ^ (m.present as u64) << 40 ^ (hour as u64) << 48);
@@ -320,77 +270,34 @@ fn rebuild_school(
     });
 }
 
-fn build(
-    p: &mut ChildSpawnerCommands,
-    theme: &crate::ui_theme::UiTheme,
-    m: &MasterView,
-    k: &Knowledge,
-    hour: f32,
-) {
+fn build(p: &mut ChildSpawnerCommands, theme: &crate::ui_theme::UiTheme, m: &MasterView, k: &Knowledge, hour: f32) {
     let teacher = m.teacher;
     // Шапка: кто и где.
-    p.spawn(Node {
-        width: percent(100),
-        align_items: AlignItems::Center,
-        column_gap: px(8),
-        ..default()
-    })
-    .with_children(|head| {
-        head.spawn(Node {
-            flex_grow: 1.0,
-            flex_direction: FlexDirection::Column,
-            ..default()
-        })
-        .with_children(|t| {
+    p.spawn(Node { width: percent(100), align_items: AlignItems::Center, column_gap: px(8), ..default() }).with_children(|head| {
+        head.spawn(Node { flex_grow: 1.0, flex_direction: FlexDirection::Column, ..default() }).with_children(|t| {
             t.spawn(theme.title_colored(crate::school::tutor_title(teacher), 28.0, ink::RUBRIC));
-            let place =
-                crate::level::place(&m.place).map_or(String::new(), |pl| format!("{} · ", pl.name));
-            t.spawn(theme.text(
-                format!("{place}учит {}", crate::school::hours_text(m.hours)),
-                13.0,
-                ink::INK_DIM,
-            ));
+            let place = crate::level::place(&m.place).map_or(String::new(), |pl| format!("{} · ", pl.name));
+            t.spawn(theme.text(format!("{place}учит {}", crate::school::hours_text(m.hours)), 13.0, ink::INK_DIM));
         });
         theme.small_button(head, "Закрыть", SchoolButton::Close, true);
     });
     let (state, color) = if m.present {
         ("Сейчас на месте и учит.".to_string(), ink::INK)
     } else {
-        (
-            crate::school::away_line(teacher, hour, m.hours),
-            ink::RUBRIC,
-        )
+        (crate::school::away_line(teacher, hour, m.hours), ink::RUBRIC)
     };
     p.spawn(theme.bold(state, 14.0, color));
     let greet = crate::school::tutor_greeting(teacher);
     if !greet.is_empty() {
-        p.spawn((
-            theme.text(format!("«{greet}»"), 14.0, ink::INK_DIM),
-            Node {
-                margin: UiRect::vertical(px(2)),
-                ..default()
-            },
-        ));
+        p.spawn((theme.text(format!("«{greet}»"), 14.0, ink::INK_DIM), Node { margin: UiRect::vertical(px(2)), ..default() }));
     }
     theme.divider(p);
 
     let letters = k.skill(crate::lore::Skill::Letters);
-    p.spawn(theme.text(
-        format!(
-            "Книжное дело: {:.0} · урок — {}",
-            letters,
-            format_money(m.price)
-        ),
-        13.0,
-        ink::INK_DIM,
-    ));
+    p.spawn(theme.text(format!("Книжное дело: {:.0} · урок — {}", letters, format_money(m.price)), 13.0, ink::INK_DIM));
     for lore in teacher.curriculum() {
         let known = k.knows(lore);
-        let missing: Vec<Lore> = lore
-            .requires()
-            .into_iter()
-            .filter(|r| !k.knows(*r))
-            .collect();
+        let missing: Vec<Lore> = lore.requires().into_iter().filter(|r| !k.knows(*r)).collect();
         let started = k.lessons.get(&lore).copied().unwrap_or(0.0);
         p.spawn(Node {
             width: percent(100),
@@ -401,46 +308,23 @@ fn build(
             ..default()
         })
         .with_children(|row| {
-            row.spawn(Node {
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_direction: FlexDirection::Column,
-                row_gap: px(2),
-                ..default()
-            })
-            .with_children(|c| {
-                c.spawn(theme.bold(
-                    lore.subject(),
-                    17.0,
-                    if known { ink::INK_DIM } else { ink::INK },
-                ));
+            row.spawn(Node { flex_grow: 1.0, flex_shrink: 1.0, flex_direction: FlexDirection::Column, row_gap: px(2), ..default() }).with_children(|c| {
+                c.spawn(theme.bold(lore.subject(), 17.0, if known { ink::INK_DIM } else { ink::INK }));
                 c.spawn(theme.text(lore.subject_about(), 13.0, ink::INK_DIM));
                 let (note, col) = if known {
                     ("Выучено.".to_string(), Color::srgb(0.20, 0.45, 0.15))
                 } else if !missing.is_empty() {
-                    let names: Vec<String> =
-                        missing.iter().map(|l| l.subject().to_lowercase()).collect();
+                    let names: Vec<String> = missing.iter().map(|l| l.subject().to_lowercase()).collect();
                     (format!("Сначала: {}.", names.join(", ")), ink::RUBRIC)
                 } else {
                     let n = lessons_left(k, teacher, lore);
-                    let begun = if started > 0.0 {
-                        format!("пройдено {:.0}%, ", started * 100.0)
-                    } else {
-                        String::new()
-                    };
-                    (
-                        format!("{begun}ещё около {n} {}.", plural_lessons(n)),
-                        ink::INK,
-                    )
+                    let begun = if started > 0.0 { format!("пройдено {:.0}%, ", started * 100.0) } else { String::new() };
+                    (format!("{begun}ещё около {n} {}.", plural_lessons(n)), ink::INK)
                 };
                 c.spawn(theme.text(note, 13.0, col));
             });
             let can = k.can_study(teacher, lore) && m.present;
-            let label = if known {
-                "Выучено".to_string()
-            } else {
-                format!("Урок · {}", crate::economy::format_money_short(m.price))
-            };
+            let label = if known { "Выучено".to_string() } else { format!("Урок · {}", crate::economy::format_money_short(m.price)) };
             theme.small_button(row, &label, SchoolButton::Lesson(lore), can);
         });
     }
@@ -454,11 +338,7 @@ fn build(
             theme.small_button(row, &format!("Помогать · {}", crate::economy::format_money_short(m.wage)), SchoolButton::Help, m.present);
         });
     }
-    p.spawn(theme.text(
-        "Esc — закрыть. Отойдёте от учителя — окно закроется.",
-        12.0,
-        ink::INK_DIM,
-    ));
+    p.spawn(theme.text("Esc — закрыть. Отойдёте от учителя — окно закроется.", 12.0, ink::INK_DIM));
 }
 
 #[cfg(test)]

@@ -47,22 +47,14 @@ pub struct SmokeSource {
 /// В `uv.x` зашит номер столба (×4), чтобы у каждого был свой рисунок клубов.
 pub fn column_mesh(w: f32, h: f32, seed: u32) -> Mesh {
     let s = (seed % 997) as f32 * 4.0;
-    let pos = vec![
-        [-w / 2.0, 0.0, 0.0],
-        [w / 2.0, 0.0, 0.0],
-        [w / 2.0, h, 0.0],
-        [-w / 2.0, h, 0.0],
-    ];
+    let pos = vec![[-w / 2.0, 0.0, 0.0], [w / 2.0, 0.0, 0.0], [w / 2.0, h, 0.0], [-w / 2.0, h, 0.0]];
     let nrm = vec![[0.0, 0.0, 1.0]; 4];
     let uv = vec![[s, 0.0], [s + 1.0, 0.0], [s + 1.0, 1.0], [s, 1.0]];
-    Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    )
-    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, nrm)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
-    .with_inserted_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]))
+    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, nrm)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
+        .with_inserted_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]))
 }
 
 /// Высота крыши над точкой: самая высокая черепица (треугольники `roofs`) над `p`.
@@ -101,24 +93,14 @@ pub fn smoke_sources(hearths: &[Vec3], forges: &[Vec3], roofs: &[[Vec3; 3]]) -> 
     let place = |p: Vec3, forge: bool, out: &mut Vec<SmokeSource>| {
         let (base, height) = match roof_above(p, roofs) {
             // Под крышей дым выходит сквозь черепицу и продухи у конька.
-            Some(y) => (
-                Vec3::new(p.x, y - 0.2, p.z),
-                if forge { 20.0 } else { 14.0 },
-            ),
+            Some(y) => (Vec3::new(p.x, y - 0.2, p.z), if forge { 20.0 } else { 14.0 }),
             None => (p + Vec3::Y * 0.3, if forge { 18.0 } else { 12.0 }),
         };
         // Два очага в одном дворе дают один столб.
-        if out
-            .iter()
-            .any(|s: &SmokeSource| s.base.xz().distance(base.xz()) < 8.0)
-        {
+        if out.iter().any(|s: &SmokeSource| s.base.xz().distance(base.xz()) < 8.0) {
             return;
         }
-        out.push(SmokeSource {
-            base,
-            height,
-            forge,
-        });
+        out.push(SmokeSource { base, height, forge });
     };
     for f in forges {
         place(*f, true, &mut out);
@@ -126,9 +108,7 @@ pub fn smoke_sources(hearths: &[Vec3], forges: &[Vec3], roofs: &[[Vec3; 3]]) -> 
     for (i, h) in hearths.iter().enumerate() {
         // Вечером топят не все: кухонные очаги, где готовят ужин (примерно каждый седьмой),
         // и костры в лагерях за стенами. Детерминированно, чтобы у всех игроков одинаково.
-        let k = ((h.x * 12.9898 + h.z * 78.233).sin() * 43758.547)
-            .fract()
-            .abs();
+        let k = ((h.x * 12.9898 + h.z * 78.233).sin() * 43758.547).fract().abs();
         if k > 0.13 && i % 17 != 0 {
             continue;
         }
@@ -137,25 +117,10 @@ pub fn smoke_sources(hearths: &[Vec3], forges: &[Vec3], roofs: &[[Vec3; 3]]) -> 
     out
 }
 
-pub fn spawn_smoke(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    mats: &mut Assets<SmokeMaterial>,
-    sources: &[SmokeSource],
-) {
+pub fn spawn_smoke(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<SmokeMaterial>, sources: &[SmokeSource]) {
     let sky = mood().sky_uniform();
-    let wood = mats.add(SmokeMaterial {
-        smoke: SmokeUniform {
-            sky,
-            tint: Vec4::new(0.78, 0.76, 0.76, 0.42),
-        },
-    });
-    let forge = mats.add(SmokeMaterial {
-        smoke: SmokeUniform {
-            sky,
-            tint: Vec4::new(0.42, 0.40, 0.40, 0.8),
-        },
-    });
+    let wood = mats.add(SmokeMaterial { smoke: SmokeUniform { sky, tint: Vec4::new(0.78, 0.76, 0.76, 0.42) } });
+    let forge = mats.add(SmokeMaterial { smoke: SmokeUniform { sky, tint: Vec4::new(0.42, 0.40, 0.40, 0.8) } });
     for (i, s) in sources.iter().enumerate() {
         let w = s.height * 0.8;
         commands.spawn((
@@ -177,11 +142,7 @@ mod tests {
     #[test]
     fn smoke_leaves_through_the_roof() {
         // Скат над очагом: от y=4 до y=6.
-        let roof = [[
-            Vec3::new(-5.0, 4.0, -5.0),
-            Vec3::new(5.0, 4.0, -5.0),
-            Vec3::new(0.0, 6.0, 5.0),
-        ]];
+        let roof = [[Vec3::new(-5.0, 4.0, -5.0), Vec3::new(5.0, 4.0, -5.0), Vec3::new(0.0, 6.0, 5.0)]];
         let y = roof_above(Vec3::ZERO, &roof).unwrap();
         assert!((y - 5.0).abs() < 0.01, "{y}");
         assert!(roof_above(Vec3::new(20.0, 0.0, 0.0), &roof).is_none());
@@ -192,15 +153,7 @@ mod tests {
 
     #[test]
     fn neighbouring_hearths_share_a_column() {
-        let s = smoke_sources(
-            &[],
-            &[
-                Vec3::ZERO,
-                Vec3::new(1.0, 0.0, 0.0),
-                Vec3::new(10.0, 0.0, 0.0),
-            ],
-            &[],
-        );
+        let s = smoke_sources(&[], &[Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0)], &[]);
         assert_eq!(s.len(), 2);
     }
 }

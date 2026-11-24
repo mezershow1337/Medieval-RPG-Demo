@@ -21,10 +21,7 @@ pub struct DaylightPlugin;
 
 impl Plugin for DaylightPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<EnvBake>().add_systems(
-            Update,
-            (drive_daylight, rebake_environment, drive_windows).chain(),
-        );
+        app.init_resource::<EnvBake>().add_systems(Update, (drive_daylight, rebake_environment, drive_windows).chain());
     }
 }
 
@@ -59,14 +56,7 @@ fn drive_daylight(
     mut smokes: ResMut<Assets<SmokeMaterial>>,
     mut surfaces: ResMut<Assets<SurfaceMaterial>>,
     mut wet_shown: Local<Option<f32>>,
-    mut cams: Query<
-        (
-            Option<&mut DistanceFog>,
-            Option<&mut ColorGrading>,
-            Option<&mut EnvironmentMapLight>,
-        ),
-        With<Camera3d>,
-    >,
+    mut cams: Query<(Option<&mut DistanceFog>, Option<&mut ColorGrading>, Option<&mut EnvironmentMapLight>), With<Camera3d>>,
     mut ambient: ResMut<GlobalAmbientLight>,
     mut clear: ResMut<ClearColor>,
 ) {
@@ -146,13 +136,7 @@ fn drive_daylight(
 }
 
 /// Окна: светятся с сумерек до рассвета.
-fn drive_windows(
-    mood: Option<Res<CurrentMood>>,
-    glow: Option<Res<WindowGlow>>,
-    mut glow_mesh: Query<&mut Visibility, With<WindowGlowMesh>>,
-    mut stds: ResMut<Assets<StandardMaterial>>,
-    mut shown: Local<f32>,
-) {
+fn drive_windows(mood: Option<Res<CurrentMood>>, glow: Option<Res<WindowGlow>>, mut glow_mesh: Query<&mut Visibility, With<WindowGlowMesh>>, mut stds: ResMut<Assets<StandardMaterial>>, mut shown: Local<f32>) {
     let Some(m) = mood.map(|m| m.0) else { return };
     let lit = smoothstep_f(0.35, 0.8, m.night);
     if (lit - *shown).abs() < 0.01 && !(lit == 0.0 && *shown != 0.0) {
@@ -160,11 +144,7 @@ fn drive_windows(
     }
     *shown = lit;
     for mut v in &mut glow_mesh {
-        let want = if lit > 0.01 {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
+        let want = if lit > 0.01 { Visibility::Inherited } else { Visibility::Hidden };
         if *v != want {
             *v = want;
         }
@@ -192,15 +172,8 @@ struct EnvBake {
 
 /// Насколько небо изменилось с прошлого пересчёта.
 fn sky_change(a: &SkyUniform, b: &SkyUniform) -> f32 {
-    let col = |x: Vec4, y: Vec4| {
-        (x.truncate() - y.truncate()).abs().max_element()
-            / (x.truncate().max_element() + y.truncate().max_element() + 0.02)
-    };
-    let sun = 1.0
-        - a.sun
-            .truncate()
-            .normalize()
-            .dot(b.sun.truncate().normalize());
+    let col = |x: Vec4, y: Vec4| (x.truncate() - y.truncate()).abs().max_element() / (x.truncate().max_element() + y.truncate().max_element() + 0.02);
+    let sun = 1.0 - a.sun.truncate().normalize().dot(b.sun.truncate().normalize());
     sun * 40.0
         + (a.sun.w - b.sun.w).abs()
         + (a.extra.x - b.extra.x).abs()
@@ -218,15 +191,10 @@ fn rebake_environment(
     mut images: ResMut<Assets<Image>>,
     mut cams: Query<&mut EnvironmentMapLight, With<Camera3d>>,
 ) {
-    let (Some(current), Some(mut env)) = (current, env) else {
-        return;
-    };
+    let (Some(current), Some(mut env)) = (current, env) else { return };
     // Готова новая карта — подменяем у всех камер, старую выбрасываем.
     if let Some((sky, rx)) = bake.pending.as_ref()
-        && let Ok((diffuse, specular)) = rx
-            .lock()
-            .map_err(|_| ())
-            .and_then(|r| r.try_recv().map_err(|_| ()))
+        && let Ok((diffuse, specular)) = rx.lock().map_err(|_| ()).and_then(|r| r.try_recv().map_err(|_| ()))
     {
         let sky = *sky;
         let (old_d, old_s) = (env.diffuse.clone(), env.specular.clone());
@@ -247,9 +215,7 @@ fn rebake_environment(
     }
     bake.next_check = now + 1.5;
     let sky = current.0.sky_uniform();
-    let baked = *bake
-        .baked
-        .get_or_insert_with(|| crate::graphics::mood().sky_uniform());
+    let baked = *bake.baked.get_or_insert_with(|| crate::graphics::mood().sky_uniform());
     if sky_change(&sky, &baked) < 0.08 {
         return;
     }
@@ -270,14 +236,8 @@ mod tests {
         let noon = mood_at(DAY * 2.0 + 13.0 * 3600.0);
         let midnight = mood_at(DAY * 2.0 + 0.5 * 3600.0);
         let dusk = mood_at(DAY * 2.0 + 20.0 * 3600.0);
-        assert!(
-            noon.lux > 5000.0 && noon.night < 0.01 && noon.dayness > 0.9,
-            "{noon:?}"
-        );
-        assert!(
-            midnight.night > 0.99 && midnight.lux < 600.0,
-            "{midnight:?}"
-        );
+        assert!(noon.lux > 5000.0 && noon.night < 0.01 && noon.dayness > 0.9, "{noon:?}");
+        assert!(midnight.night > 0.99 && midnight.lux < 600.0, "{midnight:?}");
         assert!(midnight.horizon.length() < noon.horizon.length() * 0.1);
         // На закате небо у солнца тёплое.
         assert!(dusk.horizon_sun.0.x > dusk.horizon_sun.0.z);
@@ -290,12 +250,7 @@ mod tests {
         let mut prev = mood_at(DAY * 3.0).sky_uniform();
         for i in 1..(24 * 60) {
             let u = mood_at(DAY * 3.0 + i as f64 * 60.0).sky_uniform();
-            assert!(
-                sky_change(&u, &prev) < 0.12,
-                "скачок неба в {} мин: {}",
-                i,
-                sky_change(&u, &prev)
-            );
+            assert!(sky_change(&u, &prev) < 0.12, "скачок неба в {} мин: {}", i, sky_change(&u, &prev));
             prev = u;
         }
     }
@@ -320,19 +275,7 @@ mod mood_dump {
     fn dump_moods() {
         for h in [61.0f64, 66.75, 68.3, 71.5, 81.0, 54.5] {
             let m = crate::graphics::mood_at(h * 3600.0);
-            println!(
-                "{h}: lux {:.0} sun {:?} sky {:?} amb {:.0} clouds {:.2} oc {:.2} night {:.2} day {:.2} haze {:.4} vis {:.0}",
-                m.lux,
-                m.sun,
-                m.sun_sky,
-                m.ambient.1,
-                m.clouds,
-                m.overcast,
-                m.night,
-                m.dayness,
-                m.haze,
-                m.visibility
-            );
+            println!("{h}: lux {:.0} sun {:?} sky {:?} amb {:.0} clouds {:.2} oc {:.2} night {:.2} day {:.2} haze {:.4} vis {:.0}", m.lux, m.sun, m.sun_sky, m.ambient.1, m.clouds, m.overcast, m.night, m.dayness, m.haze, m.visibility);
         }
     }
 }

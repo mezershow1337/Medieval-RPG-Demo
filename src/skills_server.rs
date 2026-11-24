@@ -26,10 +26,7 @@ impl Plugin for SkillsServerPlugin {
         app.init_resource::<PracticeQueue>()
             .init_resource::<SkillMods>()
             .init_resource::<SkillTrack>()
-            .add_systems(
-                Update,
-                (debug_skills, body_practice, apply_practice, refresh_mods).chain(),
-            );
+            .add_systems(Update, (debug_skills, body_practice, apply_practice, refresh_mods).chain());
     }
 }
 
@@ -51,37 +48,21 @@ impl PracticeQueue {
 
     /// Удар в ближнем бою дошёл до цели: учится нападавший или защищавшийся.
     pub fn melee(&mut self, world: &GameWorld, attacker: u64, target: u64, outcome: HitOutcome) {
-        let is_player = |id: u64| {
-            world
-                .actors
-                .get(&id)
-                .is_some_and(|a| a.kind == ActorKind::Player)
-        };
+        let is_player = |id: u64| world.actors.get(&id).is_some_and(|a| a.kind == ActorKind::Player);
         if !Self::fair_target(world, target) {
             return;
         }
         match outcome {
-            HitOutcome::Damage { .. } if is_player(attacker) => {
-                self.add(attacker, Skill::Arms, skill_tree::PRACTICE_HIT)
-            }
-            HitOutcome::Parried | HitOutcome::Blocked { .. } if is_player(target) => {
-                self.add(target, Skill::Arms, skill_tree::PRACTICE_DEFEND)
-            }
+            HitOutcome::Damage { .. } if is_player(attacker) => self.add(attacker, Skill::Arms, skill_tree::PRACTICE_HIT),
+            HitOutcome::Parried | HitOutcome::Blocked { .. } if is_player(target) => self.add(target, Skill::Arms, skill_tree::PRACTICE_DEFEND),
             _ => {}
         }
     }
 
     /// Стрела попала.
     pub fn arrow(&mut self, world: &GameWorld, owner: u64, target: u64, outcome: HitOutcome) {
-        let shooter = world
-            .actors
-            .get(&owner)
-            .is_some_and(|a| a.kind == ActorKind::Player);
-        if shooter
-            && owner != target
-            && matches!(outcome, HitOutcome::Damage { .. })
-            && Self::fair_target(world, target)
-        {
+        let shooter = world.actors.get(&owner).is_some_and(|a| a.kind == ActorKind::Player);
+        if shooter && owner != target && matches!(outcome, HitOutcome::Damage { .. }) && Self::fair_target(world, target) {
             self.add(owner, Skill::Archery, skill_tree::PRACTICE_ARROW);
         }
     }
@@ -112,14 +93,7 @@ struct SkillTrack {
 }
 
 /// Выносливость от потраченных сил, сила от тяжёлой ноши.
-fn body_practice(
-    time: Res<Time>,
-    world: Res<GameWorld>,
-    loot: Option<Res<LootWorld>>,
-    mods: Res<SkillMods>,
-    mut track: ResMut<SkillTrack>,
-    mut queue: ResMut<PracticeQueue>,
-) {
+fn body_practice(time: Res<Time>, world: Res<GameWorld>, loot: Option<Res<LootWorld>>, mods: Res<SkillMods>, mut track: ResMut<SkillTrack>, mut queue: ResMut<PracticeQueue>) {
     let dt = time.delta_secs().min(0.1);
     if dt <= 0.0 {
         return;
@@ -139,15 +113,11 @@ fn body_practice(
             let spent = (prev - st).max(0.0);
             // Скачок больше 40 — это смена экипировки или воскрешение, не труд.
             if spent > 0.0 && spent < 40.0 {
-                *track.pending.entry((*id, Skill::Endurance)).or_default() +=
-                    spent / 100.0 * skill_tree::PRACTICE_STAMINA_PER_100;
+                *track.pending.entry((*id, Skill::Endurance)).or_default() += spent / 100.0 * skill_tree::PRACTICE_STAMINA_PER_100;
             }
         }
         let feet = a.pose.feet;
-        let moved = track
-            .feet
-            .insert(*id, feet)
-            .map_or(0.0, |p| Vec2::new(feet.x - p.x, feet.z - p.z).length());
+        let moved = track.feet.insert(*id, feet).map_or(0.0, |p| Vec2::new(feet.x - p.x, feet.z - p.z).length());
         if moved / dt > 0.8
             && moved < 3.0
             && let Some(inv) = loot.as_ref().and_then(|l| l.inventories.get(id))
@@ -156,18 +126,12 @@ fn body_practice(
             let cap = crate::weight::carry_capacity(strength) + mods.get(*id).carry;
             let load = crate::weight::inventory_weight(inv);
             if load > cap * 0.7 {
-                *track.pending.entry((*id, Skill::Strength)).or_default() +=
-                    skill_tree::PRACTICE_LOAD_PER_SEC * dt * (load / cap).min(1.5);
+                *track.pending.entry((*id, Skill::Strength)).or_default() += skill_tree::PRACTICE_LOAD_PER_SEC * dt * (load / cap).min(1.5);
             }
         }
     }
     // Мелочь копится и уходит в знания порциями.
-    let ready: Vec<(u64, Skill)> = track
-        .pending
-        .iter()
-        .filter(|(_, v)| **v >= 0.05)
-        .map(|(k, _)| *k)
-        .collect();
+    let ready: Vec<(u64, Skill)> = track.pending.iter().filter(|(_, v)| **v >= 0.05).map(|(k, _)| *k).collect();
     for key in ready {
         if let Some(v) = track.pending.remove(&key) {
             queue.add(key.0, key.1, v);
@@ -175,12 +139,7 @@ fn body_practice(
     }
 }
 
-fn apply_practice(
-    mut queue: ResMut<PracticeQueue>,
-    mut knowledge: ResMut<KnowledgeWorld>,
-    mut track: ResMut<SkillTrack>,
-    trade: Option<ResMut<crate::trade_server::TradeWorld>>,
-) {
+fn apply_practice(mut queue: ResMut<PracticeQueue>, mut knowledge: ResMut<KnowledgeWorld>, mut track: ResMut<SkillTrack>, trade: Option<ResMut<crate::trade_server::TradeWorld>>) {
     // Сделки в лавках: опыт от оборота.
     if let Some(mut tw) = trade {
         for (player, turnover) in std::mem::take(&mut tw.turnover) {
@@ -212,12 +171,8 @@ fn refresh_mods(
     track.timer = 0.5;
     let track = &mut *track;
     mods.0.retain(|id, _| knowledge.players.contains_key(id));
-    track
-        .perks
-        .retain(|id, _| knowledge.players.contains_key(id));
-    track
-        .shown
-        .retain(|id, _| knowledge.players.contains_key(id));
+    track.perks.retain(|id, _| knowledge.players.contains_key(id));
+    track.shown.retain(|id, _| knowledge.players.contains_key(id));
     for (id, k) in &knowledge.players {
         let m = Mods::of(k);
         mods.0.insert(*id, m);
@@ -234,16 +189,7 @@ fn refresh_mods(
         if let Some(before) = before.as_ref() {
             for p in now.iter().filter(|p| !before.contains(p)) {
                 let info = p.info();
-                notice(
-                    &mut server,
-                    *id,
-                    format!(
-                        "Новое умение: «{}» ({}). {} Книга навыков — K",
-                        info.name,
-                        info.skill.name().to_lowercase(),
-                        info.effect
-                    ),
-                );
+                notice(&mut server, *id, format!("Новое умение: «{}» ({}). {} Книга навыков — K", info.name, info.skill.name().to_lowercase(), info.effect));
                 track.dirty.insert(*id);
             }
         }
@@ -254,11 +200,7 @@ fn refresh_mods(
                 for s in Skill::ALL {
                     let i = s.index();
                     if levels[i] > old[i] && levels[i] % 5 == 0 {
-                        notice(
-                            &mut server,
-                            *id,
-                            format!("{} растёт: {}", s.name(), levels[i]),
-                        );
+                        notice(&mut server, *id, format!("{} растёт: {}", s.name(), levels[i]));
                     }
                 }
             }
@@ -272,11 +214,7 @@ fn refresh_mods(
 }
 
 /// `MRPG_DEBUG_SKILLS=1` — новый игрок сразу с навыками и знаниями (для снимков древа).
-fn debug_skills(
-    mut knowledge: ResMut<KnowledgeWorld>,
-    mut track: ResMut<SkillTrack>,
-    mut done: Local<HashSet<u64>>,
-) {
+fn debug_skills(mut knowledge: ResMut<KnowledgeWorld>, mut track: ResMut<SkillTrack>, mut done: Local<HashSet<u64>>) {
     if std::env::var("MRPG_DEBUG_SKILLS").is_err() {
         return;
     }

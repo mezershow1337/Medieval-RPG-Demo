@@ -22,10 +22,7 @@ pub struct MapBounds {
 impl MapBounds {
     /// Мировая точка -> доля карты (0..1 по ширине, 0..1 по высоте сверху вниз).
     pub fn to_uv(&self, x: f32, z: f32) -> Vec2 {
-        Vec2::new(
-            (x - self.min.x) / (self.max.x - self.min.x),
-            (z - self.min.y) / (self.max.y - self.min.y),
-        )
+        Vec2::new((x - self.min.x) / (self.max.x - self.min.x), (z - self.min.y) / (self.max.y - self.min.y))
     }
     pub fn from_uv(&self, uv: Vec2) -> Vec2 {
         self.min + uv * (self.max - self.min)
@@ -62,8 +59,7 @@ fn classify(m: Mat) -> Option<Class> {
     Some(match m {
         Tile | Roof => Class::Roof,
         Thatch | Felt | Canvas => Class::Thatch,
-        Limestone | Stone | DarkStone | Rubble | Plaster | OpusMixtum | Brick | Marble | Trim
-        | Signinum => Class::Masonry,
+        Limestone | Stone | DarkStone | Rubble | Plaster | OpusMixtum | Brick | Marble | Trim | Signinum => Class::Masonry,
         Paving | Cobble | Floor | Mosaic | Earth => Class::Paving,
         Wood => Class::Wood,
         Leaves | Conifer => Class::Tree,
@@ -93,18 +89,12 @@ pub fn bounds_for(layout: &Layout, extra: &[Vec3]) -> MapBounds {
         add(Vec2::new(p.x, p.z));
     }
     if lo.x > hi.x {
-        return MapBounds {
-            min: Vec2::splat(-50.0),
-            max: Vec2::splat(50.0),
-        };
+        return MapBounds { min: Vec2::splat(-50.0), max: Vec2::splat(50.0) };
     }
     let margin = if layout.ground.is_some() { 110.0 } else { 14.0 };
     let c = (lo + hi) / 2.0;
     let half = ((hi - lo).max_element() / 2.0 + margin).max(40.0);
-    MapBounds {
-        min: c - half,
-        max: c + half,
-    }
+    MapBounds { min: c - half, max: c + half }
 }
 
 // ---------------------------------------------------------------------------
@@ -112,9 +102,7 @@ pub fn bounds_for(layout: &Layout, extra: &[Vec3]) -> MapBounds {
 // ---------------------------------------------------------------------------
 
 fn hash(ix: i32, iz: i32, seed: u32) -> f32 {
-    let mut h = (ix as u32).wrapping_mul(0x8da6_b343)
-        ^ (iz as u32).wrapping_mul(0xd816_3841)
-        ^ seed.wrapping_mul(0xcb1a_b31f);
+    let mut h = (ix as u32).wrapping_mul(0x8da6_b343) ^ (iz as u32).wrapping_mul(0xd816_3841) ^ seed.wrapping_mul(0xcb1a_b31f);
     h ^= h >> 13;
     h = h.wrapping_mul(0x5bd1_e995);
     h ^= h >> 15;
@@ -148,11 +136,7 @@ type Rgb = [f32; 3];
 
 fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
     let t = t.clamp(0.0, 1.0);
-    [
-        a[0] + (b[0] - a[0]) * t,
-        a[1] + (b[1] - a[1]) * t,
-        a[2] + (b[2] - a[2]) * t,
-    ]
+    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
 }
 
 fn mul(a: Rgb, k: f32) -> Rgb {
@@ -197,8 +181,7 @@ impl Top {
 /// Плавная высота земли (без сетки 6 м), если уровень её знает: по ней берег на карте
 /// рисуется ровной линией, а не ступеньками.
 pub fn smooth_ground() -> Option<fn(f32, f32) -> f32> {
-    (crate::level::active() == crate::level::LevelKind::Chersonesus)
-        .then_some(crate::level::height_at as fn(f32, f32) -> f32)
+    (crate::level::active() == crate::level::LevelKind::Chersonesus).then_some(crate::level::height_at as fn(f32, f32) -> f32)
 }
 
 /// Рисует карту уровня. `size` — сторона растра в пикселях.
@@ -207,12 +190,7 @@ pub fn render(layout: &Layout, bounds: MapBounds, size: usize) -> MapRaster {
     let n = size;
     let px = bounds.size() / n as f32;
     let to_px = |x: f32, z: f32| ((x - bounds.min.x) / px, (z - bounds.min.y) / px);
-    let mut top = Top {
-        n,
-        h: vec![f32::NEG_INFINITY; n * n],
-        class: vec![Class::Ground as u8; n * n],
-        rise: vec![0.0; n * n],
-    };
+    let mut top = Top { n, h: vec![f32::NEG_INFINITY; n * n], class: vec![Class::Ground as u8; n * n], rise: vec![0.0; n * n] };
 
     // Коробки уровня: верхняя грань.
     for b in &layout.blocks {
@@ -225,10 +203,7 @@ pub fn render(layout: &Layout, bounds: MapBounds, size: usize) -> MapRaster {
         let (x1, z1) = to_px(b.aabb.max.x, b.aabb.max.z);
         // Узкие стены (тоньше пикселя) всё равно оставляют след в одну точку.
         let (ix0, iz0) = (x0.round().max(0.0) as i64, z0.round().max(0.0) as i64);
-        let (ix1, iz1) = (
-            (x1.round() as i64).max(ix0 + 1).min(n as i64),
-            (z1.round() as i64).max(iz0 + 1).min(n as i64),
-        );
+        let (ix1, iz1) = ((x1.round() as i64).max(ix0 + 1).min(n as i64), (z1.round() as i64).max(iz0 + 1).min(n as i64));
         for iz in iz0..iz1 {
             for ix in ix0..ix1 {
                 top.put(iz as usize * n + ix as usize, b.aabb.max.y, c);
@@ -259,10 +234,7 @@ pub fn render(layout: &Layout, bounds: MapBounds, size: usize) -> MapRaster {
     for iz in 0..n {
         for ix in 0..n {
             let i = iz * n + ix;
-            let (x, z) = (
-                bounds.min.x + (ix as f32 + 0.5) * px,
-                bounds.min.y + (iz as f32 + 0.5) * px,
-            );
+            let (x, z) = (bounds.min.x + (ix as f32 + 0.5) * px, bounds.min.y + (iz as f32 + 0.5) * px);
             let mut g = ground(x, z);
             if let Some(f) = smooth
                 && g.is_finite()
@@ -280,11 +252,7 @@ pub fn render(layout: &Layout, bounds: MapBounds, size: usize) -> MapRaster {
                 sea[i] = true;
                 top.class[i] = Class::Sea as u8;
             }
-            top.rise[i] = if top.h[i].is_finite() {
-                top.h[i] - gh[i]
-            } else {
-                0.0
-            };
+            top.rise[i] = if top.h[i].is_finite() { top.h[i] - gh[i] } else { 0.0 };
             if !top.h[i].is_finite() {
                 top.h[i] = gh[i];
             }
@@ -295,21 +263,14 @@ pub fn render(layout: &Layout, bounds: MapBounds, size: usize) -> MapRaster {
     let coast_dist = distance_field(n, &sea);
 
     let mut rgba = vec![0u8; n * n * 4];
-    let at = |v: &Vec<f32>, ix: i64, iz: i64| {
-        v[(iz.clamp(0, n as i64 - 1) as usize) * n + ix.clamp(0, n as i64 - 1) as usize]
-    };
-    let cls = |ix: i64, iz: i64| {
-        top.class[(iz.clamp(0, n as i64 - 1) as usize) * n + ix.clamp(0, n as i64 - 1) as usize]
-    };
+    let at = |v: &Vec<f32>, ix: i64, iz: i64| v[(iz.clamp(0, n as i64 - 1) as usize) * n + ix.clamp(0, n as i64 - 1) as usize];
+    let cls = |ix: i64, iz: i64| top.class[(iz.clamp(0, n as i64 - 1) as usize) * n + ix.clamp(0, n as i64 - 1) as usize];
     let m_per_px = px;
     for iz in 0..n {
         for ix in 0..n {
             let i = iz * n + ix;
             let (fx, fz) = (ix as f32, iz as f32);
-            let (x, z) = (
-                bounds.min.x + (fx + 0.5) * px,
-                bounds.min.y + (fz + 0.5) * px,
-            );
+            let (x, z) = (bounds.min.x + (fx + 0.5) * px, bounds.min.y + (fz + 0.5) * px);
             let (ixi, izi) = (ix as i64, iz as i64);
 
             // Пергамент: неровный тон, волокна, редкие пятна.
@@ -324,11 +285,7 @@ pub fn render(layout: &Layout, bounds: MapBounds, size: usize) -> MapRaster {
             let wobble = fbm(fx / 9.0, fz / 9.0, 41, 2) - 0.5;
             if class == Class::Sea as u8 {
                 let d = coast_dist[i] * m_per_px;
-                c = mix(
-                    c,
-                    mix(SEA, SEA_DEEP, (d / 220.0).min(1.0)),
-                    0.55 + 0.1 * blotch,
-                );
+                c = mix(c, mix(SEA, SEA_DEEP, (d / 220.0).min(1.0)), 0.55 + 0.1 * blotch);
                 // Волны вдоль берега: чем дальше, тем реже и бледнее (как штриховка на картах).
                 for (k, dist) in [7.0f32, 15.0, 25.0, 38.0].iter().enumerate() {
                     let w = (d + wobble * 3.0 - dist).abs();
@@ -392,10 +349,7 @@ pub fn render(layout: &Layout, bounds: MapBounds, size: usize) -> MapRaster {
             for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
                 let dh = (at(&top.h, ixi + dx, izi + dz) - top.h[i]).abs();
                 // Под водой перепады дна не рисуем — только берег.
-                if dh > 1.2
-                    && class != Class::Sea as u8
-                    && cls(ixi + dx, izi + dz) != Class::Sea as u8
-                {
+                if dh > 1.2 && class != Class::Sea as u8 && cls(ixi + dx, izi + dz) != Class::Sea as u8 {
                     edge = edge.max(((dh - 1.2) / 2.0).clamp(0.45, 0.9));
                 }
                 let other = cls(ixi + dx, izi + dz);
@@ -424,11 +378,7 @@ pub fn render(layout: &Layout, bounds: MapBounds, size: usize) -> MapRaster {
             rgba[o + 3] = 255;
         }
     }
-    MapRaster {
-        size: n,
-        rgba,
-        bounds,
-    }
+    MapRaster { size: n, rgba, bounds }
 }
 
 /// Треугольник сверху: заполняем пиксели, центр которых внутри; высота — интерполяция.
@@ -444,19 +394,9 @@ fn raster_tri(top: &mut Top, to_px: &impl Fn(f32, f32) -> (f32, f32), v: [Vec3; 
     if nrm.y.abs() < 0.2 {
         return;
     }
-    let minx = p
-        .iter()
-        .map(|q| q.0)
-        .fold(f32::MAX, f32::min)
-        .floor()
-        .max(0.0) as i64;
+    let minx = p.iter().map(|q| q.0).fold(f32::MAX, f32::min).floor().max(0.0) as i64;
     let maxx = (p.iter().map(|q| q.0).fold(f32::MIN, f32::max).ceil() as i64).min(n - 1);
-    let minz = p
-        .iter()
-        .map(|q| q.1)
-        .fold(f32::MAX, f32::min)
-        .floor()
-        .max(0.0) as i64;
+    let minz = p.iter().map(|q| q.1).fold(f32::MAX, f32::min).floor().max(0.0) as i64;
     let maxz = (p.iter().map(|q| q.1).fold(f32::MIN, f32::max).ceil() as i64).min(n - 1);
     if minx > maxx || minz > maxz {
         return;
@@ -554,11 +494,7 @@ mod tests {
         let b = bounds_for(&layout, &extra);
         for p in crate::level::places() {
             let uv = b.to_uv(p.pos.x, p.pos.z);
-            assert!(
-                uv.x > 0.02 && uv.x < 0.98 && uv.y > 0.02 && uv.y < 0.98,
-                "{} вне карты: {uv}",
-                p.id
-            );
+            assert!(uv.x > 0.02 && uv.x < 0.98 && uv.y > 0.02 && uv.y < 0.98, "{} вне карты: {uv}", p.id);
         }
         let back = b.from_uv(b.to_uv(12.0, -40.0));
         assert!((back - Vec2::new(12.0, -40.0)).length() < 1e-3);
@@ -570,10 +506,7 @@ mod tests {
         let layout = crate::level::layout();
         let extra: Vec<Vec3> = crate::level::places().iter().map(|p| p.pos).collect();
         let b = bounds_for(&layout, &extra);
-        let size = std::env::var("MRPG_MAP_SIZE")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(512);
+        let size = std::env::var("MRPG_MAP_SIZE").ok().and_then(|s| s.parse().ok()).unwrap_or(512);
         let r = render(&layout, b, size);
         assert_eq!(r.rgba.len(), size * size * 4);
         // На карте Херсонеса есть и море (зеленовато-голубое), и черепичные крыши (рыжие).
@@ -585,37 +518,19 @@ mod tests {
         };
         if crate::level::active() == crate::level::LevelKind::Chersonesus {
             let sea = px(Vec3::new(0.0, 0.0, -260.0));
-            assert!(
-                sea[1] > sea[0],
-                "море должно быть зеленовато-голубым (ярь-медянка): {sea:?}"
-            );
-            let reds = r
-                .rgba
-                .chunks_exact(4)
-                .filter(|c| c[0] as i32 - c[2] as i32 > 70)
-                .count();
-            assert!(
-                reds > size * size / 400,
-                "на карте должны быть черепичные крыши: {reds}"
-            );
+            assert!(sea[1] > sea[0], "море должно быть зеленовато-голубым (ярь-медянка): {sea:?}");
+            let reds = r.rgba.chunks_exact(4).filter(|c| c[0] as i32 - c[2] as i32 > 70).count();
+            assert!(reds > size * size / 400, "на карте должны быть черепичные крыши: {reds}");
         }
         if let Ok(path) = std::env::var("MRPG_MAP_PNG") {
             let img = Image::new(
-                bevy::render::render_resource::Extent3d {
-                    width: size as u32,
-                    height: size as u32,
-                    depth_or_array_layers: 1,
-                },
+                bevy::render::render_resource::Extent3d { width: size as u32, height: size as u32, depth_or_array_layers: 1 },
                 bevy::render::render_resource::TextureDimension::D2,
                 r.rgba.clone(),
                 bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
                 bevy::asset::RenderAssetUsages::default(),
             );
-            img.try_into_dynamic()
-                .unwrap()
-                .to_rgba8()
-                .save(path)
-                .unwrap();
+            img.try_into_dynamic().unwrap().to_rgba8().save(path).unwrap();
         }
     }
 }

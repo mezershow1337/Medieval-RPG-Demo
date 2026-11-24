@@ -24,9 +24,7 @@ impl MeshBuilder {
 
     /// Все треугольники (для расчётов на процессоре: над чем крыша и т. п.).
     pub fn triangles(&self) -> impl Iterator<Item = [Vec3; 3]> + '_ {
-        self.idx
-            .chunks_exact(3)
-            .map(|t| [0, 1, 2].map(|k| Vec3::from_array(self.pos[t[k] as usize])))
+        self.idx.chunks_exact(3).map(|t| [0, 1, 2].map(|k| Vec3::from_array(self.pos[t[k] as usize])))
     }
 
     /// Четырёхугольник. Порядок вершин переворачивается так, чтобы лицевая сторона смотрела по `facing`.
@@ -44,11 +42,9 @@ impl MeshBuilder {
             self.uv.push(uv[i].to_array());
         }
         if flip {
-            self.idx
-                .extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
+            self.idx.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
         } else {
-            self.idx
-                .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+            self.idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         }
     }
 
@@ -56,16 +52,7 @@ impl MeshBuilder {
         // UV в метрах по двум рёбрам — пригодится для узоров, завязанных на UV.
         let u = (v[1] - v[0]).length();
         let w = (v[3] - v[0]).length();
-        self.quad_uv(
-            v,
-            [
-                Vec2::ZERO,
-                Vec2::new(u, 0.0),
-                Vec2::new(u, w),
-                Vec2::new(0.0, w),
-            ],
-            facing,
-        );
+        self.quad_uv(v, [Vec2::ZERO, Vec2::new(u, 0.0), Vec2::new(u, w), Vec2::new(0.0, w)], facing);
     }
 
     pub fn tri(&mut self, a: Vec3, b: Vec3, c: Vec3, facing: Vec3) {
@@ -80,8 +67,7 @@ impl MeshBuilder {
             self.pos.push(p.to_array());
             self.nrm.push(n.to_array());
         }
-        self.uv
-            .extend_from_slice(&[[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]);
+        self.uv.extend_from_slice(&[[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]);
         if flip {
             self.idx.extend_from_slice(&[base, base + 2, base + 1]);
         } else {
@@ -169,11 +155,7 @@ impl MeshBuilder {
     /// Многогранная пирамида (шпиль). `sides` = 4 — квадратный, 8 — восьмигранный.
     pub fn spire(&mut self, base: Vec3, radius: f32, height: f32, sides: usize) {
         let apex = base + Vec3::Y * height;
-        let offset = if sides == 4 {
-            std::f32::consts::FRAC_PI_4
-        } else {
-            0.0
-        };
+        let offset = if sides == 4 { std::f32::consts::FRAC_PI_4 } else { 0.0 };
         let ring: Vec<Vec3> = (0..sides)
             .map(|i| {
                 let a = offset + i as f32 / sides as f32 * std::f32::consts::TAU;
@@ -190,11 +172,7 @@ impl MeshBuilder {
 
     /// Восьмигранная призма (колонна, барабан башенки).
     pub fn prism(&mut self, base: Vec3, radius: f32, height: f32, sides: usize) {
-        let offset = if sides == 4 {
-            std::f32::consts::FRAC_PI_4
-        } else {
-            std::f32::consts::PI / sides as f32
-        };
+        let offset = if sides == 4 { std::f32::consts::FRAC_PI_4 } else { std::f32::consts::PI / sides as f32 };
         let ring: Vec<Vec3> = (0..sides)
             .map(|i| {
                 let a = offset + i as f32 / sides as f32 * std::f32::consts::TAU;
@@ -205,10 +183,7 @@ impl MeshBuilder {
             let a = base + ring[i];
             let b = base + ring[(i + 1) % sides];
             let up = Vec3::Y * height;
-            self.quad(
-                [a, b, b + up, a + up],
-                (ring[i] + ring[(i + 1) % sides]) / 2.0,
-            );
+            self.quad([a, b, b + up, a + up], (ring[i] + ring[(i + 1) % sides]) / 2.0);
         }
         let top: Vec<Vec3> = ring.iter().map(|p| base + *p + Vec3::Y * height).collect();
         let uvs: Vec<Vec2> = ring.iter().map(|p| Vec2::new(p.x, p.z)).collect();
@@ -225,28 +200,13 @@ impl MeshBuilder {
             let l = x1 - x0;
             for (ze, s) in [(z0, -1.0f32), (z1, 1.0)] {
                 self.quad_uv(
-                    [
-                        Vec3::new(x0, eave_y, ze),
-                        Vec3::new(x1, eave_y, ze),
-                        Vec3::new(x1, ridge_y, zm),
-                        Vec3::new(x0, ridge_y, zm),
-                    ],
-                    [
-                        Vec2::new(0.0, slope),
-                        Vec2::new(l, slope),
-                        Vec2::new(l, 0.0),
-                        Vec2::new(0.0, 0.0),
-                    ],
+                    [Vec3::new(x0, eave_y, ze), Vec3::new(x1, eave_y, ze), Vec3::new(x1, ridge_y, zm), Vec3::new(x0, ridge_y, zm)],
+                    [Vec2::new(0.0, slope), Vec2::new(l, slope), Vec2::new(l, 0.0), Vec2::new(0.0, 0.0)],
                     Vec3::new(0.0, half / (ridge_y - eave_y).max(0.01), s),
                 );
             }
             for (xe, s) in [(x0, -1.0f32), (x1, 1.0)] {
-                self.tri(
-                    Vec3::new(xe, eave_y, z0),
-                    Vec3::new(xe, eave_y, z1),
-                    Vec3::new(xe, ridge_y, zm),
-                    Vec3::X * s,
-                );
+                self.tri(Vec3::new(xe, eave_y, z0), Vec3::new(xe, eave_y, z1), Vec3::new(xe, ridge_y, zm), Vec3::X * s);
             }
         } else {
             let xm = (x0 + x1) / 2.0;
@@ -255,41 +215,19 @@ impl MeshBuilder {
             let l = z1 - z0;
             for (xe, s) in [(x0, -1.0f32), (x1, 1.0)] {
                 self.quad_uv(
-                    [
-                        Vec3::new(xe, eave_y, z0),
-                        Vec3::new(xe, eave_y, z1),
-                        Vec3::new(xm, ridge_y, z1),
-                        Vec3::new(xm, ridge_y, z0),
-                    ],
-                    [
-                        Vec2::new(0.0, slope),
-                        Vec2::new(l, slope),
-                        Vec2::new(l, 0.0),
-                        Vec2::new(0.0, 0.0),
-                    ],
+                    [Vec3::new(xe, eave_y, z0), Vec3::new(xe, eave_y, z1), Vec3::new(xm, ridge_y, z1), Vec3::new(xm, ridge_y, z0)],
+                    [Vec2::new(0.0, slope), Vec2::new(l, slope), Vec2::new(l, 0.0), Vec2::new(0.0, 0.0)],
                     Vec3::new(s, half / (ridge_y - eave_y).max(0.01), 0.0),
                 );
             }
             for (ze, s) in [(z0, -1.0f32), (z1, 1.0)] {
-                self.tri(
-                    Vec3::new(x0, eave_y, ze),
-                    Vec3::new(x1, eave_y, ze),
-                    Vec3::new(xm, ridge_y, ze),
-                    Vec3::Z * s,
-                );
+                self.tri(Vec3::new(x0, eave_y, ze), Vec3::new(x1, eave_y, ze), Vec3::new(xm, ridge_y, ze), Vec3::Z * s);
             }
         }
     }
 
     /// Только скаты двускатной крыши (без треугольных торцов).
-    pub fn gable_roof_slopes(
-        &mut self,
-        min: Vec2,
-        max: Vec2,
-        eave_y: f32,
-        ridge_y: f32,
-        ridge_x: bool,
-    ) {
+    pub fn gable_roof_slopes(&mut self, min: Vec2, max: Vec2, eave_y: f32, ridge_y: f32, ridge_x: bool) {
         let mut tmp = MeshBuilder::default();
         tmp.gable_roof(min, max, eave_y, ridge_y, ridge_x);
         // Последние два треугольника (6 индексов, 6 вершин) — торцы; отрезаем их.
@@ -322,12 +260,7 @@ impl MeshBuilder {
         };
         self.quad_uv(
             [high[0], high[1], low[1], low[0]],
-            [
-                Vec2::new(0.0, 0.0),
-                Vec2::new(along, 0.0),
-                Vec2::new(along, slope),
-                Vec2::new(0.0, slope),
-            ],
+            [Vec2::new(0.0, 0.0), Vec2::new(along, 0.0), Vec2::new(along, slope), Vec2::new(0.0, slope)],
             facing,
         );
     }
@@ -342,21 +275,13 @@ impl MeshBuilder {
             return;
         }
         let side = dir.cross(Vec3::Y).normalize_or(Vec3::X);
-        let ring = |ang: f32| {
-            (
-                side * ang.cos() * r + Vec3::Y * ang.sin() * r * 0.75,
-                (side * ang.cos() + Vec3::Y * ang.sin()).normalize(),
-            )
-        };
+        let ring = |ang: f32| (side * ang.cos() * r + Vec3::Y * ang.sin() * r * 0.75, (side * ang.cos() + Vec3::Y * ang.sin()).normalize());
         let mut ids = Vec::with_capacity((segs + 1) * 2);
         for i in 0..=segs {
             let ang = std::f32::consts::PI * i as f32 / segs as f32;
             let (o, n) = ring(ang);
             let u = 0.5 + ang.cos() * 0.1;
-            ids.push((
-                self.vert(a + o, n, Vec2::new(u, 0.0)),
-                self.vert(b + o, n, Vec2::new(u, len)),
-            ));
+            ids.push((self.vert(a + o, n, Vec2::new(u, 0.0)), self.vert(b + o, n, Vec2::new(u, len))));
         }
         for i in 0..segs {
             let (a0, b0) = ids[i];
@@ -370,11 +295,7 @@ impl MeshBuilder {
             let rim: Vec<u32> = (0..=segs)
                 .map(|i| {
                     let ang = std::f32::consts::PI * i as f32 / segs as f32;
-                    self.vert(
-                        p + ring(ang).0,
-                        out,
-                        Vec2::new(0.5 + ang.cos() * 0.1, 0.25 + ang.sin() * 0.05),
-                    )
+                    self.vert(p + ring(ang).0, out, Vec2::new(0.5 + ang.cos() * 0.1, 0.25 + ang.sin() * 0.05))
                 })
                 .collect();
             for w in rim.windows(2) {
@@ -453,11 +374,7 @@ impl MeshBuilder {
                 }
                 if (a.3 >= 0.0) != (b.3 >= 0.0) {
                     let s = a.3 / (a.3 - b.3);
-                    poly.push((
-                        a.0.lerp(b.0, s),
-                        a.1.lerp(b.1, s).normalize_or_zero(),
-                        a.2.lerp(b.2, s),
-                    ));
+                    poly.push((a.0.lerp(b.0, s), a.1.lerp(b.1, s).normalize_or_zero(), a.2.lerp(b.2, s)));
                 }
             }
             if poly.len() < 3 {
@@ -489,15 +406,7 @@ impl MeshBuilder {
 
     /// Часть тела вращения от угла `a0` до `a1` (угол 0 — +X, растёт к +Z).
     /// `inward` — лицевая сторона внутрь (апсида, чаша, свод изнутри).
-    pub fn lathe_arc(
-        &mut self,
-        base: Vec3,
-        profile: &[(f32, f32)],
-        a0: f32,
-        a1: f32,
-        segs: usize,
-        inward: bool,
-    ) {
+    pub fn lathe_arc(&mut self, base: Vec3, profile: &[(f32, f32)], a0: f32, a1: f32, segs: usize, inward: bool) {
         if profile.len() < 2 || segs == 0 {
             return;
         }
@@ -532,12 +441,7 @@ impl MeshBuilder {
                 ring.push(self.vert(base + dir * rb + Vec3::Y * yb, nvb, Vec2::new(u, ya + len)));
             }
             for i in 0..segs {
-                let (a, b, c, d) = (
-                    ring[i * 2],
-                    ring[i * 2 + 2],
-                    ring[i * 2 + 3],
-                    ring[i * 2 + 1],
-                );
+                let (a, b, c, d) = (ring[i * 2], ring[i * 2 + 2], ring[i * 2 + 3], ring[i * 2 + 1]);
                 // При обходе по углу вверх лицевая сторона смотрит наружу для порядка a, d, c / a, c, b.
                 if inward {
                     self.idx.extend_from_slice(&[a, b, c, a, c, d]);
@@ -574,14 +478,7 @@ impl MeshBuilder {
         let ax = Vec3::new(c, 0.0, s) * half.x;
         let az = Vec3::new(-s, 0.0, c) * half.z;
         let ay = Vec3::Y * half.y;
-        for (n, u, v) in [
-            (ax, az, ay),
-            (-ax, ay, az),
-            (az, ay, ax),
-            (-az, ax, ay),
-            (ay, ax, az),
-            (-ay, az, ax),
-        ] {
+        for (n, u, v) in [(ax, az, ay), (-ax, ay, az), (az, ay, ax), (-az, ax, ay), (ay, ax, az), (-ay, az, ax)] {
             let f = center + n;
             self.quad([f - u - v, f + u - v, f + u + v, f - u + v], n);
         }
@@ -591,45 +488,21 @@ impl MeshBuilder {
     /// Рисуется внутренняя сторона (интрадос) и наружная (экстрадос) толщиной `thick`.
     pub fn barrel_vault(&mut self, min: Vec2, max: Vec2, spring: f32, along_x: bool, thick: f32) {
         const N: usize = 16;
-        let (span, len) = if along_x {
-            (max.y - min.y, max.x - min.x)
-        } else {
-            (max.x - min.x, max.y - min.y)
-        };
+        let (span, len) = if along_x { (max.y - min.y, max.x - min.x) } else { (max.x - min.x, max.y - min.y) };
         let r = span / 2.0;
         let c = (min + max) / 2.0;
         let p = |k: usize, t: f32, rr: f32| {
             let a = std::f32::consts::PI * k as f32 / N as f32;
             let off = -a.cos() * rr;
             let y = spring + a.sin() * rr;
-            if along_x {
-                Vec3::new(min.x + len * t, y, c.y + off)
-            } else {
-                Vec3::new(c.x + off, y, min.y + len * t)
-            }
+            if along_x { Vec3::new(min.x + len * t, y, c.y + off) } else { Vec3::new(c.x + off, y, min.y + len * t) }
         };
-        let axis_c = |t: f32| {
-            if along_x {
-                Vec3::new(min.x + len * t, spring, c.y)
-            } else {
-                Vec3::new(c.x, spring, min.y + len * t)
-            }
-        };
+        let axis_c = |t: f32| if along_x { Vec3::new(min.x + len * t, spring, c.y) } else { Vec3::new(c.x, spring, min.y + len * t) };
         for k in 0..N {
-            let inner = [
-                p(k, 0.0, r),
-                p(k + 1, 0.0, r),
-                p(k + 1, 1.0, r),
-                p(k, 1.0, r),
-            ];
+            let inner = [p(k, 0.0, r), p(k + 1, 0.0, r), p(k + 1, 1.0, r), p(k, 1.0, r)];
             let mid = (inner[0] + inner[2]) / 2.0;
             self.quad(inner, axis_c(0.5) - mid);
-            let outer = [
-                p(k, 0.0, r + thick),
-                p(k + 1, 0.0, r + thick),
-                p(k + 1, 1.0, r + thick),
-                p(k, 1.0, r + thick),
-            ];
+            let outer = [p(k, 0.0, r + thick), p(k + 1, 0.0, r + thick), p(k + 1, 1.0, r + thick), p(k, 1.0, r + thick)];
             let mid = (outer[0] + outer[2]) / 2.0;
             self.quad(outer, mid - axis_c(0.5));
         }
@@ -651,14 +524,11 @@ impl MeshBuilder {
     }
 
     pub fn build(self) -> Mesh {
-        Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::default(),
-        )
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.pos)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, self.nrm)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, self.uv)
-        .with_inserted_indices(Indices::U32(self.idx))
+        Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.pos)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, self.nrm)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, self.uv)
+            .with_inserted_indices(Indices::U32(self.idx))
     }
 }
 
@@ -681,11 +551,7 @@ pub struct WallFrame {
 
 impl WallFrame {
     pub fn p(&self, s: f32, y: f32, d: f32) -> Vec3 {
-        if self.along_x {
-            Vec3::new(s, y, d)
-        } else {
-            Vec3::new(d, y, s)
-        }
+        if self.along_x { Vec3::new(s, y, d) } else { Vec3::new(d, y, s) }
     }
     pub fn d_axis(&self) -> Vec3 {
         if self.along_x { Vec3::Z } else { Vec3::X }
@@ -703,18 +569,7 @@ impl WallFrame {
 
 /// Заполнение стены над стрельчатой аркой (между дугой и прямоугольником до `top`),
 /// плюс выступающий профиль-архивольт по дуге с обеих сторон стены.
-pub fn arch_infill(
-    mb: &mut MeshBuilder,
-    trim: &mut MeshBuilder,
-    f: WallFrame,
-    sc: f32,
-    span: f32,
-    spring: f32,
-    rise: f32,
-    top: f32,
-    d0: f32,
-    d1: f32,
-) {
+pub fn arch_infill(mb: &mut MeshBuilder, trim: &mut MeshBuilder, f: WallFrame, sc: f32, span: f32, spring: f32, rise: f32, top: f32, d0: f32, d1: f32) {
     const N: usize = 16;
     let pts: Vec<(f32, f32)> = (0..=N)
         .map(|i| {
@@ -726,27 +581,11 @@ pub fn arch_infill(
     for w in pts.windows(2) {
         let ((sa, ya), (sb, yb)) = (w[0], w[1]);
         for (d, sign) in [(d0, -1.0f32), (d1, 1.0)] {
-            mb.quad(
-                [
-                    f.p(sc + sa, ya, d),
-                    f.p(sc + sb, yb, d),
-                    f.p(sc + sb, top, d),
-                    f.p(sc + sa, top, d),
-                ],
-                f.d_axis() * sign,
-            );
+            mb.quad([f.p(sc + sa, ya, d), f.p(sc + sb, yb, d), f.p(sc + sb, top, d), f.p(sc + sa, top, d)], f.d_axis() * sign);
         }
         // Внутренняя поверхность арки (смотрит вниз, к центру проёма).
         let hint = f.p(sc, spring, dm) - f.p(sc + (sa + sb) / 2.0, (ya + yb) / 2.0, dm);
-        mb.quad(
-            [
-                f.p(sc + sa, ya, d0),
-                f.p(sc + sb, yb, d0),
-                f.p(sc + sb, yb, d1),
-                f.p(sc + sa, ya, d1),
-            ],
-            hint,
-        );
+        mb.quad([f.p(sc + sa, ya, d0), f.p(sc + sb, yb, d0), f.p(sc + sb, yb, d1), f.p(sc + sa, ya, d1)], hint);
     }
     // Архивольт.
     for d in [d0 - 0.06, d1 + 0.06] {
@@ -756,15 +595,7 @@ pub fn arch_infill(
 }
 
 /// Контур окна-ланцета (прямоугольник со стрельчатым верхом) для стекла, с UV 0..1.
-pub fn lancet_outline(
-    f: WallFrame,
-    sc: f32,
-    d: f32,
-    width: f32,
-    sill: f32,
-    spring: f32,
-    rise: f32,
-) -> (Vec<Vec3>, Vec<Vec2>) {
+pub fn lancet_outline(f: WallFrame, sc: f32, d: f32, width: f32, sill: f32, spring: f32, rise: f32) -> (Vec<Vec3>, Vec<Vec2>) {
     const N: usize = 12;
     let apex = spring + arch_height(0.0, width, rise);
     let h = apex - sill;
@@ -774,29 +605,17 @@ pub fn lancet_outline(
         pts.push((s, spring + arch_height(s, width, rise)));
     }
     let world = pts.iter().map(|&(s, y)| f.p(sc + s, y, d)).collect();
-    let uvs = pts
-        .iter()
-        .map(|&(s, y)| Vec2::new(s / width + 0.5, 1.0 - (y - sill) / h))
-        .collect();
+    let uvs = pts.iter().map(|&(s, y)| Vec2::new(s / width + 0.5, 1.0 - (y - sill) / h)).collect();
     (world, uvs)
 }
 
 /// Крестовый стрельчатый свод над прямоугольной ячейкой, с нервюрами и замковым камнем.
 /// Поверхность — верхняя огибающая двух пересекающихся стрельчатых цилиндров.
-pub fn rib_vault(
-    web: &mut MeshBuilder,
-    ribs: &mut MeshBuilder,
-    min: Vec2,
-    max: Vec2,
-    spring: f32,
-    rise: f32,
-) {
+pub fn rib_vault(web: &mut MeshBuilder, ribs: &mut MeshBuilder, min: Vec2, max: Vec2, spring: f32, rise: f32) {
     const N: usize = 14;
     let (sx, sz) = (max.x - min.x, max.y - min.y);
     let c = (min + max) / 2.0;
-    let height = |x: f32, z: f32| {
-        spring + arch_height(x - c.x, sx, rise).max(arch_height(z - c.y, sz, rise))
-    };
+    let height = |x: f32, z: f32| spring + arch_height(x - c.x, sx, rise).max(arch_height(z - c.y, sz, rise));
     let p = |i: usize, j: usize| {
         let x = min.x + sx * i as f32 / N as f32;
         let z = min.y + sz * j as f32 / N as f32;
@@ -804,18 +623,12 @@ pub fn rib_vault(
     };
     for i in 0..N {
         for j in 0..N {
-            web.quad(
-                [p(i, j), p(i + 1, j), p(i + 1, j + 1), p(i, j + 1)],
-                Vec3::NEG_Y,
-            );
+            web.quad([p(i, j), p(i + 1, j), p(i + 1, j + 1), p(i, j + 1)], Vec3::NEG_Y);
         }
     }
     // Диагональные нервюры.
     const M: usize = 20;
-    for (a, b) in [
-        (min, max),
-        (Vec2::new(min.x, max.y), Vec2::new(max.x, min.y)),
-    ] {
+    for (a, b) in [(min, max), (Vec2::new(min.x, max.y), Vec2::new(max.x, min.y))] {
         let path: Vec<Vec3> = (0..=M)
             .map(|k| {
                 let t = k as f32 / M as f32;
@@ -827,21 +640,17 @@ pub fn rib_vault(
     }
     // Поперечные и стенные арки по краям ячейки.
     for z in [min.y, max.y] {
-        let path: Vec<Vec3> = (0..=M)
-            .map(|k| {
-                let x = min.x + sx * k as f32 / M as f32;
-                Vec3::new(x, height(x, z) - 0.12, z)
-            })
-            .collect();
+        let path: Vec<Vec3> = (0..=M).map(|k| {
+            let x = min.x + sx * k as f32 / M as f32;
+            Vec3::new(x, height(x, z) - 0.12, z)
+        }).collect();
         ribs.beam_path(&path, 0.2, 0.18, Vec3::Z);
     }
     for x in [min.x, max.x] {
-        let path: Vec<Vec3> = (0..=M)
-            .map(|k| {
-                let z = min.y + sz * k as f32 / M as f32;
-                Vec3::new(x, height(x, z) - 0.12, z)
-            })
-            .collect();
+        let path: Vec<Vec3> = (0..=M).map(|k| {
+            let z = min.y + sz * k as f32 / M as f32;
+            Vec3::new(x, height(x, z) - 0.12, z)
+        }).collect();
         ribs.beam_path(&path, 0.2, 0.18, Vec3::X);
     }
     // Замковый камень.
@@ -853,9 +662,7 @@ pub fn rib_vault(
 /// под ним — четверть арки, которая начинается ниже на опоре и подходит к стене.
 pub fn flying_buttress(mb: &mut MeshBuilder, pier: Vec3, wall: Vec3, half_w: f32) {
     const N: usize = 12;
-    let top: Vec<Vec3> = (0..=N)
-        .map(|i| pier.lerp(wall, i as f32 / N as f32))
-        .collect();
+    let top: Vec<Vec3> = (0..=N).map(|i| pier.lerp(wall, i as f32 / N as f32)).collect();
     mb.beam_path(&top, half_w, 0.25, Vec3::Y);
     let low_y = pier.y - 3.0;
     let end_y = wall.y - 0.5;
@@ -870,12 +677,6 @@ pub fn flying_buttress(mb: &mut MeshBuilder, pier: Vec3, wall: Vec3, half_w: f32
     mb.beam_path(&arc, half_w, 0.22, Vec3::Y);
     // Стойки между аркой и брусом.
     for i in (2..N).step_by(3) {
-        mb.beam(
-            arc[i],
-            top[i],
-            half_w * 0.6,
-            0.08,
-            (wall - pier).normalize(),
-        );
+        mb.beam(arc[i], top[i], half_w * 0.6, 0.08, (wall - pier).normalize());
     }
 }

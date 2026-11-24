@@ -9,9 +9,7 @@
 
 use crate::inventory_ui::{Hit, UiFonts};
 use crate::lore::Knowledge;
-use crate::medicine::{
-    Alarm, Body, BodyPart, CareTarget, WoundView, general_symptoms, wound_views,
-};
+use crate::medicine::{Alarm, Body, BodyPart, CareTarget, WoundView, general_symptoms, wound_views};
 use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
 use std::hash::{Hash, Hasher};
@@ -94,25 +92,16 @@ fn effects(body: &Body) -> Vec<String> {
         out.push(format!("Шаг медленнее на {:.0}%", pct(m.move_mult)));
     }
     if m.action_speed < 0.97 {
-        out.push(format!(
-            "Удары и движения рук медленнее на {:.0}%",
-            pct(m.action_speed)
-        ));
+        out.push(format!("Удары и движения рук медленнее на {:.0}%", pct(m.action_speed)));
     }
     if m.stamina_regen < 0.97 {
-        out.push(format!(
-            "Дух переводите медленнее на {:.0}%",
-            pct(m.stamina_regen)
-        ));
+        out.push(format!("Дух переводите медленнее на {:.0}%", pct(m.stamina_regen)));
     }
     if m.max_stamina < 0.97 {
         out.push(format!("Сил меньше на {:.0}%", pct(m.max_stamina)));
     }
     if body.bleeding() > 0.05 {
-        out.push(format!(
-            "Кровь уходит: {:.1} здоровья в секунду",
-            body.bleeding()
-        ));
+        out.push(format!("Кровь уходит: {:.1} здоровья в секунду", body.bleeding()));
     }
     out
 }
@@ -120,16 +109,7 @@ fn effects(body: &Body) -> Vec<String> {
 fn text(fonts: &UiFonts, s: impl Into<String>, size: f32, color: Color, bold: bool) -> impl Bundle {
     (
         Text::new(s),
-        TextFont {
-            font: if bold {
-                fonts.bold.clone()
-            } else {
-                fonts.regular.clone()
-            }
-            .into(),
-            font_size: bevy::text::FontSize::Px(size),
-            ..default()
-        },
+        TextFont { font: if bold { fonts.bold.clone() } else { fonts.regular.clone() }.into(), font_size: bevy::text::FontSize::Px(size), ..default() },
         TextColor(color),
     )
 }
@@ -149,13 +129,7 @@ const SHAPES: [(BodyPart, f32, f32, f32, f32, f32); 7] = [
 /// Панель «Тело» в окне инвентаря.
 pub fn body_panel(root: &mut ChildSpawnerCommands, fonts: &UiFonts, body: &Body, k: &Knowledge) {
     let views = wound_views(body, k);
-    let worst = |part: BodyPart| {
-        views
-            .iter()
-            .filter(|v| v.part == part)
-            .map(|v| v.alarm)
-            .max()
-    };
+    let worst = |part: BodyPart| views.iter().filter(|v| v.part == part).map(|v| v.alarm).max();
     root.spawn((
         Hit::Panel,
         Interaction::default(),
@@ -319,15 +293,9 @@ pub fn body_panel(root: &mut ChildSpawnerCommands, fonts: &UiFonts, body: &Body,
 }
 
 /// Подсветка места под мышью. Только наведение — окно не знает и не выдаёт, что правильно.
-fn highlight_zones(
-    mut zones: Query<(&Interaction, &CareZone, &mut BorderColor), Changed<Interaction>>,
-) {
+fn highlight_zones(mut zones: Query<(&Interaction, &CareZone, &mut BorderColor), Changed<Interaction>>) {
     for (i, zone, mut border) in &mut zones {
-        let c = if *i == Interaction::None {
-            zone.border
-        } else {
-            HOVER
-        };
+        let c = if *i == Interaction::None { zone.border } else { HOVER };
         *border = BorderColor::all(c);
     }
 }

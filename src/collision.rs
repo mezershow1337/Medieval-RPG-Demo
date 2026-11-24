@@ -13,10 +13,7 @@ const EPS: f32 = 0.001;
 
 impl Aabb {
     pub fn new(min: Vec3, max: Vec3) -> Self {
-        Self {
-            min: min.min(max),
-            max: min.max(max),
-        }
+        Self { min: min.min(max), max: min.max(max) }
     }
 
     pub fn overlaps(&self, other: &Aabb) -> bool {
@@ -50,9 +47,7 @@ impl HeightField {
     }
 
     pub fn in_hole(&self, x: f32, z: f32) -> bool {
-        self.holes
-            .iter()
-            .any(|(a, b)| x > a.x && x < b.x && z > a.y && z < b.y)
+        self.holes.iter().any(|(a, b)| x > a.x && x < b.x && z > a.y && z < b.y)
     }
 
     pub fn height(&self, x: f32, z: f32) -> f32 {
@@ -92,20 +87,11 @@ impl Grid {
             max = max.max(Vec2::new(b.max.x, b.max.z));
         }
         if min.x > max.x {
-            return Grid {
-                big: (0..boxes.len() as u32).collect(),
-                ..default()
-            };
+            return Grid { big: (0..boxes.len() as u32).collect(), ..default() };
         }
         let nx = ((max.x - min.x) / GRID_CELL).ceil() as i32 + 1;
         let nz = ((max.y - min.y) / GRID_CELL).ceil() as i32 + 1;
-        let mut grid = Grid {
-            origin: min,
-            nx,
-            nz,
-            cells: vec![Vec::new(); (nx * nz) as usize],
-            big: Vec::new(),
-        };
+        let mut grid = Grid { origin: min, nx, nz, cells: vec![Vec::new(); (nx * nz) as usize], big: Vec::new() };
         for (i, b) in boxes.iter().enumerate() {
             if is_big(b) {
                 grid.big.push(i as u32);
@@ -123,12 +109,7 @@ impl Grid {
 
     fn range(&self, b: &Aabb) -> (i32, i32, i32, i32) {
         let c = |v: f32, o: f32, n: i32| (((v - o) / GRID_CELL).floor() as i32).clamp(0, n - 1);
-        (
-            c(b.min.x, self.origin.x, self.nx),
-            c(b.min.z, self.origin.y, self.nz),
-            c(b.max.x, self.origin.x, self.nx),
-            c(b.max.z, self.origin.y, self.nz),
-        )
+        (c(b.min.x, self.origin.x, self.nx), c(b.min.z, self.origin.y, self.nz), c(b.max.x, self.origin.x, self.nx), c(b.max.z, self.origin.y, self.nz))
     }
 }
 
@@ -169,14 +150,8 @@ pub struct Body {
 }
 
 impl Body {
-    pub const STANDING: Body = Body {
-        half_width: 0.3,
-        height: 1.8,
-    };
-    pub const CROUCHING: Body = Body {
-        half_width: 0.3,
-        height: 1.2,
-    };
+    pub const STANDING: Body = Body { half_width: 0.3, height: 1.8 };
+    pub const CROUCHING: Body = Body { half_width: 0.3, height: 1.2 };
 
     pub fn aabb_at(&self, feet: Vec3) -> Aabb {
         Aabb {
@@ -205,70 +180,31 @@ impl LevelColliders {
 
     /// Коробки уровня плюс двери (коробка закрытой створки и открыта ли она сначала).
     /// Номер двери — её индекс в `doors`.
-    pub fn with_doors(
-        boxes: Vec<Aabb>,
-        ground: Option<HeightField>,
-        doors: Vec<(Aabb, bool)>,
-    ) -> Self {
+    pub fn with_doors(boxes: Vec<Aabb>, ground: Option<HeightField>, doors: Vec<(Aabb, bool)>) -> Self {
         Self::with_bodies(boxes, ground, doors, Vec::new())
     }
 
     /// То же плюс тела жителей (номер тела — индекс в `bodies`).
     #[cfg_attr(not(test), allow(dead_code))]
-    pub fn with_bodies(
-        boxes: Vec<Aabb>,
-        ground: Option<HeightField>,
-        doors: Vec<(Aabb, bool)>,
-        bodies: Vec<Aabb>,
-    ) -> Self {
+    pub fn with_bodies(boxes: Vec<Aabb>, ground: Option<HeightField>, doors: Vec<(Aabb, bool)>, bodies: Vec<Aabb>) -> Self {
         Self::with_switches(boxes, ground, doors, bodies, Vec::new(), 0)
     }
 
     /// То же плюс переключаемые группы коробок: `(коробка, номер группы)`, групп — `groups`
     /// (все выключены, пока не включат [`LevelColliders::set_switch`]).
-    pub fn with_switches(
-        mut boxes: Vec<Aabb>,
-        ground: Option<HeightField>,
-        doors: Vec<(Aabb, bool)>,
-        bodies: Vec<Aabb>,
-        switches: Vec<(Aabb, u32)>,
-        groups: usize,
-    ) -> Self {
+    pub fn with_switches(mut boxes: Vec<Aabb>, ground: Option<HeightField>, doors: Vec<(Aabb, bool)>, bodies: Vec<Aabb>, switches: Vec<(Aabb, u32)>, groups: usize) -> Self {
         let first = boxes.len();
-        let open = doors
-            .iter()
-            .map(|(_, o)| std::sync::atomic::AtomicBool::new(*o))
-            .collect();
+        let open = doors.iter().map(|(_, o)| std::sync::atomic::AtomicBool::new(*o)).collect();
         boxes.extend(doors.iter().map(|(a, _)| *a));
         let bodies_first = boxes.len();
-        let gone = bodies
-            .iter()
-            .map(|_| std::sync::atomic::AtomicBool::new(false))
-            .collect();
+        let gone = bodies.iter().map(|_| std::sync::atomic::AtomicBool::new(false)).collect();
         boxes.extend(bodies);
         let switch_first = boxes.len();
         let switch_of = switches.iter().map(|(_, g)| *g).collect();
         boxes.extend(switches.iter().map(|(a, _)| *a));
-        let switch_on = (0..groups)
-            .map(|_| std::sync::atomic::AtomicBool::new(false))
-            .collect();
+        let switch_on = (0..groups).map(|_| std::sync::atomic::AtomicBool::new(false)).collect();
         let grid = Grid::build(&boxes);
-        LevelColliders(
-            boxes,
-            Accel {
-                grid,
-                ground: ground.map(std::sync::Arc::new),
-                doors: std::sync::Arc::new(DoorFlags {
-                    first,
-                    open,
-                    bodies_first,
-                    gone,
-                    switch_first,
-                    switch_of,
-                    switch_on,
-                }),
-            },
-        )
+        LevelColliders(boxes, Accel { grid, ground: ground.map(std::sync::Arc::new), doors: std::sync::Arc::new(DoorFlags { first, open, bodies_first, gone, switch_first, switch_of, switch_on }) })
     }
 
     /// Включить или выключить группу коробок.
@@ -279,12 +215,9 @@ impl LevelColliders {
     }
 
     pub fn switch_on(&self, group: usize) -> bool {
-        self.1
-            .doors
-            .switch_on
-            .get(group)
-            .is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+        self.1.doors.switch_on.get(group).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
     }
+
 
     /// Житель погиб (его тело больше не загораживает проход) или на его место пришёл новый.
     pub fn set_body_gone(&self, id: usize, gone: bool) {
@@ -297,10 +230,7 @@ impl LevelColliders {
     pub fn point_in_wall(&self, p: Vec3) -> Option<&Aabb> {
         let a = Aabb { min: p, max: p };
         let (bodies_first, switch_first) = (self.1.doors.bodies_first, self.1.doors.switch_first);
-        self.near_ids(a)
-            .filter(|&i| i < bodies_first || i >= switch_first)
-            .map(|i| &self.0[i])
-            .find(|c| p.cmpgt(c.min).all() && p.cmplt(c.max).all())
+        self.near_ids(a).filter(|&i| i < bodies_first || i >= switch_first).map(|i| &self.0[i]).find(|c| p.cmpgt(c.min).all() && p.cmplt(c.max).all())
     }
 
     pub fn door_count(&self) -> usize {
@@ -308,11 +238,7 @@ impl LevelColliders {
     }
 
     pub fn door_open(&self, id: usize) -> bool {
-        self.1
-            .doors
-            .open
-            .get(id)
-            .is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+        self.1.doors.open.get(id).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
     }
 
     pub fn set_door_open(&self, id: usize, open: bool) {
@@ -336,10 +262,7 @@ impl LevelColliders {
 
     /// Высота земли под точкой (минус бесконечность, если карты высот нет).
     pub fn ground_height(&self, x: f32, z: f32) -> f32 {
-        self.1
-            .ground
-            .as_ref()
-            .map_or(f32::NEG_INFINITY, |g| g.height(x, z))
+        self.1.ground.as_ref().map_or(f32::NEG_INFINITY, |g| g.height(x, z))
     }
 
     /// Коробки, которые могут пересекаться с `a`.
@@ -350,11 +273,7 @@ impl LevelColliders {
     /// Номера коробок, которые могут пересекаться с `a`.
     fn near_ids<'a>(&'a self, a: Aabb) -> impl Iterator<Item = usize> + 'a {
         let g = &self.1.grid;
-        let (x0, z0, x1, z1) = if g.cells.is_empty() {
-            (0, 0, -1, -1)
-        } else {
-            g.range(&a)
-        };
+        let (x0, z0, x1, z1) = if g.cells.is_empty() { (0, 0, -1, -1) } else { g.range(&a) };
         let cells = (z0..=z1).flat_map(move |z| (x0..=x1).map(move |x| (z * g.nx + x) as usize));
         let doors = &self.1.doors;
         g.big
@@ -365,21 +284,11 @@ impl LevelColliders {
                 if i < doors.first {
                     true
                 } else if i < doors.bodies_first {
-                    !doors
-                        .open
-                        .get(i - doors.first)
-                        .is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+                    !doors.open.get(i - doors.first).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
                 } else if i < doors.switch_first {
-                    !doors
-                        .gone
-                        .get(i - doors.bodies_first)
-                        .is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+                    !doors.gone.get(i - doors.bodies_first).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
                 } else {
-                    doors
-                        .switch_of
-                        .get(i - doors.switch_first)
-                        .and_then(|g| doors.switch_on.get(*g as usize))
-                        .is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+                    doors.switch_of.get(i - doors.switch_first).and_then(|g| doors.switch_on.get(*g as usize)).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
                 }
             })
             .map(|&i| i as usize)
@@ -394,8 +303,7 @@ impl LevelColliders {
     #[allow(dead_code)]
     pub fn boxes_near(&self, p: Vec3) -> impl Iterator<Item = &Aabb> + '_ {
         let a = Aabb { min: p, max: p };
-        self.near(a)
-            .filter(move |c| p.cmpgt(c.min).all() && p.cmplt(c.max).all())
+        self.near(a).filter(move |c| p.cmpgt(c.min).all() && p.cmplt(c.max).all())
     }
 
     /// Точка внутри твёрдого (стены или земли)? Для проверки линии видимости.
@@ -404,8 +312,7 @@ impl LevelColliders {
             return true;
         }
         let a = Aabb { min: p, max: p };
-        self.near(a)
-            .any(|c| p.cmpgt(c.min).all() && p.cmplt(c.max).all())
+        self.near(a).any(|c| p.cmpgt(c.min).all() && p.cmplt(c.max).all())
     }
 
     pub fn body_is_free(&self, body: &Body, feet: Vec3) -> bool {
@@ -417,13 +324,7 @@ impl LevelColliders {
     }
 
     /// Двигает тело на `delta` с обработкой столкновений и автоматическим подъёмом на ступеньки.
-    pub fn move_body(
-        &self,
-        body: &Body,
-        feet: &mut Vec3,
-        delta: Vec3,
-        was_grounded: bool,
-    ) -> MoveResult {
+    pub fn move_body(&self, body: &Body, feet: &mut Vec3, delta: Vec3, was_grounded: bool) -> MoveResult {
         let mut result = MoveResult::default();
         // Разбиваем движение на мелкие шаги, чтобы не пролетать сквозь тонкие стены.
         let max_component = delta.abs().max_element();
@@ -465,14 +366,7 @@ impl LevelColliders {
     }
 
     /// Возвращает true, если движение по оси упёрлось в стену.
-    fn move_horizontal(
-        &self,
-        body: &Body,
-        feet: &mut Vec3,
-        axis: usize,
-        d: f32,
-        grounded: bool,
-    ) -> bool {
+    fn move_horizontal(&self, body: &Body, feet: &mut Vec3, axis: usize, d: f32, grounded: bool) -> bool {
         let mut moved = *feet;
         moved[axis] += d;
         if self.body_is_free(body, moved) {
@@ -503,11 +397,7 @@ impl LevelColliders {
             }
         }
         // Не даём «отскочить» назад дальше исходной точки.
-        let new = if d > 0.0 {
-            limit.max(feet[axis]).min(moved[axis])
-        } else {
-            limit.min(feet[axis]).max(moved[axis])
-        };
+        let new = if d > 0.0 { limit.max(feet[axis]).min(moved[axis]) } else { limit.min(feet[axis]).max(moved[axis]) };
         let mut candidate = *feet;
         candidate[axis] = new;
         if self.body_is_free(body, candidate) {
@@ -553,36 +443,17 @@ mod tests {
     }
 
     fn with(extra: Vec<Aabb>) -> LevelColliders {
-        let mut boxes = vec![Aabb::new(
-            Vec3::new(-50.0, -1.0, -50.0),
-            Vec3::new(50.0, 0.0, 50.0),
-        )];
+        let mut boxes = vec![Aabb::new(Vec3::new(-50.0, -1.0, -50.0), Vec3::new(50.0, 0.0, 50.0))];
         boxes.extend(extra);
         LevelColliders::new(boxes, None)
     }
 
     #[test]
     fn doors_block_only_when_closed() {
-        let mut boxes = vec![Aabb::new(
-            Vec3::new(-50.0, -1.0, -50.0),
-            Vec3::new(50.0, 0.0, 50.0),
-        )];
-        boxes.push(Aabb::new(
-            Vec3::new(2.0, 0.0, -5.0),
-            Vec3::new(2.2, 3.0, -0.6),
-        ));
-        boxes.push(Aabb::new(
-            Vec3::new(2.0, 0.0, 0.6),
-            Vec3::new(2.2, 3.0, 5.0),
-        ));
-        let level = LevelColliders::with_doors(
-            boxes,
-            None,
-            vec![(
-                Aabb::new(Vec3::new(2.05, 0.0, -0.6), Vec3::new(2.15, 2.2, 0.6)),
-                false,
-            )],
-        );
+        let mut boxes = vec![Aabb::new(Vec3::new(-50.0, -1.0, -50.0), Vec3::new(50.0, 0.0, 50.0))];
+        boxes.push(Aabb::new(Vec3::new(2.0, 0.0, -5.0), Vec3::new(2.2, 3.0, -0.6)));
+        boxes.push(Aabb::new(Vec3::new(2.0, 0.0, 0.6), Vec3::new(2.2, 3.0, 5.0)));
+        let level = LevelColliders::with_doors(boxes, None, vec![(Aabb::new(Vec3::new(2.05, 0.0, -0.6), Vec3::new(2.15, 2.2, 0.6)), false)]);
         let copy = level.clone();
         let walk = |level: &LevelColliders| {
             let mut feet = Vec3::ZERO;
@@ -603,14 +474,7 @@ mod tests {
         let mut feet = Vec3::new(0.0, 1.0, 0.0);
         let mut grounded = false;
         for _ in 0..200 {
-            grounded = level
-                .move_body(
-                    &Body::STANDING,
-                    &mut feet,
-                    Vec3::new(0.0, -0.05, 0.0),
-                    grounded,
-                )
-                .grounded;
+            grounded = level.move_body(&Body::STANDING, &mut feet, Vec3::new(0.0, -0.05, 0.0), grounded).grounded;
         }
         assert!(grounded);
         assert!(feet.y.abs() < 0.01, "feet.y = {}", feet.y);
@@ -618,59 +482,32 @@ mod tests {
 
     #[test]
     fn blocked_by_wall() {
-        let level = with(vec![Aabb::new(
-            Vec3::new(2.0, 0.0, -5.0),
-            Vec3::new(3.0, 3.0, 5.0),
-        )]);
+        let level = with(vec![Aabb::new(Vec3::new(2.0, 0.0, -5.0), Vec3::new(3.0, 3.0, 5.0))]);
         let mut feet = Vec3::ZERO;
         for _ in 0..100 {
             level.move_body(&Body::STANDING, &mut feet, Vec3::new(0.1, -0.01, 0.0), true);
         }
-        assert!(
-            feet.x <= 2.0 - 0.3 + 0.01 && feet.x > 1.5,
-            "feet.x = {}",
-            feet.x
-        );
+        assert!(feet.x <= 2.0 - 0.3 + 0.01 && feet.x > 1.5, "feet.x = {}", feet.x);
     }
 
     #[test]
     fn climbs_step() {
-        let level = with(vec![Aabb::new(
-            Vec3::new(2.0, 0.0, -5.0),
-            Vec3::new(10.0, 0.4, 5.0),
-        )]);
+        let level = with(vec![Aabb::new(Vec3::new(2.0, 0.0, -5.0), Vec3::new(10.0, 0.4, 5.0))]);
         let mut feet = Vec3::ZERO;
         let mut grounded = true;
         for _ in 0..100 {
-            grounded = level
-                .move_body(
-                    &Body::STANDING,
-                    &mut feet,
-                    Vec3::new(0.1, -0.05, 0.0),
-                    grounded,
-                )
-                .grounded;
+            grounded = level.move_body(&Body::STANDING, &mut feet, Vec3::new(0.1, -0.05, 0.0), grounded).grounded;
         }
         assert!(feet.x > 5.0 && (feet.y - 0.4).abs() < 0.01, "feet = {feet}");
     }
 
     #[test]
     fn does_not_climb_high_wall() {
-        let level = with(vec![Aabb::new(
-            Vec3::new(2.0, 0.0, -5.0),
-            Vec3::new(10.0, 1.0, 5.0),
-        )]);
+        let level = with(vec![Aabb::new(Vec3::new(2.0, 0.0, -5.0), Vec3::new(10.0, 1.0, 5.0))]);
         let mut feet = Vec3::ZERO;
         let mut grounded = true;
         for _ in 0..100 {
-            grounded = level
-                .move_body(
-                    &Body::STANDING,
-                    &mut feet,
-                    Vec3::new(0.1, -0.05, 0.0),
-                    grounded,
-                )
-                .grounded;
+            grounded = level.move_body(&Body::STANDING, &mut feet, Vec3::new(0.1, -0.05, 0.0), grounded).grounded;
         }
         assert!(feet.x < 2.0, "feet = {feet}");
     }
@@ -679,38 +516,19 @@ mod tests {
     fn walks_up_and_down_a_hill() {
         // Склон 1:4 вверх по X до высоты 8, потом вниз.
         let nx = 41;
-        let data: Vec<f32> = (0..nx * nx)
-            .map(|i| {
-                let x = (i % nx) as f32 * 2.0 - 40.0;
-                (8.0 - x.abs() * 0.25).max(0.0)
-            })
-            .collect();
-        let hf = HeightField {
-            origin: Vec2::splat(-40.0),
-            cell: 2.0,
-            nx,
-            nz: nx,
-            data,
-            holes: vec![],
-        };
+        let data: Vec<f32> = (0..nx * nx).map(|i| {
+            let x = (i % nx) as f32 * 2.0 - 40.0;
+            (8.0 - x.abs() * 0.25).max(0.0)
+        }).collect();
+        let hf = HeightField { origin: Vec2::splat(-40.0), cell: 2.0, nx, nz: nx, data, holes: vec![] };
         let level = LevelColliders::new(vec![], Some(hf));
         let mut feet = Vec3::new(-35.0, 0.0, 0.0);
         let mut grounded = true;
         let mut max_y: f32 = 0.0;
         for _ in 0..700 {
-            grounded = level
-                .move_body(
-                    &Body::STANDING,
-                    &mut feet,
-                    Vec3::new(0.1, -0.05, 0.0),
-                    grounded,
-                )
-                .grounded;
+            grounded = level.move_body(&Body::STANDING, &mut feet, Vec3::new(0.1, -0.05, 0.0), grounded).grounded;
             max_y = max_y.max(feet.y);
-            assert!(
-                feet.y >= level.ground_height(feet.x, feet.z) - 0.02,
-                "под землёй: {feet}"
-            );
+            assert!(feet.y >= level.ground_height(feet.x, feet.z) - 0.02, "под землёй: {feet}");
         }
         assert!(feet.x > 30.0, "не прошёл через холм: {feet}");
         assert!(max_y > 7.0, "не поднялся на холм: {max_y}");

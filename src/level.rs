@@ -21,9 +21,7 @@ pub use places::*;
 /// Полуширина главной улицы Херсона.
 pub const MAIN_STREET_HALF: f32 = city::MAIN_HALF;
 pub use spawns::{SpawnChoice, pick_spawn, spawn_spot, spawn_spots};
-pub use terrain::{
-    WATER_Y, city_distance as city_wall_distance, fbm, ground_y, height_at, inside_city,
-};
+pub use terrain::{WATER_Y, city_distance as city_wall_distance, fbm, ground_y, height_at, inside_city};
 
 /// Расстояние от точки до ближайшей загородной дороги (для травы и т. п.).
 pub fn road_distance(x: f32, z: f32) -> f32 {
@@ -215,10 +213,7 @@ impl DoorSpec {
     pub fn closed_box(&self) -> Aabb {
         let (hw, ht) = (self.width / 2.0, 0.07);
         let (dx, dz) = if self.along_x { (hw, ht) } else { (ht, hw) };
-        Aabb::new(
-            self.center - Vec3::new(dx, 0.0, dz),
-            self.center + Vec3::new(dx, self.height, dz),
-        )
+        Aabb::new(self.center - Vec3::new(dx, 0.0, dz), self.center + Vec3::new(dx, self.height, dz))
     }
 }
 
@@ -246,12 +241,7 @@ pub struct HouseSpec {
 
 impl HouseSpec {
     pub fn contains(&self, p: Vec3) -> bool {
-        p.x >= self.min.x
-            && p.x <= self.max.x
-            && p.z >= self.min.z
-            && p.z <= self.max.z
-            && p.y > self.min.y - 1.0
-            && p.y < self.max.y
+        p.x >= self.min.x && p.x <= self.max.x && p.z >= self.min.z && p.z <= self.max.z && p.y > self.min.y - 1.0 && p.y < self.max.y
     }
 }
 
@@ -304,10 +294,7 @@ pub struct Resident {
 impl Resident {
     /// Тело — невидимая коробка, чтобы сквозь жителя не ходили (номер тела = номер жителя).
     pub fn body(&self) -> Aabb {
-        Aabb::new(
-            self.pos - Vec3::new(0.25, 0.0, 0.25),
-            self.pos + Vec3::new(0.25, 1.75, 0.25),
-        )
+        Aabb::new(self.pos - Vec3::new(0.25, 0.0, 0.25), self.pos + Vec3::new(0.25, 1.75, 0.25))
     }
 }
 
@@ -442,12 +429,7 @@ pub struct EstateSpec {
 
 impl EstateSpec {
     pub fn contains(&self, p: Vec3) -> bool {
-        p.x >= self.min.x
-            && p.x <= self.max.x
-            && p.z >= self.min.z
-            && p.z <= self.max.z
-            && p.y > self.min.y - 1.0
-            && p.y < self.max.y
+        p.x >= self.min.x && p.x <= self.max.x && p.z >= self.min.z && p.z <= self.max.z && p.y > self.min.y - 1.0 && p.y < self.max.y
     }
 }
 
@@ -457,11 +439,7 @@ pub enum SwitchKey {
     /// Стадия стройки на площадке (0 — пепелище … 4 — готовый дом).
     Site { site: u16, stage: u8 },
     /// Обстановка комнаты усадьбы.
-    Furnish {
-        estate: u16,
-        room: u8,
-        kind: FurnishKind,
-    },
+    Furnish { estate: u16, room: u8, kind: FurnishKind },
 }
 
 /// Геометрия, которую можно включить и выключить во время игры.
@@ -480,16 +458,9 @@ pub struct SwitchGroup {
 pub struct SwitchVisual(pub u32);
 
 /// Клиент: показывает и прячет переключаемую геометрию по флагам коллизий.
-pub fn sync_switch_visuals(
-    level: Res<LevelColliders>,
-    mut q: Query<(&SwitchVisual, &mut Visibility)>,
-) {
+pub fn sync_switch_visuals(level: Res<LevelColliders>, mut q: Query<(&SwitchVisual, &mut Visibility)>) {
     for (s, mut vis) in &mut q {
-        let want = if level.switch_on(s.0 as usize) {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
+        let want = if level.switch_on(s.0 as usize) { Visibility::Inherited } else { Visibility::Hidden };
         if *vis != want {
             *vis = want;
         }
@@ -508,30 +479,16 @@ pub struct EstateCatalog {
 impl EstateCatalog {
     fn from_layout(layout: &Layout) -> Self {
         let keys: Vec<SwitchKey> = layout.switches.iter().map(|g| g.key).collect();
-        let sites = keys
-            .iter()
-            .filter_map(|k| {
-                if let SwitchKey::Site { site, .. } = k {
-                    Some(*site as usize + 1)
-                } else {
-                    None
-                }
-            })
-            .max()
-            .unwrap_or(0);
+        let sites = keys.iter().filter_map(|k| if let SwitchKey::Site { site, .. } = k { Some(*site as usize + 1) } else { None }).max().unwrap_or(0);
         let mut site_doors = vec![Vec::new(); sites];
         for e in &layout.estates {
             if let Some(s) = e.site {
                 site_doors[s as usize] = e.doors.clone();
             }
         }
-        EstateCatalog {
-            estates: layout.estates.clone(),
-            keys,
-            sites,
-            site_doors,
-        }
+        EstateCatalog { estates: layout.estates.clone(), keys, sites, site_doors }
     }
+
 }
 
 /// Усадьбы и переключаемые группы активного уровня.
@@ -576,24 +533,10 @@ struct Opening {
 
 impl Opening {
     fn door(s: f32, width: f32, spring: f32, rise: f32) -> Self {
-        Self {
-            s,
-            width,
-            sill: f32::NEG_INFINITY,
-            spring,
-            rise,
-            glass: false,
-        }
+        Self { s, width, sill: f32::NEG_INFINITY, spring, rise, glass: false }
     }
     fn window(s: f32, width: f32, sill: f32, spring: f32, rise: f32) -> Self {
-        Self {
-            s,
-            width,
-            sill,
-            spring,
-            rise,
-            glass: true,
-        }
+        Self { s, width, sill, spring, rise, glass: true }
     }
     fn apex(&self) -> f32 {
         self.spring + arch_height(0.0, self.width, self.rise)
@@ -709,43 +652,17 @@ impl Builder {
         t.wealth = self.wealth;
         f(&mut t);
         let shift = |a: Aabb| Aabb::new(a.min + offset, a.max + offset);
-        self.blocks.extend(t.blocks.into_iter().map(|b| Block {
-            aabb: shift(b.aabb),
-            ..b
-        }));
+        self.blocks.extend(t.blocks.into_iter().map(|b| Block { aabb: shift(b.aabb), ..b }));
         self.invisible.extend(t.invisible.into_iter().map(shift));
         self.windows.extend(t.windows.into_iter().map(shift));
-        self.torches.extend(t.torches.into_iter().map(|x| Torch {
-            pos: x.pos + offset,
-            ..x
-        }));
-        self.lamps.extend(t.lamps.into_iter().map(|x| Lamp {
-            pos: x.pos + offset,
-            ..x
-        }));
-        self.hearths
-            .extend(t.hearths.into_iter().map(|p| p + offset));
-        self.forges.extend(t.forges.into_iter().map(|f| ForgeSpec {
-            fire: f.fire + offset,
-            anvil: f.anvil + offset,
-            trough: f.trough + offset,
-            grind: f.grind + offset,
-            ..f
-        }));
+        self.torches.extend(t.torches.into_iter().map(|x| Torch { pos: x.pos + offset, ..x }));
+        self.lamps.extend(t.lamps.into_iter().map(|x| Lamp { pos: x.pos + offset, ..x }));
+        self.hearths.extend(t.hearths.into_iter().map(|p| p + offset));
+        self.forges.extend(t.forges.into_iter().map(|f| ForgeSpec { fire: f.fire + offset, anvil: f.anvil + offset, trough: f.trough + offset, grind: f.grind + offset, ..f }));
         let (d0, c0) = (self.doors.len() as u32, self.containers.len() as u32);
-        self.doors.extend(t.doors.into_iter().map(|d| DoorSpec {
-            center: d.center + offset,
-            ..d
-        }));
-        self.beds.extend(t.beds.into_iter().map(|d| Bed {
-            pos: d.pos + offset,
-            ..d
-        }));
-        self.containers
-            .extend(t.containers.into_iter().map(|c| ContainerSpec {
-                pos: c.pos + offset,
-                ..c
-            }));
+        self.doors.extend(t.doors.into_iter().map(|d| DoorSpec { center: d.center + offset, ..d }));
+        self.beds.extend(t.beds.into_iter().map(|d| Bed { pos: d.pos + offset, ..d }));
+        self.containers.extend(t.containers.into_iter().map(|c| ContainerSpec { pos: c.pos + offset, ..c }));
         let e0 = self.estates.len() as u16;
         for mut e in t.estates {
             e.min += offset;
@@ -767,28 +684,13 @@ impl Builder {
             g.decor.iter_mut().for_each(|(_, mb)| mb.translate(offset));
             g.lamps.iter_mut().for_each(|l| l.pos += offset);
             if let SwitchKey::Furnish { estate, room, kind } = g.key {
-                g.key = SwitchKey::Furnish {
-                    estate: estate + e0,
-                    room,
-                    kind,
-                };
+                g.key = SwitchKey::Furnish { estate: estate + e0, room, kind };
             }
             self.switches.push(g);
         }
-        self.residents
-            .extend(t.residents.into_iter().map(|r| Resident {
-                pos: r.pos + offset,
-                ..r
-            }));
-        self.house_items
-            .extend(t.house_items.into_iter().map(|h| HouseItemSpec {
-                pos: h.pos + offset,
-                ..h
-            }));
-        self.plants.extend(t.plants.into_iter().map(|p| Plant {
-            pos: p.pos + offset,
-            ..p
-        }));
+        self.residents.extend(t.residents.into_iter().map(|r| Resident { pos: r.pos + offset, ..r }));
+        self.house_items.extend(t.house_items.into_iter().map(|h| HouseItemSpec { pos: h.pos + offset, ..h }));
+        self.plants.extend(t.plants.into_iter().map(|p| Plant { pos: p.pos + offset, ..p }));
         for mut g in t.glass {
             g.pts.iter_mut().for_each(|p| *p += offset);
             self.glass.push(g);
@@ -810,28 +712,14 @@ impl Builder {
 
     /// Обыскиваемое место (сундук, шкаф, корзина) по текущей таблице добычи.
     fn container(&mut self, pos: Vec3, name: &'static str) {
-        self.containers.push(ContainerSpec {
-            pos,
-            name,
-            table: self.loot.0,
-            house: self.house,
-        });
+        self.containers.push(ContainerSpec { pos, name, table: self.loot.0, house: self.house });
     }
 
     /// Вещь хозяев дома, который сейчас обставляется (вне жилого дома — ничего).
     fn house_item(&mut self, pos: Vec3, yaw: f32, item: &'static str, count: u16) {
         if let Some(house) = self.house {
-            debug_assert!(
-                crate::items::ItemBaseId::find(item).is_some(),
-                "нет предмета {item}"
-            );
-            self.house_items.push(HouseItemSpec {
-                pos,
-                yaw,
-                item,
-                count,
-                house,
-            });
+            debug_assert!(crate::items::ItemBaseId::find(item).is_some(), "нет предмета {item}");
+            self.house_items.push(HouseItemSpec { pos, yaw, item, count, house });
         }
     }
 
@@ -851,57 +739,31 @@ impl Builder {
     }
 
     fn solid(&mut self, min: [f32; 3], max: [f32; 3], mat: Mat) {
-        self.blocks.push(Block {
-            aabb: Aabb::new(Vec3::from(min), Vec3::from(max)),
-            mat,
-            solid: true,
-        });
+        self.blocks.push(Block { aabb: Aabb::new(Vec3::from(min), Vec3::from(max)), mat, solid: true });
     }
     fn solid_v(&mut self, (min, max): (Vec3, Vec3), mat: Mat) {
         if (max - min).min_element() > 0.001 {
-            self.blocks.push(Block {
-                aabb: Aabb::new(min, max),
-                mat,
-                solid: true,
-            });
+            self.blocks.push(Block { aabb: Aabb::new(min, max), mat, solid: true });
         }
     }
     fn decor(&mut self, min: [f32; 3], max: [f32; 3], mat: Mat) {
-        self.blocks.push(Block {
-            aabb: Aabb::new(Vec3::from(min), Vec3::from(max)),
-            mat,
-            solid: false,
-        });
+        self.blocks.push(Block { aabb: Aabb::new(Vec3::from(min), Vec3::from(max)), mat, solid: false });
     }
     fn mesh(&mut self, mat: Mat) -> &mut MeshBuilder {
         self.decor.entry((mat, self.chunk)).or_default()
     }
     /// Дерево, куст или камень-модель с основанием в `pos`.
     fn plant(&mut self, kind: PlantKind, pos: Vec3, height: f32, yaw: f32, variant: u32) {
-        self.plants.push(Plant {
-            kind,
-            pos,
-            height,
-            yaw,
-            variant,
-        });
+        self.plants.push(Plant { kind, pos, height, yaw, variant });
     }
     fn invisible(&mut self, (min, max): (Vec3, Vec3)) {
         self.invisible.push(Aabb::new(min, max));
     }
     fn torch(&mut self, x: f32, y: f32, z: f32, out: Vec3) {
-        self.torches.push(Torch {
-            pos: Vec3::new(x, y, z),
-            out,
-        });
+        self.torches.push(Torch { pos: Vec3::new(x, y, z), out });
     }
     fn lamp(&mut self, pos: Vec3, color: Color, intensity: f32, range: f32) {
-        self.lamps.push(Lamp {
-            pos,
-            color,
-            intensity,
-            range,
-        });
+        self.lamps.push(Lamp { pos, color, intensity, range });
     }
 
     /// Зубцы вдоль X на высоте y.
@@ -931,22 +793,12 @@ impl Builder {
     }
 
     fn crate_at(&mut self, x: f32, z: f32, size: f32) {
-        self.solid(
-            [x - size / 2.0, 0.0, z - size / 2.0],
-            [x + size / 2.0, size, z + size / 2.0],
-            Mat::Wood,
-        );
+        self.solid([x - size / 2.0, 0.0, z - size / 2.0], [x + size / 2.0, size, z + size / 2.0], Mat::Wood);
         // Окованные рёбра.
         let m = self.mesh(Mat::Iron);
         let h = size / 2.0 + 0.01;
-        m.cuboid(
-            Vec3::new(x - h, size * 0.15, z - h),
-            Vec3::new(x + h, size * 0.22, z + h),
-        );
-        m.cuboid(
-            Vec3::new(x - h, size * 0.78, z - h),
-            Vec3::new(x + h, size * 0.85, z + h),
-        );
+        m.cuboid(Vec3::new(x - h, size * 0.15, z - h), Vec3::new(x + h, size * 0.22, z + h));
+        m.cuboid(Vec3::new(x - h, size * 0.78, z - h), Vec3::new(x + h, size * 0.85, z + h));
     }
 
     fn barrel_at(&mut self, x: f32, z: f32) {
@@ -958,23 +810,8 @@ impl Builder {
     }
 
     /// Стена с проёмами. `f` задаёт ориентацию; s — вдоль стены, d — толщина.
-    fn wall(
-        &mut self,
-        f: WallFrame,
-        s0: f32,
-        s1: f32,
-        y0: f32,
-        y1: f32,
-        d0: f32,
-        d1: f32,
-        openings: &[Opening],
-        mat: Mat,
-    ) {
-        let mut ops: Vec<Opening> = openings
-            .iter()
-            .copied()
-            .filter(|o| o.s > s0 && o.s < s1)
-            .collect();
+    fn wall(&mut self, f: WallFrame, s0: f32, s1: f32, y0: f32, y1: f32, d0: f32, d1: f32, openings: &[Opening], mat: Mat) {
+        let mut ops: Vec<Opening> = openings.iter().copied().filter(|o| o.s > s0 && o.s < s1).collect();
         ops.sort_by(|a, b| a.s.total_cmp(&b.s));
         let mut cursor = s0;
         let dm = (d0 + d1) / 2.0;
@@ -986,11 +823,7 @@ impl Builder {
             if sill > y0 {
                 self.solid_v(f.bounds((l, r), (y0, sill), (d0, d1)), mat);
                 // Подоконник.
-                let (a, b) = f.bounds(
-                    (l - 0.15, r + 0.15),
-                    (sill - 0.12, sill),
-                    (d0 - 0.12, d1 + 0.12),
-                );
+                let (a, b) = f.bounds((l - 0.15, r + 0.15), (sill - 0.12, sill), (d0 - 0.12, d1 + 0.12));
                 self.mesh(Mat::Trim).cuboid(a, b);
             }
             if apex < y1 {
@@ -999,36 +832,15 @@ impl Builder {
             // Коллизия в зоне арки: по краям проёма.
             let q = o.width / 4.0;
             let band_bottom = o.spring + arch_height(q, o.width, o.rise);
-            self.solid_v(
-                f.bounds((l, l + q * 0.6), (band_bottom, apex.min(y1)), (d0, d1)),
-                mat,
-            );
-            self.solid_v(
-                f.bounds((r - q * 0.6, r), (band_bottom, apex.min(y1)), (d0, d1)),
-                mat,
-            );
+            self.solid_v(f.bounds((l, l + q * 0.6), (band_bottom, apex.min(y1)), (d0, d1)), mat);
+            self.solid_v(f.bounds((r - q * 0.6, r), (band_bottom, apex.min(y1)), (d0, d1)), mat);
             {
                 let mut infill = std::mem::take(self.mesh(mat));
                 let mut trim = std::mem::take(self.mesh(Mat::Trim));
-                geom::arch_infill(
-                    &mut infill,
-                    &mut trim,
-                    f,
-                    o.s,
-                    o.width,
-                    o.spring,
-                    o.rise,
-                    apex.min(y1),
-                    d0,
-                    d1,
-                );
+                geom::arch_infill(&mut infill, &mut trim, f, o.s, o.width, o.spring, o.rise, apex.min(y1), d0, d1);
                 // Откосы проёма ниже пяты арки — обрамление.
                 for s in [l, r] {
-                    let (a, b) = f.bounds(
-                        (s - 0.12, s + 0.12),
-                        (sill, o.spring),
-                        (d0 - 0.06, d1 + 0.06),
-                    );
+                    let (a, b) = f.bounds((s - 0.12, s + 0.12), (sill, o.spring), (d0 - 0.06, d1 + 0.06));
                     trim.cuboid(a, b);
                 }
                 *self.mesh(mat) = infill;
@@ -1036,32 +848,15 @@ impl Builder {
             }
             // Дверь в проёме (широкие порталы и арки нефа остаются открытыми проходами).
             if !o.glass && o.width <= 3.0 && o.sill < y0 + 0.01 {
-                self.door(DoorSpec {
-                    center: f.p(o.s, y0, dm),
-                    along_x: f.along_x,
-                    width: o.width,
-                    height: o.spring - y0,
-                    wall_t: d1 - d0,
-                    double: o.width > 2.0,
-                    open: false,
-                });
+                self.door(DoorSpec { center: f.p(o.s, y0, dm), along_x: f.along_x, width: o.width, height: o.spring - y0, wall_t: d1 - d0, double: o.width > 2.0, open: false });
             }
             if o.glass {
                 let (pts, uvs) = geom::lancet_outline(f, o.s, dm, o.width, sill, o.spring, o.rise);
-                self.glass.push(GlassPane {
-                    kind: GlassKind::Lancet,
-                    pts,
-                    uvs,
-                    normal: f.d_axis(),
-                });
+                self.glass.push(GlassPane { kind: GlassKind::Lancet, pts, uvs, normal: f.d_axis() });
                 self.invisible(f.bounds((l, r), (sill, apex), (dm - 0.1, dm + 0.1)));
                 // Средник для широких окон.
                 if o.width > 1.9 {
-                    let (a, b) = f.bounds(
-                        (o.s - 0.07, o.s + 0.07),
-                        (sill, apex - 0.2),
-                        (dm - 0.12, dm + 0.12),
-                    );
+                    let (a, b) = f.bounds((o.s - 0.07, o.s + 0.07), (sill, apex - 0.2), (dm - 0.12, dm + 0.12));
                     self.mesh(Mat::Trim).cuboid(a, b);
                 }
             }
@@ -1072,33 +867,16 @@ impl Builder {
 
     /// Ступенчатый контрфорс у стены с пинаклем наверху.
     /// `face` — координата грани стены по d, `dir` — куда выступает (+1/−1).
-    fn buttress(
-        &mut self,
-        f: WallFrame,
-        s: f32,
-        face: f32,
-        dir: f32,
-        depth: f32,
-        height: f32,
-        width: f32,
-    ) {
+    fn buttress(&mut self, f: WallFrame, s: f32, face: f32, dir: f32, depth: f32, height: f32, width: f32) {
         let tiers = [(1.0, 0.55), (0.75, 0.8), (0.5, 1.0)];
         let mut y = 0.0;
         for (dk, hk) in tiers {
             let top = height * hk;
             let d_out = face + dir * depth * dk;
-            let (a, b) = f.bounds(
-                (s - width / 2.0, s + width / 2.0),
-                (y, top),
-                (face.min(d_out), face.max(d_out)),
-            );
+            let (a, b) = f.bounds((s - width / 2.0, s + width / 2.0), (y, top), (face.min(d_out), face.max(d_out)));
             self.solid_v((a, b), Mat::DarkStone);
             // Слив-карниз.
-            let (a2, b2) = f.bounds(
-                (s - width / 2.0 - 0.08, s + width / 2.0 + 0.08),
-                (top - 0.15, top),
-                (face.min(d_out + dir * 0.1), face.max(d_out + dir * 0.1)),
-            );
+            let (a2, b2) = f.bounds((s - width / 2.0 - 0.08, s + width / 2.0 + 0.08), (top - 0.15, top), (face.min(d_out + dir * 0.1), face.max(d_out + dir * 0.1)));
             self.mesh(Mat::Trim).cuboid(a2, b2);
             y = top;
         }
@@ -1116,83 +894,33 @@ impl Builder {
 
     /// Квадратная башня со шпилем, зубцами и окнами-бойницами.
     fn tower(&mut self, cx: f32, cz: f32, half: f32, height: f32, spire_h: f32) {
-        self.solid(
-            [cx - half, 0.0, cz - half],
-            [cx + half, height, cz + half],
-            Mat::DarkStone,
-        );
+        self.solid([cx - half, 0.0, cz - half], [cx + half, height, cz + half], Mat::DarkStone);
         // Пояс-карниз.
-        self.mesh(Mat::Trim).cuboid(
-            Vec3::new(cx - half - 0.2, height - 0.5, cz - half - 0.2),
-            Vec3::new(cx + half + 0.2, height, cz + half + 0.2),
-        );
-        self.mesh(Mat::Trim).cuboid(
-            Vec3::new(cx - half - 0.15, 2.0, cz - half - 0.15),
-            Vec3::new(cx + half + 0.15, 2.4, cz + half + 0.15),
-        );
+        self.mesh(Mat::Trim).cuboid(Vec3::new(cx - half - 0.2, height - 0.5, cz - half - 0.2), Vec3::new(cx + half + 0.2, height, cz + half + 0.2));
+        self.mesh(Mat::Trim).cuboid(Vec3::new(cx - half - 0.15, 2.0, cz - half - 0.15), Vec3::new(cx + half + 0.15, 2.4, cz + half + 0.15));
         // Зубцы.
         self.merlons_x(cx - half, cx + half, height, cz - half, cz - half + 0.6);
         self.merlons_x(cx - half, cx + half, height, cz + half - 0.6, cz + half);
-        self.merlons_z(
-            cx - half + 1.0,
-            cx + half - 1.0,
-            height,
-            cx - half,
-            cx - half + 0.6,
-        );
-        self.merlons_z(
-            cx - half + 1.0,
-            cx + half - 1.0,
-            height,
-            cx + half - 0.6,
-            cx + half,
-        );
+        self.merlons_z(cx - half + 1.0, cx + half - 1.0, height, cx - half, cx - half + 0.6);
+        self.merlons_z(cx - half + 1.0, cx + half - 1.0, height, cx + half - 0.6, cx + half);
         // Восьмигранный шпиль с барабаном.
         let r = half * 0.72;
-        self.mesh(Mat::DarkStone)
-            .prism(Vec3::new(cx, height, cz), r, 2.5, 8);
-        self.mesh(Mat::Roof)
-            .spire(Vec3::new(cx, height + 2.5, cz), r * 1.08, spire_h, 8);
-        self.mesh(Mat::Gold).prism(
-            Vec3::new(cx, height + 2.5 + spire_h - 0.3, cz),
-            0.12,
-            1.6,
-            4,
-        );
-        self.mesh(Mat::Gold).cuboid(
-            Vec3::new(cx - 0.5, height + 2.5 + spire_h + 0.7, cz - 0.06),
-            Vec3::new(cx + 0.5, height + 2.5 + spire_h + 0.85, cz + 0.06),
-        );
+        self.mesh(Mat::DarkStone).prism(Vec3::new(cx, height, cz), r, 2.5, 8);
+        self.mesh(Mat::Roof).spire(Vec3::new(cx, height + 2.5, cz), r * 1.08, spire_h, 8);
+        self.mesh(Mat::Gold).prism(Vec3::new(cx, height + 2.5 + spire_h - 0.3, cz), 0.12, 1.6, 4);
+        self.mesh(Mat::Gold).cuboid(Vec3::new(cx - 0.5, height + 2.5 + spire_h + 0.7, cz - 0.06), Vec3::new(cx + 0.5, height + 2.5 + spire_h + 0.85, cz + 0.06));
         // Пинакли по углам.
         for (sx, sz) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
-            self.pinnacle(
-                Vec3::new(cx + sx * (half - 0.4), height, cz + sz * (half - 0.4)),
-                0.35,
-                3.0,
-            );
+            self.pinnacle(Vec3::new(cx + sx * (half - 0.4), height, cz + sz * (half - 0.4)), 0.35, 3.0);
         }
         // Узкие светящиеся окна на всех гранях.
-        for (n, along_x) in [
-            (Vec3::Z, true),
-            (Vec3::NEG_Z, true),
-            (Vec3::X, false),
-            (Vec3::NEG_X, false),
-        ] {
+        for (n, along_x) in [(Vec3::Z, true), (Vec3::NEG_Z, true), (Vec3::X, false), (Vec3::NEG_X, false)] {
             let f = WallFrame { along_x };
-            let d = if along_x {
-                cz + n.z * (half + 0.03)
-            } else {
-                cx + n.x * (half + 0.03)
-            };
+            let d = if along_x { cz + n.z * (half + 0.03) } else { cx + n.x * (half + 0.03) };
             let sc = if along_x { cx } else { cz };
             for y in [height * 0.45, height * 0.72] {
                 let (pts, uvs) = geom::lancet_outline(f, sc, d, 0.8, y, y + 1.6, 0.6);
-                self.glass.push(GlassPane {
-                    kind: GlassKind::Lancet,
-                    pts,
-                    uvs,
-                    normal: n,
-                });
+                self.glass.push(GlassPane { kind: GlassKind::Lancet, pts, uvs, normal: n });
                 let (a, b) = f.bounds((sc - 0.6, sc + 0.6), (y - 0.15, y), (d - 0.1, d + 0.1));
                 self.mesh(Mat::Trim).cuboid(a, b);
             }
@@ -1202,28 +930,17 @@ impl Builder {
     /// Восьмигранная башенка-турель (коллизия — квадрат).
     fn turret(&mut self, cx: f32, cz: f32, r: f32, height: f32, spire_h: f32) {
         let h = r * 0.65;
-        self.solid(
-            [cx - h, 0.0, cz - h],
-            [cx + h, height, cz + h],
-            Mat::DarkStone,
-        );
+        self.solid([cx - h, 0.0, cz - h], [cx + h, height, cz + h], Mat::DarkStone);
         let m = self.mesh(Mat::DarkStone);
         m.prism(Vec3::new(cx, 0.0, cz), r, height, 8);
-        self.mesh(Mat::Trim)
-            .prism(Vec3::new(cx, height - 0.4, cz), r + 0.2, 0.4, 8);
-        self.mesh(Mat::Roof)
-            .spire(Vec3::new(cx, height, cz), r + 0.25, spire_h, 8);
-        self.mesh(Mat::Gold)
-            .prism(Vec3::new(cx, height + spire_h - 0.2, cz), 0.1, 1.0, 4);
+        self.mesh(Mat::Trim).prism(Vec3::new(cx, height - 0.4, cz), r + 0.2, 0.4, 8);
+        self.mesh(Mat::Roof).spire(Vec3::new(cx, height, cz), r + 0.25, spire_h, 8);
+        self.mesh(Mat::Gold).prism(Vec3::new(cx, height + spire_h - 0.2, cz), 0.1, 1.0, 4);
     }
 
     /// Колонна: база, восьмигранный ствол, капитель. Коллизия — квадрат.
     fn column(&mut self, x: f32, z: f32, r: f32, height: f32) {
-        self.solid(
-            [x - r * 0.8, 0.0, z - r * 0.8],
-            [x + r * 0.8, height, z + r * 0.8],
-            Mat::Trim,
-        );
+        self.solid([x - r * 0.8, 0.0, z - r * 0.8], [x + r * 0.8, height, z + r * 0.8], Mat::Trim);
         let m = self.mesh(Mat::Trim);
         m.prism(Vec3::new(x, 0.0, z), r * 1.3, 0.5, 8);
         m.prism(Vec3::new(x, 0.5, z), r * 1.1, 0.2, 8);
@@ -1233,12 +950,7 @@ impl Builder {
         // Тонкие колонки-«пучок» по сторонам ствола.
         for k in 0..4 {
             let a = k as f32 * std::f32::consts::FRAC_PI_2;
-            m.prism(
-                Vec3::new(x + a.cos() * r, 0.5, z + a.sin() * r),
-                r * 0.28,
-                height - 1.1,
-                6,
-            );
+            m.prism(Vec3::new(x + a.cos() * r, 0.5, z + a.sin() * r), r * 0.28, height - 1.1, 6);
         }
     }
 
@@ -1267,13 +979,7 @@ impl Builder {
             let p = c + Vec3::new(a.cos() * r, 0.0, a.sin() * r);
             m.beam(p, c + Vec3::Y * 1.6, 0.02, 0.02, Vec3::X);
         }
-        m.beam(
-            c + Vec3::Y * 1.6,
-            Vec3::new(c.x, top, c.z),
-            0.03,
-            0.03,
-            Vec3::X,
-        );
+        m.beam(c + Vec3::Y * 1.6, Vec3::new(c.x, top, c.z), 0.03, 0.03, Vec3::X);
         let candles: Vec<Vec3> = (0..8)
             .map(|i| {
                 let a = (i as f32 + 0.5) / 8.0 * std::f32::consts::TAU;
@@ -1282,15 +988,9 @@ impl Builder {
             .collect();
         for p in candles {
             self.mesh(Mat::Trim).prism(p, 0.05, 0.3, 6);
-            self.mesh(Mat::Coals)
-                .prism(p + Vec3::Y * 0.3, 0.025, 0.08, 4);
+            self.mesh(Mat::Coals).prism(p + Vec3::Y * 0.3, 0.025, 0.08, 4);
         }
-        self.lamp(
-            c + Vec3::Y * 0.4,
-            Color::srgb(1.0, 0.72, 0.42),
-            120_000.0,
-            22.0,
-        );
+        self.lamp(c + Vec3::Y * 0.4, Color::srgb(1.0, 0.72, 0.42), 120_000.0, 22.0);
     }
 
     /// Знамя (ткань с узором по UV) на стене.
@@ -1299,81 +999,32 @@ impl Builder {
         let n = f.d_axis() * out;
         let p = |ss: f32, y: f32| f.p(s + ss, y, d);
         m.quad_uv(
-            [
-                p(-width / 2.0, y0),
-                p(width / 2.0, y0),
-                p(width / 2.0, y1),
-                p(-width / 2.0, y1),
-            ],
-            [
-                Vec2::new(0.0, 1.0),
-                Vec2::new(1.0, 1.0),
-                Vec2::new(1.0, 0.0),
-                Vec2::new(0.0, 0.0),
-            ],
+            [p(-width / 2.0, y0), p(width / 2.0, y0), p(width / 2.0, y1), p(-width / 2.0, y1)],
+            [Vec2::new(0.0, 1.0), Vec2::new(1.0, 1.0), Vec2::new(1.0, 0.0), Vec2::new(0.0, 0.0)],
             n,
         );
         // Перекладина.
-        let (a, b) = f.bounds(
-            (s - width / 2.0 - 0.15, s + width / 2.0 + 0.15),
-            (y1, y1 + 0.1),
-            (d - 0.06, d + 0.06),
-        );
+        let (a, b) = f.bounds((s - width / 2.0 - 0.15, s + width / 2.0 + 0.15), (y1, y1 + 0.1), (d - 0.06, d + 0.06));
         self.mesh(Mat::Wood).cuboid(a, b);
     }
 
     /// Треугольный щипец (фронтон) над стеной.
-    fn gable(
-        &mut self,
-        f: WallFrame,
-        s0: f32,
-        s1: f32,
-        y0: f32,
-        y1: f32,
-        d0: f32,
-        d1: f32,
-        mat: Mat,
-    ) {
+    fn gable(&mut self, f: WallFrame, s0: f32, s1: f32, y0: f32, y1: f32, d0: f32, d1: f32, mat: Mat) {
         let sm = (s0 + s1) / 2.0;
         let m = self.mesh(mat);
         for (d, sign) in [(d0, -1.0f32), (d1, 1.0)] {
-            m.tri(
-                f.p(s0, y0, d),
-                f.p(s1, y0, d),
-                f.p(sm, y1, d),
-                f.d_axis() * sign,
-            );
+            m.tri(f.p(s0, y0, d), f.p(s1, y0, d), f.p(sm, y1, d), f.d_axis() * sign);
         }
         for (sa, sb) in [(s0, sm), (sm, s1)] {
             let (ya, yb) = if sa == s0 { (y0, y1) } else { (y1, y0) };
             let up = Vec3::Y + f.s_axis() * if sa == s0 { -1.0 } else { 1.0 };
-            m.quad(
-                [
-                    f.p(sa, ya, d0),
-                    f.p(sb, yb, d0),
-                    f.p(sb, yb, d1),
-                    f.p(sa, ya, d1),
-                ],
-                up,
-            );
+            m.quad([f.p(sa, ya, d0), f.p(sb, yb, d0), f.p(sb, yb, d1), f.p(sa, ya, d1)], up);
         }
         // Обрамление по скатам и крест-фиал на вершине.
         let t = self.mesh(Mat::Trim);
         let dd = (d0 + d1) / 2.0;
-        t.beam(
-            f.p(s0, y0 + 0.2, dd),
-            f.p(sm, y1 + 0.2, dd),
-            (d1 - d0) / 2.0 + 0.15,
-            0.2,
-            f.d_axis(),
-        );
-        t.beam(
-            f.p(sm, y1 + 0.2, dd),
-            f.p(s1, y0 + 0.2, dd),
-            (d1 - d0) / 2.0 + 0.15,
-            0.2,
-            f.d_axis(),
-        );
+        t.beam(f.p(s0, y0 + 0.2, dd), f.p(sm, y1 + 0.2, dd), (d1 - d0) / 2.0 + 0.15, 0.2, f.d_axis());
+        t.beam(f.p(sm, y1 + 0.2, dd), f.p(s1, y0 + 0.2, dd), (d1 - d0) / 2.0 + 0.15, 0.2, f.d_axis());
         self.pinnacle(f.p(sm, y1, dd), 0.4, 3.0);
     }
 }
@@ -1416,33 +1067,17 @@ pub fn city_colliders() -> LevelColliders {
 }
 
 pub fn colliders(layout: Layout) -> LevelColliders {
-    let mut boxes: Vec<Aabb> = layout
-        .blocks
-        .iter()
-        .filter(|b| b.solid)
-        .map(|b| b.aabb)
-        .collect();
+    let mut boxes: Vec<Aabb> = layout.blocks.iter().filter(|b| b.solid).map(|b| b.aabb).collect();
     boxes.extend(layout.invisible);
-    let doors = layout
-        .doors
-        .iter()
-        .map(|d| (d.closed_box(), d.open))
-        .collect();
+    let doors = layout.doors.iter().map(|d| (d.closed_box(), d.open)).collect();
     let bodies = layout.residents.iter().map(Resident::body).collect();
     let mut switches = Vec::new();
     for (g, group) in layout.switches.iter().enumerate() {
-        switches.extend(
-            group
-                .blocks
-                .iter()
-                .filter(|b| b.solid)
-                .map(|b| (b.aabb, g as u32)),
-        );
+        switches.extend(group.blocks.iter().filter(|b| b.solid).map(|b| (b.aabb, g as u32)));
         switches.extend(group.invisible.iter().map(|a| (*a, g as u32)));
     }
     let groups = layout.switches.len();
-    let level =
-        LevelColliders::with_switches(boxes, layout.ground, doors, bodies, switches, groups);
+    let level = LevelColliders::with_switches(boxes, layout.ground, doors, bodies, switches, groups);
     // Пока мир не загружен — пепелища на всех стройплощадках.
     for (g, group) in layout.switches.iter().enumerate() {
         if matches!(group.key, SwitchKey::Site { stage: 0, .. }) {
@@ -1468,11 +1103,7 @@ pub fn spawn_point(index: usize) -> Vec3 {
 /// Подробнее (с фракциями) — [`npc_posts`].
 pub fn npc_spawn_hints() -> Vec<Vec3> {
     match active() {
-        LevelKind::Chersonesus => places::npc_posts()
-            .into_iter()
-            .filter(|p| p.group.hostile())
-            .map(|p| p.pos)
-            .collect(),
+        LevelKind::Chersonesus => places::npc_posts().into_iter().filter(|p| p.group.hostile()).map(|p| p.pos).collect(),
         LevelKind::Castle => castle::npc_spawn_hints(),
     }
 }
@@ -1489,24 +1120,14 @@ pub fn spawn_level(
     mut window_mats: ResMut<Assets<StandardMaterial>>,
 ) {
     let mut layout = layout();
-    commands.insert_resource(crate::vegetation::PendingPlants(std::mem::take(
-        &mut layout.plants,
-    )));
+    commands.insert_resource(crate::vegetation::PendingPlants(std::mem::take(&mut layout.plants)));
 
     // Все коробки и декор одного материала на одном участке — в один меш.
     for block in &layout.blocks {
         let size = block.aabb.max - block.aabb.min;
         // Огромные плиты (пол на весь мир) — отдельно, иначе их участок будет виден всегда.
-        let chunk = if size.x > CHUNK * 2.0 || size.z > CHUNK * 2.0 {
-            (i16::MAX, i16::MAX)
-        } else {
-            chunk_of((block.aabb.min + block.aabb.max) / 2.0)
-        };
-        layout
-            .decor
-            .entry((block.mat, chunk))
-            .or_default()
-            .cuboid(block.aabb.min, block.aabb.max);
+        let chunk = if size.x > CHUNK * 2.0 || size.z > CHUNK * 2.0 { (i16::MAX, i16::MAX) } else { chunk_of((block.aabb.min + block.aabb.max) / 2.0) };
+        layout.decor.entry((block.mat, chunk)).or_default().cuboid(block.aabb.min, block.aabb.max);
     }
     if let Some(ground) = &layout.ground {
         terrain::terrain_meshes(ground, &mut layout.decor);
@@ -1515,30 +1136,12 @@ pub fn spawn_level(
     if let Some(y) = layout.water_y {
         let mut mb = MeshBuilder::default();
         let r = 1200.0;
-        mb.quad(
-            [
-                Vec3::new(-r, y, -r),
-                Vec3::new(r, y, -r),
-                Vec3::new(r, y, r),
-                Vec3::new(-r, y, r),
-            ],
-            Vec3::Y,
-        );
+        mb.quad([Vec3::new(-r, y, -r), Vec3::new(r, y, -r), Vec3::new(r, y, r), Vec3::new(-r, y, r)], Vec3::Y);
         let mat = water_mats.add(crate::sky::water_material(&crate::graphics::mood()));
-        commands.spawn((
-            Mesh3d(meshes.add(mb.build())),
-            MeshMaterial3d(mat),
-            Transform::IDENTITY,
-            NotShadowCaster,
-        ));
+        commands.spawn((Mesh3d(meshes.add(mb.build())), MeshMaterial3d(mat), Transform::IDENTITY, NotShadowCaster));
     }
     // Дым из очагов и горнов: над крышей, если очаг под черепицей.
-    let roofs: Vec<[Vec3; 3]> = layout
-        .decor
-        .iter()
-        .filter(|((m, _), _)| *m == Mat::Tile)
-        .flat_map(|(_, mb)| mb.triangles())
-        .collect();
+    let roofs: Vec<[Vec3; 3]> = layout.decor.iter().filter(|((m, _), _)| *m == Mat::Tile).flat_map(|(_, mb)| mb.triangles()).collect();
     let forges: Vec<Vec3> = layout.forges.iter().map(|f| f.fire).collect();
     let smoke = crate::smoke::smoke_sources(&layout.hearths, &forges, &roofs);
     crate::smoke::spawn_smoke(&mut commands, &mut meshes, &mut smoke_mats, &smoke);
@@ -1549,10 +1152,7 @@ pub fn spawn_level(
         if mb.is_empty() {
             continue;
         }
-        let handle = materials
-            .entry(mat)
-            .or_insert_with(|| surfaces.add(crate::graphics::surface_material(mat)))
-            .clone();
+        let handle = materials.entry(mat).or_insert_with(|| surfaces.add(crate::graphics::surface_material(mat))).clone();
         // Геометрия уровня неизменна: после загрузки в видеокарту копию в памяти отпускаем,
         // а рамку для отсечения считаем заранее (потом данных меша уже не будет).
         let mut mesh = mb.build();
@@ -1562,11 +1162,7 @@ pub fn spawn_level(
         crate::graphics::push_along_normals(&mut mesh, crate::graphics::depth_rank(mat));
         let aabb = bevy::camera::primitives::MeshAabb::get_aabb(&mesh);
         mesh.asset_usage = bevy::asset::RenderAssetUsages::RENDER_WORLD;
-        let mut e = commands.spawn((
-            Mesh3d(meshes.add(mesh)),
-            MeshMaterial3d(handle),
-            Transform::IDENTITY,
-        ));
+        let mut e = commands.spawn((Mesh3d(meshes.add(mesh)), MeshMaterial3d(handle), Transform::IDENTITY));
         if let Some(aabb) = aabb {
             e.insert(aabb);
         }
@@ -1579,10 +1175,7 @@ pub fn spawn_level(
     for (g, group) in layout.switches.iter().enumerate() {
         let mut by_mat: HashMap<Mat, MeshBuilder> = HashMap::new();
         for block in &group.blocks {
-            by_mat
-                .entry(block.mat)
-                .or_default()
-                .cuboid(block.aabb.min, block.aabb.max);
+            by_mat.entry(block.mat).or_default().cuboid(block.aabb.min, block.aabb.max);
         }
         for (mat, mb) in &group.decor {
             by_mat.entry(*mat).or_default().append(mb.clone());
@@ -1591,27 +1184,12 @@ pub fn spawn_level(
             if mb.is_empty() {
                 continue;
             }
-            let handle = materials
-                .entry(mat)
-                .or_insert_with(|| surfaces.add(crate::graphics::surface_material(mat)))
-                .clone();
-            commands.spawn((
-                Mesh3d(meshes.add(mb.build())),
-                MeshMaterial3d(handle),
-                Transform::IDENTITY,
-                Visibility::Hidden,
-                SwitchVisual(g as u32),
-            ));
+            let handle = materials.entry(mat).or_insert_with(|| surfaces.add(crate::graphics::surface_material(mat))).clone();
+            commands.spawn((Mesh3d(meshes.add(mb.build())), MeshMaterial3d(handle), Transform::IDENTITY, Visibility::Hidden, SwitchVisual(g as u32)));
         }
         for lamp in &group.lamps {
             commands.spawn((
-                PointLight {
-                    color: lamp.color,
-                    intensity: lamp.intensity,
-                    range: lamp.range,
-                    shadow_maps_enabled: false,
-                    ..default()
-                },
+                PointLight { color: lamp.color, intensity: lamp.intensity, range: lamp.range, shadow_maps_enabled: false, ..default() },
                 Transform::from_translation(lamp.pos),
                 Visibility::Hidden,
                 SwitchVisual(g as u32),
@@ -1620,14 +1198,8 @@ pub fn spawn_level(
     }
 
     // Двери и жители.
-    let wood = materials
-        .entry(Mat::Wood)
-        .or_insert_with(|| surfaces.add(crate::graphics::surface_material(Mat::Wood)))
-        .clone();
-    let iron = materials
-        .entry(Mat::Iron)
-        .or_insert_with(|| surfaces.add(crate::graphics::surface_material(Mat::Iron)))
-        .clone();
+    let wood = materials.entry(Mat::Wood).or_insert_with(|| surfaces.add(crate::graphics::surface_material(Mat::Wood))).clone();
+    let iron = materials.entry(Mat::Iron).or_insert_with(|| surfaces.add(crate::graphics::surface_material(Mat::Iron))).clone();
     crate::doors::spawn_door_leaves(&mut commands, &mut meshes, wood, iron, &layout.doors);
     crate::residents::spawn_residents(&mut commands, &layout.residents);
 
@@ -1643,9 +1215,7 @@ pub fn spawn_level(
         }
         commands.spawn((
             Mesh3d(meshes.add(mb.build())),
-            MeshMaterial3d(
-                glass_mats.add(crate::graphics::glass_material(kind == GlassKind::Rose)),
-            ),
+            MeshMaterial3d(glass_mats.add(crate::graphics::glass_material(kind == GlassKind::Rose))),
             Transform::IDENTITY,
             NotShadowCaster,
         ));
@@ -1658,31 +1228,18 @@ pub fn spawn_level(
         if t.out != Vec3::ZERO {
             let wall = base - t.out * 0.35;
             holders.beam(wall + Vec3::Y * -0.25, base, 0.03, 0.03, Vec3::Y);
-            holders.cuboid(
-                wall - Vec3::splat(0.08) - Vec3::Y * 0.3,
-                wall + Vec3::splat(0.08) - Vec3::Y * 0.1,
-            );
+            holders.cuboid(wall - Vec3::splat(0.08) - Vec3::Y * 0.3, wall + Vec3::splat(0.08) - Vec3::Y * 0.1);
         }
         holders.prism(base - Vec3::Y * 0.25, 0.05, 0.3, 6);
         holders.prism(base + Vec3::Y * 0.02, 0.1, 0.12, 6);
     }
     if !holders.is_empty() {
-        commands.spawn((
-            Mesh3d(meshes.add(holders.build())),
-            MeshMaterial3d(surfaces.add(crate::graphics::surface_material(Mat::Iron))),
-        ));
+        commands.spawn((Mesh3d(meshes.add(holders.build())), MeshMaterial3d(surfaces.add(crate::graphics::surface_material(Mat::Iron)))));
     }
     let flame_mesh = meshes.add(Rectangle::new(0.42, 0.75));
     let flame = flame_mats.add(crate::graphics::FlameMaterial::default());
     for (i, t) in layout.torches.iter().enumerate() {
-        crate::graphics::spawn_flame(
-            &mut commands,
-            flame_mesh.clone(),
-            flame.clone(),
-            t.pos + Vec3::Y * 0.12,
-            t.out,
-            i as f32 * 1.7,
-        );
+        crate::graphics::spawn_flame(&mut commands, flame_mesh.clone(), flame.clone(), t.pos + Vec3::Y * 0.12, t.out, i as f32 * 1.7);
     }
     // Ночью в части окон горит свет: тёплое свечение за деревянной решёткой (не у всех — кто-то спит).
     let mut glow = MeshBuilder::default();
@@ -1701,29 +1258,15 @@ pub fn spawn_level(
             ..default()
         });
         commands.insert_resource(crate::daylight::WindowGlow(mat.clone()));
-        commands.spawn((
-            Mesh3d(meshes.add(glow.build())),
-            MeshMaterial3d(mat),
-            Transform::IDENTITY,
-            Visibility::Hidden,
-            NotShadowCaster,
-            crate::daylight::WindowGlowMesh,
-        ));
+        commands.spawn((Mesh3d(meshes.add(glow.build())), MeshMaterial3d(mat), Transform::IDENTITY, Visibility::Hidden, NotShadowCaster, crate::daylight::WindowGlowMesh));
     }
     for lamp in &layout.lamps {
         commands.spawn((
-            PointLight {
-                color: lamp.color,
-                intensity: lamp.intensity,
-                range: lamp.range,
-                shadow_maps_enabled: false,
-                ..default()
-            },
+            PointLight { color: lamp.color, intensity: lamp.intensity, range: lamp.range, shadow_maps_enabled: false, ..default() },
             Transform::from_translation(lamp.pos),
-            crate::graphics::Flicker {
-                base: lamp.intensity,
-                phase: lamp.pos.x + lamp.pos.z,
-            },
+            crate::graphics::Flicker { base: lamp.intensity, phase: lamp.pos.x + lamp.pos.z },
         ));
     }
 }
+
+

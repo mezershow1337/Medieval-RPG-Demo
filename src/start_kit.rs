@@ -27,35 +27,14 @@ pub const WEAPONS: [(Choice, &str); 10] = [
     ((Some("Булава"), C), "Булава"),
     ((Some("Окованная палица"), C), "Палица окованная"),
 ];
-pub const SHIELDS: [(Choice, &str); 3] = [
-    ((Some("Круглый щит"), C), "Круглый щит"),
-    ((Some("Овальный щит"), P), "Овальный щит"),
-    ((None, C), "Без щита"),
-];
-pub const HELMETS: [(Choice, &str); 2] = [
-    ((Some("Гребенчатый шлем"), C), "Гребенчатый шлем"),
-    ((Some("Спангенхельм"), P), "Спангенхельм (ветхий)"),
-];
-pub const CHESTS: [(Choice, &str); 2] = [
-    ((Some("Стёганая туника"), C), "Стёганая туника"),
-    ((Some("Кольчуга"), P), "Кольчуга (ветхая)"),
-];
-pub const HANDS: [(Choice, &str); 2] = [
-    ((Some("Кожаные перчатки"), C), "Кожаные перчатки"),
-    ((Some("Ламеллярные наручи"), P), "Наручи (ветхие)"),
-];
-pub const LEGS: [(Choice, &str); 2] = [
-    ((None, C), "Без поножей"),
-    ((Some("Железные поножи"), P), "Поножи (ветхие)"),
-];
+pub const SHIELDS: [(Choice, &str); 3] = [((Some("Круглый щит"), C), "Круглый щит"), ((Some("Овальный щит"), P), "Овальный щит"), ((None, C), "Без щита")];
+pub const HELMETS: [(Choice, &str); 2] = [((Some("Гребенчатый шлем"), C), "Гребенчатый шлем"), ((Some("Спангенхельм"), P), "Спангенхельм (ветхий)")];
+pub const CHESTS: [(Choice, &str); 2] = [((Some("Стёганая туника"), C), "Стёганая туника"), ((Some("Кольчуга"), P), "Кольчуга (ветхая)")];
+pub const HANDS: [(Choice, &str); 2] = [((Some("Кожаные перчатки"), C), "Кожаные перчатки"), ((Some("Ламеллярные наручи"), P), "Наручи (ветхие)")];
+pub const LEGS: [(Choice, &str); 2] = [((None, C), "Без поножей"), ((Some("Железные поножи"), P), "Поножи (ветхие)")];
 
 /// Что дают всем сверх выбора: обувь, бинт, уксус для промывки ран и пять фоллисов.
-pub const ALWAYS: [(&str, Quality, u16); 4] = [
-    ("Кожаные сапоги", P, 1),
-    ("Бинт", C, 1),
-    ("Винный уксус", C, 1),
-    ("Фоллис", C, 5),
-];
+pub const ALWAYS: [(&str, Quality, u16); 4] = [("Кожаные сапоги", P, 1), ("Бинт", C, 1), ("Винный уксус", C, 1), ("Фоллис", C, 5)];
 
 /// Что можно выбрать в стартовом наборе.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -69,14 +48,7 @@ pub enum KitField {
 }
 
 impl KitField {
-    pub const ALL: [KitField; 6] = [
-        KitField::Weapon,
-        KitField::Shield,
-        KitField::Helmet,
-        KitField::Chest,
-        KitField::Hands,
-        KitField::Legs,
-    ];
+    pub const ALL: [KitField; 6] = [KitField::Weapon, KitField::Shield, KitField::Helmet, KitField::Chest, KitField::Hands, KitField::Legs];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -141,29 +113,18 @@ impl StartKit {
 
     /// Все предметы набора: (название, качество, количество).
     pub fn items(&self) -> Vec<(&'static str, Quality, u16)> {
-        let mut out: Vec<_> = KitField::ALL
-            .iter()
-            .filter_map(|f| self.choice(*f).0.0.map(|n| (n, self.choice(*f).0.1, 1)))
-            .collect();
+        let mut out: Vec<_> = KitField::ALL.iter().filter_map(|f| self.choice(*f).0.0.map(|n| (n, self.choice(*f).0.1, 1))).collect();
         out.extend(ALWAYS);
         out
     }
 
     pub fn pack(&self) -> [u8; 6] {
-        [
-            self.weapon,
-            self.shield,
-            self.helmet,
-            self.chest,
-            self.hands,
-            self.legs,
-        ]
+        [self.weapon, self.shield, self.helmet, self.chest, self.hands, self.legs]
     }
 
     /// Из байтов профиля; чужие и испорченные номера приводятся в допустимые.
     pub fn unpack(b: &[u8]) -> Self {
-        let get =
-            |i: usize, f: KitField| b.get(i).map(|v| *v % f.options().len() as u8).unwrap_or(0);
+        let get = |i: usize, f: KitField| b.get(i).map(|v| *v % f.options().len() as u8).unwrap_or(0);
         StartKit {
             weapon: get(0, KitField::Weapon),
             shield: get(1, KitField::Shield),
@@ -176,30 +137,17 @@ impl StartKit {
 
     /// Строка для settings.txt: номера через запятую.
     pub fn to_text(&self) -> String {
-        self.pack()
-            .iter()
-            .map(|v| v.to_string())
-            .collect::<Vec<_>>()
-            .join(",")
+        self.pack().iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")
     }
 
     pub fn from_text(s: &str) -> Option<Self> {
-        let v: Vec<u8> = s
-            .split(',')
-            .map(|x| x.trim().parse().ok())
-            .collect::<Option<_>>()?;
+        let v: Vec<u8> = s.split(',').map(|x| x.trim().parse().ok()).collect::<Option<_>>()?;
         (v.len() == 6).then(|| Self::unpack(&v))
     }
 
     /// Вид персонажа в этом наборе — для предпросмотра в меню.
     pub fn gear(&self, look: crate::appearance::Look) -> crate::gear_look::Gear {
-        let id = |f: KitField| {
-            self.choice(f)
-                .0
-                .0
-                .and_then(crate::items::ItemBaseId::find)
-                .map(|b| b.0)
-        };
+        let id = |f: KitField| self.choice(f).0.0.and_then(crate::items::ItemBaseId::find).map(|b| b.0);
         crate::gear_look::Gear {
             head: id(KitField::Helmet),
             chest: id(KitField::Chest),
@@ -223,30 +171,19 @@ mod tests {
         for f in KitField::ALL {
             for ((name, _), _) in f.options() {
                 if let Some(n) = name {
-                    assert!(
-                        crate::items::ItemBaseId::find(n).is_some(),
-                        "нет предмета «{n}»"
-                    );
+                    assert!(crate::items::ItemBaseId::find(n).is_some(), "нет предмета «{n}»");
                 }
             }
         }
         for (n, _, _) in ALWAYS {
-            assert!(
-                crate::items::ItemBaseId::find(n).is_some(),
-                "нет предмета «{n}»"
-            );
+            assert!(crate::items::ItemBaseId::find(n).is_some(), "нет предмета «{n}»");
         }
     }
 
     #[test]
     fn two_choices_of_each_weapon_and_armour() {
         assert_eq!(WEAPONS.len(), 10);
-        for f in [
-            KitField::Helmet,
-            KitField::Chest,
-            KitField::Hands,
-            KitField::Legs,
-        ] {
+        for f in [KitField::Helmet, KitField::Chest, KitField::Hands, KitField::Legs] {
             assert_eq!(f.options().len(), 2, "{f:?}");
         }
     }

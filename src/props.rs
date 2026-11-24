@@ -97,15 +97,9 @@ impl Obb {
     pub fn aabb(&self) -> Aabb {
         let m = Mat3::from_quat(self.rot);
         let e = Vec3::new(
-            m.x_axis.x.abs() * self.half.x
-                + m.y_axis.x.abs() * self.half.y
-                + m.z_axis.x.abs() * self.half.z,
-            m.x_axis.y.abs() * self.half.x
-                + m.y_axis.y.abs() * self.half.y
-                + m.z_axis.y.abs() * self.half.z,
-            m.x_axis.z.abs() * self.half.x
-                + m.y_axis.z.abs() * self.half.y
-                + m.z_axis.z.abs() * self.half.z,
+            m.x_axis.x.abs() * self.half.x + m.y_axis.x.abs() * self.half.y + m.z_axis.x.abs() * self.half.z,
+            m.x_axis.y.abs() * self.half.x + m.y_axis.y.abs() * self.half.y + m.z_axis.y.abs() * self.half.z,
+            m.x_axis.z.abs() * self.half.x + m.y_axis.z.abs() * self.half.y + m.z_axis.z.abs() * self.half.z,
         );
         Aabb::new(self.center - e, self.center + e)
     }
@@ -118,18 +112,8 @@ fn aabb_penetration(b: &Aabb, p: Vec3) -> Option<(Vec3, f32)> {
     if lo.min_element() <= 0.0 || hi.min_element() <= 0.0 {
         return None;
     }
-    let cands = [
-        (lo.x, Vec3::NEG_X),
-        (hi.x, Vec3::X),
-        (lo.y, Vec3::NEG_Y),
-        (hi.y, Vec3::Y),
-        (lo.z, Vec3::NEG_Z),
-        (hi.z, Vec3::Z),
-    ];
-    let (d, n) = cands
-        .into_iter()
-        .min_by(|a, b| a.0.total_cmp(&b.0))
-        .unwrap();
+    let cands = [(lo.x, Vec3::NEG_X), (hi.x, Vec3::X), (lo.y, Vec3::NEG_Y), (hi.y, Vec3::Y), (lo.z, Vec3::NEG_Z), (hi.z, Vec3::Z)];
+    let (d, n) = cands.into_iter().min_by(|a, b| a.0.total_cmp(&b.0)).unwrap();
     Some((n, d))
 }
 
@@ -188,11 +172,7 @@ pub struct PropBody {
 /// Точки на поверхности коробки: углы, рёбра и грани через ~12 см.
 fn surface_points(half: Vec3) -> Vec<Vec3> {
     let n = |len: f32, step: f32| ((len / step).ceil() as usize).clamp(1, 8);
-    let (nx, ny, nz) = (
-        n(half.x * 2.0, 0.12),
-        n(half.y * 2.0, 0.12),
-        n(half.z * 2.0, 0.12),
-    );
+    let (nx, ny, nz) = (n(half.x * 2.0, 0.12), n(half.y * 2.0, 0.12), n(half.z * 2.0, 0.12));
     let mut pts = Vec::new();
     for ix in 0..=nx {
         for iy in 0..=ny {
@@ -205,11 +185,7 @@ fn surface_points(half: Vec3) -> Vec<Vec3> {
                     continue;
                 }
                 let f = |i: usize, n: usize| i as f32 / n as f32 * 2.0 - 1.0;
-                pts.push(Vec3::new(
-                    f(ix, nx) * half.x,
-                    f(iy, ny) * half.y,
-                    f(iz, nz) * half.z,
-                ));
+                pts.push(Vec3::new(f(ix, nx) * half.x, f(iy, ny) * half.y, f(iz, nz) * half.z));
             }
         }
     }
@@ -221,11 +197,7 @@ impl PropBody {
         let half = half.max(Vec3::splat(MIN_HALF));
         let mass = mass.max(0.002);
         let s = half * 2.0;
-        let i = Vec3::new(
-            s.y * s.y + s.z * s.z,
-            s.x * s.x + s.z * s.z,
-            s.x * s.x + s.y * s.y,
-        ) * (mass / 12.0);
+        let i = Vec3::new(s.y * s.y + s.z * s.z, s.x * s.x + s.z * s.z, s.x * s.x + s.y * s.y) * (mass / 12.0);
         Self {
             pos,
             rot,
@@ -254,11 +226,7 @@ impl PropBody {
     }
 
     pub fn obb(&self) -> Obb {
-        Obb {
-            center: self.pos,
-            rot: self.rot,
-            half: self.half,
-        }
+        Obb { center: self.pos, rot: self.rot, half: self.half }
     }
 
     pub fn wake(&mut self) {
@@ -300,11 +268,7 @@ impl PropBody {
         let q = hold.target_rot * self.rot.inverse();
         let q = if q.w < 0.0 { -q } else { q };
         let (axis, angle) = q.to_axis_angle();
-        let want = if angle.is_finite() && axis.is_finite() {
-            axis * angle * 10.0
-        } else {
-            Vec3::ZERO
-        };
+        let want = if angle.is_finite() && axis.is_finite() { axis * angle * 10.0 } else { Vec3::ZERO };
         let k = (hold.max_force / (self.mass * GRAVITY * 3.0)).clamp(0.05, 1.0);
         self.ang += (want - self.ang) * (h * 20.0 * k).min(1.0);
     }
@@ -336,11 +300,7 @@ impl PropBody {
             return;
         }
         // Выталкиваем по самой глубокой точке.
-        let (_, n, depth, _) = contacts
-            .iter()
-            .copied()
-            .max_by(|a, b| a.2.total_cmp(&b.2))
-            .unwrap();
+        let (_, n, depth, _) = contacts.iter().copied().max_by(|a, b| a.2.total_cmp(&b.2)).unwrap();
         if depth > SLOP {
             self.pos += n * (depth - SLOP) * 0.8;
         }
@@ -391,11 +351,7 @@ impl PropBody {
     }
 
     fn update_sleep(&mut self, held: bool, dt: f32) -> bool {
-        if !held
-            && self.touching
-            && self.vel.length() < SLEEP_SPEED
-            && self.ang.length() < SLEEP_SPIN
-        {
+        if !held && self.touching && self.vel.length() < SLEEP_SPEED && self.ang.length() < SLEEP_SPIN {
             self.still += dt;
             if self.still > SLEEP_AFTER {
                 self.vel = Vec3::ZERO;
@@ -414,10 +370,7 @@ impl PropBody {
 fn candidate_boxes(level: &LevelColliders, b: &PropBody, dt: f32) -> Vec<Aabb> {
     let a = b.obb().aabb();
     let grow = Vec3::splat(b.vel.length() * dt + 0.05);
-    level
-        .boxes_touching(Aabb::new(a.min - grow, a.max + grow))
-        .copied()
-        .collect()
+    level.boxes_touching(Aabb::new(a.min - grow, a.max + grow)).copied().collect()
 }
 
 /// Самая глубокая точка касания с неподвижным миром: (нормаль, глубина, скорость поверхности).
@@ -433,11 +386,7 @@ fn static_contact(env: &Env, boxes: &[Aabb], p: Vec3) -> Option<(Vec3, f32, Vec3
         let e = 0.15;
         let gx = env.level.ground_height(p.x + e, p.z) - env.level.ground_height(p.x - e, p.z);
         let gz = env.level.ground_height(p.x, p.z + e) - env.level.ground_height(p.x, p.z - e);
-        let n = if gx.is_finite() && gz.is_finite() {
-            Vec3::new(-gx, 2.0 * e, -gz).normalize()
-        } else {
-            Vec3::Y
-        };
+        let n = if gx.is_finite() && gz.is_finite() { Vec3::new(-gx, 2.0 * e, -gz).normalize() } else { Vec3::Y };
         take(n, (g - p.y) * n.y, Vec3::ZERO);
     }
     for b in boxes {
@@ -483,14 +432,10 @@ pub fn collide_pair(a: &mut PropBody, b: &mut PropBody, h: f32) -> bool {
 /// Точки `a` внутри `b`: толкаем оба тела.
 fn points_into(a: &mut PropBody, b: &mut PropBody, h: f32) -> bool {
     let ob = b.obb();
-    let contacts: Vec<(Vec3, Vec3, f32)> = a
-        .points
-        .iter()
-        .filter_map(|lp| {
-            let p = a.pos + a.rot * *lp;
-            ob.penetration(p).map(|(n, d)| (p, n, d))
-        })
-        .collect();
+    let contacts: Vec<(Vec3, Vec3, f32)> = a.points.iter().filter_map(|lp| {
+        let p = a.pos + a.rot * *lp;
+        ob.penetration(p).map(|(n, d)| (p, n, d))
+    }).collect();
     if contacts.is_empty() {
         return false;
     }
@@ -498,11 +443,7 @@ fn points_into(a: &mut PropBody, b: &mut PropBody, h: f32) -> bool {
         a.wake();
         b.wake();
     }
-    let (_, n, depth) = contacts
-        .iter()
-        .copied()
-        .max_by(|x, y| x.2.total_cmp(&y.2))
-        .unwrap();
+    let (_, n, depth) = contacts.iter().copied().max_by(|x, y| x.2.total_cmp(&y.2)).unwrap();
     if depth > SLOP {
         let total = a.mass + b.mass;
         let push = n * (depth - SLOP) * 0.6;
@@ -544,16 +485,11 @@ fn points_into(a: &mut PropBody, b: &mut PropBody, h: f32) -> bool {
 /// Кадр для набора тел: каждое — со своим удержанием (или без), плюс столкновения между ними.
 /// Возвращает номера тел, которые уснули в этом кадре.
 pub fn step_bodies(bodies: &mut [(&mut PropBody, Option<Hold>)], env: &Env, dt: f32) -> Vec<usize> {
-    let awake: Vec<usize> = (0..bodies.len())
-        .filter(|i| !bodies[*i].0.asleep || bodies[*i].1.is_some())
-        .collect();
+    let awake: Vec<usize> = (0..bodies.len()).filter(|i| !bodies[*i].0.asleep || bodies[*i].1.is_some()).collect();
     if awake.is_empty() {
         return Vec::new();
     }
-    let boxes: Vec<Vec<Aabb>> = awake
-        .iter()
-        .map(|i| candidate_boxes(env.level, bodies[*i].0, dt))
-        .collect();
+    let boxes: Vec<Vec<Aabb>> = awake.iter().map(|i| candidate_boxes(env.level, bodies[*i].0, dt)).collect();
     for i in &awake {
         bodies[*i].0.asleep = false;
     }
@@ -618,21 +554,11 @@ mod tests {
     use crate::collision::LevelColliders;
 
     fn floor() -> LevelColliders {
-        LevelColliders::new(
-            vec![Aabb::new(
-                Vec3::new(-50.0, -1.0, -50.0),
-                Vec3::new(50.0, 0.0, 50.0),
-            )],
-            None,
-        )
+        LevelColliders::new(vec![Aabb::new(Vec3::new(-50.0, -1.0, -50.0), Vec3::new(50.0, 0.0, 50.0))], None)
     }
 
     fn run(body: &mut PropBody, level: &LevelColliders, statics: &[Obb], secs: f32) {
-        let env = Env {
-            level,
-            statics,
-            movers: &[],
-        };
+        let env = Env { level, statics, movers: &[] };
         for _ in 0..(secs / TICK) as usize {
             body.step(&env, None, TICK);
         }
@@ -642,12 +568,7 @@ mod tests {
     fn falls_and_settles_flat() {
         let level = floor();
         let half = Vec3::new(0.05, 0.02, 0.45);
-        let mut b = PropBody::new(
-            half,
-            1.1,
-            Vec3::new(0.0, 1.5, 0.0),
-            Quat::from_rotation_x(0.6) * Quat::from_rotation_z(0.4),
-        );
+        let mut b = PropBody::new(half, 1.1, Vec3::new(0.0, 1.5, 0.0), Quat::from_rotation_x(0.6) * Quat::from_rotation_z(0.4));
         run(&mut b, &level, &[], 6.0);
         assert!(b.asleep, "тело должно уснуть: v={} w={}", b.vel, b.ang);
         // Плоская спата ложится плашмя: центр на половине толщины над полом.
@@ -659,17 +580,8 @@ mod tests {
     #[test]
     fn lands_on_counter_and_on_slope() {
         let level = floor();
-        let counter = Obb {
-            center: Vec3::new(0.0, 0.45, 0.0),
-            rot: Quat::from_rotation_y(0.7),
-            half: Vec3::new(1.0, 0.45, 0.35),
-        };
-        let mut b = PropBody::new(
-            Vec3::splat(0.06),
-            0.8,
-            Vec3::new(0.1, 1.4, 0.05),
-            Quat::IDENTITY,
-        );
+        let counter = Obb { center: Vec3::new(0.0, 0.45, 0.0), rot: Quat::from_rotation_y(0.7), half: Vec3::new(1.0, 0.45, 0.35) };
+        let mut b = PropBody::new(Vec3::splat(0.06), 0.8, Vec3::new(0.1, 1.4, 0.05), Quat::IDENTITY);
         run(&mut b, &level, &[counter], 4.0);
         assert!(b.asleep);
         assert!((b.pos.y - 0.96).abs() < 0.02, "на прилавке: {}", b.pos.y);
@@ -678,17 +590,9 @@ mod tests {
     #[test]
     fn thrown_item_does_not_pass_through_wall() {
         let mut boxes = floor().0;
-        boxes.push(Aabb::new(
-            Vec3::new(3.0, 0.0, -5.0),
-            Vec3::new(3.25, 4.0, 5.0),
-        ));
+        boxes.push(Aabb::new(Vec3::new(3.0, 0.0, -5.0), Vec3::new(3.25, 4.0, 5.0)));
         let level = LevelColliders::new(boxes, None);
-        let mut b = PropBody::new(
-            Vec3::new(0.0045, 0.006, 0.004),
-            0.009,
-            Vec3::new(0.0, 1.5, 0.0),
-            Quat::IDENTITY,
-        );
+        let mut b = PropBody::new(Vec3::new(0.0045, 0.006, 0.004), 0.009, Vec3::new(0.0, 1.5, 0.0), Quat::IDENTITY);
         b.vel = Vec3::new(13.0, 1.0, 0.0);
         run(&mut b, &level, &[], 4.0);
         assert!(b.pos.x < 3.0, "монета пролетела сквозь стену: {}", b.pos);
@@ -698,90 +602,39 @@ mod tests {
     #[test]
     fn stack_rests_and_heavy_cannot_be_lifted() {
         let level = floor();
-        let env = Env {
-            level: &level,
-            statics: &[],
-            movers: &[],
-        };
-        let mut a = PropBody::new(
-            Vec3::new(0.2, 0.1, 0.2),
-            5.0,
-            Vec3::new(0.0, 0.1, 0.0),
-            Quat::IDENTITY,
-        );
-        let mut b = PropBody::new(
-            Vec3::new(0.1, 0.05, 0.1),
-            1.0,
-            Vec3::new(0.02, 0.5, 0.0),
-            Quat::IDENTITY,
-        );
+        let env = Env { level: &level, statics: &[], movers: &[] };
+        let mut a = PropBody::new(Vec3::new(0.2, 0.1, 0.2), 5.0, Vec3::new(0.0, 0.1, 0.0), Quat::IDENTITY);
+        let mut b = PropBody::new(Vec3::new(0.1, 0.05, 0.1), 1.0, Vec3::new(0.02, 0.5, 0.0), Quat::IDENTITY);
         for _ in 0..240 {
             let mut list = [(&mut a, None), (&mut b, None)];
             step_bodies(&mut list, &env, TICK);
         }
-        assert!(
-            b.pos.y > 0.2 && b.pos.y < 0.3,
-            "лёгкое лежит на тяжёлом: {}",
-            b.pos.y
-        );
+        assert!(b.pos.y > 0.2 && b.pos.y < 0.3, "лёгкое лежит на тяжёлом: {}", b.pos.y);
 
         // Лёгкое поднимается к точке перед глазами, амфору 40 кг не оторвать от земли.
         let eye_target = Vec3::new(0.0, 1.3, -1.0);
-        let hold = Hold {
-            target: eye_target,
-            target_rot: Quat::IDENTITY,
-            max_force: hand_force(0.0),
-        };
-        let mut light = PropBody::new(
-            Vec3::splat(0.08),
-            1.0,
-            Vec3::new(0.0, 0.08, -1.0),
-            Quat::IDENTITY,
-        );
-        let mut heavy = PropBody::new(
-            Vec3::new(0.15, 0.3, 0.15),
-            40.0,
-            Vec3::new(2.0, 0.3, -1.0),
-            Quat::IDENTITY,
-        );
-        let heavy_hold = Hold {
-            target: Vec3::new(2.0, 1.3, -1.0),
-            ..hold
-        };
+        let hold = Hold { target: eye_target, target_rot: Quat::IDENTITY, max_force: hand_force(0.0) };
+        let mut light = PropBody::new(Vec3::splat(0.08), 1.0, Vec3::new(0.0, 0.08, -1.0), Quat::IDENTITY);
+        let mut heavy = PropBody::new(Vec3::new(0.15, 0.3, 0.15), 40.0, Vec3::new(2.0, 0.3, -1.0), Quat::IDENTITY);
+        let heavy_hold = Hold { target: Vec3::new(2.0, 1.3, -1.0), ..hold };
         for _ in 0..120 {
             light.step(&env, Some(&hold), TICK);
             heavy.step(&env, Some(&heavy_hold), TICK);
         }
-        assert!(
-            light.pos.distance(eye_target) < 0.1,
-            "лёгкое в руке: {}",
-            light.pos
-        );
+        assert!(light.pos.distance(eye_target) < 0.1, "лёгкое в руке: {}", light.pos);
         assert!(heavy.pos.y < 0.45, "40 кг не поднять: {}", heavy.pos.y);
         // А тянуть по земле можно.
-        let drag = Hold {
-            target: Vec3::new(3.0, 0.3, -1.0),
-            ..hold
-        };
+        let drag = Hold { target: Vec3::new(3.0, 0.3, -1.0), ..hold };
         let x0 = heavy.pos.x;
         for _ in 0..120 {
             heavy.step(&env, Some(&drag), TICK);
         }
-        assert!(
-            heavy.pos.x > x0 + 0.3,
-            "волочится: {} -> {}",
-            x0,
-            heavy.pos.x
-        );
+        assert!(heavy.pos.x > x0 + 0.3, "волочится: {} -> {}", x0, heavy.pos.x);
     }
 
     #[test]
     fn ray_hits_rotated_box() {
-        let o = Obb {
-            center: Vec3::new(0.0, 0.0, -2.0),
-            rot: Quat::from_rotation_y(0.8),
-            half: Vec3::new(0.5, 0.1, 0.05),
-        };
+        let o = Obb { center: Vec3::new(0.0, 0.0, -2.0), rot: Quat::from_rotation_y(0.8), half: Vec3::new(0.5, 0.1, 0.05) };
         assert!(o.ray(Vec3::ZERO, Vec3::NEG_Z).is_some());
         assert!(o.ray(Vec3::new(0.0, 0.5, 0.0), Vec3::NEG_Z).is_none());
         assert!(o.penetration(Vec3::new(0.0, 0.0, -2.0)).is_some());
@@ -791,11 +644,7 @@ mod tests {
     fn every_item_has_a_body() {
         for i in 0..crate::items::ITEM_BASES.len() {
             let b = PropBody::for_item(ItemBaseId(i as u16), 1, Vec3::ZERO, Quat::IDENTITY);
-            assert!(
-                b.mass > 0.0 && b.half.min_element() >= MIN_HALF && b.half.max_element() < 2.0,
-                "{}",
-                crate::items::ITEM_BASES[i].name
-            );
+            assert!(b.mass > 0.0 && b.half.min_element() >= MIN_HALF && b.half.max_element() < 2.0, "{}", crate::items::ITEM_BASES[i].name);
         }
     }
 }

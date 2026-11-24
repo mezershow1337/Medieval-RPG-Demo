@@ -6,12 +6,12 @@
 #![allow(deprecated)] // Interaction: в Bevy 0.20 помечен устаревшим, но работает и проще.
 
 use crate::appearance::{Folk, Look, LookField};
+use crate::start_kit::{KitField, StartKit};
 use crate::client::NetState;
 use crate::inventory_ui::UiFonts;
+use crate::ui_theme::{Appear, Skin, ink, theme};
 use crate::protocol::{DEFAULT_PORT, PROTOCOL_ID, connection_config};
 use crate::settings::{DRAW_DISTANCES, Preset, RENDER_SCALES, Settings};
-use crate::start_kit::{KitField, StartKit};
-use crate::ui_theme::{Appear, Skin, ink, theme};
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{AutoFocus, InputFocus};
 use bevy::prelude::*;
@@ -19,9 +19,7 @@ use bevy::text::{EditableText, FontSize, TextCursorStyle};
 use bevy::ui_widgets::TextInput;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use bevy_renet::RenetClient;
-use bevy_renet::netcode::{
-    ClientAuthentication, ConnectToken, NETCODE_KEY_BYTES, NetcodeClientTransport,
-};
+use bevy_renet::netcode::{ClientAuthentication, ConnectToken, NETCODE_KEY_BYTES, NetcodeClientTransport};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -96,22 +94,7 @@ impl Plugin for MenuPlugin {
         })
         .add_systems(Startup, begin.after(crate::inventory_ui::setup_fonts))
         .add_systems(PreUpdate, escape_key.after(bevy::input::InputSystems))
-        .add_systems(
-            Update,
-            (
-                sync_name,
-                highlight_focused_field,
-                handle_buttons,
-                submit_on_enter,
-                poll_resolve,
-                watch_connection,
-                rebuild,
-                orbit_camera,
-                hud_visibility,
-                cursor_in_menu,
-            )
-                .chain(),
-        )
+        .add_systems(Update, (sync_name, highlight_focused_field, handle_buttons, submit_on_enter, poll_resolve, watch_connection, rebuild, orbit_camera, hud_visibility, cursor_in_menu).chain())
         .add_systems(Update, look_preview.in_set(crate::rig::PoseSet));
     }
 }
@@ -120,14 +103,7 @@ impl Plugin for MenuPlugin {
 // Подключение
 // ---------------------------------------------------------------------------
 
-fn begin(
-    mut commands: Commands,
-    start: Res<Start>,
-    mut menu: ResMut<MenuState>,
-    mut net: ResMut<NetState>,
-    time: Res<Time>,
-    settings: Res<Settings>,
-) {
+fn begin(mut commands: Commands, start: Res<Start>, mut menu: ResMut<MenuState>, mut net: ResMut<NetState>, time: Res<Time>, settings: Res<Settings>) {
     let name = settings.nickname.clone();
     match *start {
         // MRPG_MENU=settings|join — открыть экран сразу (для снимков меню в облаке).
@@ -139,40 +115,16 @@ fn begin(
                 _ => Screen::Main,
             }
         }
-        Start::Host(port) => host(
-            &mut commands,
-            &mut menu,
-            &mut net,
-            &time,
-            port,
-            &name,
-            (settings.look, settings.kit),
-        ),
+        Start::Host(port) => host(&mut commands, &mut menu, &mut net, &time, port, &name, (settings.look, settings.kit)),
         Start::Join(addr) => {
             menu.screen = Screen::Join;
-            connect(
-                &mut commands,
-                &mut menu,
-                &mut net,
-                &time,
-                addr,
-                &name,
-                (settings.look, settings.kit),
-            );
+            connect(&mut commands, &mut menu, &mut net, &time, addr, &name, (settings.look, settings.kit));
         }
     }
 }
 
 /// Запустить сервер в этом процессе и подключиться к нему.
-fn host(
-    commands: &mut Commands,
-    menu: &mut MenuState,
-    net: &mut NetState,
-    time: &Time,
-    port: u16,
-    name: &str,
-    look: (Look, StartKit),
-) {
+fn host(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time: &Time, port: u16, name: &str, look: (Look, StartKit)) {
     if !menu.hosting {
         match crate::server::bind_socket(port) {
             Ok(socket) => {
@@ -187,23 +139,13 @@ fn host(
             }
             Err(e) => {
                 menu.screen = Screen::Main;
-                menu.error = Some(format!(
-                    "Порт {port} занят ({e}). Возможно, игра или сервер уже запущены."
-                ));
+                menu.error = Some(format!("Порт {port} занят ({e}). Возможно, игра или сервер уже запущены."));
                 return;
             }
         }
     }
     menu.back = Screen::Main;
-    connect(
-        commands,
-        menu,
-        net,
-        time,
-        SocketAddr::from(([127, 0, 0, 1], port)),
-        name,
-        look,
-    );
+    connect(commands, menu, net, time, SocketAddr::from(([127, 0, 0, 1], port)), name, look);
 }
 
 /// Сколько секунд тишины от другой стороны терпим, прежде чем считать связь потерянной.
@@ -222,49 +164,28 @@ fn profile_with_name(name: &str, look: (Look, StartKit)) -> crate::estates::Prof
     p
 }
 
-fn connect(
-    commands: &mut Commands,
-    menu: &mut MenuState,
-    net: &mut NetState,
-    time: &Time,
-    addr: SocketAddr,
-    name: &str,
-    look: (Look, StartKit),
-) {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
+fn connect(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time: &Time, addr: SocketAddr, name: &str, look: (Look, StartKit)) {
+    let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
     let client_id = now.as_nanos() as u64;
-    let transport = UdpSocket::bind("0.0.0.0:0")
-        .map_err(|e| e.to_string())
-        .and_then(|socket| {
-            // Билет подключения собираем сами, а не через ClientAuthentication::Unsecure: там таймаут
-            // жёстко 15 с, и если игра у друга замирает дольше (первая загрузка уровня, компиляция
-            // шейдеров, перетаскивание окна), сервер выкидывал его. Сервер работает в режиме
-            // Unsecure — его ключ из нулей, тот же, что здесь. Ник едет в user_data.
-            let token = ConnectToken::generate(
-                now,
-                PROTOCOL_ID,
-                CONNECT_TOKEN_EXPIRE_SECS,
-                client_id,
-                CONNECTION_TIMEOUT_SECS,
-                vec![addr],
-                // Постоянный профиль (ключ дома и ник): по ключу сервер узнаёт хозяина усадьбы.
-                Some(&crate::estates::pack_profile(&profile_with_name(
-                    name, look,
-                ))),
-                &[0; NETCODE_KEY_BYTES],
-            )
-            .map_err(|e| e.to_string())?;
-            NetcodeClientTransport::new(
-                now,
-                ClientAuthentication::Secure {
-                    connect_token: token,
-                },
-                socket,
-            )
-            .map_err(|e| e.to_string())
-        });
+    let transport = UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string()).and_then(|socket| {
+        // Билет подключения собираем сами, а не через ClientAuthentication::Unsecure: там таймаут
+        // жёстко 15 с, и если игра у друга замирает дольше (первая загрузка уровня, компиляция
+        // шейдеров, перетаскивание окна), сервер выкидывал его. Сервер работает в режиме
+        // Unsecure — его ключ из нулей, тот же, что здесь. Ник едет в user_data.
+        let token = ConnectToken::generate(
+            now,
+            PROTOCOL_ID,
+            CONNECT_TOKEN_EXPIRE_SECS,
+            client_id,
+            CONNECTION_TIMEOUT_SECS,
+            vec![addr],
+            // Постоянный профиль (ключ дома и ник): по ключу сервер узнаёт хозяина усадьбы.
+            Some(&crate::estates::pack_profile(&profile_with_name(name, look))),
+            &[0; NETCODE_KEY_BYTES],
+        )
+        .map_err(|e| e.to_string())?;
+        NetcodeClientTransport::new(now, ClientAuthentication::Secure { connect_token: token }, socket).map_err(|e| e.to_string())
+    });
     match transport {
         Ok(t) => {
             commands.insert_resource(RenetClient::new(connection_config()));
@@ -300,19 +221,9 @@ fn start_resolve(menu: &mut MenuState, address: String) {
     menu.error = None;
 }
 
-fn poll_resolve(
-    mut commands: Commands,
-    mut menu: ResMut<MenuState>,
-    mut net: ResMut<NetState>,
-    mut settings: ResMut<Settings>,
-    time: Res<Time>,
-) {
-    let Some(slot) = menu.resolving.clone() else {
-        return;
-    };
-    let Some(result) = slot.lock().ok().and_then(|mut s| s.take()) else {
-        return;
-    };
+fn poll_resolve(mut commands: Commands, mut menu: ResMut<MenuState>, mut net: ResMut<NetState>, mut settings: ResMut<Settings>, time: Res<Time>) {
+    let Some(slot) = menu.resolving.clone() else { return };
+    let Some(result) = slot.lock().ok().and_then(|mut s| s.take()) else { return };
     menu.resolving = None;
     match result {
         Ok(addr) => {
@@ -322,15 +233,7 @@ fn poll_resolve(
             }
             menu.back = Screen::Join;
             let name = settings.nickname.clone();
-            connect(
-                &mut commands,
-                &mut menu,
-                &mut net,
-                &time,
-                addr,
-                &name,
-                (settings.look, settings.kit),
-            );
+            connect(&mut commands, &mut menu, &mut net, &time, addr, &name, (settings.look, settings.kit));
         }
         Err(e) => menu.error = Some(format!("Не получилось: {e}. Проверьте адрес.")),
     }
@@ -348,26 +251,14 @@ fn watch_connection(
 ) {
     if menu.screen == Screen::Connecting {
         if net.my_id.is_some() {
-            menu.screen = if std::env::var("MRPG_MENU").as_deref() == Ok("pause") {
-                Screen::Pause
-            } else {
-                Screen::None
-            };
+            menu.screen = if std::env::var("MRPG_MENU").as_deref() == Ok("pause") { Screen::Pause } else { Screen::None };
             menu.in_game = true;
             cursor.grab_mode = CursorGrabMode::Locked;
             cursor.visible = false;
             return;
         }
-        let failed = transport
-            .as_ref()
-            .and_then(|t| t.disconnect_reason())
-            .map(|r| format!("{r:?}"));
-        let failed = failed.or_else(|| net.error.clone()).or_else(|| {
-            client
-                .as_ref()
-                .filter(|c| c.is_disconnected())
-                .map(|_| "соединение закрыто".to_string())
-        });
+        let failed = transport.as_ref().and_then(|t| t.disconnect_reason()).map(|r| format!("{r:?}"));
+        let failed = failed.or_else(|| net.error.clone()).or_else(|| client.as_ref().filter(|c| c.is_disconnected()).map(|_| "соединение закрыто".to_string()));
         let timeout = time.elapsed_secs() - menu.connect_started > 45.0;
         if failed.is_some() || timeout {
             let why = failed.unwrap_or_else(|| "сервер не отвечает 45 секунд".into());
@@ -377,16 +268,9 @@ fn watch_connection(
             ));
             net.error = None;
             reset_connection(&mut commands);
-            menu.screen = if menu.back == Screen::Join {
-                Screen::Join
-            } else {
-                Screen::Main
-            };
+            menu.screen = if menu.back == Screen::Join { Screen::Join } else { Screen::Main };
         }
-    } else if menu.in_game
-        && menu.screen != Screen::Lost
-        && client.as_ref().is_some_and(|c| c.is_disconnected())
-    {
+    } else if menu.in_game && menu.screen != Screen::Lost && client.as_ref().is_some_and(|c| c.is_disconnected()) {
         menu.screen = Screen::Lost;
     }
 }
@@ -395,11 +279,7 @@ fn watch_connection(
 // Клавиши
 // ---------------------------------------------------------------------------
 
-fn escape_key(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut menu: ResMut<MenuState>,
-    cursor: Single<&CursorOptions, With<PrimaryWindow>>,
-) {
+fn escape_key(keys: Res<ButtonInput<KeyCode>>, mut menu: ResMut<MenuState>, cursor: Single<&CursorOptions, With<PrimaryWindow>>) {
     if !keys.just_pressed(KeyCode::Escape) {
         return;
     }
@@ -414,15 +294,8 @@ fn escape_key(
 }
 
 /// Enter в поле адреса — подключиться.
-fn submit_on_enter(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut menu: ResMut<MenuState>,
-    field: Query<&EditableText, With<AddressField>>,
-) {
-    if menu.screen != Screen::Join
-        || menu.resolving.is_some()
-        || !(keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter))
-    {
+fn submit_on_enter(keys: Res<ButtonInput<KeyCode>>, mut menu: ResMut<MenuState>, field: Query<&EditableText, With<AddressField>>) {
+    if menu.screen != Screen::Join || menu.resolving.is_some() || !(keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter)) {
         return;
     }
     if let Ok(text) = field.single() {
@@ -436,11 +309,7 @@ fn submit_on_enter(
 }
 
 /// Пока открыто меню — мышь свободна; когда закрыли паузу — снова захвачена.
-fn cursor_in_menu(
-    menu: Res<MenuState>,
-    mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
-    mut was_open: Local<bool>,
-) {
+fn cursor_in_menu(menu: Res<MenuState>, mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>, mut was_open: Local<bool>) {
     let open = menu.is_open();
     if open && (cursor.grab_mode != CursorGrabMode::None || !cursor.visible) {
         cursor.grab_mode = CursorGrabMode::None;
@@ -508,10 +377,7 @@ struct NameField;
 
 /// Ник из поля — сразу в настройки и в settings.txt (без «изменения» ресурса:
 /// иначе каждая буква заново применяла бы графику — тени, камеры, окно).
-fn sync_name(
-    field: Query<&EditableText, (With<NameField>, Changed<EditableText>)>,
-    mut settings: ResMut<Settings>,
-) {
+fn sync_name(field: Query<&EditableText, (With<NameField>, Changed<EditableText>)>, mut settings: ResMut<Settings>) {
     for text in &field {
         let name = crate::protocol::clean_name(&text.value().to_string());
         if settings.nickname != name {
@@ -522,16 +388,9 @@ fn sync_name(
 }
 
 /// Поле ввода, в котором сейчас курсор, обведено ярким золотом — видно, куда печатаешь.
-fn highlight_focused_field(
-    focus: Res<InputFocus>,
-    mut fields: Query<(Entity, &mut BorderColor), With<TextInput>>,
-) {
+fn highlight_focused_field(focus: Res<InputFocus>, mut fields: Query<(Entity, &mut BorderColor), With<TextInput>>) {
     for (e, mut border) in &mut fields {
-        let color = if focus.get() == Some(e) {
-            GOLD
-        } else {
-            GOLD_DIM
-        };
+        let color = if focus.get() == Some(e) { GOLD } else { GOLD_DIM };
         if border.top != color {
             *border = BorderColor::all(color);
         }
@@ -560,15 +419,7 @@ fn handle_buttons(
             Act::Host => {
                 settings.save();
                 let name = settings.nickname.clone();
-                host(
-                    &mut commands,
-                    &mut menu,
-                    &mut net,
-                    &time,
-                    DEFAULT_PORT,
-                    &name,
-                    (settings.look, settings.kit),
-                );
+                host(&mut commands, &mut menu, &mut net, &time, DEFAULT_PORT, &name, (settings.look, settings.kit));
             }
             Act::OpenJoin => {
                 settings.save();
@@ -579,10 +430,7 @@ fn handle_buttons(
                 if menu.resolving.is_some() {
                     continue;
                 }
-                let address = field
-                    .single()
-                    .map(|t| t.value().to_string())
-                    .unwrap_or_default();
+                let address = field.single().map(|t| t.value().to_string()).unwrap_or_default();
                 if address.trim().is_empty() {
                     menu.error = Some("Введите адрес хоста.".into());
                 } else {
@@ -603,11 +451,7 @@ fn handle_buttons(
             Act::CancelConnect => {
                 reset_connection(&mut commands);
                 net.server_addr = None;
-                menu.screen = if menu.back == Screen::Join {
-                    Screen::Join
-                } else {
-                    Screen::Main
-                };
+                menu.screen = if menu.back == Screen::Join { Screen::Join } else { Screen::Main };
             }
             Act::MainMenu => {
                 // Самый надёжный способ всё сбросить — перезапустить игру с главным меню.
@@ -639,14 +483,7 @@ fn handle_buttons(
             Act::LookRandom => {
                 // Случайный ромей, гот, алан или заморский гость.
                 let seed = time.elapsed().as_nanos() as u64 ^ 0x5EED;
-                let folk = [
-                    Folk::Romaioi,
-                    Folk::Romaioi,
-                    Folk::Goths,
-                    Folk::Alans,
-                    Folk::Overseas,
-                    Folk::Nomads,
-                ][(seed % 6) as usize];
+                let folk = [Folk::Romaioi, Folk::Romaioi, Folk::Goths, Folk::Alans, Folk::Overseas, Folk::Nomads][(seed % 6) as usize];
                 settings.look = Look::random(seed / 6, folk);
                 settings.save();
             }
@@ -667,15 +504,8 @@ fn handle_buttons(
 
 fn step_in<T: Copy + PartialOrd>(list: &[T], cur: T, d: i32) -> T {
     // Ближайший пункт списка к текущему значению, затем шаг.
-    let i = list
-        .iter()
-        .position(|v| *v >= cur)
-        .unwrap_or(list.len() - 1) as i32;
-    let i = if d > 0 && list[i as usize] > cur {
-        i - 1
-    } else {
-        i
-    };
+    let i = list.iter().position(|v| *v >= cur).unwrap_or(list.len() - 1) as i32;
+    let i = if d > 0 && list[i as usize] > cur { i - 1 } else { i };
     list[(i + d).clamp(0, list.len() as i32 - 1) as usize]
 }
 
@@ -691,28 +521,11 @@ fn adjust(s: &mut Settings, f: Field, d: i32) {
         Field::Vsync => s.vsync = !s.vsync,
         Field::WindowMode => s.window_mode = (s.window_mode as i32 + d).rem_euclid(3) as u8,
         Field::Fov => s.fov = (s.fov + 5.0 * d as f32).clamp(60.0, 110.0),
-        Field::Sensitivity => {
-            s.sensitivity = ((s.sensitivity + 0.1 * d as f32) * 10.0)
-                .round()
-                .clamp(1.0, 50.0)
-                / 10.0
-        }
-        Field::Volume => {
-            s.volume = ((s.volume + 0.1 * d as f32) * 10.0)
-                .round()
-                .clamp(0.0, 10.0)
-                / 10.0
-        }
-        Field::Music => {
-            s.music = ((s.music + 0.1 * d as f32) * 10.0).round().clamp(0.0, 10.0) / 10.0
-        }
+        Field::Sensitivity => s.sensitivity = ((s.sensitivity + 0.1 * d as f32) * 10.0).round().clamp(1.0, 50.0) / 10.0,
+        Field::Volume => s.volume = ((s.volume + 0.1 * d as f32) * 10.0).round().clamp(0.0, 10.0) / 10.0,
+        Field::Music => s.music = ((s.music + 0.1 * d as f32) * 10.0).round().clamp(0.0, 10.0) / 10.0,
         Field::Sfx => s.sfx = ((s.sfx + 0.1 * d as f32) * 10.0).round().clamp(0.0, 10.0) / 10.0,
-        Field::Ambient => {
-            s.ambient = ((s.ambient + 0.1 * d as f32) * 10.0)
-                .round()
-                .clamp(0.0, 10.0)
-                / 10.0
-        }
+        Field::Ambient => s.ambient = ((s.ambient + 0.1 * d as f32) * 10.0).round().clamp(0.0, 10.0) / 10.0,
         Field::ShowFps => s.show_fps = !s.show_fps,
         Field::Minimap => s.minimap = !s.minimap,
     }
@@ -724,12 +537,7 @@ fn value_text(s: &Settings, f: Field) -> String {
     match f {
         Field::DrawDistance => format!("{:.0} м", s.draw_distance),
         Field::Shadows => q4(s.shadows),
-        Field::Water => if s.water == 0 {
-            "простая"
-        } else {
-            "подробная"
-        }
-        .into(),
+        Field::Water => if s.water == 0 { "простая" } else { "подробная" }.into(),
         Field::Effects => crate::settings::effects_name(s.effects).into(),
         Field::Textures => ["низкие", "средние", "высокие"][s.textures.min(2) as usize].into(),
         Field::RenderScale => format!("{} %", s.render_scale),
@@ -757,16 +565,7 @@ const INK_SOFT: Color = ink::DIM;
 const ERROR: Color = ink::BAD;
 
 fn font(fonts: &UiFonts, bold: bool, size: f32) -> TextFont {
-    TextFont {
-        font: if bold {
-            fonts.bold.clone()
-        } else {
-            fonts.regular.clone()
-        }
-        .into(),
-        font_size: FontSize::Px(size),
-        ..default()
-    }
+    TextFont { font: if bold { fonts.bold.clone() } else { fonts.regular.clone() }.into(), font_size: FontSize::Px(size), ..default() }
 }
 
 fn label(p: &mut ChildSpawnerCommands, fonts: &UiFonts, s: &str, size: f32, color: Color) {
@@ -801,15 +600,13 @@ fn small_button(p: &mut ChildSpawnerCommands, _fonts: &UiFonts, text: &str, act:
 
 /// Кнопка набора графики: выбранный набор «вдавлен».
 fn preset_button(p: &mut ChildSpawnerCommands, preset: Preset, on: bool) {
-    theme()
-        .toggle_button(p, preset.name(), Act::Preset(preset), on)
-        .insert(Node {
-            width: px(118),
-            min_height: px(30),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        });
+    theme().toggle_button(p, preset.name(), Act::Preset(preset), on).insert(Node {
+        width: px(118),
+        min_height: px(30),
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::Center,
+        ..default()
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -827,15 +624,8 @@ fn rebuild(
     mut built: Local<Option<(Screen, Option<String>, bool, bool, bool)>>,
 ) {
     let Some(fonts) = fonts else { return };
-    let key = (
-        menu.screen,
-        menu.error.clone(),
-        menu.resolving.is_some(),
-        menu.look_zoom,
-        menu.kit_tab,
-    );
-    let settings_changed =
-        matches!(menu.screen, Screen::Settings | Screen::Look) && settings.is_changed();
+    let key = (menu.screen, menu.error.clone(), menu.resolving.is_some(), menu.look_zoom, menu.kit_tab);
+    let settings_changed = matches!(menu.screen, Screen::Settings | Screen::Look) && settings.is_changed();
     if built.as_ref() == Some(&key) && !settings_changed {
         return;
     }
@@ -846,42 +636,19 @@ fn rebuild(
     match menu.screen {
         Screen::None => {}
         Screen::Main => side_panel(&mut commands, &fonts, |p| {
-            p.spawn(Node {
-                width: percent(100),
-                align_items: AlignItems::Center,
-                column_gap: px(12),
-                margin: UiRect::bottom(px(4)),
-                ..default()
-            })
-            .with_children(|r| {
-                r.spawn((
-                    Text::new("Имя"),
-                    font(&fonts, false, 18.0),
-                    TextColor(INK_SOFT),
-                ));
+            p.spawn(Node { width: percent(100), align_items: AlignItems::Center, column_gap: px(12), margin: UiRect::bottom(px(4)), ..default() }).with_children(|r| {
+                r.spawn((Text::new("Имя"), font(&fonts, false, 18.0), TextColor(INK_SOFT)));
                 r.spawn((
                     NameField,
                     TextInput,
                     // Без TabIndex щелчок по полю снимал фокус и клавиатура в поле не попадала.
                     TabIndex(0),
-                    EditableText {
-                        max_characters: Some(24),
-                        ..EditableText::new(settings.nickname.as_str())
-                    },
+                    EditableText { max_characters: Some(24), ..EditableText::new(settings.nickname.as_str()) },
                     TextLayout::no_wrap(),
                     font(&fonts, false, 20.0),
                     TextColor(PARCHMENT),
-                    TextCursorStyle {
-                        color: GOLD,
-                        ..default()
-                    },
-                    Node {
-                        flex_grow: 1.0,
-                        height: px(40),
-                        padding: UiRect::axes(px(10), px(7)),
-                        border: UiRect::all(px(1)),
-                        ..default()
-                    },
+                    TextCursorStyle { color: GOLD, ..default() },
+                    Node { flex_grow: 1.0, height: px(40), padding: UiRect::axes(px(10), px(7)), border: UiRect::all(px(1)), ..default() },
                     BorderColor::all(GOLD_DIM),
                     BackgroundColor(Color::srgba(0.06, 0.03, 0.04, 0.95)),
                 ));
@@ -894,16 +661,11 @@ fn rebuild(
             if let Some(err) = &menu.error {
                 label(p, &fonts, err, 16.0, ERROR);
             }
-            p.spawn(Node {
-                flex_grow: 1.0,
-                ..default()
-            });
+            p.spawn(Node { flex_grow: 1.0, ..default() });
             label(
                 p,
                 &fonts,
-                &format!(
-                    "«Создать игру» — вы хост: игра слушает UDP-порт {DEFAULT_PORT}. Друзьям дайте адрес своего туннеля playit.gg (вида xxx.at.ply.gg:12345) или свой IP, если порт открыт на роутере."
-                ),
+                &format!("«Создать игру» — вы хост: игра слушает UDP-порт {DEFAULT_PORT}. Друзьям дайте адрес своего туннеля playit.gg (вида xxx.at.ply.gg:12345) или свой IP, если порт открыт на роутере."),
                 14.0,
                 INK_SOFT,
             );
@@ -918,28 +680,13 @@ fn rebuild(
                 TextLayout::no_wrap(),
                 font(&fonts, false, 22.0),
                 TextColor(PARCHMENT),
-                TextCursorStyle {
-                    color: GOLD,
-                    ..default()
-                },
+                TextCursorStyle { color: GOLD, ..default() },
                 AutoFocus,
-                Node {
-                    width: percent(100),
-                    height: px(46),
-                    padding: UiRect::axes(px(12), px(9)),
-                    border: UiRect::all(px(1)),
-                    ..default()
-                },
+                Node { width: percent(100), height: px(46), padding: UiRect::axes(px(12), px(9)), border: UiRect::all(px(1)), ..default() },
                 BorderColor::all(GOLD),
                 BackgroundColor(Color::srgba(0.06, 0.03, 0.04, 0.95)),
             ));
-            label(
-                p,
-                &fonts,
-                "Например  abc.at.ply.gg:12345  или  192.168.1.5  (порт по умолчанию 5000). Ctrl+V — вставить.",
-                14.0,
-                INK_SOFT,
-            );
+            label(p, &fonts, "Например  abc.at.ply.gg:12345  или  192.168.1.5  (порт по умолчанию 5000). Ctrl+V — вставить.", 14.0, INK_SOFT);
             if menu.resolving.is_some() {
                 label(p, &fonts, "Ищу адрес…", 16.0, PARCHMENT);
             }
@@ -951,19 +698,9 @@ fn rebuild(
         }),
         Screen::Connecting => side_panel(&mut commands, &fonts, |p| {
             let addr = net.server_addr.map(|a| a.to_string()).unwrap_or_default();
-            let what = if menu.hosting && menu.back == Screen::Main {
-                "Создаём игру…".to_string()
-            } else {
-                format!("Подключение к {addr}…")
-            };
+            let what = if menu.hosting && menu.back == Screen::Main { "Создаём игру…".to_string() } else { format!("Подключение к {addr}…") };
             label(p, &fonts, &what, 22.0, PARCHMENT);
-            label(
-                p,
-                &fonts,
-                "Город строится, корабли входят в гавань.",
-                15.0,
-                INK_SOFT,
-            );
+            label(p, &fonts, "Город строится, корабли входят в гавань.", 15.0, INK_SOFT);
             button(p, &fonts, "Отмена", Act::CancelConnect);
         }),
         Screen::Pause => center_panel(&mut commands, &fonts, "Пауза", 440.0, |p| {
@@ -972,46 +709,16 @@ fn rebuild(
             button(p, &fonts, "В главное меню", Act::MainMenu);
             button(p, &fonts, "Выйти из игры", Act::Quit);
             if menu.hosting {
-                label(
-                    p,
-                    &fonts,
-                    &format!(
-                        "Вы хост (UDP-порт {DEFAULT_PORT}). Если выйти, игра закончится и для друзей."
-                    ),
-                    14.0,
-                    INK_SOFT,
-                );
+                label(p, &fonts, &format!("Вы хост (UDP-порт {DEFAULT_PORT}). Если выйти, игра закончится и для друзей."), 14.0, INK_SOFT);
             }
         }),
-        Screen::Lost => center_panel(
-            &mut commands,
-            &fonts,
-            "Связь потеряна",
-            480.0,
-            |p| {
-                label(
-                    p,
-                    &fonts,
-                    "Сервер не отвечает: хост вышел из игры или пропал интернет.",
-                    16.0,
-                    PARCHMENT,
-                );
-                button(p, &fonts, "В главное меню", Act::MainMenu);
-                button(p, &fonts, "Выйти из игры", Act::Quit);
-            },
-        ),
-        Screen::Settings => {
-            center_panel(&mut commands, &fonts, "Настройки", 1000.0, |p| {
-                settings_body(p, &fonts, &settings)
-            })
-        }
-        Screen::Look => side_panel(&mut commands, &fonts, |p| {
-            if menu.kit_tab {
-                kit_body(p, &fonts, &settings.kit)
-            } else {
-                look_body(p, &fonts, &settings.look, menu.look_zoom)
-            }
+        Screen::Lost => center_panel(&mut commands, &fonts, "Связь потеряна", 480.0, |p| {
+            label(p, &fonts, "Сервер не отвечает: хост вышел из игры или пропал интернет.", 16.0, PARCHMENT);
+            button(p, &fonts, "В главное меню", Act::MainMenu);
+            button(p, &fonts, "Выйти из игры", Act::Quit);
         }),
+        Screen::Settings => center_panel(&mut commands, &fonts, "Настройки", 1000.0, |p| settings_body(p, &fonts, &settings)),
+        Screen::Look => side_panel(&mut commands, &fonts, |p| if menu.kit_tab { kit_body(p, &fonts, &settings.kit) } else { look_body(p, &fonts, &settings.look, menu.look_zoom) }),
     }
 }
 
@@ -1019,94 +726,30 @@ fn rebuild(
 fn look_body(p: &mut ChildSpawnerCommands, fonts: &UiFonts, look: &Look, zoom: bool) {
     tabs(p, fonts, false);
     for f in LookField::ALL {
-        p.spawn(Node {
-            width: percent(100),
-            height: px(34),
-            align_items: AlignItems::Center,
-            column_gap: px(8),
-            ..default()
-        })
-        .with_children(|r| {
-            r.spawn((
-                Text::new(f.title()),
-                font(fonts, false, 17.0),
-                TextColor(PARCHMENT),
-                Node {
-                    width: px(112),
-                    ..default()
-                },
-            ));
+        p.spawn(Node { width: percent(100), height: px(34), align_items: AlignItems::Center, column_gap: px(8), ..default() }).with_children(|r| {
+            r.spawn((Text::new(f.title()), font(fonts, false, 17.0), TextColor(PARCHMENT), Node { width: px(112), ..default() }));
             small_button(r, fonts, "‹", Act::LookStep(f, -1), 34.0);
-            r.spawn(Node {
-                flex_grow: 1.0,
-                justify_content: JustifyContent::Center,
-                ..default()
-            })
-            .with_children(|v| {
-                v.spawn((
-                    Text::new(look.field(f).2),
-                    font(fonts, true, 16.0),
-                    TextColor(GOLD),
-                ));
+            r.spawn(Node { flex_grow: 1.0, justify_content: JustifyContent::Center, ..default() }).with_children(|v| {
+                v.spawn((Text::new(look.field(f).2), font(fonts, true, 16.0), TextColor(GOLD)));
             });
             small_button(r, fonts, "›", Act::LookStep(f, 1), 34.0);
         });
     }
-    p.spawn(Node {
-        width: percent(100),
-        column_gap: px(10),
-        margin: UiRect::top(px(6)),
-        ..default()
-    })
-    .with_children(|r| {
+    p.spawn(Node { width: percent(100), column_gap: px(10), margin: UiRect::top(px(6)), ..default() }).with_children(|r| {
         small_button(r, fonts, "Случайно", Act::LookRandom, 187.0);
-        small_button(
-            r,
-            fonts,
-            if zoom {
-                "Во весь рост"
-            } else {
-                "Лицо крупно"
-            },
-            Act::LookZoom,
-            187.0,
-        );
+        small_button(r, fonts, if zoom { "Во весь рост" } else { "Лицо крупно" }, Act::LookZoom, 187.0);
     });
-    label(
-        p,
-        fonts,
-        "Так вас увидят другие игроки. Облик сохраняется и при следующем запуске.",
-        14.0,
-        INK_SOFT,
-    );
-    p.spawn(Node {
-        flex_grow: 1.0,
-        ..default()
-    });
+    label(p, fonts, "Так вас увидят другие игроки. Облик сохраняется и при следующем запуске.", 14.0, INK_SOFT);
+    p.spawn(Node { flex_grow: 1.0, ..default() });
     button(p, fonts, "Готово", Act::Back);
 }
 
 /// Вкладки окна персонажа: «Облик» и «Снаряжение».
 fn tabs(p: &mut ChildSpawnerCommands, fonts: &UiFonts, kit: bool) {
-    p.spawn(Node {
-        width: percent(100),
-        column_gap: px(10),
-        align_items: AlignItems::Center,
-        margin: UiRect::bottom(px(4)),
-        ..default()
-    })
-    .with_children(|r| {
+    p.spawn(Node { width: percent(100), column_gap: px(10), align_items: AlignItems::Center, margin: UiRect::bottom(px(4)), ..default() }).with_children(|r| {
         for (title, on) in [("Облик", false), ("Снаряжение", true)] {
             if on == kit {
-                r.spawn((
-                    Text::new(title),
-                    font(fonts, true, 24.0),
-                    TextColor(GOLD),
-                    Node {
-                        width: px(187),
-                        ..default()
-                    },
-                ));
+                r.spawn((Text::new(title), font(fonts, true, 24.0), TextColor(GOLD), Node { width: px(187), ..default() }));
             } else {
                 small_button(r, fonts, title, Act::LookTab(on), 187.0);
             }
@@ -1118,77 +761,25 @@ fn tabs(p: &mut ChildSpawnerCommands, fonts: &UiFonts, kit: bool) {
 fn kit_body(p: &mut ChildSpawnerCommands, fonts: &UiFonts, kit: &StartKit) {
     tabs(p, fonts, true);
     for f in KitField::ALL {
-        p.spawn(Node {
-            width: percent(100),
-            height: px(34),
-            align_items: AlignItems::Center,
-            column_gap: px(8),
-            ..default()
-        })
-        .with_children(|r| {
-            r.spawn((
-                Text::new(f.title()),
-                font(fonts, false, 17.0),
-                TextColor(PARCHMENT),
-                Node {
-                    width: px(80),
-                    ..default()
-                },
-            ));
+        p.spawn(Node { width: percent(100), height: px(34), align_items: AlignItems::Center, column_gap: px(8), ..default() }).with_children(|r| {
+            r.spawn((Text::new(f.title()), font(fonts, false, 17.0), TextColor(PARCHMENT), Node { width: px(80), ..default() }));
             small_button(r, fonts, "‹", Act::KitStep(f, -1), 34.0);
-            r.spawn(Node {
-                flex_grow: 1.0,
-                justify_content: JustifyContent::Center,
-                ..default()
-            })
-            .with_children(|v| {
-                v.spawn((
-                    Text::new(kit.choice(f).1),
-                    font(fonts, true, 16.0),
-                    TextColor(GOLD),
-                ));
+            r.spawn(Node { flex_grow: 1.0, justify_content: JustifyContent::Center, ..default() }).with_children(|v| {
+                v.spawn((Text::new(kit.choice(f).1), font(fonts, true, 16.0), TextColor(GOLD)));
             });
             small_button(r, fonts, "›", Act::KitStep(f, 1), 34.0);
         });
     }
-    label(
-        p,
-        fonts,
-        "Всем в дорогу: кожаные сапоги, бинт, винный уксус промыть рану и 5 фоллисов.",
-        15.0,
-        PARCHMENT,
-    );
-    label(
-        p,
-        fonts,
-        "Нищий старт: вещи простые, остальное — добыть, купить или заработать. Набор выдаётся при входе и после смерти.",
-        14.0,
-        INK_SOFT,
-    );
-    p.spawn(Node {
-        flex_grow: 1.0,
-        ..default()
-    });
+    label(p, fonts, "Всем в дорогу: кожаные сапоги, бинт, винный уксус промыть рану и 5 фоллисов.", 15.0, PARCHMENT);
+    label(p, fonts, "Нищий старт: вещи простые, остальное — добыть, купить или заработать. Набор выдаётся при входе и после смерти.", 14.0, INK_SOFT);
+    p.spawn(Node { flex_grow: 1.0, ..default() });
     button(p, fonts, "Готово", Act::Back);
 }
 
 /// Левая панель главного меню: заголовок, орнамент, содержимое. Справа виден город.
-fn side_panel(
-    commands: &mut Commands,
-    fonts: &UiFonts,
-    body: impl FnOnce(&mut ChildSpawnerCommands),
-) {
+fn side_panel(commands: &mut Commands, fonts: &UiFonts, body: impl FnOnce(&mut ChildSpawnerCommands)) {
     commands
-        .spawn((
-            MenuRoot,
-            Node {
-                width: percent(100),
-                height: percent(100),
-                position_type: PositionType::Absolute,
-                ..default()
-            },
-            GlobalZIndex(100),
-        ))
+        .spawn((MenuRoot, Node { width: percent(100), height: percent(100), position_type: PositionType::Absolute, ..default() }, GlobalZIndex(100)))
         .with_children(|root| {
             root.spawn((
                 Node {
@@ -1211,47 +802,22 @@ fn side_panel(
 
 fn title_block(p: &mut ChildSpawnerCommands, fonts: &UiFonts) {
     p.spawn(theme().title("Херсонес", 56.0));
-    p.spawn((
-        Text::new("Лето 510 года. Царствование Анастасия"),
-        font(fonts, false, 18.0),
-        TextColor(PARCHMENT),
-    ));
+    p.spawn((Text::new("Лето 510 года. Царствование Анастасия"), font(fonts, false, 18.0), TextColor(PARCHMENT)));
     ornament(p);
 }
 
 /// Окно по центру поверх затемнённой игры (пауза, настройки).
-fn center_panel(
-    commands: &mut Commands,
-    fonts: &UiFonts,
-    title: &str,
-    width: f32,
-    body: impl FnOnce(&mut ChildSpawnerCommands),
-) {
+fn center_panel(commands: &mut Commands, fonts: &UiFonts, title: &str, width: f32, body: impl FnOnce(&mut ChildSpawnerCommands)) {
     commands
         .spawn((
             MenuRoot,
-            Node {
-                width: percent(100),
-                height: percent(100),
-                position_type: PositionType::Absolute,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
+            Node { width: percent(100), height: percent(100), position_type: PositionType::Absolute, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
             theme().backdrop(),
             GlobalZIndex(100),
         ))
         .with_children(|root| {
             root.spawn((
-                Node {
-                    width: px(width),
-                    max_width: percent(98),
-                    max_height: percent(96),
-                    padding: UiRect::axes(px(40), px(30)),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: px(10),
-                    ..default()
-                },
+                Node { width: px(width), max_width: percent(98), max_height: percent(96), padding: UiRect::axes(px(40), px(30)), flex_direction: FlexDirection::Column, row_gap: px(10), ..default() },
                 theme().skin(Skin::Wood),
                 Appear::default(),
             ))
@@ -1266,79 +832,25 @@ fn center_panel(
 
 fn settings_body(p: &mut ChildSpawnerCommands, fonts: &UiFonts, s: &Settings) {
     // Наборы.
-    p.spawn(Node {
-        width: percent(100),
-        column_gap: px(8),
-        align_items: AlignItems::Center,
-        ..default()
-    })
-    .with_children(|r| {
-        r.spawn((
-            Text::new("Набор графики"),
-            font(fonts, false, 17.0),
-            TextColor(INK_SOFT),
-            Node {
-                width: px(170),
-                ..default()
-            },
-        ));
+    p.spawn(Node { width: percent(100), column_gap: px(8), align_items: AlignItems::Center, ..default() }).with_children(|r| {
+        r.spawn((Text::new("Набор графики"), font(fonts, false, 17.0), TextColor(INK_SOFT), Node { width: px(170), ..default() }));
         let current = s.preset();
         for preset in Preset::ALL {
             preset_button(r, preset, current == Some(preset));
         }
     });
     // Две колонки: графика слева, экран, управление и звук справа — чтобы всё влезало и в 720p.
-    p.spawn(Node {
-        width: percent(100),
-        column_gap: px(36),
-        ..default()
-    })
-    .with_children(|cols| {
-        cols.spawn(Node {
-            flex_grow: 1.0,
-            flex_basis: px(0),
-            flex_direction: FlexDirection::Column,
-            row_gap: px(6),
-            ..default()
-        })
-        .with_children(|c| {
+    p.spawn(Node { width: percent(100), column_gap: px(36), ..default() }).with_children(|cols| {
+        cols.spawn(Node { flex_grow: 1.0, flex_basis: px(0), flex_direction: FlexDirection::Column, row_gap: px(6), ..default() }).with_children(|c| {
             section(c, fonts, "Графика");
-            row(
-                c,
-                fonts,
-                s,
-                "Дальность прорисовки",
-                Field::DrawDistance,
-                None,
-            );
+            row(c, fonts, s, "Дальность прорисовки", Field::DrawDistance, None);
             row(c, fonts, s, "Тени", Field::Shadows, None);
             row(c, fonts, s, "Вода", Field::Water, None);
-            row(
-                c,
-                fonts,
-                s,
-                "Эффекты",
-                Field::Effects,
-                Some("блум, SSAO, лучи, дым"),
-            );
-            row(
-                c,
-                fonts,
-                s,
-                "Текстуры",
-                Field::Textures,
-                Some("после перезапуска"),
-            );
+            row(c, fonts, s, "Эффекты", Field::Effects, Some("блум, SSAO, лучи, дым"));
+            row(c, fonts, s, "Текстуры", Field::Textures, Some("после перезапуска"));
             row(c, fonts, s, "Масштаб рендера", Field::RenderScale, None);
         });
-        cols.spawn(Node {
-            flex_grow: 1.0,
-            flex_basis: px(0),
-            flex_direction: FlexDirection::Column,
-            row_gap: px(6),
-            ..default()
-        })
-        .with_children(|c| {
+        cols.spawn(Node { flex_grow: 1.0, flex_basis: px(0), flex_direction: FlexDirection::Column, row_gap: px(6), ..default() }).with_children(|c| {
             section(c, fonts, "Экран");
             row(c, fonts, s, "Режим", Field::WindowMode, Some("F11"));
             row(c, fonts, s, "Верт. синхронизация", Field::Vsync, None);
@@ -1353,77 +865,26 @@ fn settings_body(p: &mut ChildSpawnerCommands, fonts: &UiFonts, s: &Settings) {
             row(c, fonts, s, "Окружение", Field::Ambient, None);
         });
     });
-    p.spawn(Node {
-        width: percent(100),
-        justify_content: JustifyContent::Center,
-        margin: UiRect::top(px(8)),
-        ..default()
-    })
-    .with_children(|r| {
+    p.spawn(Node { width: percent(100), justify_content: JustifyContent::Center, margin: UiRect::top(px(8)), ..default() }).with_children(|r| {
         small_button(r, fonts, "Готово", Act::Back, 220.0);
     });
 }
 
 fn section(p: &mut ChildSpawnerCommands, fonts: &UiFonts, title: &str) {
-    p.spawn((
-        Text::new(title),
-        font(fonts, true, 19.0),
-        TextColor(GOLD),
-        Node {
-            margin: UiRect::top(px(8)),
-            ..default()
-        },
-    ));
+    p.spawn((Text::new(title), font(fonts, true, 19.0), TextColor(GOLD), Node { margin: UiRect::top(px(8)), ..default() }));
 }
 
-fn row(
-    p: &mut ChildSpawnerCommands,
-    fonts: &UiFonts,
-    s: &Settings,
-    title: &str,
-    f: Field,
-    hint: Option<&str>,
-) {
-    p.spawn(Node {
-        width: percent(100),
-        height: px(32),
-        align_items: AlignItems::Center,
-        column_gap: px(8),
-        ..default()
-    })
-    .with_children(|r| {
-        r.spawn(Node {
-            flex_grow: 1.0,
-            align_items: AlignItems::Baseline,
-            column_gap: px(8),
-            ..default()
-        })
-        .with_children(|l| {
-            l.spawn((
-                Text::new(title),
-                font(fonts, false, 17.0),
-                TextColor(PARCHMENT),
-            ));
+fn row(p: &mut ChildSpawnerCommands, fonts: &UiFonts, s: &Settings, title: &str, f: Field, hint: Option<&str>) {
+    p.spawn(Node { width: percent(100), height: px(32), align_items: AlignItems::Center, column_gap: px(8), ..default() }).with_children(|r| {
+        r.spawn(Node { flex_grow: 1.0, align_items: AlignItems::Baseline, column_gap: px(8), ..default() }).with_children(|l| {
+            l.spawn((Text::new(title), font(fonts, false, 17.0), TextColor(PARCHMENT)));
             if let Some(h) = hint {
-                l.spawn((
-                    Text::new(format!("({h})")),
-                    font(fonts, false, 12.0),
-                    TextColor(INK_SOFT),
-                ));
+                l.spawn((Text::new(format!("({h})")), font(fonts, false, 12.0), TextColor(INK_SOFT)));
             }
         });
         small_button(r, fonts, "‹", Act::Adjust(f, -1), 34.0);
-        r.spawn(Node {
-            width: px(128),
-            justify_content: JustifyContent::Center,
-            ..default()
-        })
-        .with_children(|v| {
-            v.spawn((
-                Text::new(value_text(s, f)),
-                font(fonts, true, 17.0),
-                TextColor(GOLD),
-            ));
+        r.spawn(Node { width: px(128), justify_content: JustifyContent::Center, ..default() }).with_children(|v| {
+            v.spawn((Text::new(value_text(s, f)), font(fonts, true, 17.0), TextColor(GOLD)));
         });
         small_button(r, fonts, "›", Act::Adjust(f, 1), 34.0);
     });
@@ -1445,15 +906,9 @@ struct LookPreviewBody;
 /// Где стоит персонаж окна облика и куда смотрит (единичный вектор по земле).
 fn preview_spot(level: Option<&crate::collision::LevelColliders>) -> (Vec3, Vec3) {
     let p = crate::level::spawn_point(0);
-    let y = level
-        .map(|l| l.ground_height(p.x, p.z))
-        .filter(|h| h.is_finite())
-        .unwrap_or(0.0);
+    let y = level.map(|l| l.ground_height(p.x, p.z)).filter(|h| h.is_finite()).unwrap_or(0.0);
     let sun = crate::graphics::SUN_DIR;
-    (
-        Vec3::new(p.x, y, p.z),
-        Vec3::new(sun.x, 0.0, sun.z).normalize(),
-    )
+    (Vec3::new(p.x, y, p.z), Vec3::new(sun.x, 0.0, sun.z).normalize())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1479,44 +934,20 @@ fn look_preview(
     let shown = (settings.look, menu.kit_tab.then_some(settings.kit));
     let outfit = |(look, kit): (Look, Option<StartKit>)| {
         // Оружие убрано (на поясе или за спиной), щит — в левой руке.
-        let gear = kit
-            .map(|k| crate::gear_look::Gear {
-                holstered: true,
-                ..k.gear(look)
-            })
-            .unwrap_or(crate::gear_look::Gear { look, ..default() });
+        let gear = kit.map(|k| crate::gear_look::Gear { holstered: true, ..k.gear(look) }).unwrap_or(crate::gear_look::Gear { look, ..default() });
         let shield = crate::client::shield_of(crate::protocol::ActorKind::Player, false, &gear);
-        (
-            crate::rig::Outfit::for_actor(crate::protocol::ActorKind::Player, 0).with_gear(&gear),
-            crate::worn::Worn::new(crate::worn::Extras::of(&gear)),
-            shield,
-        )
+        (crate::rig::Outfit::for_actor(crate::protocol::ActorKind::Player, 0).with_gear(&gear), crate::worn::Worn::new(crate::worn::Extras::of(&gear)), shield)
     };
     let spawn_body = |p: &mut ChildSpawnerCommands, shown: (Look, Option<StartKit>)| {
         let (outfit, worn, shield) = outfit(shown);
-        p.spawn((
-            LookPreviewBody,
-            worn,
-            crate::rig::NeedsRig(outfit),
-            Transform::default(),
-            Visibility::default(),
-        ));
+        p.spawn((LookPreviewBody, worn, crate::rig::NeedsRig(outfit), Transform::default(), Visibility::default()));
         if let Some(kind) = shield {
-            p.spawn((
-                LookPreviewBody,
-                crate::rig::NeedsShield(kind),
-                Transform::from_xyz(-0.36, 1.0, -0.12).with_rotation(Quat::from_rotation_y(1.2)),
-                Visibility::default(),
-            ));
+            p.spawn((LookPreviewBody, crate::rig::NeedsShield(kind), Transform::from_xyz(-0.36, 1.0, -0.12).with_rotation(Quat::from_rotation_y(1.2)), Visibility::default()));
         }
     };
     let Ok((root, mut preview, mut tf)) = previews.single_mut() else {
         commands
-            .spawn((
-                LookPreview { shown },
-                Transform::from_translation(spot),
-                Visibility::default(),
-            ))
+            .spawn((LookPreview { shown }, Transform::from_translation(spot), Visibility::default()))
             .with_children(|p| {
                 spawn_body(p, shown);
             });
@@ -1537,38 +968,21 @@ fn look_preview(
         return;
     }
     for (_, mut pose) in &mut bodies {
-        *pose = crate::rig::solve_pose(&crate::rig::PoseInput {
-            time: t,
-            ..default()
-        })
-        .pose;
+        *pose = crate::rig::solve_pose(&crate::rig::PoseInput { time: t, ..default() }).pose;
     }
 }
 
 /// Пока открыто главное меню, камера медленно облетает город.
 #[allow(clippy::too_many_arguments)]
-fn orbit_camera(
-    menu: Res<MenuState>,
-    time: Res<Time>,
-    level: Option<Res<crate::collision::LevelColliders>>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    mut cams: Query<&mut Transform, With<crate::client::WaitingCamera>>,
-) {
+fn orbit_camera(menu: Res<MenuState>, time: Res<Time>, level: Option<Res<crate::collision::LevelColliders>>, windows: Query<&Window, With<PrimaryWindow>>, mut cams: Query<&mut Transform, With<crate::client::WaitingCamera>>) {
     if menu.in_game || std::env::var_os("MRPG_CAM").is_some() {
         return;
     }
     if menu.screen == Screen::Look {
         // Камера перед персонажем; он — справа от панели облика.
         let (spot, face) = preview_spot(level.as_deref());
-        let (dist, height, aim_y) = if menu.look_zoom {
-            (0.95, 1.63, 1.6)
-        } else {
-            (3.0, 1.45, 1.0)
-        };
-        let aspect = windows
-            .single()
-            .map(|w| w.width() / w.height().max(1.0))
-            .unwrap_or(16.0 / 9.0);
+        let (dist, height, aim_y) = if menu.look_zoom { (0.95, 1.63, 1.6) } else { (3.0, 1.45, 1.0) };
+        let aspect = windows.single().map(|w| w.width() / w.height().max(1.0)).unwrap_or(16.0 / 9.0);
         // Сдвиг взгляда влево на четверть ширины кадра (вертикальный угол обзора 70°).
         let off = dist * (35f32.to_radians()).tan() * aspect * 0.33;
         let eye = spot + face * dist + Vec3::Y * height;
@@ -1588,15 +1002,8 @@ fn orbit_camera(
 }
 
 /// Прицел, полоски здоровья и подсказки не нужны, пока игра не началась.
-fn hud_visibility(
-    menu: Res<MenuState>,
-    mut hud: Query<&mut Visibility, With<crate::hud::HudRoot>>,
-) {
-    let want = if menu.in_game {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
+fn hud_visibility(menu: Res<MenuState>, mut hud: Query<&mut Visibility, With<crate::hud::HudRoot>>) {
+    let want = if menu.in_game { Visibility::Inherited } else { Visibility::Hidden };
     for mut v in &mut hud {
         v.set_if_neq(want);
     }
@@ -1633,3 +1040,4 @@ mod tests {
         assert_eq!(s.window_mode, 2);
     }
 }
+

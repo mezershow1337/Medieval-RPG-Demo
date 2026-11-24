@@ -27,12 +27,7 @@ impl Plugin for PropsClientPlugin {
             .insert_resource(PropStatics::default())
             .add_systems(Startup, setup_highlight)
             .add_systems(Update, receive_snapshots.run_if(client_connected))
-            .add_systems(
-                Update,
-                (grab_input, predict_held, smooth_props, update_highlight)
-                    .chain()
-                    .after(receive_snapshots),
-            );
+            .add_systems(Update, (grab_input, predict_held, smooth_props, update_highlight).chain().after(receive_snapshots));
     }
 }
 
@@ -84,9 +79,7 @@ impl PropGrab {
                 self.holders.remove(&id);
             }
         }
-        if self.holding == Some(id) && holder.is_some_and(|h| Some(h) != me)
-            || (self.holding == Some(id) && holder.is_none())
-        {
+        if self.holding == Some(id) && holder.is_some_and(|h| Some(h) != me) || (self.holding == Some(id) && holder.is_none()) {
             self.holding = None;
             self.sim = None;
         }
@@ -131,16 +124,10 @@ fn receive_snapshots(
 ) {
     let now = time.elapsed_secs();
     while let Some(bytes) = client.receive_message(CH_PROPS) {
-        let Some(PropsSnapshot(list)) = decode::<PropsSnapshot>(&bytes) else {
-            continue;
-        };
+        let Some(PropsSnapshot(list)) = decode::<PropsSnapshot>(&bytes) else { continue };
         for s in list {
-            let Some(e) = index.0.get(&s.id) else {
-                continue;
-            };
-            let Ok(mut m) = motions.get_mut(*e) else {
-                continue;
-            };
+            let Some(e) = index.0.get(&s.id) else { continue };
+            let Ok(mut m) = motions.get_mut(*e) else { continue };
             m.pos = Vec3::from_array(s.pos);
             m.rot = s.rotation();
             m.vel = Vec3::from_array(s.vel);
@@ -151,11 +138,7 @@ fn receive_snapshots(
 }
 
 /// Плавно ведём предметы к серверному положению (с упреждением по скорости).
-fn smooth_props(
-    time: Res<Time>,
-    grab: Res<PropGrab>,
-    mut items: Query<(&GroundView, &PropMotion, &mut Transform)>,
-) {
+fn smooth_props(time: Res<Time>, grab: Res<PropGrab>, mut items: Query<(&GroundView, &PropMotion, &mut Transform)>) {
     let dt = time.delta_secs();
     let now = time.elapsed_secs();
     let k = 1.0 - (-dt * 18.0).exp();
@@ -163,11 +146,7 @@ fn smooth_props(
         if grab.sim.as_ref().is_some_and(|s| s.0 == g.id) {
             continue;
         }
-        let ahead = if m.asleep {
-            0.0
-        } else {
-            (now - m.at).clamp(0.0, 0.1)
-        };
+        let ahead = if m.asleep { 0.0 } else { (now - m.at).clamp(0.0, 0.1) };
         let target = m.pos + m.vel * ahead;
         // Лежащее на месте не трогаем: иначе тысячи вещей в домах каждый кадр пересчитывали бы
         // свои трансформы. Почти доехавшее ставим точно на место.
@@ -213,16 +192,10 @@ fn grab_input(
     work: Option<Res<crate::work_client::MyWork>>,
 ) {
     let Some(mut client) = client else { return };
-    let busy = loot.ui_open
-        || trade.is_some_and(|t| t.window_open())
-        || !cursor_locked(&cursor)
-        || crate::work_client::hands_busy(work.as_deref());
+    let busy = loot.ui_open || trade.is_some_and(|t| t.window_open()) || !cursor_locked(&cursor) || crate::work_client::hands_busy(work.as_deref());
     let Ok(cam) = camera.single() else { return };
-    let Ok((player, fighter)) = local.single() else {
-        return;
-    };
-    let idle =
-        matches!(fighter.fighter.action, crate::combat::Action::Idle) && !fighter.fighter.is_dead();
+    let Ok((player, fighter)) = local.single() else { return };
+    let idle = matches!(fighter.fighter.action, crate::combat::Action::Idle) && !fighter.fighter.is_dead();
 
     // Что под прицелом и можно ли это схватить.
     grab.aim = None;
@@ -239,11 +212,7 @@ fn grab_input(
 
     if let Some(id) = grab.holding {
         let dead = fighter.fighter.is_dead();
-        if busy
-            || dead
-            || mouse.just_released(MouseButton::Left)
-            || !mouse.pressed(MouseButton::Left)
-        {
+        if busy || dead || mouse.just_released(MouseButton::Left) || !mouse.pressed(MouseButton::Left) {
             send(&mut client, &LootClientMessage::Release);
             grab.holding = None;
             grab.sim = None;
@@ -258,10 +227,7 @@ fn grab_input(
             grab.sim = None;
         } else if scroll.delta.y.abs() > 0.0 {
             grab.dist = (grab.dist + scroll.delta.y.signum() * 0.15).clamp(HOLD_MIN, HOLD_MAX);
-            send(
-                &mut client,
-                &LootClientMessage::HoldDistance { dist: grab.dist },
-            );
+            send(&mut client, &LootClientMessage::HoldDistance { dist: grab.dist });
         }
         let _ = id;
         return;
@@ -270,10 +236,7 @@ fn grab_input(
         && let Some(id) = grab.aim
         && let Some((g, t)) = index.0.get(&id).and_then(|e| items.get(*e).ok())
     {
-        let dist = t
-            .translation
-            .distance(cam.translation())
-            .clamp(HOLD_MIN, HOLD_MAX);
+        let dist = t.translation.distance(cam.translation()).clamp(HOLD_MIN, HOLD_MAX);
         send(&mut client, &LootClientMessage::Grab { id, dist });
         grab.holding = Some(id);
         grab.dist = dist;
@@ -297,26 +260,16 @@ fn predict_held(
     mut items: Query<(&PropMotion, &mut Transform)>,
 ) {
     let grab = &mut *grab;
-    let Some((id, body, yaw0, rot0)) = grab.sim.as_mut() else {
-        return;
-    };
-    let (Ok(cam), Ok(player)) = (camera.single(), local.single()) else {
-        return;
-    };
-    let Some(Ok((m, mut t))) = index.0.get(id).map(|e| items.get_mut(*e)) else {
-        return;
-    };
+    let Some((id, body, yaw0, rot0)) = grab.sim.as_mut() else { return };
+    let (Ok(cam), Ok(player)) = (camera.single(), local.single()) else { return };
+    let Some(Ok((m, mut t))) = index.0.get(id).map(|e| items.get_mut(*e)) else { return };
     let eye = cam.translation();
     let hold = Hold {
         target: eye + cam.forward().as_vec3() * grab.dist,
         target_rot: Quat::from_rotation_y(player.yaw - *yaw0) * *rot0,
         max_force: hand_force(0.0),
     };
-    let env = Env {
-        level: &level,
-        statics: &statics.0,
-        movers: &[],
-    };
+    let env = Env { level: &level, statics: &statics.0, movers: &[] };
     grab.acc += time.delta_secs().min(0.1);
     while grab.acc >= TICK {
         grab.acc -= TICK;
@@ -334,11 +287,7 @@ fn predict_held(
 #[derive(Component)]
 struct Highlight;
 
-fn setup_highlight(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
+fn setup_highlight(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
     commands.spawn((
         Highlight,
         Mesh3d(meshes.add(Cuboid::new(2.0, 2.0, 2.0))),
@@ -367,10 +316,7 @@ fn update_highlight(
 ) {
     let (ref mut t, ref mut vis) = *hl;
     let id = grab.holding.or(loot.target);
-    let Some((g, it)) = id
-        .and_then(|id| index.0.get(&id))
-        .and_then(|e| items.get(*e).ok())
-    else {
+    let Some((g, it)) = id.and_then(|id| index.0.get(&id)).and_then(|e| items.get(*e).ok()) else {
         **vis = Visibility::Hidden;
         return;
     };

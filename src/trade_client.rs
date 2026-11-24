@@ -7,13 +7,13 @@
 //! - J — репутация у фракций и розыск;
 //! - X — бросить урок или смену.
 
-use crate::appearance::{Folk, Look};
 use crate::client::RemoteActor;
 use crate::factions::Reputation;
 use crate::inventory_ui::UiFonts;
 use crate::loot_client::LootState;
 use crate::player::PlayerCamera;
 use crate::protocol::{ActorKind, decode, encode};
+use crate::appearance::{Folk, Look};
 use crate::rig::{FootGear, HeadGear, LegGear, NeedsRig, Outfit, RigPose, Tunic};
 use crate::trade::MerchantId;
 use crate::trade_net::*;
@@ -103,30 +103,15 @@ pub fn outfit_for(info: &MerchantInfo) -> Outfit {
         Faction::Alans => (Tunic::Kaftan, Folk::Alans, HeadGear::Conical),
         Faction::Nomads => (Tunic::Kaftan, Folk::Nomads, HeadGear::FeltCap),
         // Среди купцов порта много заморских: сирийцы, египтяне, понтийцы.
-        Faction::Merchants if seed % 3 == 1 => {
-            (Tunic::Byzantine, Folk::Overseas, HeadGear::Spangenhelm)
-        }
+        Faction::Merchants if seed % 3 == 1 => (Tunic::Byzantine, Folk::Overseas, HeadGear::Spangenhelm),
         _ => (Tunic::Byzantine, Folk::Romaioi, HeadGear::Spangenhelm),
     };
-    let base = Outfit::for_actor(ActorKind::Player, seed)
-        .with_look(Look::random(seed.wrapping_mul(31) ^ 0xA11CE, folk));
+    let base = Outfit::for_actor(ActorKind::Player, seed).with_look(Look::random(seed.wrapping_mul(31) ^ 0xA11CE, folk));
     Outfit {
-        head: if info.look.helmet {
-            head
-        } else {
-            HeadGear::Bare
-        },
+        head: if info.look.helmet { head } else { HeadGear::Bare },
         tunic,
-        legs: if info.id.0.is_multiple_of(2) {
-            LegGear::Wrapped
-        } else {
-            LegGear::Trousers
-        },
-        feet: if info.look.helmet {
-            FootGear::Boots
-        } else {
-            FootGear::Shoes
-        },
+        legs: if info.id.0.is_multiple_of(2) { LegGear::Wrapped } else { LegGear::Trousers },
+        feet: if info.look.helmet { FootGear::Boots } else { FootGear::Shoes },
         tunic_color: c(info.look.tunic),
         trousers: c(info.look.trousers),
         ..base
@@ -167,11 +152,7 @@ fn spawn_stall(
         let c = Vec3::from_array(b.center);
         let h = Vec3::from_array(b.half);
         if b.felt {
-            p.spawn((
-                Mesh3d(meshes.add(Cuboid::new(h.x * 2.0, h.y * 2.0, h.z * 2.0))),
-                MeshMaterial3d(cloth.clone()),
-                Transform::from_translation(c),
-            ));
+            p.spawn((Mesh3d(meshes.add(Cuboid::new(h.x * 2.0, h.y * 2.0, h.z * 2.0))), MeshMaterial3d(cloth.clone()), Transform::from_translation(c)));
             continue;
         }
         // Столешница и ножки.
@@ -252,10 +233,7 @@ fn receive_trade(
                     commands.entity(e).despawn();
                 }
                 // Прилавки для физики своего предмета в руках.
-                let statics = list
-                    .iter()
-                    .flat_map(|i| crate::trade::stall_obbs(i.pos.into(), i.yaw, &i.stall))
-                    .collect();
+                let statics = list.iter().flat_map(|i| crate::trade::stall_obbs(i.pos.into(), i.yaw, &i.stall)).collect();
                 commands.insert_resource(crate::props_server::PropStatics(statics));
                 for (i, info) in list.iter().enumerate() {
                     let pos: Vec3 = info.pos.into();
@@ -641,10 +619,7 @@ fn update_trade_hud(
                     lines.push(format!("{} · {}", m.faction.name(), standing));
                 }
             }
-            Some(Aim::Player(id)) => lines.push(format!(
-                "[T] Предложить обмен: {}",
-                crate::trade_ui::partner_name(party.as_deref(), id)
-            )),
+            Some(Aim::Player(id)) => lines.push(format!("[T] Предложить обмен: {}", crate::trade_ui::partner_name(party.as_deref(), id))),
             None => {}
         }
     }

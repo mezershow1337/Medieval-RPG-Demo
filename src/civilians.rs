@@ -134,9 +134,7 @@ impl Violence {
 pub enum Crime {
     Violence(Violence),
     /// Кража (furtum manifestum: пойман с поличным — пеня в четверную цену вещи).
-    Theft {
-        value: u32,
-    },
+    Theft { value: u32 },
     /// Залез ночью в чужой дом.
     Trespass,
 }
@@ -186,8 +184,7 @@ pub const WITNESS_SECS: f32 = 10.0;
 pub fn persuade_chance(eloquence: f32, fine: u32, garrison_rep: f32) -> f32 {
     let skill = eloquence.clamp(0.0, 100.0) / 100.0;
     let guilt = (fine as f32 / 7200.0).min(2.0);
-    (0.12 + 0.6 * skill + garrison_rep.clamp(-100.0, 100.0) * 0.003 - 0.32 * guilt)
-        .clamp(0.03, 0.92)
+    (0.12 + 0.6 * skill + garrison_rep.clamp(-100.0, 100.0) * 0.003 - 0.32 * guilt).clamp(0.03, 0.92)
 }
 
 /// Сколько секунд сидеть в карцере за такую пеню (время в игре идёт быстрее, чем в жизни).
@@ -215,24 +212,14 @@ pub enum LawMessage {
     Notice(String),
     /// Стражник остановил вас: за вами пеня. `persuade` — можно ли ещё попробовать уговорить
     /// (и красноречие для подсказки).
-    Halt {
-        fine: u32,
-        crimes: Vec<String>,
-        purse: u32,
-        persuade: Option<u8>,
-    },
+    Halt { fine: u32, crimes: Vec<String>, purse: u32, persuade: Option<u8> },
     /// Вас видели: сколько живых свидетелей и сколько секунд, пока они не донесли
     /// (`count == 0` — опасность миновала).
-    Witnessed {
-        count: u8,
-        secs: f32,
-    },
+    Witnessed { count: u8, secs: f32 },
     /// Разговор со стражником окончен (ушли, уплатили, сдались или драка).
     HaltEnd,
     /// Вы в карцере ещё столько секунд.
-    Jailed {
-        secs: f32,
-    },
+    Jailed { secs: f32 },
     Released,
 }
 
@@ -253,10 +240,7 @@ mod tests {
         let killer = persuade_chance(50.0, Crime::Violence(Violence::Murder).fine(), 0.0);
         assert!(thief > killer + 0.2, "{thief} {killer}");
         assert!(persuade_chance(90.0, 120, 0.0) > persuade_chance(5.0, 120, 0.0));
-        assert!(
-            persuade_chance(100.0, 0, 100.0) <= 0.92
-                && persuade_chance(0.0, 100_000, -100.0) >= 0.03
-        );
+        assert!(persuade_chance(100.0, 0, 100.0) <= 0.92 && persuade_chance(0.0, 100_000, -100.0) >= 0.03);
         assert!(Crime::Theft { value: 10 }.fine() >= 40);
     }
 

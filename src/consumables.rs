@@ -39,8 +39,7 @@ pub struct ConsumablesPlugin;
 
 impl Plugin for ConsumablesPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(Healing::default())
-            .add_systems(Update, tick_consumables);
+        app.insert_resource(Healing::default()).add_systems(Update, tick_consumables);
     }
 }
 
@@ -61,32 +60,13 @@ fn tick_consumables(
     for (pid, request) in std::mem::take(&mut healing.requests) {
         let Some(uid) = request else {
             if healing.using.remove(&pid).is_some() {
-                send(
-                    &mut server,
-                    pid,
-                    &LootServerMessage::UseFinished { ok: false },
-                );
+                send(&mut server, pid, &LootServerMessage::UseFinished { ok: false });
             }
             continue;
         };
-        let notice = |server: &mut RenetServer, text: &str| {
-            send(server, pid, &LootServerMessage::Notice(text.into()))
-        };
-        let Some(actor) = game
-            .actors
-            .get(&pid)
-            .filter(|a| a.alive && !a.fighter.is_dead())
-        else {
-            continue;
-        };
-        let Some(base) = world
-            .inventories
-            .get(&pid)
-            .and_then(|inv| inv.find(uid))
-            .map(|(_, item)| item.base)
-        else {
-            continue;
-        };
+        let notice = |server: &mut RenetServer, text: &str| send(server, pid, &LootServerMessage::Notice(text.into()));
+        let Some(actor) = game.actors.get(&pid).filter(|a| a.alive && !a.fighter.is_dead()) else { continue };
+        let Some(base) = world.inventories.get(&pid).and_then(|inv| inv.find(uid)).map(|(_, item)| item.base) else { continue };
         let Some(c) = base.consumable() else {
             notice(&mut server, "Это нельзя использовать");
             continue;
@@ -98,23 +78,8 @@ fn tick_consumables(
             notice(&mut server, "Здоровье и так полное");
             continue;
         }
-        healing.using.insert(
-            pid,
-            Using {
-                uid,
-                base,
-                elapsed: 0.0,
-                last_hp: actor.fighter.hp,
-            },
-        );
-        send(
-            &mut server,
-            pid,
-            &LootServerMessage::UseStarted {
-                verb: c.verb.into(),
-                duration: c.use_time,
-            },
-        );
+        healing.using.insert(pid, Using { uid, base, elapsed: 0.0, last_hp: actor.fighter.hp });
+        send(&mut server, pid, &LootServerMessage::UseStarted { verb: c.verb.into(), duration: c.use_time });
     }
 
     let mut finished = Vec::new();
@@ -126,10 +91,7 @@ fn tick_consumables(
         };
         let f = &mut actor.fighter;
         // Удар по нам, своя атака или парирование прерывают применение.
-        let interrupted = !actor.alive
-            || f.is_dead()
-            || f.hp < u.last_hp - crate::knowledge::HIT_THRESHOLD
-            || !matches!(f.action, Action::Idle);
+        let interrupted = !actor.alive || f.is_dead() || f.hp < u.last_hp - crate::knowledge::HIT_THRESHOLD || !matches!(f.action, Action::Idle);
         if interrupted {
             finished.push((*pid, false));
             continue;
@@ -144,15 +106,11 @@ fn tick_consumables(
         }
     }
     for (pid, ok) in finished {
-        let Some(u) = healing.using.remove(&pid) else {
-            continue;
-        };
+        let Some(u) = healing.using.remove(&pid) else { continue };
         if ok {
             // Списываем одну штуку из стопки.
             let consumed = world.inventories.get_mut(&pid).is_some_and(|inv| {
-                let Some((mut item, loc)) = inv.take(u.uid) else {
-                    return false;
-                };
+                let Some((mut item, loc)) = inv.take(u.uid) else { return false };
                 if item.count > 1 {
                     item.count -= 1;
                     let _ = inv.place(item, loc.into());
@@ -160,20 +118,12 @@ fn tick_consumables(
                 true
             });
             if !consumed {
-                send(
-                    &mut server,
-                    pid,
-                    &LootServerMessage::UseFinished { ok: false },
-                );
+                send(&mut server, pid, &LootServerMessage::UseFinished { ok: false });
                 continue;
             }
             let c = u.base.consumable().unwrap();
             if c.heal_over > 0.0 {
-                healing.hots.push(HealOverTime {
-                    player: pid,
-                    per_sec: c.heal / c.heal_over,
-                    left: c.heal_over,
-                });
+                healing.hots.push(HealOverTime { player: pid, per_sec: c.heal / c.heal_over, left: c.heal_over });
             }
             if let Some(inv) = world.inventories.get(&pid) {
                 send(&mut server, pid, &LootServerMessage::Inventory(inv.clone()));
@@ -183,13 +133,7 @@ fn tick_consumables(
     }
 
     healing.hots.retain_mut(|h| {
-        let Some(actor) = game
-            .actors
-            .get_mut(&h.player)
-            .filter(|a| a.alive && !a.fighter.is_dead())
-        else {
-            return false;
-        };
+        let Some(actor) = game.actors.get_mut(&h.player).filter(|a| a.alive && !a.fighter.is_dead()) else { return false };
         let step = dt.min(h.left);
         actor.fighter.hp = (actor.fighter.hp + h.per_sec * step).min(actor.fighter.max_hp);
         h.left -= step;

@@ -34,22 +34,8 @@ impl Plugin for InventoryUiPlugin {
         app.insert_resource(Held::default())
             .insert_resource(Built::default())
             .insert_resource(TooltipFor::default())
-            .add_systems(
-                Startup,
-                (setup_fonts, crate::icons::setup_icons, setup_tooltip).chain(),
-            )
-            .add_systems(
-                Update,
-                (
-                    toggle_inventory,
-                    rebuild_ui,
-                    handle_input,
-                    highlight_cells,
-                    update_tooltip,
-                    move_ghost,
-                )
-                    .chain(),
-            )
+            .add_systems(Startup, (setup_fonts, crate::icons::setup_icons, setup_tooltip).chain())
+            .add_systems(Update, (toggle_inventory, rebuild_ui, handle_input, highlight_cells, update_tooltip, move_ghost).chain())
             .add_systems(PostUpdate, free_cursor_while_open);
     }
 }
@@ -98,25 +84,13 @@ struct HeldGhost;
 /// Во что попадает мышь.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Hit {
-    Cell {
-        owner: Owner,
-        x: u8,
-        y: u8,
-    },
+    Cell { owner: Owner, x: u8, y: u8 },
     /// Рана, часть тела или рот в окне здоровья.
     Care(crate::medicine::CareTarget),
     /// Слот хотбара внизу экрана.
-    Hotbar {
-        slot: usize,
-    },
-    Equip {
-        owner: Owner,
-        slot: EquipSlot,
-    },
-    Item {
-        owner: Owner,
-        uid: ItemUid,
-    },
+    Hotbar { slot: usize },
+    Equip { owner: Owner, slot: EquipSlot },
+    Item { owner: Owner, uid: ItemUid },
     TakeAll,
     Panel,
     Outside,
@@ -130,16 +104,7 @@ pub(crate) fn hotbar_hit(slot: usize) -> Hit {
 fn text(fonts: &UiFonts, s: impl Into<String>, size: f32, color: Color, bold: bool) -> impl Bundle {
     (
         Text::new(s),
-        TextFont {
-            font: if bold {
-                fonts.bold.clone()
-            } else {
-                fonts.regular.clone()
-            }
-            .into(),
-            font_size: bevy::text::FontSize::Px(size),
-            ..default()
-        },
+        TextFont { font: if bold { fonts.bold.clone() } else { fonts.regular.clone() }.into(), font_size: bevy::text::FontSize::Px(size), ..default() },
         TextColor(color),
     )
 }
@@ -156,11 +121,7 @@ fn item_bg(q: Quality) -> Color {
 fn owner_inv(state: &LootState, owner: Owner) -> Option<&Inventory> {
     match owner {
         Owner::Me => state.inventory.as_ref(),
-        Owner::Container(id) => state
-            .container
-            .as_ref()
-            .filter(|c| c.id == id)
-            .map(|c| &c.inv),
+        Owner::Container(id) => state.container.as_ref().filter(|c| c.id == id).map(|c| &c.inv),
     }
 }
 
@@ -178,11 +139,8 @@ fn toggle_inventory(
     if state.inventory.is_none() {
         return;
     }
-    let toggle = keys.just_pressed(KeyCode::Tab)
-        || keys.just_pressed(KeyCode::KeyI)
-        || keys.just_pressed(KeyCode::KeyH);
-    let close_with_e =
-        state.ui_open && state.container.is_some() && keys.just_pressed(KeyCode::KeyE);
+    let toggle = keys.just_pressed(KeyCode::Tab) || keys.just_pressed(KeyCode::KeyI) || keys.just_pressed(KeyCode::KeyH);
+    let close_with_e = state.ui_open && state.container.is_some() && keys.just_pressed(KeyCode::KeyE);
     let escape = state.ui_open && keys.just_pressed(KeyCode::Escape);
     if !(toggle || close_with_e || escape) {
         return;
@@ -207,10 +165,7 @@ fn toggle_inventory(
 }
 
 /// Пока окно открыто, мышь свободна (персонаж не крутит головой и не ходит).
-fn free_cursor_while_open(
-    state: Res<LootState>,
-    mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
-) {
+fn free_cursor_while_open(state: Res<LootState>, mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>) {
     if state.ui_open && (cursor.grab_mode != CursorGrabMode::None || !cursor.visible) {
         cursor.grab_mode = CursorGrabMode::None;
         cursor.visible = true;
@@ -245,19 +200,8 @@ fn rebuild_ui(
     let k = knowledge.as_deref().map_or(&unschooled, |k| &k.0);
     // Окно здоровья показываем, когда не открыт чужой сундук или тело (иначе не влезет).
     let show_body = state.ui_open && state.container.is_none();
-    let health = if show_body {
-        crate::health_ui::signature(body, k)
-    } else {
-        0
-    };
-    let want = Built {
-        rev: state.rev,
-        open: state.ui_open,
-        held: held.0.as_ref().map(|h| h.item.uid),
-        dock: dock_w as u32,
-        screen: screen_w as u32,
-        health,
-    };
+    let health = if show_body { crate::health_ui::signature(body, k) } else { 0 };
+    let want = Built { rev: state.rev, open: state.ui_open, held: held.0.as_ref().map(|h| h.item.uid), dock: dock_w as u32, screen: screen_w as u32, health };
     if *built == want && (roots.is_empty() != state.ui_open) {
         return;
     }
@@ -493,51 +437,23 @@ fn item_body(p: &mut ChildSpawnerCommands, fonts: &UiRes, item: &Item, alpha: f3
         // Иконка вписывается в рамку с сохранением пропорций.
         let (w, h) = item.size();
         b.spawn((
-            ImageNode::new(fonts.icons[item.base.0 as usize].clone())
-                .with_color(icon_tint(&item).with_alpha(alpha)),
-            Node {
-                height: percent(100),
-                aspect_ratio: Some(w as f32 / h as f32),
-                max_width: percent(100),
-                ..default()
-            },
+            ImageNode::new(fonts.icons[item.base.0 as usize].clone()).with_color(icon_tint(&item).with_alpha(alpha)),
+            Node { height: percent(100), aspect_ratio: Some(w as f32 / h as f32), max_width: percent(100), ..default() },
             FocusPolicy::Pass,
         ));
         if item.count > 1 {
             b.spawn((
-                text(
-                    &fonts.fonts,
-                    item.count.to_string(),
-                    13.0,
-                    Color::WHITE.with_alpha(alpha),
-                    true,
-                ),
+                text(&fonts.fonts, item.count.to_string(), 13.0, Color::WHITE.with_alpha(alpha), true),
                 TextShadow::default(),
-                Node {
-                    position_type: PositionType::Absolute,
-                    right: px(3),
-                    bottom: px(0),
-                    ..default()
-                },
+                Node { position_type: PositionType::Absolute, right: px(3), bottom: px(0), ..default() },
             ));
         }
     });
 }
 
-fn grid(
-    p: &mut ChildSpawnerCommands,
-    fonts: &UiRes,
-    owner: Owner,
-    inv: &Inventory,
-    held: Option<ItemUid>,
-) {
+fn grid(p: &mut ChildSpawnerCommands, fonts: &UiRes, owner: Owner, inv: &Inventory, held: Option<ItemUid>) {
     let g = &inv.grid;
-    p.spawn(Node {
-        width: px(g.w as f32 * CELL),
-        height: px(g.h as f32 * CELL),
-        ..default()
-    })
-    .with_children(|n| {
+    p.spawn(Node { width: px(g.w as f32 * CELL), height: px(g.h as f32 * CELL), ..default() }).with_children(|n| {
         for y in 0..g.h {
             for x in 0..g.w {
                 n.spawn((
@@ -558,16 +474,9 @@ fn grid(
         }
         for placed in &g.items {
             let (w, h) = placed.item.size();
-            let alpha = if held == Some(placed.item.uid) {
-                0.3
-            } else {
-                1.0
-            };
+            let alpha = if held == Some(placed.item.uid) { 0.3 } else { 1.0 };
             n.spawn((
-                Hit::Item {
-                    owner,
-                    uid: placed.item.uid,
-                },
+                Hit::Item { owner, uid: placed.item.uid },
                 Interaction::default(),
                 FocusPolicy::Pass,
                 Node {
@@ -584,15 +493,7 @@ fn grid(
     });
 }
 
-fn equip_slot(
-    p: &mut ChildSpawnerCommands,
-    fonts: &UiRes,
-    owner: Owner,
-    slot: EquipSlot,
-    item: Option<&Item>,
-    size: f32,
-    held: Option<ItemUid>,
-) {
+fn equip_slot(p: &mut ChildSpawnerCommands, fonts: &UiRes, owner: Owner, slot: EquipSlot, item: Option<&Item>, size: f32, held: Option<ItemUid>) {
     p.spawn((
         Hit::Equip { owner, slot },
         Interaction::default(),
@@ -610,20 +511,8 @@ fn equip_slot(
     .with_children(|s| match item {
         Some(item) => {
             let alpha = if held == Some(item.uid) { 0.3 } else { 1.0 };
-            s.spawn((
-                Hit::Item {
-                    owner,
-                    uid: item.uid,
-                },
-                Interaction::default(),
-                FocusPolicy::Pass,
-                Node {
-                    width: percent(100),
-                    height: percent(100),
-                    ..default()
-                },
-            ))
-            .with_children(|b| item_body(b, fonts, item, alpha));
+            s.spawn((Hit::Item { owner, uid: item.uid }, Interaction::default(), FocusPolicy::Pass, Node { width: percent(100), height: percent(100), ..default() }))
+                .with_children(|b| item_body(b, fonts, item, alpha));
         }
         None => {
             let size = if size < SLOT { 10.0 } else { 12.0 };
@@ -661,10 +550,7 @@ fn hovered(hits: &Query<(&Interaction, &Hit)>, holding: bool) -> Option<Hit> {
         (Hit::Panel, _) => 5,
         (Hit::Outside, _) => 6,
     };
-    hits.iter()
-        .filter(|(i, _)| **i != Interaction::None)
-        .map(|(_, h)| *h)
-        .min_by_key(rank)
+    hits.iter().filter(|(i, _)| **i != Interaction::None).map(|(_, h)| *h).min_by_key(rank)
 }
 
 /// Куда быстро переложить предмет (ПКМ).
@@ -695,22 +581,10 @@ fn handle_input(
     if !state.ui_open {
         return;
     }
-    let Some(client) = client.as_mut() else {
-        return;
-    };
+    let Some(client) = client.as_mut() else { return };
     let hit = hovered(&hits, held.0.is_some());
     let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    let mv = |client: &mut RenetClient, uid, from, to, target| {
-        send(
-            client,
-            &LootClientMessage::Move {
-                uid,
-                from,
-                to,
-                target,
-            },
-        )
-    };
+    let mv = |client: &mut RenetClient, uid, from, to, target| send(client, &LootClientMessage::Move { uid, from, to, target });
 
     // Отмена переноски.
     if held.0.is_some() && mouse.just_pressed(MouseButton::Right) {
@@ -726,9 +600,7 @@ fn handle_input(
         match hit {
             Some(Hit::Cell { owner, x, y }) => {
                 let (w, hgt) = h.item.size();
-                let grid = owner_inv(&state, owner)
-                    .map(|i| (i.grid.w, i.grid.h))
-                    .unwrap_or((0, 0));
+                let grid = owner_inv(&state, owner).map(|i| (i.grid.w, i.grid.h)).unwrap_or((0, 0));
                 // Верхний левый угол с учётом того, за какую клетку держим; не вылезаем за край.
                 let tx = x.saturating_sub(h.grab.0).min(grid.0.saturating_sub(w));
                 let ty = y.saturating_sub(h.grab.1).min(grid.1.saturating_sub(hgt));
@@ -749,10 +621,7 @@ fn handle_input(
             }
             Some(Hit::Care(target)) => {
                 if h.owner == Owner::Me {
-                    crate::lore_client::send(
-                        client,
-                        &crate::lore_net::LoreClientMessage::TreatOn { uid, target },
-                    );
+                    crate::lore_client::send(client, &crate::lore_net::LoreClientMessage::TreatOn { uid, target });
                     held.0 = None;
                 } else {
                     state.notify("Сначала возьмите это себе в сумку", time.elapsed_secs());
@@ -788,13 +657,7 @@ fn handle_input(
             && let Some(c) = &state.container
         {
             for item in c.inv.all_items() {
-                mv(
-                    client,
-                    item.uid,
-                    Owner::Container(c.id),
-                    Owner::Me,
-                    Target::EquipOrAuto,
-                );
+                mv(client, item.uid, Owner::Container(c.id), Owner::Me, Target::EquipOrAuto);
             }
         }
         return;
@@ -805,23 +668,13 @@ fn handle_input(
         return;
     }
     // Цифра над своей вещью — на панель быстрого доступа.
-    if let Some(slot) = crate::hotbar::KEYS
-        .iter()
-        .position(|k| keys.just_pressed(*k))
-    {
-        let item = owner_inv(&state, owner)
-            .and_then(|i| i.find(uid))
-            .map(|(_, it)| it.clone());
+    if let Some(slot) = crate::hotbar::KEYS.iter().position(|k| keys.just_pressed(*k)) {
+        let item = owner_inv(&state, owner).and_then(|i| i.find(uid)).map(|(_, it)| it.clone());
         match item {
-            _ if slot == 0 => {
-                state.notify("Слот 1 — пустые руки, выберите 2–9", time.elapsed_secs())
-            }
+            _ if slot == 0 => state.notify("Слот 1 — пустые руки, выберите 2–9", time.elapsed_secs()),
             Some(item) if owner == Owner::Me => {
                 let name = item.info().name;
-                state.notify(
-                    format!("{name} — на клавишу {}", slot + 1),
-                    time.elapsed_secs(),
-                );
+                state.notify(format!("{name} — на клавишу {}", slot + 1), time.elapsed_secs());
                 hotbar.bind(slot, &item);
             }
             _ => state.notify("Сначала положите вещь в свою сумку", time.elapsed_secs()),
@@ -829,30 +682,16 @@ fn handle_input(
         return;
     }
     // F — использовать (бинт, зелье). Также ПКМ по расходнику в своей сумке, если тело не открыто.
-    let mine = if owner == Owner::Me {
-        owner_inv(&state, owner)
-            .and_then(|i| i.find(uid))
-            .map(|(_, it)| it.clone())
-    } else {
-        None
-    };
-    let lore_usable = mine
-        .as_ref()
-        .is_some_and(|it| crate::lore_client::usable(it.base));
-    let consumable = mine
-        .as_ref()
-        .is_some_and(|it| it.base.consumable().is_some());
-    let use_pressed = keys.just_pressed(KeyCode::KeyF)
-        || (state.container.is_none() && mouse.just_pressed(MouseButton::Right));
+    let mine = if owner == Owner::Me { owner_inv(&state, owner).and_then(|i| i.find(uid)).map(|(_, it)| it.clone()) } else { None };
+    let lore_usable = mine.as_ref().is_some_and(|it| crate::lore_client::usable(it.base));
+    let consumable = mine.as_ref().is_some_and(|it| it.base.consumable().is_some());
+    let use_pressed = keys.just_pressed(KeyCode::KeyF) || (state.container.is_none() && mouse.just_pressed(MouseButton::Right));
     // C над своей книгой — переписать её (нужны письмо, калам, чернила и пергамент).
     if keys.just_pressed(KeyCode::KeyC)
         && let Some(item) = mine.as_ref()
         && crate::lore::Book::from_item(item.base).is_some()
     {
-        crate::lore_client::send(
-            client,
-            &crate::lore_net::LoreClientMessage::Copy { uid: item.uid },
-        );
+        crate::lore_client::send(client, &crate::lore_net::LoreClientMessage::Copy { uid: item.uid });
         return;
     }
     // Горшок, котелок, ступка — окно варки.
@@ -866,18 +705,12 @@ fn handle_input(
     }
     if lore_usable
         && use_pressed
-        && crate::lore_client::try_use(
-            client,
-            mine.as_ref().unwrap(),
-            body.as_deref().map(|b| &b.0),
-        )
+        && crate::lore_client::try_use(client, mine.as_ref().unwrap(), body.as_deref().map(|b| &b.0))
     {
         // Книги — читать, лекарства — на рану или внутрь.
         return;
     }
-    if keys.just_pressed(KeyCode::KeyF)
-        || (consumable && state.container.is_none() && mouse.just_pressed(MouseButton::Right))
-    {
+    if keys.just_pressed(KeyCode::KeyF) || (consumable && state.container.is_none() && mouse.just_pressed(MouseButton::Right)) {
         if consumable {
             send(client, &LootClientMessage::Use { uid });
         } else {
@@ -885,8 +718,7 @@ fn handle_input(
         }
         return;
     }
-    let quick =
-        mouse.just_pressed(MouseButton::Right) || (shift && mouse.just_pressed(MouseButton::Left));
+    let quick = mouse.just_pressed(MouseButton::Right) || (shift && mouse.just_pressed(MouseButton::Left));
     if quick {
         match quick_move(&state, owner, uid) {
             Some((to, target)) => mv(client, uid, owner, to, target),
@@ -895,33 +727,20 @@ fn handle_input(
         return;
     }
     if mouse.just_pressed(MouseButton::Left) {
-        let Some((loc, item)) = owner_inv(&state, owner).and_then(|i| i.find(uid)) else {
-            return;
-        };
+        let Some((loc, item)) = owner_inv(&state, owner).and_then(|i| i.find(uid)) else { return };
         let (w, h) = item.size();
         // За какую клетку взяли: ищем клетку под мышью в той же сетке.
         let grab = match loc {
             Loc::Grid { x, y } => hits
                 .iter()
                 .find_map(|(i, hit)| match hit {
-                    Hit::Cell {
-                        owner: o,
-                        x: cx,
-                        y: cy,
-                    } if *i != Interaction::None && *o == owner => Some((
-                        cx.saturating_sub(x).min(w - 1),
-                        cy.saturating_sub(y).min(h - 1),
-                    )),
+                    Hit::Cell { owner: o, x: cx, y: cy } if *i != Interaction::None && *o == owner => Some((cx.saturating_sub(x).min(w - 1), cy.saturating_sub(y).min(h - 1))),
                     _ => None,
                 })
                 .unwrap_or((0, 0)),
             Loc::Equip(_) => ((w - 1) / 2, (h - 1) / 2),
         };
-        held.0 = Some(HeldItem {
-            owner,
-            item: item.clone(),
-            grab,
-        });
+        held.0 = Some(HeldItem { owner, item: item.clone(), grab });
     }
 }
 
@@ -940,27 +759,19 @@ fn highlight_cells(
             let inv = owner_inv(&state, owner)?;
             let (w, hgt) = h.item.size();
             let tx = x.saturating_sub(h.grab.0).min(inv.grid.w.saturating_sub(w));
-            let ty = y
-                .saturating_sub(h.grab.1)
-                .min(inv.grid.h.saturating_sub(hgt));
+            let ty = y.saturating_sub(h.grab.1).min(inv.grid.h.saturating_sub(hgt));
             // Проверяем без самого переносимого предмета и с учётом обмена/стопки.
             let mut copy = inv.clone();
             copy.take(h.item.uid);
-            let ok = copy
-                .place(h.item.clone(), Target::Grid { x: tx, y: ty })
-                .is_ok();
+            let ok = copy.place(h.item.clone(), Target::Grid { x: tx, y: ty }).is_ok();
             Some((owner, tx, ty, w, hgt, ok))
         }
         _ => None,
     });
     for (hit, mut bg) in &mut cells {
-        let Hit::Cell { owner, x, y } = *hit else {
-            continue;
-        };
+        let Hit::Cell { owner, x, y } = *hit else { continue };
         let color = match target {
-            Some((o, tx, ty, w, h, ok))
-                if o == owner && x >= tx && x < tx + w && y >= ty && y < ty + h =>
-            {
+            Some((o, tx, ty, w, h, ok)) if o == owner && x >= tx && x < tx + w && y >= ty && y < ty + h => {
                 if ok {
                     Color::srgb(0.75, 2.2, 0.7)
                 } else {
@@ -1014,9 +825,7 @@ fn update_tooltip(
     let (entity, ref mut node, ref mut border) = *tooltip;
     let hovered_item = if state.ui_open && held.0.is_none() {
         match hovered(&hits, false) {
-            Some(Hit::Item { owner, uid }) => owner_inv(&state, owner)
-                .and_then(|i| i.find(uid))
-                .map(|(_, item)| (owner, item.clone())),
+            Some(Hit::Item { owner, uid }) => owner_inv(&state, owner).and_then(|i| i.find(uid)).map(|(_, item)| (owner, item.clone())),
             _ => None,
         }
     } else {
@@ -1029,237 +838,96 @@ fn update_tooltip(
     };
     if let Some(pos) = window.cursor_position() {
         // Не даём подсказке уйти за правый и нижний край.
-        let x = if pos.x + 340.0 > window.width() {
-            pos.x - 330.0
-        } else {
-            pos.x + 18.0
-        };
+        let x = if pos.x + 340.0 > window.width() { pos.x - 330.0 } else { pos.x + 18.0 };
         let y = (pos.y + 18.0).min(window.height() - 260.0).max(0.0);
         node.left = px(x);
         node.top = px(y);
     }
     node.display = Display::Flex;
     // Знания меняют имя и описание (опознали траву, выучили грамоту).
-    if tooltip_for.0 == Some((owner, item.uid))
-        && !knowledge.as_ref().is_some_and(|k| k.is_changed())
-    {
+    if tooltip_for.0 == Some((owner, item.uid)) && !knowledge.as_ref().is_some_and(|k| k.is_changed()) {
         return;
     }
     tooltip_for.0 = Some((owner, item.uid));
     border.set_all(quality_color(item.quality));
     let info = item.info();
-    commands
-        .entity(entity)
-        .despawn_children()
-        .with_children(|t| {
-            let (w, h) = item.size();
-            let scale = 40.0 / (w.max(h) as f32 / 2.0).max(1.0);
-            t.spawn((
-                ImageNode::new(icons.get(item.base)).with_color(icon_tint(&item)),
-                Node {
-                    width: px(w as f32 * scale),
-                    height: px(h as f32 * scale),
-                    align_self: AlignSelf::Center,
-                    ..default()
-                },
-            ));
-            let name = knowledge
-                .as_ref()
-                .map(|k| k.item_name(&item))
-                .unwrap_or_else(|| item.display_name());
-            t.spawn(text(&fonts, name, 18.0, quality_color(item.quality), true));
-            if let Some(k) = knowledge.as_ref() {
-                for line in k.0.describe(item.base) {
-                    t.spawn(text(
-                        &fonts,
-                        line,
-                        13.0,
-                        Color::srgb(0.85, 0.8, 0.68),
-                        false,
-                    ));
-                }
+    commands.entity(entity).despawn_children().with_children(|t| {
+        let (w, h) = item.size();
+        let scale = 40.0 / (w.max(h) as f32 / 2.0).max(1.0);
+        t.spawn((ImageNode::new(icons.get(item.base)).with_color(icon_tint(&item)), Node { width: px(w as f32 * scale), height: px(h as f32 * scale), align_self: AlignSelf::Center, ..default() }));
+        let name = knowledge.as_ref().map(|k| k.item_name(&item)).unwrap_or_else(|| item.display_name());
+        t.spawn(text(&fonts, name, 18.0, quality_color(item.quality), true));
+        if let Some(k) = knowledge.as_ref() {
+            for line in k.0.describe(item.base) {
+                t.spawn(text(&fonts, line, 13.0, Color::srgb(0.85, 0.8, 0.68), false));
             }
-            if crate::medicine::is_remedy(info.name) && item.base.consumable().is_none() {
-                t.spawn(text(
-                    &fonts,
-                    "F или ПКМ — на рану или внутрь".to_string(),
-                    13.0,
-                    Color::srgb(0.75, 0.85, 0.6),
-                    false,
-                ));
-            }
-            if let Some(c) = item.base.consumable() {
-                let how = if c.heal_over > 0.0 {
-                    format!("за {:.0} с после применения", c.heal_over)
-                } else {
-                    "во время применения".to_string()
-                };
-                t.spawn(text(
-                    &fonts,
-                    format!("Лечит {:.0} здоровья {how}", c.heal),
-                    14.0,
-                    Color::srgb(0.5, 0.9, 0.5),
-                    false,
-                ));
-                t.spawn(text(
-                    &fonts,
-                    format!("Применение {:.0} с · F или ПКМ", c.use_time),
-                    13.0,
-                    Color::srgb(0.5, 0.9, 0.5),
-                    false,
-                ));
-            }
-            let mut kind = String::new();
-            if info.has_quality {
-                kind.push_str(item.quality.name());
-            }
-            if let Some(slot) = info.slot {
-                if !kind.is_empty() {
-                    kind.push_str(" · ");
-                }
-                kind.push_str(slot.name());
-            }
+        }
+        if crate::medicine::is_remedy(info.name) && item.base.consumable().is_none() {
+            t.spawn(text(&fonts, "F или ПКМ — на рану или внутрь".to_string(), 13.0, Color::srgb(0.75, 0.85, 0.6), false));
+        }
+        if let Some(c) = item.base.consumable() {
+            let how = if c.heal_over > 0.0 { format!("за {:.0} с после применения", c.heal_over) } else { "во время применения".to_string() };
+            t.spawn(text(&fonts, format!("Лечит {:.0} здоровья {how}", c.heal), 14.0, Color::srgb(0.5, 0.9, 0.5), false));
+            t.spawn(text(&fonts, format!("Применение {:.0} с · F или ПКМ", c.use_time), 13.0, Color::srgb(0.5, 0.9, 0.5), false));
+        }
+        let mut kind = String::new();
+        if info.has_quality {
+            kind.push_str(item.quality.name());
+        }
+        if let Some(slot) = info.slot {
             if !kind.is_empty() {
-                t.spawn(text(&fonts, kind, 13.0, DIM, false));
+                kind.push_str(" · ");
             }
-            if let Some((s, v)) = item.main_stat() {
-                t.spawn(text(
-                    &fonts,
-                    format!("{}: {}", s.name(), s.format(v)),
-                    15.0,
-                    Color::WHITE,
-                    true,
-                ));
+            kind.push_str(slot.name());
+        }
+        if !kind.is_empty() {
+            t.spawn(text(&fonts, kind, 13.0, DIM, false));
+        }
+        if let Some((s, v)) = item.main_stat() {
+            t.spawn(text(&fonts, format!("{}: {}", s.name(), s.format(v)), 15.0, Color::WHITE, true));
+        }
+        for (s, v) in &item.affixes {
+            t.spawn(text(&fonts, format!("{} {}", s.format(*v), s.name()), 14.0, Color::srgb(0.55, 0.75, 1.0), false));
+        }
+        if let Some(a) = crate::arsenal::of_base(item.base) {
+            t.spawn(text(&fonts, format!("Образец: {}", a.people), 13.0, Color::srgb(0.8, 0.72, 0.55), false));
+            t.spawn(text(&fonts, a.desc.to_string(), 13.0, Color::srgb(0.78, 0.74, 0.64), false));
+            if a.fam == crate::arsenal::Fam::Head {
+                t.spawn(text(&fonts, format!("Стрела: урон {:+.0}%, пробивание доспеха {:+.0}%", a.dmg, a.speed), 13.0, Color::srgb(0.55, 0.75, 1.0), false));
+            } else if a.speed != 0.0 {
+                let what = if a.speed > 0.0 { "лёгкое" } else { "тяжёлое" };
+                t.spawn(text(&fonts, format!("{what}: скорость ударов {:+.0}%", a.speed), 13.0, Color::srgb(0.55, 0.75, 1.0), false));
             }
-            for (s, v) in &item.affixes {
-                t.spawn(text(
-                    &fonts,
-                    format!("{} {}", s.format(*v), s.name()),
-                    14.0,
-                    Color::srgb(0.55, 0.75, 1.0),
-                    false,
-                ));
+        }
+        if let Some(at) = crate::archery::arrow_type(info.name) {
+            t.spawn(text(&fonts, at.desc.to_string(), 13.0, Color::srgb(0.78, 0.74, 0.64), false));
+            let shot = crate::archery::Shot::of(&item);
+            t.spawn(text(&fonts, format!("Урон лука ×{:.2}, пробивание доспеха {:+.0}%", shot.damage_mult, shot.pierce * 100.0), 13.0, Color::srgb(0.55, 0.75, 1.0), false));
+        }
+        if crate::archery::is_bow(info.name) {
+            t.spawn(text(&fonts, "Стреляет стрелами из сумки (первой стопкой).".to_string(), 13.0, Color::srgb(0.78, 0.74, 0.64), false));
+        }
+        if let Some(m) = item.make.as_ref() {
+            for (line, color) in make_lines(&item, m) {
+                t.spawn(text(&fonts, line, 13.0, color, false));
             }
-            if let Some(a) = crate::arsenal::of_base(item.base) {
-                t.spawn(text(
-                    &fonts,
-                    format!("Образец: {}", a.people),
-                    13.0,
-                    Color::srgb(0.8, 0.72, 0.55),
-                    false,
-                ));
-                t.spawn(text(
-                    &fonts,
-                    a.desc.to_string(),
-                    13.0,
-                    Color::srgb(0.78, 0.74, 0.64),
-                    false,
-                ));
-                if a.fam == crate::arsenal::Fam::Head {
-                    t.spawn(text(
-                        &fonts,
-                        format!(
-                            "Стрела: урон {:+.0}%, пробивание доспеха {:+.0}%",
-                            a.dmg, a.speed
-                        ),
-                        13.0,
-                        Color::srgb(0.55, 0.75, 1.0),
-                        false,
-                    ));
-                } else if a.speed != 0.0 {
-                    let what = if a.speed > 0.0 {
-                        "лёгкое"
-                    } else {
-                        "тяжёлое"
-                    };
-                    t.spawn(text(
-                        &fonts,
-                        format!("{what}: скорость ударов {:+.0}%", a.speed),
-                        13.0,
-                        Color::srgb(0.55, 0.75, 1.0),
-                        false,
-                    ));
-                }
-            }
-            if let Some(at) = crate::archery::arrow_type(info.name) {
-                t.spawn(text(
-                    &fonts,
-                    at.desc.to_string(),
-                    13.0,
-                    Color::srgb(0.78, 0.74, 0.64),
-                    false,
-                ));
-                let shot = crate::archery::Shot::of(&item);
-                t.spawn(text(
-                    &fonts,
-                    format!(
-                        "Урон лука ×{:.2}, пробивание доспеха {:+.0}%",
-                        shot.damage_mult,
-                        shot.pierce * 100.0
-                    ),
-                    13.0,
-                    Color::srgb(0.55, 0.75, 1.0),
-                    false,
-                ));
-            }
-            if crate::archery::is_bow(info.name) {
-                t.spawn(text(
-                    &fonts,
-                    "Стреляет стрелами из сумки (первой стопкой).".to_string(),
-                    13.0,
-                    Color::srgb(0.78, 0.74, 0.64),
-                    false,
-                ));
-            }
-            if let Some(m) = item.make.as_ref() {
-                for (line, color) in make_lines(&item, m) {
-                    t.spawn(text(&fonts, line, 13.0, color, false));
-                }
-            }
-            t.spawn(text(
-                &fonts,
-                format!(
-                    "Размер {}×{}   Вес {}   Цена ≈ {}",
-                    info.size.0,
-                    info.size.1,
-                    crate::weight::format_weight(crate::weight::item_weight(&item)),
-                    crate::economy::format_money(item.value())
-                ),
-                12.0,
-                DIM,
-                false,
-            ));
-            // Сравнение с надетым.
-            if let (Some(slot), Some(me)) = (info.slot, state.inventory.as_ref())
-                && let Some(worn) = me.equipped(slot).filter(|w| w.uid != item.uid)
-                && let (Some((s, a)), Some((_, b))) = (item.main_stat(), worn.main_stat())
-            {
-                let d = a - b;
-                let color = if d >= 0.0 {
-                    Color::srgb(0.4, 0.85, 0.4)
-                } else {
-                    Color::srgb(0.9, 0.4, 0.35)
-                };
-                t.spawn(text(
-                    &fonts,
-                    format!("{} {:+.0} к надетому", s.name(), d),
-                    13.0,
-                    color,
-                    false,
-                ));
-            }
-        });
+        }
+        t.spawn(text(&fonts, format!("Размер {}×{}   Вес {}   Цена ≈ {}", info.size.0, info.size.1, crate::weight::format_weight(crate::weight::item_weight(&item)), crate::economy::format_money(item.value())), 12.0, DIM, false));
+        // Сравнение с надетым.
+        if let (Some(slot), Some(me)) = (info.slot, state.inventory.as_ref())
+            && let Some(worn) = me.equipped(slot).filter(|w| w.uid != item.uid)
+            && let (Some((s, a)), Some((_, b))) = (item.main_stat(), worn.main_stat())
+        {
+            let d = a - b;
+            let color = if d >= 0.0 { Color::srgb(0.4, 0.85, 0.4) } else { Color::srgb(0.9, 0.4, 0.35) };
+            t.spawn(text(&fonts, format!("{} {:+.0} к надетому", s.name(), d), 13.0, color, false));
+        }
+    });
 }
 
-fn move_ghost(
-    held: Res<Held>,
-    window: Single<&Window, With<PrimaryWindow>>,
-    mut ghost: Query<&mut Node, With<HeldGhost>>,
-) {
+fn move_ghost(held: Res<Held>, window: Single<&Window, With<PrimaryWindow>>, mut ghost: Query<&mut Node, With<HeldGhost>>) {
     let Some(h) = &held.0 else { return };
-    let Some(pos) = window.cursor_position() else {
-        return;
-    };
+    let Some(pos) = window.cursor_position() else { return };
     for mut node in &mut ghost {
         node.left = px(pos.x - (h.grab.0 as f32 + 0.5) * CELL);
         node.top = px(pos.y - (h.grab.1 as f32 + 0.5) * CELL);
@@ -1268,9 +936,7 @@ fn move_ghost(
 
 /// Иконка грубой или сбитой вещи темнее и рыжее (окалина, ржа), полированной — как есть.
 pub fn icon_tint(item: &crate::items::Item) -> Color {
-    let Some(m) = item.make.as_ref() else {
-        return Color::WHITE;
-    };
+    let Some(m) = item.make.as_ref() else { return Color::WHITE };
     if m.dur_max <= 0.0 && m.smith.is_empty() {
         return Color::WHITE;
     }
@@ -1285,10 +951,7 @@ pub fn make_lines(item: &crate::items::Item, m: &crate::items::Make) -> Vec<(Str
     let mut v = Vec::new();
     let dim = Color::srgb(0.7, 0.66, 0.58);
     if !m.smith.is_empty() {
-        v.push((
-            format!("Работа: {}", m.smith),
-            Color::srgb(0.85, 0.75, 0.55),
-        ));
+        v.push((format!("Работа: {}", m.smith), Color::srgb(0.85, 0.75, 0.55)));
     }
     if m.dur_max > 0.0 {
         let c = m.condition();
@@ -1299,17 +962,8 @@ pub fn make_lines(item: &crate::items::Item, m: &crate::items::Make) -> Vec<(Str
         } else {
             Color::srgb(0.7, 0.85, 0.65)
         };
-        let tail = if m.broken() {
-            " — сломано, нужен кузнец"
-        } else if c < 0.5 {
-            " — сбито, слабее в деле"
-        } else {
-            ""
-        };
-        v.push((
-            format!("Прочность {:.0}/{:.0}{tail}", m.dur, m.dur_max),
-            color,
-        ));
+        let tail = if m.broken() { " — сломано, нужен кузнец" } else if c < 0.5 { " — сбито, слабее в деле" } else { "" };
+        v.push((format!("Прочность {:.0}/{:.0}{tail}", m.dur, m.dur_max), color));
     }
     if item.info().slot == Some(EquipSlot::MainHand) && !m.smith.is_empty() {
         let edge = match m.edge {
@@ -1336,10 +990,7 @@ pub fn make_lines(item: &crate::items::Item, m: &crate::items::Make) -> Vec<(Str
     }
     if !m.flaws.is_empty() {
         let names: Vec<&str> = m.flaws.iter().map(|f| f.name()).collect();
-        v.push((
-            format!("Изъяны: {}", names.join(", ")),
-            Color::srgb(0.9, 0.45, 0.35),
-        ));
+        v.push((format!("Изъяны: {}", names.join(", ")), Color::srgb(0.9, 0.45, 0.35)));
     }
     v
 }
