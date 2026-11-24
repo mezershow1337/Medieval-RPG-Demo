@@ -57,6 +57,8 @@ pub struct Settings {
     pub nickname: String,
     /// Облик персонажа (окно «Облик» в главном меню).
     pub look: crate::appearance::Look,
+    /// Стартовый набор, выбранный в окне персонажа.
+    pub kit: crate::start_kit::StartKit,
 }
 
 /// Готовые наборы графики.
@@ -113,6 +115,7 @@ impl Default for Settings {
             // Для начала — имя пользователя Windows; его можно сменить в главном меню.
             nickname: crate::protocol::clean_name(&std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default()),
             look: crate::appearance::Look::PLAYER_DEFAULT,
+            kit: Default::default(),
         };
         // По умолчанию — средние: игра должна идти плавно и на обычной видеокарте.
         s.apply_preset(Preset::Medium);
@@ -187,7 +190,7 @@ impl Settings {
         format!(
             "# Настройки Medieval RPG. Можно править руками; неизвестные строки пропускаются.\n\
              draw_distance = {}\nshadows = {}\nwater = {}\neffects = {}\ntextures = {}\nrender_scale = {}\n\
-             vsync = {}\nwindow_mode = {}\nfov = {}\nsensitivity = {}\nvolume = {}\nmusic = {}\nsfx = {}\nambient = {}\nshow_fps = {}\nlast_address = {}\nnickname = {}\nlook = {}\n",
+             vsync = {}\nwindow_mode = {}\nfov = {}\nsensitivity = {}\nvolume = {}\nmusic = {}\nsfx = {}\nambient = {}\nshow_fps = {}\nlast_address = {}\nnickname = {}\nlook = {}\nkit = {}\n",
             self.draw_distance,
             self.shadows,
             self.water,
@@ -206,6 +209,7 @@ impl Settings {
             self.last_address,
             self.nickname,
             self.look.to_text(),
+            self.kit.to_text(),
         )
     }
 
@@ -244,6 +248,7 @@ impl Settings {
                 "last_address" => s.last_address = v.to_string(),
                 "nickname" => s.nickname = crate::protocol::clean_name(v),
                 "look" => s.look = crate::appearance::Look::from_text(v).unwrap_or(s.look),
+                "kit" => s.kit = crate::start_kit::StartKit::from_text(v).unwrap_or(s.kit),
                 _ => {}
             }
         }
@@ -627,6 +632,7 @@ mod tests {
         s.nickname = "Феодор".into();
         s.look.step(crate::appearance::LookField::Beard, 2);
         s.look.step(crate::appearance::LookField::Build, -1);
+        s.kit.step(crate::start_kit::KitField::Weapon, 3);
         let back = Settings::from_text(&s.to_text());
         assert_eq!(s, back);
         assert_eq!(back.preset(), Some(Preset::Low));
