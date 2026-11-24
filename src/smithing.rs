@@ -75,11 +75,19 @@ pub fn heat_color(t: f32) -> ([f32; 3], &'static str) {
         }
         if t >= a.0 && t < b.0 {
             let k = (t - a.0) / (b.0 - a.0);
-            let c = [a.1[0] + (b.1[0] - a.1[0]) * k, a.1[1] + (b.1[1] - a.1[1]) * k, a.1[2] + (b.1[2] - a.1[2]) * k];
+            let c = [
+                a.1[0] + (b.1[0] - a.1[0]) * k,
+                a.1[1] + (b.1[1] - a.1[1]) * k,
+                a.1[2] + (b.1[2] - a.1[2]) * k,
+            ];
             return (c, name);
         }
     }
-    if t >= 1380.0 { (STOPS[9].1, "искрит — горит!") } else { (STOPS[9].1, STOPS[9].2) }
+    if t >= 1380.0 {
+        (STOPS[9].1, "искрит — горит!")
+    } else {
+        (STOPS[9].1, STOPS[9].2)
+    }
 }
 
 /// Цвета побежалости на зачищенной стали при отпуске (°C → цвет, название).
@@ -174,7 +182,25 @@ pub struct PatternInfo {
 impl Pattern {
     pub const ALL: [Pattern; 17] = {
         use Pattern::*;
-        [Bloom, ScrapWeld, Knife, Spatha, CavalrySpatha, Axe, Spear, Mace, Arrowheads, Spangenhelm, RidgeHelmet, Mail, Lamellar, Vambraces, Greaves, OvalShield, RoundShield]
+        [
+            Bloom,
+            ScrapWeld,
+            Knife,
+            Spatha,
+            CavalrySpatha,
+            Axe,
+            Spear,
+            Mace,
+            Arrowheads,
+            Spangenhelm,
+            RidgeHelmet,
+            Mail,
+            Lamellar,
+            Vambraces,
+            Greaves,
+            OvalShield,
+            RoundShield,
+        ]
     };
 
     /// Всё, что можно сковать: заготовки, старые образцы, доспехи и весь арсенал.
@@ -220,7 +246,17 @@ impl Pattern {
             };
         }
         use Technique as T;
-        let p = |product, count, metal, parts, segments, weld, harden, needs, mass, temper_best, kind| PatternInfo {
+        let p = |product,
+                 count,
+                 metal,
+                 parts,
+                 segments,
+                 weld,
+                 harden,
+                 needs,
+                 mass,
+                 temper_best,
+                 kind| PatternInfo {
             product,
             count,
             metal,
@@ -236,26 +272,247 @@ impl Pattern {
         };
         const BLADE6: &[&str] = &["хвостовик", "пята", "дол", "дол", "сильная часть", "острие"];
         match self {
-            Bloom => p(IRON, 2, 1, &[], &["край", "середина", "край"], true, false, None, 2.4, 0.0, PieceKind::Stock),
-            ScrapWeld => p(IRON, 1, 3, &[], &["пакет", "полоса"], true, false, None, 1.6, 0.0, PieceKind::Stock),
-            Knife => p("Кинжал", 1, 1, &[(ASH, 1)], &["хвостовик", "клинок", "острие"], false, true, None, 0.7, 240.0, PieceKind::Weapon),
-            Spatha => p("Спата", 1, 3, &[(ASH, 1)], BLADE6, true, true, None, 1.2, 290.0, PieceKind::Weapon),
-            CavalrySpatha => p("Кавалерийская спата", 1, 4, &[(ASH, 1)], &["хвостовик", "пята", "дол", "дол", "дол", "сильная часть", "острие"], true, true, None, 1.35, 295.0, PieceKind::Weapon),
-            Axe => p("Боевой топор", 1, 2, &[(ASH, 1)], &["обух", "проух", "щёки", "лезвие"], true, true, None, 1.5, 255.0, PieceKind::Weapon),
-            Spear => p("Пехотное копьё", 1, 1, &[(ASH, 1)], &["втулка", "шейка", "перо", "острие"], false, true, None, 0.9, 270.0, PieceKind::Weapon),
-            Mace => p("Булава", 1, 2, &[(ASH, 1)], &["втулка", "навершие", "рёбра"], true, false, None, 1.7, 0.0, PieceKind::Weapon),
-            Arrowheads => p("Наконечники стрел", 12, 1, &[], &["черешки", "перья", "острия"], false, true, None, 0.5, 260.0, PieceKind::Weapon),
-            Spangenhelm => p("Спангенхельм", 1, 3, &[(HIDE, 1)], &["сегмент", "сегмент", "сегмент", "сегмент", "обруч"], false, false, Some(T::Armoury), 1.3, 0.0, PieceKind::Armour),
-            RidgeHelmet => p("Гребенчатый шлем", 1, 2, &[(HIDE, 1)], &["левая половина", "гребень", "правая половина"], false, false, Some(T::Armoury), 1.2, 0.0, PieceKind::Armour),
+            Bloom => p(
+                IRON,
+                2,
+                1,
+                &[],
+                &["край", "середина", "край"],
+                true,
+                false,
+                None,
+                2.4,
+                0.0,
+                PieceKind::Stock,
+            ),
+            ScrapWeld => p(
+                IRON,
+                1,
+                3,
+                &[],
+                &["пакет", "полоса"],
+                true,
+                false,
+                None,
+                1.6,
+                0.0,
+                PieceKind::Stock,
+            ),
+            Knife => p(
+                "Кинжал",
+                1,
+                1,
+                &[(ASH, 1)],
+                &["хвостовик", "клинок", "острие"],
+                false,
+                true,
+                None,
+                0.7,
+                240.0,
+                PieceKind::Weapon,
+            ),
+            Spatha => p(
+                "Спата",
+                1,
+                3,
+                &[(ASH, 1)],
+                BLADE6,
+                true,
+                true,
+                None,
+                1.2,
+                290.0,
+                PieceKind::Weapon,
+            ),
+            CavalrySpatha => p(
+                "Кавалерийская спата",
+                1,
+                4,
+                &[(ASH, 1)],
+                &[
+                    "хвостовик",
+                    "пята",
+                    "дол",
+                    "дол",
+                    "дол",
+                    "сильная часть",
+                    "острие",
+                ],
+                true,
+                true,
+                None,
+                1.35,
+                295.0,
+                PieceKind::Weapon,
+            ),
+            Axe => p(
+                "Боевой топор",
+                1,
+                2,
+                &[(ASH, 1)],
+                &["обух", "проух", "щёки", "лезвие"],
+                true,
+                true,
+                None,
+                1.5,
+                255.0,
+                PieceKind::Weapon,
+            ),
+            Spear => p(
+                "Пехотное копьё",
+                1,
+                1,
+                &[(ASH, 1)],
+                &["втулка", "шейка", "перо", "острие"],
+                false,
+                true,
+                None,
+                0.9,
+                270.0,
+                PieceKind::Weapon,
+            ),
+            Mace => p(
+                "Булава",
+                1,
+                2,
+                &[(ASH, 1)],
+                &["втулка", "навершие", "рёбра"],
+                true,
+                false,
+                None,
+                1.7,
+                0.0,
+                PieceKind::Weapon,
+            ),
+            Arrowheads => p(
+                "Наконечники стрел",
+                12,
+                1,
+                &[],
+                &["черешки", "перья", "острия"],
+                false,
+                true,
+                None,
+                0.5,
+                260.0,
+                PieceKind::Weapon,
+            ),
+            Spangenhelm => p(
+                "Спангенхельм",
+                1,
+                3,
+                &[(HIDE, 1)],
+                &["сегмент", "сегмент", "сегмент", "сегмент", "обруч"],
+                false,
+                false,
+                Some(T::Armoury),
+                1.3,
+                0.0,
+                PieceKind::Armour,
+            ),
+            RidgeHelmet => p(
+                "Гребенчатый шлем",
+                1,
+                2,
+                &[(HIDE, 1)],
+                &["левая половина", "гребень", "правая половина"],
+                false,
+                false,
+                Some(T::Armoury),
+                1.2,
+                0.0,
+                PieceKind::Armour,
+            ),
             Mail => PatternInfo {
                 cold: true,
-                ..p("Кольчуга", 1, 5, &[], &["ворот", "грудь", "спина", "бок", "бок", "рукав", "рукав", "подол"], false, false, Some(T::MailMaking), 0.6, 0.0, PieceKind::Armour)
+                ..p(
+                    "Кольчуга",
+                    1,
+                    5,
+                    &[],
+                    &[
+                        "ворот",
+                        "грудь",
+                        "спина",
+                        "бок",
+                        "бок",
+                        "рукав",
+                        "рукав",
+                        "подол",
+                    ],
+                    false,
+                    false,
+                    Some(T::MailMaking),
+                    0.6,
+                    0.0,
+                    PieceKind::Armour,
+                )
             },
-            Lamellar => p("Ламеллярный панцирь", 1, 5, &[(HIDE, 2)], &["ряд I", "ряд II", "ряд III", "ряд IV", "ряд V", "наплечья"], false, false, Some(T::Armoury), 1.0, 0.0, PieceKind::Armour),
-            Vambraces => p("Ламеллярные наручи", 1, 1, &[(HIDE, 1)], &["левый", "правый"], false, false, Some(T::Armoury), 0.8, 0.0, PieceKind::Armour),
-            Greaves => p("Железные поножи", 1, 2, &[(HIDE, 1)], &["левая", "правая", "наколенники"], false, false, Some(T::Armoury), 1.1, 0.0, PieceKind::Armour),
-            OvalShield => p("Овальный щит", 1, 1, &[(ASH, 2), (HIDE, 1)], &["умбон", "рукоять", "оковка"], false, false, None, 1.0, 0.0, PieceKind::Armour),
-            RoundShield => p("Круглый щит", 1, 1, &[(ASH, 1), (HIDE, 1)], &["умбон", "рукоять"], false, false, None, 1.0, 0.0, PieceKind::Armour),
+            Lamellar => p(
+                "Ламеллярный панцирь",
+                1,
+                5,
+                &[(HIDE, 2)],
+                &["ряд I", "ряд II", "ряд III", "ряд IV", "ряд V", "наплечья"],
+                false,
+                false,
+                Some(T::Armoury),
+                1.0,
+                0.0,
+                PieceKind::Armour,
+            ),
+            Vambraces => p(
+                "Ламеллярные наручи",
+                1,
+                1,
+                &[(HIDE, 1)],
+                &["левый", "правый"],
+                false,
+                false,
+                Some(T::Armoury),
+                0.8,
+                0.0,
+                PieceKind::Armour,
+            ),
+            Greaves => p(
+                "Железные поножи",
+                1,
+                2,
+                &[(HIDE, 1)],
+                &["левая", "правая", "наколенники"],
+                false,
+                false,
+                Some(T::Armoury),
+                1.1,
+                0.0,
+                PieceKind::Armour,
+            ),
+            OvalShield => p(
+                "Овальный щит",
+                1,
+                1,
+                &[(ASH, 2), (HIDE, 1)],
+                &["умбон", "рукоять", "оковка"],
+                false,
+                false,
+                None,
+                1.0,
+                0.0,
+                PieceKind::Armour,
+            ),
+            RoundShield => p(
+                "Круглый щит",
+                1,
+                1,
+                &[(ASH, 1), (HIDE, 1)],
+                &["умбон", "рукоять"],
+                false,
+                false,
+                None,
+                1.0,
+                0.0,
+                PieceKind::Armour,
+            ),
             Arms(_) => unreachable!("разобрано выше"),
         }
     }
@@ -382,10 +639,22 @@ impl SmithEvent {
             SmithEvent::Welded => "Слои схватились: сварка взялась".into(),
             SmithEvent::ColdShut => "Сварка не берётся: жара мало".into(),
             SmithEvent::Missed => "Удар вскользь: забоина".into(),
-            SmithEvent::Quenched { hard: true, cracked: false } => "Шипит пар: закалилось".into(),
-            SmithEvent::Quenched { hard: true, cracked: true } => "Закалилось, но пошла трещина".into(),
-            SmithEvent::Quenched { hard: false, cracked: false } => "Не закалилось: металл был холоден или это мягкое железо".into(),
-            SmithEvent::Quenched { hard: false, cracked: true } => "Треснуло и не закалилось".into(),
+            SmithEvent::Quenched {
+                hard: true,
+                cracked: false,
+            } => "Шипит пар: закалилось".into(),
+            SmithEvent::Quenched {
+                hard: true,
+                cracked: true,
+            } => "Закалилось, но пошла трещина".into(),
+            SmithEvent::Quenched {
+                hard: false,
+                cracked: false,
+            } => "Не закалилось: металл был холоден или это мягкое железо".into(),
+            SmithEvent::Quenched {
+                hard: false,
+                cracked: true,
+            } => "Треснуло и не закалилось".into(),
             SmithEvent::Annealed => "Остыло в золе: напряжение ушло, металл мягкий".into(),
             SmithEvent::TooCold => "Холодное: не поддаётся".into(),
             SmithEvent::Note(s) => s.clone(),
@@ -436,7 +705,8 @@ impl Forging {
         let before = self.temp;
         match self.spot {
             Spot::Fire => {
-                self.temp += (fire_temp.max(AMBIENT) - self.temp) * (1.0 - (-0.26 * dt / mass).exp());
+                self.temp +=
+                    (fire_temp.max(AMBIENT) - self.temp) * (1.0 - (-0.26 * dt / mass).exp());
             }
             Spot::Temper => {
                 // Край углей без дутья: медленно и не выше ~420 °C.
@@ -486,7 +756,14 @@ impl Forging {
     }
 
     /// Удар молотом по участку `zone`. `acc` — точность 0..1 (с экрана), `skill` — навык 0..100.
-    pub fn strike(&mut self, zone: usize, heavy: bool, acc: f32, skill: f32, rng: &mut Rng) -> Vec<SmithEvent> {
+    pub fn strike(
+        &mut self,
+        zone: usize,
+        heavy: bool,
+        acc: f32,
+        skill: f32,
+        rng: &mut Rng,
+    ) -> Vec<SmithEvent> {
         let mut ev = Vec::new();
         let info = self.pattern.info();
         let n = self.shape.len();
@@ -500,15 +777,24 @@ impl Forging {
         // Неумелая рука промахивается по соседнему участку.
         let mut zone = zone.min(n - 1);
         if rng.f32() < 0.22 * (1.0 - s) * (1.0 - acc * 0.5) {
-            zone = if rng.f32() < 0.5 { zone.saturating_sub(1) } else { (zone + 1).min(n - 1) };
+            zone = if rng.f32() < 0.5 {
+                zone.saturating_sub(1)
+            } else {
+                (zone + 1).min(n - 1)
+            };
         }
         let force = if heavy { 2.2 } else { 1.0 };
-        let plast = if info.cold { 1.0 } else { plasticity(self.temp) };
+        let plast = if info.cold {
+            1.0
+        } else {
+            plasticity(self.temp)
+        };
         let cold_limit = if self.carbon > 0.3 { 780.0 } else { 700.0 };
         if !info.cold && self.temp < cold_limit {
             // Остывший металл не тянется, а копит напряжение и трескается.
             self.stress += 0.03 * force;
-            let risk = (cold_limit - self.temp) / 320.0 * force * (0.35 + self.carbon) * (1.0 - 0.5 * s);
+            let risk =
+                (cold_limit - self.temp) / 320.0 * force * (0.35 + self.carbon) * (1.0 - 0.5 * s);
             if rng.f32() < risk * 0.35 {
                 self.cracks += 0.12 * force;
                 ev.push(SmithEvent::Crack);
@@ -524,7 +810,8 @@ impl Forging {
         // Сварка пакета: только на белом жару, сильными ударами.
         if self.weld < 1.0 {
             if self.temp >= 1230.0 {
-                let gain = 0.09 * force * (0.4 + 0.6 * acc) * smooth(1230.0, 1320.0, self.temp).max(0.35);
+                let gain =
+                    0.09 * force * (0.4 + 0.6 * acc) * smooth(1230.0, 1320.0, self.temp).max(0.35);
                 self.weld = (self.weld + gain).min(1.0);
                 if self.weld >= 1.0 {
                     ev.push(SmithEvent::Welded);
@@ -550,7 +837,9 @@ impl Forging {
             if over > 0.0 {
                 self.warp += over * gain * 3.0 * (1.0 - 0.4 * s);
                 if over > 0.06 {
-                    ev.push(SmithEvent::Note("Заготовку повело на одну сторону — переверните (R)".into()));
+                    ev.push(SmithEvent::Note(
+                        "Заготовку повело на одну сторону — переверните (R)".into(),
+                    ));
                 }
             }
         }
@@ -581,7 +870,11 @@ impl Forging {
         let overheat = smooth(900.0, 1100.0, t);
         let carbon_k = (self.carbon / 0.6).clamp(0.0, 1.2);
         let hard = transform * carbon_k.min(1.0) * (0.5 + 0.5 * sev.min(1.1));
-        let risk = sev * (0.08 + self.carbon * 0.45) * (0.25 + self.stress + overheat * 1.2) * (1.0 - 0.4 * s) * transform.max(0.2);
+        let risk = sev
+            * (0.08 + self.carbon * 0.45)
+            * (0.25 + self.stress + overheat * 1.2)
+            * (1.0 - 0.4 * s)
+            * transform.max(0.2);
         let cracked = rng.f32() < risk;
         if cracked {
             self.cracks += 0.35;
@@ -595,7 +888,10 @@ impl Forging {
             self.brittle = self.hardness * (1.0 + overheat * 0.5);
             self.temper = 0.0;
         }
-        SmithEvent::Quenched { hard: hard > 0.15, cracked }
+        SmithEvent::Quenched {
+            hard: hard > 0.15,
+            cracked,
+        }
     }
 
     /// Проход на точиле.
@@ -611,7 +907,11 @@ impl Forging {
         if self.shape.is_empty() {
             return 0.0;
         }
-        self.shape.iter().map(|s| if *s > 1.0 { (s - 1.0) * 1.6 } else { 1.0 - s }).sum::<f32>() / self.shape.len() as f32
+        self.shape
+            .iter()
+            .map(|s| if *s > 1.0 { (s - 1.0) * 1.6 } else { 1.0 - s })
+            .sum::<f32>()
+            / self.shape.len() as f32
     }
 
     /// Развесовка: перекованное острие легче, недокованное тяжелее.
@@ -642,12 +942,20 @@ pub fn cool(t: f32, dt: f32, mass: f32) -> f32 {
 
 /// Жар в горне: без дутья угли держат около 850 °C, с мехами — до 1400 °C.
 pub fn fire_temp(fuel: f32, blast: f32) -> f32 {
-    if fuel <= 0.0 { 200.0 } else { 850.0 + 560.0 * blast.clamp(0.0, 1.0) }
+    if fuel <= 0.0 {
+        200.0
+    } else {
+        850.0 + 560.0 * blast.clamp(0.0, 1.0)
+    }
 }
 
 /// Как растёт и спадает дутьё (0..1) от мехов.
 pub fn step_blast(blast: f32, bellows: bool, dt: f32) -> f32 {
-    if bellows { (blast + dt * 0.45).min(1.0) } else { (blast - dt * 0.22).max(0.0) }
+    if bellows {
+        (blast + dt * 0.45).min(1.0)
+    } else {
+        (blast - dt * 0.22).max(0.0)
+    }
 }
 
 /// Итог ковки.
@@ -681,7 +989,8 @@ impl Forging {
         if self.shape.is_empty() {
             return 0.0;
         }
-        (self.shape.iter().map(|s| s.min(1.0)).sum::<f32>() / self.shape.len() as f32).clamp(0.0, 1.0)
+        (self.shape.iter().map(|s| s.min(1.0)).sum::<f32>() / self.shape.len() as f32)
+            .clamp(0.0, 1.0)
     }
 
     /// Оценить работу. `fitting` — бронзовое навершие (лучше развесовка, красивее).
@@ -689,16 +998,27 @@ impl Forging {
         let info = self.pattern.info();
         let err = self.shape_error();
         let shape = (1.0 - err * 2.2).clamp(0.0, 1.0);
-        let integrity = (1.0 - self.cracks * 1.3 - self.cold_shut * 1.4 - self.burn * 1.5 - (1.0 - self.purity) * 0.45).clamp(0.0, 1.0);
+        let integrity = (1.0
+            - self.cracks * 1.3
+            - self.cold_shut * 1.4
+            - self.burn * 1.5
+            - (1.0 - self.purity) * 0.45)
+            .clamp(0.0, 1.0);
         let pits = (self.scale * 2.0).clamp(0.0, 1.0);
-        let surface = (1.0 - self.dents * 2.0 - pits * 0.7 + self.ground.min(1.0) * 0.35).clamp(0.0, 1.0);
+        let surface =
+            (1.0 - self.dents * 2.0 - pits * 0.7 + self.ground.min(1.0) * 0.35).clamp(0.0, 1.0);
         let over_ground = (self.ground - 1.35).max(0.0);
         // Закалка: хорошая твёрдость при малой хрупкости и правильном отпуске.
         let (edge, temper_score) = if info.harden {
             let soft = smooth(250.0, 470.0, self.temper);
             let edge = (self.hardness * (1.0 - soft * 0.75)).clamp(0.0, 1.0);
-            let near = if self.temper > 0.0 { 1.0 - ((self.temper - info.temper_best).abs() / 70.0).min(1.0) } else { 0.0 };
-            let score = (edge * 0.55 + near * 0.3 + (1.0 - self.brittle).max(0.0) * 0.15).clamp(0.0, 1.0);
+            let near = if self.temper > 0.0 {
+                1.0 - ((self.temper - info.temper_best).abs() / 70.0).min(1.0)
+            } else {
+                0.0
+            };
+            let score =
+                (edge * 0.55 + near * 0.3 + (1.0 - self.brittle).max(0.0) * 0.15).clamp(0.0, 1.0);
             (edge, score)
         } else {
             (0.0, 1.0)
@@ -710,7 +1030,8 @@ impl Forging {
         } else {
             shape * 0.38 + integrity * 0.3 + surface * 0.15 + self.purity * 0.17
         };
-        let mut score = (score - over_ground * 0.3 + if fitting { 0.03 } else { 0.0 }).clamp(0.0, 1.0);
+        let mut score =
+            (score - over_ground * 0.3 + if fitting { 0.03 } else { 0.0 }).clamp(0.0, 1.0);
         // Недокованная вещь — ещё не вещь: выше «плохой» не бывает.
         if self.shape.iter().any(|s| *s < 0.8) {
             score = score.min(0.3);
@@ -729,23 +1050,56 @@ impl Forging {
         add(self.warp > 0.25, Flaw::Warped);
         add(self.shape.iter().any(|s| *s > 1.25), Flaw::ThinSpot);
         add(self.shape.iter().any(|s| *s < 0.8), Flaw::Unfinished);
-        add(info.harden && self.quenched && self.brittle > 0.5, Flaw::Brittle);
-        add(info.harden && (!self.quenched || edge < 0.25) && info.kind == PieceKind::Weapon, Flaw::Soft);
+        add(
+            info.harden && self.quenched && self.brittle > 0.5,
+            Flaw::Brittle,
+        );
+        add(
+            info.harden && (!self.quenched || edge < 0.25) && info.kind == PieceKind::Weapon,
+            Flaw::Soft,
+        );
         add(over_ground > 0.1, Flaw::Overground);
         add(self.dents > 0.25, Flaw::Dented);
         let base = ItemBaseId::find(info.product).map(|b| b.base());
         let dur_base = base.map(base_durability).unwrap_or(0.0);
-        let tough = if info.harden { 1.0 - self.brittle.clamp(0.0, 1.0) * 0.6 } else { 1.0 };
-        let dur_max = (dur_base * (0.35 + 0.8 * integrity) * (0.6 + 0.4 * tough) * (0.85 + 0.3 * shape)).round();
-        let balance = if fitting { self.balance() * 0.6 } else { self.balance() };
+        let tough = if info.harden {
+            1.0 - self.brittle.clamp(0.0, 1.0) * 0.6
+        } else {
+            1.0
+        };
+        let dur_max =
+            (dur_base * (0.35 + 0.8 * integrity) * (0.6 + 0.4 * tough) * (0.85 + 0.3 * shape))
+                .round();
+        let balance = if fitting {
+            self.balance() * 0.6
+        } else {
+            self.balance()
+        };
         let finish = (surface * 0.8 + self.ground.min(1.0) * 0.2 - pits * 0.3).clamp(0.0, 1.0);
-        let make = Make { smith: smith.to_string(), finish, edge, balance, flaws, dur: dur_max, dur_max, carbon: self.carbon };
-        Outcome { quality: quality_of(score), make, score }
+        let make = Make {
+            smith: smith.to_string(),
+            finish,
+            edge,
+            balance,
+            flaws,
+            dur: dur_max,
+            dur_max,
+            carbon: self.carbon,
+        };
+        Outcome {
+            quality: quality_of(score),
+            make,
+            score,
+        }
     }
 }
 
 /// Свойства, которые даёт работа мастера (в дополнение к основной характеристике).
-pub fn crafted_affixes(kind: PieceKind, make: &Make, quality: Quality) -> Vec<(crate::items::Stat, f32)> {
+pub fn crafted_affixes(
+    kind: PieceKind,
+    make: &Make,
+    quality: Quality,
+) -> Vec<(crate::items::Stat, f32)> {
     use crate::items::Stat;
     let mut v = Vec::new();
     let r1 = |x: f32| (x * 10.0).round() / 10.0;
@@ -756,7 +1110,10 @@ pub fn crafted_affixes(kind: PieceKind, make: &Make, quality: Quality) -> Vec<(c
             // Хорошо уравновешенный клинок быстрее в руке.
             v.push((Stat::ActionSpeed, r1((0.22 - make.balance.abs()) * 14.0)));
             if quality >= Quality::Rare && !make.flaws.contains(&Flaw::Brittle) {
-                v.push((Stat::ParryWindow, ((quality.index() as f32 - 2.0) * 12.0).round()));
+                v.push((
+                    Stat::ParryWindow,
+                    ((quality.index() as f32 - 2.0) * 12.0).round(),
+                ));
             }
         }
         PieceKind::Armour => {
@@ -799,7 +1156,13 @@ pub enum CastMetal {
 }
 
 impl CastMetal {
-    pub const ALL: [CastMetal; 5] = [CastMetal::Copper, CastMetal::Tin, CastMetal::Bronze, CastMetal::Silver, CastMetal::Lead];
+    pub const ALL: [CastMetal; 5] = [
+        CastMetal::Copper,
+        CastMetal::Tin,
+        CastMetal::Bronze,
+        CastMetal::Silver,
+        CastMetal::Lead,
+    ];
     pub fn item(self) -> &'static str {
         match self {
             CastMetal::Copper => "Медный лом",
@@ -840,9 +1203,22 @@ pub enum Alloy {
 }
 
 impl CastPiece {
-    pub const ALL: [CastPiece; 6] = [CastPiece::Buckle, CastPiece::Fibula, CastPiece::Pommel, CastPiece::Cross, CastPiece::Ring, CastPiece::Sinkers];
+    pub const ALL: [CastPiece; 6] = [
+        CastPiece::Buckle,
+        CastPiece::Fibula,
+        CastPiece::Pommel,
+        CastPiece::Cross,
+        CastPiece::Ring,
+        CastPiece::Sinkers,
+    ];
     pub fn info(self) -> CastInfo {
-        let c = |product, count, drachms, lost_wax, alloy| CastInfo { product, count, drachms, lost_wax, alloy };
+        let c = |product, count, drachms, lost_wax, alloy| CastInfo {
+            product,
+            count,
+            drachms,
+            lost_wax,
+            alloy,
+        };
         match self {
             CastPiece::Buckle => c("Бронзовая пряжка", 1, 14.0, false, Alloy::Bronze),
             CastPiece::Fibula => c("Бронзовая фибула", 1, 10.0, false, Alloy::Bronze),
@@ -885,7 +1261,27 @@ pub struct Casting {
 
 impl Casting {
     pub fn new(piece: CastPiece, copper: f32, tin: f32, silver: f32, lead: f32) -> Self {
-        Self { piece, copper, tin, silver, lead, temp: AMBIENT, spot: Spot::Anvil, melt: 0.0, dross: 0.0, mould_heat: 0.0, mould_warm: false, poured: 0.0, pouring: false, pauses: 0, porosity: 0.0, misrun: 0.0, opened: false, chased: 0.0, dents: 0.0 }
+        Self {
+            piece,
+            copper,
+            tin,
+            silver,
+            lead,
+            temp: AMBIENT,
+            spot: Spot::Anvil,
+            melt: 0.0,
+            dross: 0.0,
+            mould_heat: 0.0,
+            mould_warm: false,
+            poured: 0.0,
+            pouring: false,
+            pauses: 0,
+            porosity: 0.0,
+            misrun: 0.0,
+            opened: false,
+            chased: 0.0,
+            dents: 0.0,
+        }
     }
 
     pub fn total(&self) -> f32 {
@@ -914,7 +1310,9 @@ impl Casting {
         let mut ev = Vec::new();
         let liq = self.liquidus();
         match self.spot {
-            Spot::Fire => self.temp += (fire_temp.max(AMBIENT) - self.temp) * (1.0 - (-0.2 * dt).exp()),
+            Spot::Fire => {
+                self.temp += (fire_temp.max(AMBIENT) - self.temp) * (1.0 - (-0.2 * dt).exp())
+            }
             _ => self.temp = cool(self.temp, dt, 0.8),
         }
         if self.temp > liq {
@@ -941,7 +1339,8 @@ impl Casting {
             // Металл стынет в форме, если он едва жидкий, а форма холодная.
             let margin = self.temp - liq;
             if margin < 60.0 {
-                self.misrun += dt * 0.6 * (1.0 - self.mould_heat * 0.7) * (1.0 - margin.max(0.0) / 60.0);
+                self.misrun +=
+                    dt * 0.6 * (1.0 - self.mould_heat * 0.7) * (1.0 - margin.max(0.0) / 60.0);
             }
             if margin > 260.0 {
                 self.porosity += dt * 0.15;
@@ -951,7 +1350,9 @@ impl Casting {
             }
             if cap < 1.0 && self.poured >= cap {
                 self.pouring = false;
-                ev.push(SmithEvent::Note("Металла не хватило: форма залита не вся".into()));
+                ev.push(SmithEvent::Note(
+                    "Металла не хватило: форма залита не вся".into(),
+                ));
                 self.misrun += 0.5;
             } else if self.poured >= 1.0 {
                 self.pouring = false;
@@ -1005,7 +1406,8 @@ impl Casting {
             Alloy::Bronze => {
                 // 8–12 % олова — лучшая бронза: меньше — мягкая и густая, больше — хрупкая.
                 let t = self.tin_frac();
-                1.0 - ((t - 0.1).abs() / 0.08).min(1.0) * 0.8 - (self.silver + self.lead) / self.total().max(1.0)
+                1.0 - ((t - 0.1).abs() / 0.08).min(1.0) * 0.8
+                    - (self.silver + self.lead) / self.total().max(1.0)
             }
             Alloy::Silver => self.silver / self.total().max(1.0),
             Alloy::Lead => self.lead / self.total().max(1.0),
@@ -1013,7 +1415,8 @@ impl Casting {
         .clamp(0.0, 1.0);
         let fill = (1.0 - self.misrun.min(1.0) - self.pauses as f32 * 0.25).clamp(0.0, 1.0);
         let sound = (1.0 - self.porosity.min(1.0)).clamp(0.0, 1.0);
-        let finish = (self.chased.min(1.0) - self.dents * 1.5 - (self.chased - 1.25).max(0.0)).clamp(0.0, 1.0);
+        let finish = (self.chased.min(1.0) - self.dents * 1.5 - (self.chased - 1.25).max(0.0))
+            .clamp(0.0, 1.0);
         let score = (alloy * 0.3 + fill * 0.3 + sound * 0.2 + finish * 0.2).clamp(0.0, 1.0);
         let mut flaws = Vec::new();
         if self.misrun > 0.25 || self.pauses > 0 {
@@ -1025,8 +1428,21 @@ impl Casting {
         if self.dents > 0.2 {
             flaws.push(Flaw::Dented);
         }
-        let make = Make { smith: smith.into(), finish, edge: 0.0, balance: 0.0, flaws, dur: 0.0, dur_max: 0.0, carbon: 0.0 };
-        Outcome { quality: quality_of(score), make, score }
+        let make = Make {
+            smith: smith.into(),
+            finish,
+            edge: 0.0,
+            balance: 0.0,
+            flaws,
+            dur: 0.0,
+            dur_max: 0.0,
+            carbon: 0.0,
+        };
+        Outcome {
+            quality: quality_of(score),
+            make,
+            score,
+        }
     }
 }
 
@@ -1066,7 +1482,17 @@ impl Soak {
             SoakKind::Bloomery { .. } => 60.0,
             SoakKind::Carburize => 45.0,
         };
-        Self { kind, temp: AMBIENT, blast: 0.0, bellows: false, elapsed: 0.0, total, good: 0.0, over: 0.0, carbon: 0.05 }
+        Self {
+            kind,
+            temp: AMBIENT,
+            blast: 0.0,
+            bellows: false,
+            elapsed: 0.0,
+            total,
+            good: 0.0,
+            over: 0.0,
+            carbon: 0.05,
+        }
     }
 
     /// Нужный жар (°C): от и до.
@@ -1097,7 +1523,9 @@ impl Soak {
         let (lo, hi) = self.window();
         let target = match self.kind {
             // В шахте горна жар зависит от дутья и сколько угля на руду.
-            SoakKind::Bloomery { .. } => 820.0 + 620.0 * self.blast * (0.75 + 0.35 * self.ratio().min(1.5)),
+            SoakKind::Bloomery { .. } => {
+                820.0 + 620.0 * self.blast * (0.75 + 0.35 * self.ratio().min(1.5))
+            }
             SoakKind::Carburize => fire_temp(if fuel { 1.0 } else { 0.0 }, self.blast),
         };
         self.temp += (target - self.temp) * (1.0 - (-0.22 * dt).exp());
@@ -1108,13 +1536,16 @@ impl Soak {
             SoakKind::Bloomery { .. } => {
                 // Чем жарче и больше угля, тем больше углерода уходит в железо.
                 if self.temp > 1150.0 {
-                    self.carbon += dt * 0.006 * ((self.temp - 1150.0) / 100.0) * self.ratio().min(2.0);
+                    self.carbon +=
+                        dt * 0.006 * ((self.temp - 1150.0) / 100.0) * self.ratio().min(2.0);
                 }
                 if self.temp > 1350.0 {
                     let was = self.over;
                     self.over += dt * (self.temp - 1350.0) / 100.0 * 0.06;
                     if was < 0.1 && self.over >= 0.1 {
-                        ev.push(SmithEvent::Note("Из горна течёт чугун: слишком жарко".into()));
+                        ev.push(SmithEvent::Note(
+                            "Из горна течёт чугун: слишком жарко".into(),
+                        ));
                     }
                 }
             }
@@ -1146,14 +1577,20 @@ impl Soak {
 
 /// Что вышло из сыродутного горна: (сколько криц, их качество, углерод, сколько чугуна).
 pub fn bloomery_yield(s: &Soak) -> (u16, Quality, f32, u16) {
-    let SoakKind::Bloomery { ore, rich, .. } = s.kind else { return (0, Quality::Poor, 0.0, 0) };
+    let SoakKind::Bloomery { ore, rich, .. } = s.kind else {
+        return (0, Quality::Poor, 0.0, 0);
+    };
     let ratio = s.ratio();
     // Мало угля — руда не восстановилась; много — зря сожгли, но железо чище от шлака.
     let reduce = (ratio / 0.9).min(1.0) * s.steadiness().powf(0.7);
     let iron = ore as f32 * 0.33 * (rich as f32 / 100.0) * reduce * (1.0 - s.over.min(1.0) * 0.7);
     let blooms = (iron / 1.0).floor() as u16;
     let cast = (ore as f32 * 0.25 * s.over.min(1.0)).round() as u16;
-    let purity = (0.3 + 0.55 * s.steadiness() + 0.15 * (1.0 - ((ratio - 1.1).abs() / 0.8).min(1.0)) + crate::mining::richness_purity(rich)).clamp(0.0, 1.0);
+    let purity = (0.3
+        + 0.55 * s.steadiness()
+        + 0.15 * (1.0 - ((ratio - 1.1).abs() / 0.8).min(1.0))
+        + crate::mining::richness_purity(rich))
+    .clamp(0.0, 1.0);
     let q = match purity {
         p if p < 0.45 => Quality::Poor,
         p if p < 0.65 => Quality::Common,
@@ -1228,7 +1665,11 @@ pub fn repair_price(make: &Make, value: u32) -> u32 {
         return 0;
     }
     let worn = 1.0 - make.condition();
-    crate::economy::round_price((value as f32 * 0.25 * worn).max(if worn > 0.0 { 40.0 } else { 0.0 }))
+    crate::economy::round_price((value as f32 * 0.25 * worn).max(if worn > 0.0 {
+        40.0
+    } else {
+        0.0
+    }))
 }
 
 #[cfg(test)]
@@ -1342,13 +1783,22 @@ mod tests {
         let mut rng = Rng::new(1);
         let mut f = Forging::new(Pattern::Knife, 0.7, 0.7);
         f.temp = 800.0;
-        assert!(matches!(f.quench(Quench::Oil, 50.0, &mut rng), SmithEvent::Quenched { hard: true, .. }));
+        assert!(matches!(
+            f.quench(Quench::Oil, 50.0, &mut rng),
+            SmithEvent::Quenched { hard: true, .. }
+        ));
         let mut f = Forging::new(Pattern::Knife, 0.7, 0.7);
         f.temp = 650.0;
-        assert!(matches!(f.quench(Quench::Water, 50.0, &mut rng), SmithEvent::Quenched { hard: false, .. }));
+        assert!(matches!(
+            f.quench(Quench::Water, 50.0, &mut rng),
+            SmithEvent::Quenched { hard: false, .. }
+        ));
         let mut f = Forging::new(Pattern::Knife, 0.7, 0.05);
         f.temp = 820.0;
-        assert!(matches!(f.quench(Quench::Water, 50.0, &mut rng), SmithEvent::Quenched { hard: false, .. }));
+        assert!(matches!(
+            f.quench(Quench::Water, 50.0, &mut rng),
+            SmithEvent::Quenched { hard: false, .. }
+        ));
     }
 
     #[test]
@@ -1380,7 +1830,9 @@ mod tests {
                 }
             }
             for _ in 0..80 {
-                let zone = (0..f.shape.len()).min_by(|a, b| f.shape[*a].total_cmp(&f.shape[*b])).unwrap();
+                let zone = (0..f.shape.len())
+                    .min_by(|a, b| f.shape[*a].total_cmp(&f.shape[*b]))
+                    .unwrap();
                 if f.shape[zone] > 0.97 {
                     break;
                 }
@@ -1412,8 +1864,18 @@ mod tests {
             }
             f.outcome("тест", false)
         };
-        assert!(careful.quality >= Quality::Rare, "{:?} {}", careful.quality, careful.score);
-        assert!(sloppy.quality <= Quality::Common, "{:?} {}", sloppy.quality, sloppy.score);
+        assert!(
+            careful.quality >= Quality::Rare,
+            "{:?} {}",
+            careful.quality,
+            careful.score
+        );
+        assert!(
+            sloppy.quality <= Quality::Common,
+            "{:?} {}",
+            sloppy.quality,
+            sloppy.score
+        );
         assert!(careful.make.dur_max > sloppy.make.dur_max);
         assert!(sloppy.make.finish < careful.make.finish);
         assert!(!sloppy.make.flaws.is_empty());
@@ -1429,7 +1891,10 @@ mod tests {
         c.melt = 1.0;
         c.opened = true;
         c.chased = 1.0;
-        let bad = Casting { tin: 40.0, ..c.clone() };
+        let bad = Casting {
+            tin: 40.0,
+            ..c.clone()
+        };
         assert!(c.outcome("т").score > bad.outcome("т").score);
     }
 
@@ -1456,7 +1921,11 @@ mod tests {
     #[test]
     fn bloomery_needs_steady_heat_and_enough_charcoal() {
         let run = |ore, charcoal, blast_pattern: &dyn Fn(f32) -> bool| {
-            let mut s = Soak::new(SoakKind::Bloomery { ore, charcoal, rich: 100 });
+            let mut s = Soak::new(SoakKind::Bloomery {
+                ore,
+                charcoal,
+                rich: 100,
+            });
             while !s.done() {
                 s.bellows = blast_pattern(s.temp);
                 s.step(0.1, true);

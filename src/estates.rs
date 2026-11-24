@@ -69,13 +69,24 @@ pub fn local_profile() -> Profile {
     {
         return p;
     }
-    let key = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(7) ^ (std::process::id() as u64) << 32;
-    let base = std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_else(|_| "Путник".into());
+    let key = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(7)
+        ^ (std::process::id() as u64) << 32;
+    let base = std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "Путник".into());
     let name = match &suffix {
         Some(s) => format!("{base} ({s})"),
         None => base,
     };
-    let p = Profile { key: key.max(1), name: clean_name(&name), look: Default::default(), kit: Default::default() };
+    let p = Profile {
+        key: key.max(1),
+        name: clean_name(&name),
+        look: Default::default(),
+        kit: Default::default(),
+    };
     let _ = std::fs::create_dir_all(data_dir());
     let _ = std::fs::write(&file, format!("key={:016x}\nname={}\n", p.key, p.name));
     p
@@ -91,13 +102,27 @@ fn parse_profile(text: &str) -> Option<Profile> {
             name = Some(clean_name(v));
         }
     }
-    Some(Profile { key: key.filter(|k| *k != 0)?, name: name.unwrap_or_else(|| "Путник".into()), look: Default::default(), kit: Default::default() })
+    Some(Profile {
+        key: key.filter(|k| *k != 0)?,
+        name: name.unwrap_or_else(|| "Путник".into()),
+        look: Default::default(),
+        kit: Default::default(),
+    })
 }
 
 /// Имя без управляющих символов, не длиннее 32 символов.
 pub fn clean_name(s: &str) -> String {
-    let n: String = s.trim().chars().filter(|c| !c.is_control()).take(32).collect();
-    if n.is_empty() { "Путник".into() } else { n }
+    let n: String = s
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(32)
+        .collect();
+    if n.is_empty() {
+        "Путник".into()
+    } else {
+        n
+    }
 }
 
 /// Упаковать профиль в «пользовательские данные» билета подключения netcode (256 байт).
@@ -108,7 +133,10 @@ pub fn pack_profile(p: &Profile) -> [u8; 256] {
     let name = p.name.as_bytes();
     let n = name.len().min(200);
     // Не режем букву пополам.
-    let n = (0..=n).rev().find(|&k| p.name.is_char_boundary(k)).unwrap_or(0);
+    let n = (0..=n)
+        .rev()
+        .find(|&k| p.name.is_char_boundary(k))
+        .unwrap_or(0);
     out[12] = n as u8;
     out[13..13 + n].copy_from_slice(&name[..n]);
     // Облик — в хвосте блока (имя занимает не дальше 213-го байта).
@@ -131,7 +159,12 @@ pub fn unpack_profile(data: &[u8; 256]) -> Option<Profile> {
     let name = String::from_utf8_lossy(&data[13..13 + n]).to_string();
     let look = crate::appearance::Look::unpack(&data[LOOK_AT..LOOK_AT + 7]);
     let kit = crate::start_kit::StartKit::unpack(&data[KIT_AT..KIT_AT + 6]);
-    (key != 0).then(|| Profile { key, name: clean_name(&name), look, kit })
+    (key != 0).then(|| Profile {
+        key,
+        name: clean_name(&name),
+        look,
+        kit,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +175,11 @@ pub fn unpack_profile(data: &[u8; 256]) -> Option<Profile> {
 pub fn estate_price(spec: &EstateSpec, town: &TownState) -> u32 {
     let rooms = spec.rooms.len() as f32;
     let base_solidi = match spec.town {
-        TownId::Herson => 4.0 + 1.7 * rooms + if spec.two_storey { 5.0 } else { 0.0 } + if spec.site.is_some() { 2.0 } else { 0.0 },
+        TownId::Herson => {
+            4.0 + 1.7 * rooms
+                + if spec.two_storey { 5.0 } else { 0.0 }
+                + if spec.site.is_some() { 2.0 } else { 0.0 }
+        }
         _ => 1.5 + 0.6 * rooms,
     };
     let demand = (0.75 + 0.6 * (town.crowding() - 0.85)).clamp(0.7, 1.5);
@@ -156,7 +193,10 @@ pub fn estate_price(spec: &EstateSpec, town: &TownState) -> u32 {
 /// Плата за месяц (4 недели) аренды: около 1/90 цены, до фоллиса.
 pub fn rent_price(sale: u32) -> u32 {
     let n = sale as f32 / 90.0;
-    ((n / crate::economy::NUMMI_PER_FOLLIS as f32).round().max(1.0) * crate::economy::NUMMI_PER_FOLLIS as f32) as u32
+    ((n / crate::economy::NUMMI_PER_FOLLIS as f32)
+        .round()
+        .max(1.0)
+        * crate::economy::NUMMI_PER_FOLLIS as f32) as u32
 }
 
 /// Сколько курия даёт, если продать дом обратно.
@@ -175,7 +215,9 @@ pub enum Status {
     ForSale,
     Owned,
     /// Снят до недели `until`.
-    Rented { until: u32 },
+    Rented {
+        until: u32,
+    },
 }
 
 /// Коротко об усадьбе — рассылается всем (для подсказок у входа и замков).
@@ -231,16 +273,33 @@ pub struct EstateDetail {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum TownClientMessage {
     /// Открыть окно усадьбы.
-    Open { estate: u16 },
-    Buy { estate: u16 },
+    Open {
+        estate: u16,
+    },
+    Buy {
+        estate: u16,
+    },
     /// Снять на `months` месяцев (продлить, если уже снята вами).
-    Rent { estate: u16, months: u8 },
+    Rent {
+        estate: u16,
+        months: u8,
+    },
     /// Продать курии (или отказаться от аренды).
-    Sell { estate: u16 },
+    Sell {
+        estate: u16,
+    },
     /// Заказать обстановку комнаты (`None` — вынести всё и освободить комнату).
-    Furnish { estate: u16, room: u8, kind: Option<FurnishKind> },
+    Furnish {
+        estate: u16,
+        room: u8,
+        kind: Option<FurnishKind>,
+    },
     /// Пустить или не пускать игрока (номер подключения).
-    Guest { estate: u16, player: u64, allow: bool },
+    Guest {
+        estate: u16,
+        player: u64,
+        allow: bool,
+    },
     /// Окно «Вести».
     News,
 }
@@ -265,10 +324,22 @@ pub struct NewsView {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum TownServerMessage {
     /// При подключении: неделя, стадии строек, все усадьбы.
-    Init { week: u32, date: String, sites: Vec<u8>, estates: Vec<EstateBrief>, you: u64 },
+    Init {
+        week: u32,
+        date: String,
+        sites: Vec<u8>,
+        estates: Vec<EstateBrief>,
+        you: u64,
+    },
     /// Началась новая неделя.
-    Week { week: u32, date: String },
-    Site { site: u16, stage: u8 },
+    Week {
+        week: u32,
+        date: String,
+    },
+    Site {
+        site: u16,
+        stage: u8,
+    },
     Estate(EstateBrief),
     Detail(EstateDetail),
     News(NewsView),
@@ -284,13 +355,35 @@ mod tests {
 
     #[test]
     fn profile_round_trip() {
-        let p = Profile { key: 0x1234_5678_9abc_def0, name: "Гагик из Херсона".into(), look: crate::appearance::Look::PLAYER_DEFAULT, kit: crate::start_kit::StartKit { weapon: 4, shield: 2, chest: 1, ..Default::default() } };
+        let p = Profile {
+            key: 0x1234_5678_9abc_def0,
+            name: "Гагик из Херсона".into(),
+            look: crate::appearance::Look::PLAYER_DEFAULT,
+            kit: crate::start_kit::StartKit {
+                weapon: 4,
+                shield: 2,
+                chest: 1,
+                ..Default::default()
+            },
+        };
         assert_eq!(unpack_profile(&pack_profile(&p)), Some(p.clone()));
         // В profile.txt облика нет (он в settings.txt).
-        assert_eq!(parse_profile(&format!("key={:016x}\nname={}\n", p.key, p.name)), Some(Profile { look: Default::default(), kit: Default::default(), ..p }));
+        assert_eq!(
+            parse_profile(&format!("key={:016x}\nname={}\n", p.key, p.name)),
+            Some(Profile {
+                look: Default::default(),
+                kit: Default::default(),
+                ..p
+            })
+        );
         assert!(unpack_profile(&[0u8; 256]).is_none());
         // Очень длинное имя режется по границе буквы.
-        let long = Profile { key: 5, name: "Ж".repeat(40), look: Default::default(), kit: Default::default() };
+        let long = Profile {
+            key: 5,
+            name: "Ж".repeat(40),
+            look: Default::default(),
+            kit: Default::default(),
+        };
         let back = unpack_profile(&pack_profile(&long)).unwrap();
         assert!(back.name.chars().all(|c| c == 'Ж'));
     }
@@ -306,7 +399,11 @@ mod tests {
             let rent = rent_price(p);
             assert!(rent >= 400 && rent < p / 50, "аренда {rent} при цене {p}");
         }
-        let hut = cat.estates.iter().find(|e| e.town == TownId::GothVillage).expect("мазанка у готов");
+        let hut = cat
+            .estates
+            .iter()
+            .find(|e| e.town == TownId::GothVillage)
+            .expect("мазанка у готов");
         let p = estate_price(hut, &TownState::new(TownId::GothVillage));
         assert!(p <= 5 * crate::economy::NUMMI_PER_SOLIDUS, "мазанка {p}");
     }

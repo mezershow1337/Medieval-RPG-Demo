@@ -12,7 +12,12 @@ pub struct AmbiencePlugin;
 
 impl Plugin for AmbiencePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Scene>().add_systems(Update, (sense_scene, layers, fires, critters).chain().before(super::AudioSet));
+        app.init_resource::<Scene>().add_systems(
+            Update,
+            (sense_scene, layers, fires, critters)
+                .chain()
+                .before(super::AudioSet),
+        );
     }
 }
 
@@ -51,7 +56,12 @@ pub struct Scene {
     pub(super) target: [f32; 6],
 }
 
-fn sense_scene(time: Res<Time>, ears: Res<Ears>, surfaces: Res<Surfaces>, mut scene: ResMut<Scene>) {
+fn sense_scene(
+    time: Res<Time>,
+    ears: Res<Ears>,
+    surfaces: Res<Surfaces>,
+    mut scene: ResMut<Scene>,
+) {
     if !ears.valid {
         return;
     }
@@ -74,19 +84,37 @@ fn sense_scene(time: Res<Time>, ears: Res<Ears>, surfaces: Res<Surfaces>, mut sc
                     }
                 }
             }
-            t[0] = if sea_d < f32::MAX { (1.0 - sea_d / 160.0).clamp(0.0, 1.0).powf(1.3) } else { 0.0 };
-            t[1] = if map.roofed(p + Vec3::Y * 0.2) { 1.0 } else { 0.0 };
+            t[0] = if sea_d < f32::MAX {
+                (1.0 - sea_d / 160.0).clamp(0.0, 1.0).powf(1.3)
+            } else {
+                0.0
+            };
+            t[1] = if map.roofed(p + Vec3::Y * 0.2) {
+                1.0
+            } else {
+                0.0
+            };
             let ground = map.ground_y(p.x, p.z).unwrap_or(p.y - 1.65);
             t[5] = ((p.y - 1.65 - ground - 4.0) / 8.0).clamp(0.0, 1.0);
         }
-        t[2] = if crate::level::inside_city(p.x, p.z) { 1.0 } else { 0.0 };
+        t[2] = if crate::level::inside_city(p.x, p.z) {
+            1.0
+        } else {
+            0.0
+        };
         let mut place = None;
         let mut best = f32::MAX;
         for pl in places::places() {
             let d = pl.pos.distance(p);
             match pl.kind {
-                PlaceKind::Agora | PlaceKind::PortMarket => t[3] = t[3].max((1.0 - (d - pl.radius).max(0.0) / 35.0).clamp(0.0, 1.0)),
-                PlaceKind::Basilica | PlaceKind::Church | PlaceKind::Baptistery if d < pl.radius + 4.0 => t[4] = 1.0,
+                PlaceKind::Agora | PlaceKind::PortMarket => {
+                    t[3] = t[3].max((1.0 - (d - pl.radius).max(0.0) / 35.0).clamp(0.0, 1.0))
+                }
+                PlaceKind::Basilica | PlaceKind::Church | PlaceKind::Baptistery
+                    if d < pl.radius + 4.0 =>
+                {
+                    t[4] = 1.0
+                }
                 _ => {}
             }
             if d < pl.radius && d < best {
@@ -125,16 +153,30 @@ fn layer_targets(s: &Scene) -> [(&'static str, f32); 9] {
         ("sea", 0.9 * s.sea * out),
         ("wind", (0.25 + 0.35 * outside + 0.2 * s.height) * out),
         ("wind_strong", 0.6 * s.height * out),
-        ("city", 0.55 * s.city * (1.0 - s.market) * (day + 0.2 * night) * out),
+        (
+            "city",
+            0.55 * s.city * (1.0 - s.market) * (day + 0.2 * night) * out,
+        ),
         ("market", 0.75 * s.market * day * out),
-        ("night", (night * 0.8 + evening * (0.25 + 0.25 * outside)) * out),
+        (
+            "night",
+            (night * 0.8 + evening * (0.25 + 0.25 * outside)) * out,
+        ),
         ("steppe", 0.55 * outside * day * out),
         ("room", 0.35 * s.indoor * (1.0 - s.sacred)),
         ("basilica", 0.7 * s.sacred),
     ]
 }
 
-fn layers(mut commands: Commands, bank: Option<Res<Bank>>, ears: Res<Ears>, scene: Res<Scene>, time: Res<Time>, mut live: Local<Layers>, mut q: Query<&mut Emitter>) {
+fn layers(
+    mut commands: Commands,
+    bank: Option<Res<Bank>>,
+    ears: Res<Ears>,
+    scene: Res<Scene>,
+    time: Res<Time>,
+    mut live: Local<Layers>,
+    mut q: Query<&mut Emitter>,
+) {
     let Some(bank) = bank else { return };
     if !ears.valid {
         return;
@@ -144,8 +186,18 @@ fn layers(mut commands: Commands, bank: Option<Res<Bank>>, ears: Res<Ears>, scen
         let e = match live.0.get(name) {
             Some(e) => *e,
             None => {
-                let Some(h) = bank.ambient.get(name) else { continue };
-                let em = Emitter { at: None, follow: None, gain: 1.0, near: 1.0, range: 1.0, channel: Channel::Ambient, fade: 0.0 };
+                let Some(h) = bank.ambient.get(name) else {
+                    continue;
+                };
+                let em = Emitter {
+                    at: None,
+                    follow: None,
+                    gain: 1.0,
+                    near: 1.0,
+                    range: 1.0,
+                    channel: Channel::Ambient,
+                    fade: 0.0,
+                };
                 let e = spawn_loop(&mut commands, h.clone(), em, &ears);
                 live.0.insert(name, e);
                 continue;
@@ -158,18 +210,38 @@ fn layers(mut commands: Commands, bank: Option<Res<Bank>>, ears: Res<Ears>, scen
 }
 
 /// Треск огня в ближайших очагах и горнах.
-fn fires(mut commands: Commands, bank: Option<Res<Bank>>, ears: Res<Ears>, surfaces: Res<Surfaces>, mut live: Local<HashMap<usize, Entity>>, mut next: Local<f32>, time: Res<Time>) {
-    let (Some(bank), Some(map)) = (bank, surfaces.get()) else { return };
+fn fires(
+    mut commands: Commands,
+    bank: Option<Res<Bank>>,
+    ears: Res<Ears>,
+    surfaces: Res<Surfaces>,
+    mut live: Local<HashMap<usize, Entity>>,
+    mut next: Local<f32>,
+    time: Res<Time>,
+) {
+    let (Some(bank), Some(map)) = (bank, surfaces.get()) else {
+        return;
+    };
     if !ears.valid || time.elapsed_secs() < *next {
         return;
     }
     *next = time.elapsed_secs() + 0.5;
-    let Some(h) = bank.ambient.get("fire") else { return };
+    let Some(h) = bank.ambient.get("fire") else {
+        return;
+    };
     for (i, f) in map.fires.iter().enumerate() {
         let d = f.distance(ears.pos);
         match live.get(&i) {
             None if d < 16.0 => {
-                let em = Emitter { at: Some(*f + Vec3::Y * 0.3), follow: None, gain: 0.55, near: 1.2, range: 16.0, channel: Channel::Ambient, fade: 1.0 };
+                let em = Emitter {
+                    at: Some(*f + Vec3::Y * 0.3),
+                    follow: None,
+                    gain: 0.55,
+                    near: 1.2,
+                    range: 16.0,
+                    channel: Channel::Ambient,
+                    fade: 1.0,
+                };
                 live.insert(i, spawn_loop(&mut commands, h.clone(), em, &ears));
             }
             Some(e) if d > 19.0 => {
@@ -189,7 +261,15 @@ struct CritterClock {
 /// Редкие голоса округи: чайки над морем, собаки и стук ремёсел в городе, скот у ферм,
 /// семантрон у храма.
 #[allow(clippy::too_many_arguments)]
-fn critters(time: Res<Time>, ears: Res<Ears>, scene: Res<Scene>, surfaces: Res<Surfaces>, mut rng: ResMut<SfxRng>, mut clock: Local<CritterClock>, mut out: MessageWriter<Sfx>) {
+fn critters(
+    time: Res<Time>,
+    ears: Res<Ears>,
+    scene: Res<Scene>,
+    surfaces: Res<Surfaces>,
+    mut rng: ResMut<SfxRng>,
+    mut clock: Local<CritterClock>,
+    mut out: MessageWriter<Sfx>,
+) {
     if !ears.valid {
         return;
     }
@@ -199,7 +279,10 @@ fn critters(time: Res<Time>, ears: Res<Ears>, scene: Res<Scene>, surfaces: Res<S
     let tod = scene.time.unwrap_or(TimeOfDay::Day);
     let awake = tod != TimeOfDay::Night;
     let mut due = |name: &'static str, lo: f32, hi: f32, rng: &mut SfxRng| -> bool {
-        let t = clock.next.entry(name).or_insert(now + rng.range(lo * 0.3, hi * 0.6));
+        let t = clock
+            .next
+            .entry(name)
+            .or_insert(now + rng.range(lo * 0.3, hi * 0.6));
         if now >= *t {
             *t = now + rng.range(lo, hi);
             true
@@ -225,40 +308,99 @@ fn critters(time: Res<Time>, ears: Res<Ears>, scene: Res<Scene>, surfaces: Res<S
             }
         }
         at.y = p.y + rng.range(10.0, 25.0);
-        out.write(Sfx::at("gull", at).gain(0.55 * out_k * scene.sea.sqrt()).range(10.0, 140.0).spread(0.08).channel(Channel::Ambient));
+        out.write(
+            Sfx::at("gull", at)
+                .gain(0.55 * out_k * scene.sea.sqrt())
+                .range(10.0, 140.0)
+                .spread(0.08)
+                .channel(Channel::Ambient),
+        );
     }
     if scene.city > 0.5 {
         if due("dog_bark", 18.0, 45.0, &mut rng) {
             let at = around(&mut rng, 25.0, 70.0);
-            out.write(Sfx::at("dog_bark", at).gain(0.4 * out_k).range(8.0, 110.0).spread(0.1).channel(Channel::Ambient));
+            out.write(
+                Sfx::at("dog_bark", at)
+                    .gain(0.4 * out_k)
+                    .range(8.0, 110.0)
+                    .spread(0.1)
+                    .channel(Channel::Ambient),
+            );
         }
         if awake && due("far_hammer", 20.0, 50.0, &mut rng) {
             let at = around(&mut rng, 30.0, 80.0);
-            out.write(Sfx::at("far_hammer", at).gain(0.35 * out_k).range(8.0, 110.0).channel(Channel::Ambient));
+            out.write(
+                Sfx::at("far_hammer", at)
+                    .gain(0.35 * out_k)
+                    .range(8.0, 110.0)
+                    .channel(Channel::Ambient),
+            );
         }
         if awake && due("cart", 40.0, 90.0, &mut rng) {
             let at = around(&mut rng, 20.0, 50.0);
-            out.write(Sfx::at("cart", at).gain(0.4 * out_k).range(6.0, 70.0).channel(Channel::Ambient));
+            out.write(
+                Sfx::at("cart", at)
+                    .gain(0.4 * out_k)
+                    .range(6.0, 70.0)
+                    .channel(Channel::Ambient),
+            );
         }
         if tod == TimeOfDay::Day && due("rooster", 60.0, 150.0, &mut rng) {
             let at = around(&mut rng, 40.0, 90.0);
-            out.write(Sfx::at("rooster", at).gain(0.35 * out_k).range(10.0, 130.0).channel(Channel::Ambient));
+            out.write(
+                Sfx::at("rooster", at)
+                    .gain(0.35 * out_k)
+                    .range(10.0, 130.0)
+                    .channel(Channel::Ambient),
+            );
         }
     }
     // Скот у ферм, сёл и кочевых станов.
-    for (name, spot) in [("sheep", places::KLEROS_FARM), ("sheep", places::GOTH_VILLAGE), ("sheep", places::STEPPE_CAMP), ("donkey", places::KLEROS_FARM), ("donkey", places::ALAN_CAMP)] {
+    for (name, spot) in [
+        ("sheep", places::KLEROS_FARM),
+        ("sheep", places::GOTH_VILLAGE),
+        ("sheep", places::STEPPE_CAMP),
+        ("donkey", places::KLEROS_FARM),
+        ("donkey", places::ALAN_CAMP),
+    ] {
         let flat = Vec2::new(spot.x - p.x, spot.z - p.z).length();
-        if flat < 140.0 && awake && due(if name == "sheep" { "sheep" } else { "donkey" }, 10.0, 28.0, &mut rng) {
-            let at = Vec3::new(spot.x + rng.range(-20.0, 20.0), p.y, spot.z + rng.range(-20.0, 20.0));
-            out.write(Sfx::at(name, at).gain(0.45 * out_k).range(8.0, 150.0).spread(0.1).channel(Channel::Ambient));
+        if flat < 140.0
+            && awake
+            && due(
+                if name == "sheep" { "sheep" } else { "donkey" },
+                10.0,
+                28.0,
+                &mut rng,
+            )
+        {
+            let at = Vec3::new(
+                spot.x + rng.range(-20.0, 20.0),
+                p.y,
+                spot.z + rng.range(-20.0, 20.0),
+            );
+            out.write(
+                Sfx::at(name, at)
+                    .gain(0.45 * out_k)
+                    .range(8.0, 150.0)
+                    .spread(0.1)
+                    .channel(Channel::Ambient),
+            );
         }
     }
     // Семантрон: монах сзывает на службу ударами по доске.
-    if let Some(b) = places::places().iter().find(|pl| pl.kind == PlaceKind::Basilica)
+    if let Some(b) = places::places()
+        .iter()
+        .find(|pl| pl.kind == PlaceKind::Basilica)
         && b.pos.distance(p) < 160.0
         && due("semantron", 140.0, 280.0, &mut rng)
     {
-        out.write(Sfx::at("semantron", b.pos + Vec3::Y * 4.0).gain(0.8).range(15.0, 200.0).spread(0.02).channel(Channel::Ambient));
+        out.write(
+            Sfx::at("semantron", b.pos + Vec3::Y * 4.0)
+                .gain(0.8)
+                .range(15.0, 200.0)
+                .spread(0.02)
+                .channel(Channel::Ambient),
+        );
     }
 }
 
@@ -268,15 +410,25 @@ mod tests {
 
     #[test]
     fn layers_follow_scene() {
-        let sea = Scene { sea: 1.0, ..default() };
+        let sea = Scene {
+            sea: 1.0,
+            ..default()
+        };
         let t = layer_targets(&sea);
         assert!(t.iter().find(|(n, _)| *n == "sea").unwrap().1 > 0.8);
-        let inside = Scene { sea: 1.0, indoor: 1.0, ..default() };
+        let inside = Scene {
+            sea: 1.0,
+            indoor: 1.0,
+            ..default()
+        };
         let t2 = layer_targets(&inside);
         assert!(t2.iter().find(|(n, _)| *n == "sea").unwrap().1 < 0.3);
         assert!(t2.iter().find(|(n, _)| *n == "room").unwrap().1 > 0.2);
         for (name, _) in t {
-            assert!(super::super::bank_gen::AMBIENT.contains(&name), "нет петли {name}");
+            assert!(
+                super::super::bank_gen::AMBIENT.contains(&name),
+                "нет петли {name}"
+            );
         }
     }
 }

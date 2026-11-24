@@ -52,10 +52,24 @@ pub fn tick_props(
         if !a.alive {
             continue;
         }
-        let body = if a.pose.crouching { Body::CROUCHING } else { Body::STANDING };
-        let last = clock.last_feet.insert(*id, a.pose.feet).unwrap_or(a.pose.feet);
-        let vel = if dt > 0.0 { ((a.pose.feet - last) / dt).clamp_length_max(8.0) } else { Vec3::ZERO };
-        movers.push(Mover { aabb: body.aabb_at(a.pose.feet), vel });
+        let body = if a.pose.crouching {
+            Body::CROUCHING
+        } else {
+            Body::STANDING
+        };
+        let last = clock
+            .last_feet
+            .insert(*id, a.pose.feet)
+            .unwrap_or(a.pose.feet);
+        let vel = if dt > 0.0 {
+            ((a.pose.feet - last) / dt).clamp_length_max(8.0)
+        } else {
+            Vec3::ZERO
+        };
+        movers.push(Mover {
+            aabb: body.aabb_at(a.pose.feet),
+            vel,
+        });
     }
     clock.last_feet.retain(|id, _| game.actors.contains_key(id));
 
@@ -90,7 +104,14 @@ fn wake_cell(p: Vec3) -> (i32, i32) {
     ((p.x / 2.0).floor() as i32, (p.z / 2.0).floor() as i32)
 }
 
-fn step_world(server: &mut RenetServer, game: &GameWorld, level: &crate::collision::LevelColliders, statics: &[Obb], movers: &[Mover], world: &mut LootWorld) {
+fn step_world(
+    server: &mut RenetServer,
+    game: &GameWorld,
+    level: &crate::collision::LevelColliders,
+    statics: &[Obb],
+    movers: &[Mover],
+    world: &mut LootWorld,
+) {
     // Руки: куда тянуть каждый предмет.
     let mut holds: HashMap<LootId, Hold> = HashMap::new();
     let mut drop: Vec<(u64, &'static str)> = Vec::new();
@@ -110,7 +131,14 @@ fn step_world(server: &mut RenetServer, game: &GameWorld, level: &crate::collisi
         }
         let strength = world.equipped_stats(pid).get(Stat::Strength);
         let target_rot = Quat::from_rotation_y(actor.pose.yaw - h.yaw0) * h.rot0;
-        holds.insert(h.id, Hold { target, target_rot, max_force: hand_force(strength) });
+        holds.insert(
+            h.id,
+            Hold {
+                target,
+                target_rot,
+                max_force: hand_force(strength),
+            },
+        );
         // Застрял (зажат между ящиками, слишком тяжёл): через секунду руки разжимаются.
         let far = g.body.pos.distance(target) > 1.3;
         let hs = world.holds.get_mut(&pid).unwrap();
@@ -146,15 +174,26 @@ fn step_world(server: &mut RenetServer, game: &GameWorld, level: &crate::collisi
             if !g.body.asleep {
                 continue;
             }
-            let Some(near) = cells.get(&wake_cell(g.body.pos)) else { continue };
+            let Some(near) = cells.get(&wake_cell(g.body.pos)) else {
+                continue;
+            };
             let a = g.body.obb().aabb();
-            if near.iter().any(|k| movers[*k].aabb.overlaps(&crate::collision::Aabb::new(a.min - Vec3::splat(0.03), a.max + Vec3::splat(0.03)))) {
+            if near.iter().any(|k| {
+                movers[*k].aabb.overlaps(&crate::collision::Aabb::new(
+                    a.min - Vec3::splat(0.03),
+                    a.max + Vec3::splat(0.03),
+                ))
+            }) {
                 g.body.wake();
             }
         }
     }
 
-    let env = Env { level, statics, movers };
+    let env = Env {
+        level,
+        statics,
+        movers,
+    };
     let mut ids = Vec::with_capacity(world.ground.len());
     let mut list = Vec::with_capacity(world.ground.len());
     for (id, g) in world.ground.iter_mut() {
@@ -166,15 +205,30 @@ fn step_world(server: &mut RenetServer, game: &GameWorld, level: &crate::collisi
     for i in slept {
         let id = ids[i];
         let g = &world.ground[&id];
-        server.broadcast_message(CH_LOOT, encode(&LootServerMessage::PropRest { id, pos: g.body.pos.into(), rot: g.body.rot.to_array() }));
+        server.broadcast_message(
+            CH_LOOT,
+            encode(&LootServerMessage::PropRest {
+                id,
+                pos: g.body.pos.into(),
+                rot: g.body.rot.to_array(),
+            }),
+        );
     }
 
     // Упавшее сквозь мир (не должно быть, но мало ли): кладём обратно на землю.
     for (id, g) in world.ground.iter_mut() {
         if g.body.pos.y < -40.0 || !g.body.pos.is_finite() {
-            let p = if g.body.pos.is_finite() { g.body.pos } else { crate::level::spawn_point(0) };
+            let p = if g.body.pos.is_finite() {
+                g.body.pos
+            } else {
+                crate::level::spawn_point(0)
+            };
             let ground = level.ground_height(p.x, p.z);
-            let y = if ground.is_finite() { ground } else { crate::level::spawn_point(0).y };
+            let y = if ground.is_finite() {
+                ground
+            } else {
+                crate::level::spawn_point(0).y
+            };
             g.body.pos = Vec3::new(p.x, y + 1.0, p.z);
             g.body.vel = Vec3::ZERO;
             g.body.wake();

@@ -2,10 +2,13 @@
 
 use crate::combat::{self, Action, Fighter, WeaponKind};
 use crate::fight::{self, CombatFeedback, LocalFighter};
+use crate::gear_look::{Gear, ShieldLook};
 use crate::player::{LocalPlayer, PlayerPlugin, spawn_local_player};
 use crate::protocol::*;
-use crate::gear_look::{Gear, ShieldLook};
-use crate::rig::{self, Blade, CharacterModels, NeedsRig, NeedsShield, NeedsWeapon, Outfit, PoseInput, RigPose, ShieldKind};
+use crate::rig::{
+    self, Blade, CharacterModels, NeedsRig, NeedsShield, NeedsWeapon, Outfit, PoseInput, RigPose,
+    ShieldKind,
+};
 use crate::{graphics, hud, level, worn};
 use bevy::prelude::*;
 use bevy_renet::netcode::{NetcodeClientPlugin, NetcodeErrorEvent};
@@ -72,7 +75,9 @@ struct ShownWeapon(WeaponKind, Option<u16>);
 
 /// Какой предмет у бойца в руке (у игроков; у врагов — общая модель по виду оружия).
 fn held_item(r: &RemoteActor) -> Option<u16> {
-    r.gear.main_hand.filter(|_| !r.gear.holstered && r.fighter.weapon != WeaponKind::Fists)
+    r.gear
+        .main_hand
+        .filter(|_| !r.gear.holstered && r.fighter.weapon != WeaponKind::Fists)
 }
 
 /// Летящая стрела: двигаем её сами между снимками.
@@ -105,7 +110,10 @@ pub struct PlayerNames(pub HashMap<u64, String>);
 impl PlayerNames {
     /// Ник игрока или запасное «Игрок 123», пока имя не пришло.
     pub fn of(&self, id: u64) -> String {
-        self.0.get(&id).cloned().unwrap_or_else(|| format!("Игрок {}", id % 1000))
+        self.0
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| format!("Игрок {}", id % 1000))
     }
 }
 
@@ -136,11 +144,22 @@ pub struct CharacterAssets {
 pub struct RiposteGlow;
 
 pub fn riposte_glow_bundle(assets: &CharacterAssets) -> impl Bundle {
-    (RiposteGlow, Mesh3d(assets.glow_mesh.clone()), MeshMaterial3d(assets.glow.clone()), Transform::default(), Visibility::Hidden, bevy::light::NotShadowCaster)
+    (
+        RiposteGlow,
+        Mesh3d(assets.glow_mesh.clone()),
+        MeshMaterial3d(assets.glow.clone()),
+        Transform::default(),
+        Visibility::Hidden,
+        bevy::light::NotShadowCaster,
+    )
 }
 
 /// Каждому новому бойцу — своё свечение рипоста.
-fn attach_riposte_glow(mut commands: Commands, assets: Res<CharacterAssets>, added: Query<Entity, Added<RemoteActor>>) {
+fn attach_riposte_glow(
+    mut commands: Commands,
+    assets: Res<CharacterAssets>,
+    added: Query<Entity, Added<RemoteActor>>,
+) {
     for e in &added {
         commands.entity(e).with_children(|p| {
             p.spawn(riposte_glow_bundle(&assets));
@@ -156,24 +175,42 @@ pub fn riposte_glow_transform(sword: &Transform, weapon: WeaponKind) -> Option<T
     }
     let (from, to) = (0.08, weapon.stats().reach);
     let len = (to - from).max(0.1);
-    Some(Transform { translation: sword.transform_point(Vec3::Y * (from + len * 0.5)), rotation: sword.rotation, scale: Vec3::new(1.0, len, 1.0) })
+    Some(Transform {
+        translation: sword.transform_point(Vec3::Y * (from + len * 0.5)),
+        rotation: sword.rotation,
+        scale: Vec3::new(1.0, len, 1.0),
+    })
 }
 
 impl CharacterAssets {
     /// Обычный материал клинка (пока модели не загружены — простая сталь).
     #[allow(dead_code)]
     pub fn blade(&self, models: Option<&CharacterModels>) -> Handle<StandardMaterial> {
-        models.map(|m| m.blade.clone()).unwrap_or_else(|| self.steel.clone())
+        models
+            .map(|m| m.blade.clone())
+            .unwrap_or_else(|| self.steel.clone())
     }
 }
 
 pub fn run(start: crate::menu::Start) {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window { title: "Херсонес, 510 — Medieval RPG".into(), present_mode: bevy::window::PresentMode::AutoVsync, ..default() }),
+            primary_window: Some(Window {
+                title: "Херсонес, 510 — Medieval RPG".into(),
+                present_mode: bevy::window::PresentMode::AutoVsync,
+                ..default()
+            }),
             ..default()
         }))
-        .add_plugins((RenetClientPlugin, NetcodeClientPlugin, PlayerPlugin, fight::FightPlugin, hud::HudPlugin, graphics::GraphicsPlugin, crate::textures::TexturesPlugin))
+        .add_plugins((
+            RenetClientPlugin,
+            NetcodeClientPlugin,
+            PlayerPlugin,
+            fight::FightPlugin,
+            hud::HudPlugin,
+            graphics::GraphicsPlugin,
+            crate::textures::TexturesPlugin,
+        ))
         .add_plugins(rig::RigPlugin)
         .add_plugins(crate::vegetation::VegetationPlugin)
         .add_plugins(crate::loot_client::LootClientPlugin)
@@ -187,17 +224,35 @@ pub fn run(start: crate::menu::Start) {
         .add_plugins(crate::daylight::DaylightPlugin)
         .add_plugins(crate::civil_client::CivilClientPlugin)
         .add_plugins(crate::trade_client::TradeClientPlugin)
-        .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))
+        .add_plugins((
+            crate::lore_client::LoreClientPlugin,
+            crate::lore_client::DevShotPlugin,
+            crate::medicine_client::MedicineClientPlugin,
+            crate::brewing_client::BrewingClientPlugin,
+            crate::alchemy_fx::AlchemyFxPlugin,
+        ))
         .add_plugins(crate::smithing_client::SmithingClientPlugin)
         .add_plugins(crate::mining_client::MiningClientPlugin)
         .add_plugins(crate::audio::GameAudioPlugin)
         .add_plugins(crate::towns_client::TownClientPlugin)
         .add_plugins(crate::ui_theme::UiThemePlugin)
-        .add_plugins((crate::skill_book::SkillBookPlugin, crate::hints::HintsPlugin, crate::school_client::SchoolClientPlugin, crate::tablet_view::TabletViewPlugin))
+        .add_plugins((
+            crate::skill_book::SkillBookPlugin,
+            crate::hints::HintsPlugin,
+            crate::school_client::SchoolClientPlugin,
+            crate::tablet_view::TabletViewPlugin,
+        ))
         .add_plugins(crate::work_client::WorkClientPlugin)
         .add_plugins(crate::console::ConsolePlugin)
-        .add_systems(Update, (hide_ui_for_shots, mute_player_camera_for_shots).run_if(|| std::env::var("MRPG_CAM").is_ok()))
-        .add_systems(Update, shot_tour.run_if(|| std::env::var("MRPG_TOUR").is_ok()))
+        .add_systems(
+            Update,
+            (hide_ui_for_shots, mute_player_camera_for_shots)
+                .run_if(|| std::env::var("MRPG_CAM").is_ok()),
+        )
+        .add_systems(
+            Update,
+            shot_tour.run_if(|| std::env::var("MRPG_TOUR").is_ok()),
+        )
         // Клиент без соединения: транспорт появится, когда игрок выберет в меню «Создать» или «Подключиться».
         .insert_resource(RenetClient::new(connection_config()))
         .insert_resource(NetState::default())
@@ -208,26 +263,82 @@ pub fn run(start: crate::menu::Start) {
         .insert_resource(PlayerNames::default())
         .insert_resource(CorpseIndex::default())
         .insert_resource(ArrowIndex::default())
-        .insert_resource(SendTimer(Timer::from_seconds(1.0 / 30.0, TimerMode::Repeating)))
+        .insert_resource(SendTimer(Timer::from_seconds(
+            1.0 / 30.0,
+            TimerMode::Repeating,
+        )))
         .insert_resource(ClearColor(Color::srgb(0.55, 0.5, 0.48)))
-        .insert_resource(GlobalAmbientLight { color: Color::srgb(0.7, 0.72, 0.85), brightness: 250.0, ..default() })
+        .insert_resource(GlobalAmbientLight {
+            color: Color::srgb(0.7, 0.72, 0.85),
+            brightness: 250.0,
+            ..default()
+        })
         .add_observer(on_netcode_error)
-        .add_systems(Startup, (level::spawn_level, setup_character_assets, spawn_waiting_camera))
+        .add_systems(
+            Startup,
+            (
+                level::spawn_level,
+                setup_character_assets,
+                spawn_waiting_camera,
+            ),
+        )
         .add_systems(
             Update,
-            ((receive_reliable, receive_snapshots).chain(), send_state, animate_remote).run_if(client_connected).before(fight::FightSet).in_set(rig::PoseSet),
+            (
+                (receive_reliable, receive_snapshots).chain(),
+                send_state,
+                animate_remote,
+            )
+                .run_if(client_connected)
+                .before(fight::FightSet)
+                .in_set(rig::PoseSet),
         )
         .add_systems(Update, animate_corpses.in_set(rig::PoseSet))
-        .add_systems(Update, (fly_arrows, refresh_remote_weapons, refresh_remote_gear, worn::attach_worn, attach_riposte_glow))
-        .add_systems(Update, gear_showcase.run_if(|| std::env::var("MRPG_GEAR_SHOWCASE").is_ok()))
-        .add_systems(Update, pose_showcase.in_set(rig::PoseSet).run_if(|| std::env::var("MRPG_GEAR_SHOWCASE").is_ok()))
-        .add_systems(Update, (people_showcase, pose_people).chain().in_set(rig::PoseSet).run_if(|| std::env::var("MRPG_PEOPLE_SHOWCASE").is_ok()))
-        .add_systems(Update, duel_showcase.run_if(|| std::env::var("MRPG_DUEL_SHOWCASE").is_ok()))
         .add_systems(
             Update,
-            (freeze_showcase, animate_remote).chain().in_set(rig::PoseSet).run_if(|| std::env::var("MRPG_DUEL_SHOWCASE").is_ok()).run_if(not(client_connected)),
+            (
+                fly_arrows,
+                refresh_remote_weapons,
+                refresh_remote_gear,
+                worn::attach_worn,
+                attach_riposte_glow,
+            ),
         )
-        .add_systems(Update, hide_ui_for_shots.run_if(|| std::env::var("MRPG_DUEL_SHOWCASE").is_ok() && std::env::var("MRPG_CAM").is_err()))
+        .add_systems(
+            Update,
+            gear_showcase.run_if(|| std::env::var("MRPG_GEAR_SHOWCASE").is_ok()),
+        )
+        .add_systems(
+            Update,
+            pose_showcase
+                .in_set(rig::PoseSet)
+                .run_if(|| std::env::var("MRPG_GEAR_SHOWCASE").is_ok()),
+        )
+        .add_systems(
+            Update,
+            (people_showcase, pose_people)
+                .chain()
+                .in_set(rig::PoseSet)
+                .run_if(|| std::env::var("MRPG_PEOPLE_SHOWCASE").is_ok()),
+        )
+        .add_systems(
+            Update,
+            duel_showcase.run_if(|| std::env::var("MRPG_DUEL_SHOWCASE").is_ok()),
+        )
+        .add_systems(
+            Update,
+            (freeze_showcase, animate_remote)
+                .chain()
+                .in_set(rig::PoseSet)
+                .run_if(|| std::env::var("MRPG_DUEL_SHOWCASE").is_ok())
+                .run_if(not(client_connected)),
+        )
+        .add_systems(
+            Update,
+            hide_ui_for_shots.run_if(|| {
+                std::env::var("MRPG_DUEL_SHOWCASE").is_ok() && std::env::var("MRPG_CAM").is_err()
+            }),
+        )
         .run();
 }
 
@@ -241,10 +352,17 @@ fn on_netcode_error(event: On<NetcodeErrorEvent>, mut state: ResMut<NetState>) {
 pub struct WaitingCamera;
 
 /// Снимки уровня (MRPG_CAM): прячем интерфейс.
-fn hide_ui_for_shots(mut roots: Query<(&mut Visibility, Has<crate::civil_client::ShotKeep>), (With<Node>, Without<ChildOf>)>) {
+fn hide_ui_for_shots(
+    mut roots: Query<
+        (&mut Visibility, Has<crate::civil_client::ShotKeep>),
+        (With<Node>, Without<ChildOf>),
+    >,
+) {
     // Снимок окна стражи (`MRPG_LAW_DEMO`): его окна оставляем.
     // И окна школы/табличка (`MRPG_SHOT_UI=school…`, `MRPG_WORK_DEMO`).
-    let law = std::env::var_os("MRPG_LAW_DEMO").is_some() || std::env::var_os("MRPG_WORK_DEMO").is_some() || std::env::var("MRPG_SHOT_UI").is_ok_and(|s| s.starts_with("school"));
+    let law = std::env::var_os("MRPG_LAW_DEMO").is_some()
+        || std::env::var_os("MRPG_WORK_DEMO").is_some()
+        || std::env::var("MRPG_SHOT_UI").is_ok_and(|s| s.starts_with("school"));
     for (mut v, keep) in &mut roots {
         if !(law && keep) {
             *v = Visibility::Hidden;
@@ -265,7 +383,12 @@ fn mute_player_camera_for_shots(mut cams: Query<&mut Camera, With<crate::player:
 /// умолчанию 8), потом игра выходит.
 /// Одна загрузка уровня на много снимков: на программном рендере это минуты и гигабайты.
 /// `имя@часы:…` — снимок в другое время суток (`@75.5` — 03:30 четвёртых суток).
-fn shot_tour(mut commands: Commands, mut cams: Query<&mut Transform, With<WaitingCamera>>, mut state: Local<(usize, u32)>, mut exit: MessageWriter<AppExit>) {
+fn shot_tour(
+    mut commands: Commands,
+    mut cams: Query<&mut Transform, With<WaitingCamera>>,
+    mut state: Local<(usize, u32)>,
+    mut exit: MessageWriter<AppExit>,
+) {
     let tour = std::env::var("MRPG_TOUR").unwrap_or_default();
     let views: Vec<(&str, Option<f64>, Transform)> = tour
         .split(';')
@@ -275,11 +398,24 @@ fn shot_tour(mut commands: Commands, mut cams: Query<&mut Transform, With<Waitin
                 Some((n, h)) => (n, h.trim().parse::<f64>().ok().map(|h| h * 3600.0)),
                 None => (name, None),
             };
-            let f: Vec<f32> = cam.split(',').filter_map(|t| t.trim().parse().ok()).collect();
-            (f.len() == 6).then(|| (name.trim(), at, Transform::from_xyz(f[0], f[1], f[2]).looking_at(Vec3::new(f[3], f[4], f[5]), Vec3::Y)))
+            let f: Vec<f32> = cam
+                .split(',')
+                .filter_map(|t| t.trim().parse().ok())
+                .collect();
+            (f.len() == 6).then(|| {
+                (
+                    name.trim(),
+                    at,
+                    Transform::from_xyz(f[0], f[1], f[2])
+                        .looking_at(Vec3::new(f[3], f[4], f[5]), Vec3::Y),
+                )
+            })
         })
         .collect();
-    let first: u32 = std::env::var("MRPG_TOUR_FRAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(30);
+    let first: u32 = std::env::var("MRPG_TOUR_FRAMES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(30);
     let dir = std::env::var("MRPG_TOUR_DIR").unwrap_or_else(|_| ".".into());
     let (i, n) = &mut *state;
     *n += 1;
@@ -297,10 +433,25 @@ fn shot_tour(mut commands: Commands, mut cams: Query<&mut Transform, With<Waitin
     }
     // Сменилось время — ждём дольше: свет неба пересчитывается в фоне.
     let changed = *i > 0 && at.is_some() && views[*i - 1].1 != *at;
-    let next: u32 = std::env::var("MRPG_TOUR_NEXT").ok().and_then(|s| s.parse().ok()).unwrap_or(8);
-    if *n >= if *i == 0 { first } else if changed { next.max(16) } else { next } {
+    let next: u32 = std::env::var("MRPG_TOUR_NEXT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(8);
+    if *n
+        >= if *i == 0 {
+            first
+        } else if changed {
+            next.max(16)
+        } else {
+            next
+        }
+    {
         info!("обход: снимок {name}");
-        commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(format!("{dir}/{name}.png")));
+        commands
+            .spawn(bevy::render::view::screenshot::Screenshot::primary_window())
+            .observe(bevy::render::view::screenshot::save_to_disk(format!(
+                "{dir}/{name}.png"
+            )));
         *i += 1;
         *n = 0;
     }
@@ -315,36 +466,74 @@ fn spawn_waiting_camera(mut commands: Commands) {
             let t: Vec<&str> = rest.split(',').map(str::trim).collect();
             let p = crate::level::place_pos(t[0])?;
             let d: Vec<f32> = t[1..].iter().filter_map(|v| v.parse().ok()).collect();
-            let off = if d.len() == 3 { Vec3::new(d[0], d[1], d[2]) } else { Vec3::new(-6.0, 2.5, 4.0) };
+            let off = if d.len() == 3 {
+                Vec3::new(d[0], d[1], d[2])
+            } else {
+                Vec3::new(-6.0, 2.5, 4.0)
+            };
             let at = p + Vec3::Y * 1.2;
             info!("камера снимка: {} -> {at}", p + off);
             return Some(Transform::from_translation(p + off).looking_at(at, Vec3::Y));
         }
         let t: Vec<&str> = s.split(',').map(str::trim).collect();
-        let v: Vec<f32> = t.iter().filter_map(|t| t.trim_start_matches('g').parse().ok()).collect();
+        let v: Vec<f32> = t
+            .iter()
+            .filter_map(|t| t.trim_start_matches('g').parse().ok())
+            .collect();
         if v.len() != 6 {
             return None;
         }
-        let y = |i: usize, x: f32, z: f32| if t[i].starts_with('g') { crate::level::ground_y(x, z) + v[i] } else { v[i] };
-        let (eye, at) = (Vec3::new(v[0], y(1, v[0], v[2]), v[2]), Vec3::new(v[3], y(4, v[3], v[5]), v[5]));
+        let y = |i: usize, x: f32, z: f32| {
+            if t[i].starts_with('g') {
+                crate::level::ground_y(x, z) + v[i]
+            } else {
+                v[i]
+            }
+        };
+        let (eye, at) = (
+            Vec3::new(v[0], y(1, v[0], v[2]), v[2]),
+            Vec3::new(v[3], y(4, v[3], v[5]), v[5]),
+        );
         info!("камера снимка: {eye} -> {at}");
         Some(Transform::from_translation(eye).looking_at(at, Vec3::Y))
     });
     let tf = cam.unwrap_or_else(|| {
         let p = crate::level::spawn_point(0);
-        Transform::from_translation(p + Vec3::new(-40.0, 30.0, 60.0)).looking_at(p + Vec3::Y * 4.0, Vec3::Y)
+        Transform::from_translation(p + Vec3::new(-40.0, 30.0, 60.0))
+            .looking_at(p + Vec3::Y * 4.0, Vec3::Y)
     });
-    commands.spawn((WaitingCamera, Camera3d::default(), Projection::Perspective(PerspectiveProjection { fov: 70f32.to_radians(), ..default() }), tf));
+    commands.spawn((
+        WaitingCamera,
+        Camera3d::default(),
+        Projection::Perspective(PerspectiveProjection {
+            fov: 70f32.to_radians(),
+            ..default()
+        }),
+        tf,
+    ));
 }
 
-fn setup_character_assets(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>, mut meshes: ResMut<Assets<Mesh>>) {
+fn setup_character_assets(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
     // Стрела: тонкое древко вдоль -Z длиной 75 см.
     commands.insert_resource(ArrowAssets {
         mesh: meshes.add(Cuboid::new(0.012, 0.012, 0.75)),
-        material: materials.add(StandardMaterial { base_color: Color::srgb(0.45, 0.33, 0.2), perceptual_roughness: 0.8, ..default() }),
+        material: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.45, 0.33, 0.2),
+            perceptual_roughness: 0.8,
+            ..default()
+        }),
     });
     commands.insert_resource(CharacterAssets {
-        steel: materials.add(StandardMaterial { base_color: Color::srgb(0.72, 0.74, 0.78), metallic: 0.9, perceptual_roughness: 0.3, ..default() }),
+        steel: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.72, 0.74, 0.78),
+            metallic: 0.9,
+            perceptual_roughness: 0.3,
+            ..default()
+        }),
         blade_red: materials.add(StandardMaterial {
             base_color: Color::srgb(0.9, 0.2, 0.1),
             emissive: LinearRgba::rgb(1.2, 0.15, 0.05),
@@ -363,7 +552,9 @@ fn setup_character_assets(mut commands: Commands, mut materials: ResMut<Assets<S
 /// Где рука держит оружие: (правая, левая) — центр кулака в координатах оружия.
 pub fn weapon_grips(weapon: WeaponKind) -> (Vec3, Option<Vec3>) {
     match weapon {
-        WeaponKind::Spatha | WeaponKind::Axe | WeaponKind::Seax => (Vec3::new(0.0, -0.06, 0.0), None),
+        WeaponKind::Spatha | WeaponKind::Axe | WeaponKind::Seax => {
+            (Vec3::new(0.0, -0.06, 0.0), None)
+        }
         // Копьё: начало координат — передняя (левая) рука, правая сзади на древке.
         WeaponKind::Spear => (Vec3::new(0.0, -0.6, 0.0), Some(Vec3::ZERO)),
         // Лук держат за середину.
@@ -382,7 +573,11 @@ pub fn outfit_of(kind: ActorKind, id: u64, gear: &Gear) -> Outfit {
         return crate::residents::outfit(role, i as u64 + 17);
     }
     let base = Outfit::for_actor(kind, id);
-    if kind == ActorKind::Player { base.with_gear(gear) } else { base }
+    if kind == ActorKind::Player {
+        base.with_gear(gear)
+    } else {
+        base
+    }
 }
 
 /// Какой щит в руке: у игроков — надетый, у врагов — по типу (если он у них есть).
@@ -398,7 +593,12 @@ pub(crate) fn shield_of(kind: ActorKind, has_shield: bool, gear: &Gear) -> Optio
 
 /// Щит на руке другого бойца (место — как в `animate_remote`).
 fn spawn_remote_shield(p: &mut ChildSpawnerCommands, kind: ShieldKind) {
-    p.spawn((RemoteShield, NeedsShield(kind), Transform::from_xyz(-0.42, 1.05, -0.1), Visibility::default()));
+    p.spawn((
+        RemoteShield,
+        NeedsShield(kind),
+        Transform::from_xyz(-0.42, 1.05, -0.1),
+        Visibility::default(),
+    ));
 }
 
 /// Где левая рука держит щит (ремни на обратной стороне).
@@ -433,8 +633,20 @@ fn spawn_remote(commands: &mut Commands, index: &mut RemoteIndex, snap: &ActorSn
             Visibility::default(),
         ))
         .with_children(|p| {
-            p.spawn((BodyRig, worn::Worn::new(worn::Extras::of(&snap.gear)), NeedsRig(outfit_of(snap.kind, snap.id, &snap.gear)), Transform::default(), Visibility::default()));
-            p.spawn((RemoteSword, ShownWeapon(snap.weapon, None), NeedsWeapon(snap.weapon), Transform::from_xyz(0.3, 1.0, -0.4), Visibility::default()));
+            p.spawn((
+                BodyRig,
+                worn::Worn::new(worn::Extras::of(&snap.gear)),
+                NeedsRig(outfit_of(snap.kind, snap.id, &snap.gear)),
+                Transform::default(),
+                Visibility::default(),
+            ));
+            p.spawn((
+                RemoteSword,
+                ShownWeapon(snap.weapon, None),
+                NeedsWeapon(snap.weapon),
+                Transform::from_xyz(0.3, 1.0, -0.4),
+                Visibility::default(),
+            ));
             if let Some(kind) = shield_of(snap.kind, snap.shield, &snap.gear) {
                 spawn_remote_shield(p, kind);
             }
@@ -444,26 +656,60 @@ fn spawn_remote(commands: &mut Commands, index: &mut RemoteIndex, snap: &ActorSn
 }
 
 #[allow(clippy::too_many_arguments)]
-fn spawn_corpse(commands: &mut Commands, index: &mut CorpseIndex, corpse_id: u64, kind: ActorKind, pos: Vec3, yaw: f32, gear: &Gear, animate: bool) {
+fn spawn_corpse(
+    commands: &mut Commands,
+    index: &mut CorpseIndex,
+    corpse_id: u64,
+    kind: ActorKind,
+    pos: Vec3,
+    yaw: f32,
+    gear: &Gear,
+    animate: bool,
+) {
     let proto = crate::npc::fighter_for(kind);
     // Оружие и щит игрока остаются в его инвентаре (их забирают при обыске), рядом не кладём.
-    let weapon = if kind == ActorKind::Player { WeaponKind::Fists } else { proto.weapon };
-    let shield = if kind == ActorKind::Player { None } else { shield_of(kind, proto.has_shield, gear) };
+    let weapon = if kind == ActorKind::Player {
+        WeaponKind::Fists
+    } else {
+        proto.weapon
+    };
+    let shield = if kind == ActorKind::Player {
+        None
+    } else {
+        shield_of(kind, proto.has_shield, gear)
+    };
     let entity = commands
-        .spawn((CorpseMarker { corpse_id, kind }, Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)), Visibility::default()))
+        .spawn((
+            CorpseMarker { corpse_id, kind },
+            Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)),
+            Visibility::default(),
+        ))
         .with_children(|c| {
             // Лежит на спине; упавшее оружие и щит — рядом.
             let t = if animate { 0.0 } else { 1.0 };
-            c.spawn((BodyRig, worn::Worn::new(worn::Extras::of(gear)), CorpseFall { t, seed: corpse_id }, NeedsRig(outfit_of(kind, corpse_id, gear)), rig::fall_transform(t), Visibility::default()));
+            c.spawn((
+                BodyRig,
+                worn::Worn::new(worn::Extras::of(gear)),
+                CorpseFall { t, seed: corpse_id },
+                NeedsRig(outfit_of(kind, corpse_id, gear)),
+                rig::fall_transform(t),
+                Visibility::default(),
+            ));
             c.spawn((
                 NeedsWeapon(weapon),
-                Transform::from_xyz(0.5, 0.025, 0.35).with_rotation(Quat::from_rotation_y(0.35) * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                Transform::from_xyz(0.5, 0.025, 0.35).with_rotation(
+                    Quat::from_rotation_y(0.35)
+                        * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                ),
                 Visibility::default(),
             ));
             if let Some(shield) = shield {
                 c.spawn((
                     NeedsShield(shield),
-                    Transform::from_xyz(-0.6, 0.06, 0.55).with_rotation(Quat::from_rotation_y(-0.5) * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                    Transform::from_xyz(-0.6, 0.06, 0.55).with_rotation(
+                        Quat::from_rotation_y(-0.5)
+                            * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                    ),
                     Visibility::default(),
                 ));
             }
@@ -473,23 +719,46 @@ fn spawn_corpse(commands: &mut Commands, index: &mut CorpseIndex, corpse_id: u64
 }
 
 /// Тело мирного человека (в своей одежде, без оружия).
-pub fn spawn_civ_corpse(commands: &mut Commands, index: &mut CorpseIndex, corpse_id: u64, outfit: Outfit, scale: f32, pos: Vec3, yaw: f32, animate: bool) {
+pub fn spawn_civ_corpse(
+    commands: &mut Commands,
+    index: &mut CorpseIndex,
+    corpse_id: u64,
+    outfit: Outfit,
+    scale: f32,
+    pos: Vec3,
+    yaw: f32,
+    animate: bool,
+) {
     let entity = commands
         .spawn((
-            CorpseMarker { corpse_id, kind: ActorKind::Player },
-            Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)).with_scale(Vec3::splat(scale)),
+            CorpseMarker {
+                corpse_id,
+                kind: ActorKind::Player,
+            },
+            Transform::from_translation(pos)
+                .with_rotation(Quat::from_rotation_y(yaw))
+                .with_scale(Vec3::splat(scale)),
             Visibility::default(),
         ))
         .with_children(|c| {
             let t = if animate { 0.0 } else { 1.0 };
-            c.spawn((BodyRig, CorpseFall { t, seed: corpse_id }, NeedsRig(outfit), rig::fall_transform(t), Visibility::default()));
+            c.spawn((
+                BodyRig,
+                CorpseFall { t, seed: corpse_id },
+                NeedsRig(outfit),
+                rig::fall_transform(t),
+                Visibility::default(),
+            ));
         })
         .id();
     index.0.insert(corpse_id, entity);
 }
 
 /// Падение тела: поза из стойки в лежачую, корень скелета заваливается назад.
-fn animate_corpses(time: Res<Time>, mut corpses: Query<(&mut CorpseFall, &mut Transform, Option<&mut RigPose>)>) {
+fn animate_corpses(
+    time: Res<Time>,
+    mut corpses: Query<(&mut CorpseFall, &mut Transform, Option<&mut RigPose>)>,
+) {
     const FALL_TIME: f32 = 0.8;
     for (mut fall, mut transform, pose) in &mut corpses {
         let Some(mut pose) = pose else { continue };
@@ -499,7 +768,11 @@ fn animate_corpses(time: Res<Time>, mut corpses: Query<(&mut CorpseFall, &mut Tr
         fall.t = (fall.t + time.delta_secs() / FALL_TIME).min(1.0);
         let k = fall.t;
         *transform = rig::fall_transform(k);
-        let standing = rig::solve_pose(&PoseInput { time: time.elapsed_secs(), ..default() }).pose;
+        let standing = rig::solve_pose(&PoseInput {
+            time: time.elapsed_secs(),
+            ..default()
+        })
+        .pose;
         *pose = rig::blend(&standing, &rig::dead_pose(fall.seed), (k * 1.3).min(1.0));
     }
 }
@@ -523,9 +796,15 @@ fn receive_reliable(
     mut alarm: MessageWriter<crate::daily_life::Alarm>,
 ) {
     while let Some(bytes) = client.receive_message(CH_RELIABLE) {
-        let Some(msg) = decode::<ServerMessage>(&bytes) else { continue };
+        let Some(msg) = decode::<ServerMessage>(&bytes) else {
+            continue;
+        };
         match msg {
-            ServerMessage::Welcome { your_id, spawn, yaw } => {
+            ServerMessage::Welcome {
+                your_id,
+                spawn,
+                yaw,
+            } => {
                 info!("Подключились к серверу, наш id {your_id}");
                 state.my_id = Some(your_id);
                 state.error = None;
@@ -557,8 +836,18 @@ fn receive_reliable(
                     commands.entity(e).despawn();
                 }
             }
-            ServerMessage::Hit { attacker, target, outcome, at } => {
-                feedback.write(CombatFeedback::Hit { attacker, target, outcome, at: at.into() });
+            ServerMessage::Hit {
+                attacker,
+                target,
+                outcome,
+                at,
+            } => {
+                feedback.write(CombatFeedback::Hit {
+                    attacker,
+                    target,
+                    outcome,
+                    at: at.into(),
+                });
             }
             ServerMessage::Died { id, killer } => {
                 if Some(id) == state.my_id {
@@ -584,22 +873,55 @@ fn receive_reliable(
                     }
                 }
             }
-            ServerMessage::CorpseSpawned { corpse_id, kind, pos, yaw, gear } => {
+            ServerMessage::CorpseSpawned {
+                corpse_id,
+                kind,
+                pos,
+                yaw,
+                gear,
+            } => {
                 if !corpses.0.contains_key(&corpse_id) {
                     // Тела, которые уже лежали, когда мы вошли, не падают заново.
                     let fresh = welcomed_at.is_some_and(|t| time.elapsed_secs() - t > 1.5);
-                    spawn_corpse(&mut commands, &mut corpses, corpse_id, kind, pos.into(), yaw, &gear, fresh);
+                    spawn_corpse(
+                        &mut commands,
+                        &mut corpses,
+                        corpse_id,
+                        kind,
+                        pos.into(),
+                        yaw,
+                        &gear,
+                        fresh,
+                    );
                 }
             }
-            ServerMessage::CivilianHit { civ, at, amount, head } => {
-                feedback.write(CombatFeedback::Hit { attacker: 0, target: u64::MAX, outcome: combat::HitOutcome::Damage { amount, killed: false, head }, at: at.into() });
+            ServerMessage::CivilianHit {
+                civ,
+                at,
+                amount,
+                head,
+            } => {
+                feedback.write(CombatFeedback::Hit {
+                    attacker: 0,
+                    target: u64::MAX,
+                    outcome: combat::HitOutcome::Damage {
+                        amount,
+                        killed: false,
+                        head,
+                    },
+                    at: at.into(),
+                });
                 let _ = civ;
                 civil.write(crate::civil_client::CivilNet::Hit);
                 alarm.write(crate::daily_life::Alarm(at.into()));
             }
             ServerMessage::CivilianDead { civ, corpse } => {
                 let fresh = welcomed_at.is_some_and(|t| time.elapsed_secs() - t > 1.5);
-                civil.write(crate::civil_client::CivilNet::Dead { civ, corpse: corpse.map(|(id, p, y)| (id, p.into(), y)), fresh });
+                civil.write(crate::civil_client::CivilNet::Dead {
+                    civ,
+                    corpse: corpse.map(|(id, p, y)| (id, p.into(), y)),
+                    fresh,
+                });
             }
             ServerMessage::CivilianBack { civ } => {
                 civil.write(crate::civil_client::CivilNet::Back(civ));
@@ -635,7 +957,10 @@ fn receive_snapshots(
     while let Some(bytes) = client.receive_message(CH_UNRELIABLE) {
         if let Some(s) = decode::<Snapshot>(&bytes) {
             // Пакеты могут прийти не по порядку — берём самый свежий.
-            if latest.as_ref().is_none_or(|l| s.tick.wrapping_sub(l.tick) < u32::MAX / 2) {
+            if latest
+                .as_ref()
+                .is_none_or(|l| s.tick.wrapping_sub(l.tick) < u32::MAX / 2)
+            {
                 latest = Some(s);
             }
         }
@@ -658,7 +983,9 @@ fn receive_snapshots(
                 r.pitch = a.pitch;
                 r.crouching = a.crouching;
                 // Берём действие с сервера, но не откатываем таймер назад внутри того же действия.
-                if std::mem::discriminant(&r.fighter.action) != std::mem::discriminant(&a.action) || a.action.time() > r.fighter.action.time() {
+                if std::mem::discriminant(&r.fighter.action) != std::mem::discriminant(&a.action)
+                    || a.action.time() > r.fighter.action.time()
+                {
                     r.fighter.action = a.action;
                 }
                 r.fighter.hp = a.hp;
@@ -680,8 +1007,14 @@ fn receive_snapshots(
     for a in &snapshot.arrows {
         alive_arrows.push(a.id);
         let (pos, vel): (Vec3, Vec3) = (a.pos.into(), a.vel.into());
-        let rot = Transform::default().looking_to(vel.normalize_or(Vec3::NEG_Z), Vec3::Y).rotation;
-        match arrow_index.0.get(&a.id).and_then(|e| arrows.get_mut(*e).ok()) {
+        let rot = Transform::default()
+            .looking_to(vel.normalize_or(Vec3::NEG_Z), Vec3::Y)
+            .rotation;
+        match arrow_index
+            .0
+            .get(&a.id)
+            .and_then(|e| arrows.get_mut(*e).ok())
+        {
             Some((mut v, mut t)) => {
                 v.vel = vel;
                 // Плавно подтягиваем к серверной точке.
@@ -689,7 +1022,12 @@ fn receive_snapshots(
             }
             None => {
                 let e = commands
-                    .spawn((ArrowVisual { vel }, Mesh3d(arrow_assets.mesh.clone()), MeshMaterial3d(arrow_assets.material.clone()), Transform::from_translation(pos).with_rotation(rot)))
+                    .spawn((
+                        ArrowVisual { vel },
+                        Mesh3d(arrow_assets.mesh.clone()),
+                        MeshMaterial3d(arrow_assets.material.clone()),
+                        Transform::from_translation(pos).with_rotation(rot),
+                    ))
                     .id();
                 arrow_index.0.insert(a.id, e);
             }
@@ -703,7 +1041,12 @@ fn receive_snapshots(
         keep
     });
     // Те, кого больше нет в снимке, ушли или погибли.
-    let gone: Vec<u64> = index.0.keys().copied().filter(|id| !seen.contains(id)).collect();
+    let gone: Vec<u64> = index
+        .0
+        .keys()
+        .copied()
+        .filter(|id| !seen.contains(id))
+        .collect();
     for id in gone {
         if let Some(e) = index.0.remove(&id) {
             commands.entity(e).despawn();
@@ -738,7 +1081,14 @@ fn refresh_remote_weapons(
                 && (w.0, w.1) != want
             {
                 (w.0, w.1) = want;
-                worn::set_weapon_model(&mut commands, e, want.0, want.1.map(crate::items::ItemBaseId), r.finish, models.as_deref());
+                worn::set_weapon_model(
+                    &mut commands,
+                    e,
+                    want.0,
+                    want.1.map(crate::items::ItemBaseId),
+                    r.finish,
+                    models.as_deref(),
+                );
             }
         }
     }
@@ -746,30 +1096,83 @@ fn refresh_remote_weapons(
 
 /// `MRPG_GEAR_SHOWCASE=x,y,z` (или пусто — у агоры): для снимков ряд игроков в разных доспехах
 /// и с разными вещами на теле, лицом к +Z; камера ожидания смотрит на них (если не задана `MRPG_CAM`).
-fn gear_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<WaitingCamera>>, models: Option<Res<crate::icons::ItemModels>>, mut done: Local<bool>) {
+fn gear_showcase(
+    mut commands: Commands,
+    mut cams: Query<&mut Transform, With<WaitingCamera>>,
+    models: Option<Res<crate::icons::ItemModels>>,
+    mut done: Local<bool>,
+) {
     if *done {
         return;
     }
-    let Ok(mut cam) = cams.single_mut() else { return };
+    let Ok(mut cam) = cams.single_mut() else {
+        return;
+    };
     *done = true;
-    let v: Vec<f32> = std::env::var("MRPG_GEAR_SHOWCASE").unwrap_or_default().split(',').filter_map(|s| s.trim().parse().ok()).collect();
-    let o = if v.len() == 3 { Vec3::new(v[0], v[1], v[2]) } else { crate::level::place_pos("agora").unwrap_or_default() + Vec3::new(4.0, 0.0, 4.0) };
+    let v: Vec<f32> = std::env::var("MRPG_GEAR_SHOWCASE")
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
+    let o = if v.len() == 3 {
+        Vec3::new(v[0], v[1], v[2])
+    } else {
+        crate::level::place_pos("agora").unwrap_or_default() + Vec3::new(4.0, 0.0, 4.0)
+    };
     let id = |n: &str| crate::items::ItemBaseId::find(n).map(|b| b.0);
     // Слоты: 0 голова, 1 торс, 2 руки, 3 ноги, 4 ступни, 5 щит, 6 оружие в руке, 7 оружие убрано,
     // 8 шея, 9 перстень, 10 стрелы (колчан).
     let sets: [&[(&str, u8)]; 5] = [
-        &[("Спата", 7), ("Нательный крест", 8), ("Серебряный перстень", 9)],
-        &[("Стёганая туника", 1), ("Кожаные перчатки", 2), ("Кожаные сапоги", 4), ("Гуннский составной лук", 7), ("Стрелы", 10)],
-        &[("Спангенхельм", 0), ("Кольчуга", 1), ("Кожаные перчатки", 2), ("Железные поножи", 3), ("Кожаные сапоги", 4), ("Круглый щит", 5), ("Готская узорчатая спата", 6)],
-        &[("Гребенчатый шлем", 0), ("Ламеллярный панцирь", 1), ("Ламеллярные наручи", 2), ("Железные поножи", 3), ("Кожаные сапоги", 4), ("Контос", 7), ("Франциска", 6)],
-        &[("Гребенчатый шлем", 0), ("Стёганая туника", 1), ("Ламеллярные наручи", 2), ("Кожаные сапоги", 4), ("Овальный щит", 5), ("Шипастая булава", 6)],
+        &[
+            ("Спата", 7),
+            ("Нательный крест", 8),
+            ("Серебряный перстень", 9),
+        ],
+        &[
+            ("Стёганая туника", 1),
+            ("Кожаные перчатки", 2),
+            ("Кожаные сапоги", 4),
+            ("Гуннский составной лук", 7),
+            ("Стрелы", 10),
+        ],
+        &[
+            ("Спангенхельм", 0),
+            ("Кольчуга", 1),
+            ("Кожаные перчатки", 2),
+            ("Железные поножи", 3),
+            ("Кожаные сапоги", 4),
+            ("Круглый щит", 5),
+            ("Готская узорчатая спата", 6),
+        ],
+        &[
+            ("Гребенчатый шлем", 0),
+            ("Ламеллярный панцирь", 1),
+            ("Ламеллярные наручи", 2),
+            ("Железные поножи", 3),
+            ("Кожаные сапоги", 4),
+            ("Контос", 7),
+            ("Франциска", 6),
+        ],
+        &[
+            ("Гребенчатый шлем", 0),
+            ("Стёганая туника", 1),
+            ("Ламеллярные наручи", 2),
+            ("Кожаные сапоги", 4),
+            ("Овальный щит", 5),
+            ("Шипастая булава", 6),
+        ],
     ];
     info!("Витрина доспехов у {o}");
     if std::env::var("MRPG_CAM").is_err() {
         // `MRPG_GEAR_FOCUS=x` — крупно между фигурами (x — номер фигуры, можно дробный).
-        *cam = match std::env::var("MRPG_GEAR_FOCUS").ok().and_then(|s| s.parse::<f32>().ok()) {
-            Some(f) => Transform::from_translation(o + Vec3::new(f * 0.95, 1.45, 1.7)).looking_at(o + Vec3::new(f * 0.95, 1.1, 0.0), Vec3::Y),
-            None => Transform::from_translation(o + Vec3::new(1.9, 1.35, 3.6)).looking_at(o + Vec3::new(1.9, 1.0, 0.0), Vec3::Y),
+        *cam = match std::env::var("MRPG_GEAR_FOCUS")
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok())
+        {
+            Some(f) => Transform::from_translation(o + Vec3::new(f * 0.95, 1.45, 1.7))
+                .looking_at(o + Vec3::new(f * 0.95, 1.1, 0.0), Vec3::Y),
+            None => Transform::from_translation(o + Vec3::new(1.9, 1.35, 3.6))
+                .looking_at(o + Vec3::new(1.9, 1.0, 0.0), Vec3::Y),
         };
     }
     for (i, set) in sets.iter().enumerate() {
@@ -797,18 +1200,45 @@ fn gear_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<Wa
         if in_hand.is_some() {
             (g.main_hand, g.holstered) = (in_hand, false);
         }
-        let kind = in_hand.map_or(WeaponKind::Fists, |b| WeaponKind::from_item_name(crate::items::ItemBaseId(b).base().name));
+        let kind = in_hand.map_or(WeaponKind::Fists, |b| {
+            WeaponKind::from_item_name(crate::items::ItemBaseId(b).base().name)
+        });
         let p = o + Vec3::X * (i as f32 * 0.95);
         commands
-            .spawn((Transform::from_translation(p).with_rotation(Quat::from_rotation_y(std::f32::consts::PI)), Visibility::default()))
+            .spawn((
+                Transform::from_translation(p)
+                    .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
+                Visibility::default(),
+            ))
             .with_children(|c| {
-                c.spawn((BodyRig, ShowcasePose(kind), worn::Worn::new(worn::Extras::of(&g)), NeedsRig(outfit_of(ActorKind::Player, 7 + i as u64, &g)), Transform::default(), Visibility::default()));
+                c.spawn((
+                    BodyRig,
+                    ShowcasePose(kind),
+                    worn::Worn::new(worn::Extras::of(&g)),
+                    NeedsRig(outfit_of(ActorKind::Player, 7 + i as u64, &g)),
+                    Transform::default(),
+                    Visibility::default(),
+                ));
                 if let Some(kind) = shield_of(ActorKind::Player, false, &g) {
-                    c.spawn((NeedsShield(kind), Transform::from_xyz(-0.36, 1.0, -0.12).with_rotation(Quat::from_rotation_y(1.2)), Visibility::default()));
+                    c.spawn((
+                        NeedsShield(kind),
+                        Transform::from_xyz(-0.36, 1.0, -0.12)
+                            .with_rotation(Quat::from_rotation_y(1.2)),
+                        Visibility::default(),
+                    ));
                 }
-                let weapon = c.spawn((ShowcaseWeapon, Transform::default(), Visibility::default())).id();
+                let weapon = c
+                    .spawn((ShowcaseWeapon, Transform::default(), Visibility::default()))
+                    .id();
                 let mut cmds = c.commands();
-                worn::set_weapon_model(&mut cmds, weapon, kind, in_hand.map(crate::items::ItemBaseId), 200, models.as_deref());
+                worn::set_weapon_model(
+                    &mut cmds,
+                    weapon,
+                    kind,
+                    in_hand.map(crate::items::ItemBaseId),
+                    200,
+                    models.as_deref(),
+                );
             });
     }
 }
@@ -820,60 +1250,128 @@ fn gear_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<Wa
 #[derive(Component)]
 struct ShowcasePerson(usize);
 
-fn people_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<WaitingCamera>>, mut done: Local<bool>) {
+fn people_showcase(
+    mut commands: Commands,
+    mut cams: Query<&mut Transform, With<WaitingCamera>>,
+    mut done: Local<bool>,
+) {
     if *done {
         return;
     }
-    let Ok(mut cam) = cams.single_mut() else { return };
+    let Ok(mut cam) = cams.single_mut() else {
+        return;
+    };
     *done = true;
-    let v: Vec<f32> = std::env::var("MRPG_PEOPLE_SHOWCASE").unwrap_or_default().split(',').filter_map(|s| s.trim().parse().ok()).collect();
-    let o = if v.len() == 3 { Vec3::new(v[0], v[1], v[2]) } else { crate::level::place_pos("agora").unwrap_or_default() + Vec3::new(4.0, 0.0, 4.0) };
-    let seed: u64 = std::env::var("MRPG_PEOPLE_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let v: Vec<f32> = std::env::var("MRPG_PEOPLE_SHOWCASE")
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
+    let o = if v.len() == 3 {
+        Vec3::new(v[0], v[1], v[2])
+    } else {
+        crate::level::place_pos("agora").unwrap_or_default() + Vec3::new(4.0, 0.0, 4.0)
+    };
+    let seed: u64 = std::env::var("MRPG_PEOPLE_SEED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
     use crate::level::Role;
-    let roles = [Role::Householder, Role::Craftsman, Role::Sailor, Role::Noble, Role::Farmer, Role::Priest, Role::Shopkeeper, Role::Servant];
+    let roles = [
+        Role::Householder,
+        Role::Craftsman,
+        Role::Sailor,
+        Role::Noble,
+        Role::Farmer,
+        Role::Priest,
+        Role::Shopkeeper,
+        Role::Servant,
+    ];
     const GAP: f32 = 0.85;
     if std::env::var("MRPG_CAM").is_err() {
         let mid = (roles.len() - 1) as f32 * 0.5;
-        *cam = match std::env::var("MRPG_PEOPLE_FOCUS").ok().and_then(|s| s.parse::<f32>().ok()) {
-            Some(f) => Transform::from_translation(o + Vec3::new(f * GAP, 1.6, 1.25)).looking_at(o + Vec3::new(f * GAP, 1.5, 0.0), Vec3::Y),
-            None => Transform::from_translation(o + Vec3::new(mid * GAP, 1.3, 4.4)).looking_at(o + Vec3::new(mid * GAP, 0.95, 0.0), Vec3::Y),
+        *cam = match std::env::var("MRPG_PEOPLE_FOCUS")
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok())
+        {
+            Some(f) => Transform::from_translation(o + Vec3::new(f * GAP, 1.6, 1.25))
+                .looking_at(o + Vec3::new(f * GAP, 1.5, 0.0), Vec3::Y),
+            None => Transform::from_translation(o + Vec3::new(mid * GAP, 1.3, 4.4))
+                .looking_at(o + Vec3::new(mid * GAP, 0.95, 0.0), Vec3::Y),
         };
     }
     // `MRPG_PEOPLE_FACES=1` — вместо горожан бритые одинаковые люди со всеми вариантами лица подряд.
     // Число — с какого лица начать: тогда трое стоят дугой лицом к камере (крупный план).
     let faces = std::env::var("MRPG_PEOPLE_FACES").is_ok();
-    let first: Option<usize> = std::env::var("MRPG_PEOPLE_FACES").ok().and_then(|s| s.parse().ok());
-    let count = if faces { crate::appearance::FACES.len() } else { roles.len() };
+    let first: Option<usize> = std::env::var("MRPG_PEOPLE_FACES")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    let count = if faces {
+        crate::appearance::FACES.len()
+    } else {
+        roles.len()
+    };
     for i in 0..count {
         if let Some(f) = first {
             if i < f || i >= f + 3 {
                 continue;
             }
             let k = (i - f) as f32 - 1.0;
-            let look = crate::appearance::Look { face: i as u8, beard: 4, hair: 0, ..crate::appearance::Look::PLAYER_DEFAULT };
+            let look = crate::appearance::Look {
+                face: i as u8,
+                beard: 4,
+                hair: 0,
+                ..crate::appearance::Look::PLAYER_DEFAULT
+            };
             let outfit = crate::residents::outfit(Role::Householder, 100).with_look(look);
             // Камера в точке o + (0, 1.6, 1.3) смотрит на −Z; люди на дуге радиусом 1,3 м.
             let eye = o + Vec3::new(0.0, 0.0, 1.3);
             let a = k * 0.36;
             let at = eye + Vec3::new(a.sin(), 0.0, -a.cos()) * 1.3;
             commands
-                .spawn((Transform::from_translation(at).with_rotation(Quat::from_rotation_y(std::f32::consts::PI - a)), Visibility::default()))
+                .spawn((
+                    Transform::from_translation(at)
+                        .with_rotation(Quat::from_rotation_y(std::f32::consts::PI - a)),
+                    Visibility::default(),
+                ))
                 .with_children(|c| {
-                    c.spawn((BodyRig, ShowcasePerson(i), NeedsRig(outfit), Transform::default(), Visibility::default()));
+                    c.spawn((
+                        BodyRig,
+                        ShowcasePerson(i),
+                        NeedsRig(outfit),
+                        Transform::default(),
+                        Visibility::default(),
+                    ));
                 });
-            *cam = Transform::from_translation(eye + Vec3::Y * 1.62).looking_at(eye + Vec3::new(0.0, 1.55, -1.3), Vec3::Y);
+            *cam = Transform::from_translation(eye + Vec3::Y * 1.62)
+                .looking_at(eye + Vec3::new(0.0, 1.55, -1.3), Vec3::Y);
             continue;
         }
         let outfit = if faces {
-            let look = crate::appearance::Look { face: i as u8, beard: 4, hair: 1, ..crate::appearance::Look::PLAYER_DEFAULT };
+            let look = crate::appearance::Look {
+                face: i as u8,
+                beard: 4,
+                hair: 1,
+                ..crate::appearance::Look::PLAYER_DEFAULT
+            };
             crate::residents::outfit(Role::Householder, 100).with_look(look)
         } else {
             crate::residents::outfit(roles[i], 100 + i as u64 * 7 + seed * 131)
         };
         commands
-            .spawn((Transform::from_translation(o + Vec3::X * (i as f32 * GAP)).with_rotation(Quat::from_rotation_y(std::f32::consts::PI)), Visibility::default()))
+            .spawn((
+                Transform::from_translation(o + Vec3::X * (i as f32 * GAP))
+                    .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
+                Visibility::default(),
+            ))
             .with_children(|c| {
-                c.spawn((BodyRig, ShowcasePerson(i), NeedsRig(outfit), Transform::default(), Visibility::default()));
+                c.spawn((
+                    BodyRig,
+                    ShowcasePerson(i),
+                    NeedsRig(outfit),
+                    Transform::default(),
+                    Visibility::default(),
+                ));
             });
     }
 }
@@ -881,7 +1379,9 @@ fn people_showcase(mut commands: Commands, mut cams: Query<&mut Transform, With<
 fn pose_people(time: Res<Time>, mut rigs: Query<(&ShowcasePerson, &mut RigPose)>) {
     let walk = std::env::var("MRPG_PEOPLE_WALK").is_ok();
     // Для снимков походки: `MRPG_PEOPLE_PHASE` — доля цикла шага (одинаковая у всех фигур).
-    let phase: Option<f32> = std::env::var("MRPG_PEOPLE_PHASE").ok().and_then(|s| s.parse().ok());
+    let phase: Option<f32> = std::env::var("MRPG_PEOPLE_PHASE")
+        .ok()
+        .and_then(|s| s.parse().ok());
     let faces = std::env::var("MRPG_PEOPLE_FACES").is_ok();
     let now = time.elapsed_secs();
     for (p, mut pose) in &mut rigs {
@@ -892,7 +1392,13 @@ fn pose_people(time: Res<Time>, mut rigs: Query<(&ShowcasePerson, &mut RigPose)>
         };
         // Для сравнения лиц все стоят одинаково и смотрят прямо.
         let t = if faces { 0.0 } else { now + k * 3.7 };
-        *pose = rig::solve_pose(&PoseInput { time: t, walk: if walk { 1.0 } else { 0.0 }, walk_phase, ..default() }).pose;
+        *pose = rig::solve_pose(&PoseInput {
+            time: t,
+            walk: if walk { 1.0 } else { 0.0 },
+            walk_phase,
+            ..default()
+        })
+        .pose;
     }
 }
 
@@ -910,7 +1416,11 @@ fn pose_showcase(
     mut rigs: Query<(&ShowcasePose, &mut RigPose, &ChildOf)>,
     mut weapons: Query<&mut Transform, With<ShowcaseWeapon>>,
 ) {
-    let v: Vec<f32> = std::env::var("MRPG_GEAR_POSE").unwrap_or_default().split(',').filter_map(|s| s.trim().parse().ok()).collect();
+    let v: Vec<f32> = std::env::var("MRPG_GEAR_POSE")
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
     let get = |i: usize| v.get(i).copied().unwrap_or(0.0);
     let now = time.elapsed_secs();
     for (fig, mut pose, parent) in &mut rigs {
@@ -918,7 +1428,8 @@ fn pose_showcase(
         let eye = 1.65 - 0.6 * crouch;
         let aim = Quat::from_rotation_x(pitch * 0.6);
         let (hilt, dir) = combat::weapon_pose(&Action::Idle, fig.0, now);
-        let sword = Transform::from_translation(Vec3::Y * (eye - 0.25) + aim * hilt).with_rotation(Quat::from_rotation_arc(Vec3::Y, aim * dir));
+        let sword = Transform::from_translation(Vec3::Y * (eye - 0.25) + aim * hilt)
+            .with_rotation(Quat::from_rotation_arc(Vec3::Y, aim * dir));
         let (right, left) = weapon_grips(fig.0);
         let armed = fig.0 != WeaponKind::Fists;
         let input = PoseInput {
@@ -957,25 +1468,50 @@ fn freeze_showcase(mut q: Query<(&mut RemoteActor, &Frozen)>) {
 /// застывшие бойцы в фазах боя. `row` — шестеро лицом к камере (замах сверху справа, удар
 /// сверху, укол, окно парирования, отбит, рипост); `pairs` — три пары лицом друг к другу
 /// (удар в парирование, отбитый под рипостом, укол в щит).
-fn duel_showcase(mut commands: Commands, mut index: ResMut<RemoteIndex>, mut cams: Query<&mut Transform, With<WaitingCamera>>, mut done: Local<bool>) {
+fn duel_showcase(
+    mut commands: Commands,
+    mut index: ResMut<RemoteIndex>,
+    mut cams: Query<&mut Transform, With<WaitingCamera>>,
+    mut done: Local<bool>,
+) {
     use std::f32::consts::FRAC_PI_2;
     if *done {
         return;
     }
-    let Ok(mut cam) = cams.single_mut() else { return };
+    let Ok(mut cam) = cams.single_mut() else {
+        return;
+    };
     *done = true;
-    let v: Vec<f32> = std::env::var("MRPG_DUEL_AT").unwrap_or_default().split(',').filter_map(|s| s.trim().parse().ok()).collect();
-    let o = if v.len() == 3 { Vec3::new(v[0], v[1], v[2]) } else { crate::level::place_pos("agora").unwrap_or_default() + Vec3::new(4.0, 0.0, 4.0) };
+    let v: Vec<f32> = std::env::var("MRPG_DUEL_AT")
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
+    let o = if v.len() == 3 {
+        Vec3::new(v[0], v[1], v[2])
+    } else {
+        crate::level::place_pos("agora").unwrap_or_default() + Vec3::new(4.0, 0.0, 4.0)
+    };
     let mail = |n: &str| crate::items::ItemBaseId::find(n).map(|b| b.0);
     let gear = |shield: bool| Gear {
         head: mail("Спангенхельм"),
         chest: mail("Кольчуга"),
         hands: mail("Кожаные перчатки"),
         feet: mail("Кожаные сапоги"),
-        off_hand: if shield { mail("Овальный щит") } else { None },
+        off_hand: if shield {
+            mail("Овальный щит")
+        } else {
+            None
+        },
         ..default()
     };
-    let mut spawn = |id: u64, kind: ActorKind, pos: Vec3, yaw: f32, weapon: WeaponKind, shield: bool, spec: &str| {
+    let mut spawn = |id: u64,
+                     kind: ActorKind,
+                     pos: Vec3,
+                     yaw: f32,
+                     weapon: WeaponKind,
+                     shield: bool,
+                     spec: &str| {
         let action = combat::showcase_action(spec, weapon).unwrap_or_default();
         let snap = ActorSnapshot {
             id,
@@ -994,7 +1530,11 @@ fn duel_showcase(mut commands: Commands, mut index: ResMut<RemoteIndex>, mut cam
             action_speed: 1.0,
             move_mult: 1.0,
             finish: 230,
-            gear: if kind == ActorKind::Player { gear(shield) } else { Gear::default() },
+            gear: if kind == ActorKind::Player {
+                gear(shield)
+            } else {
+                Gear::default()
+            },
         };
         spawn_remote(&mut commands, &mut index, &snap);
         if let Some(e) = index.0.get(&id) {
@@ -1003,39 +1543,106 @@ fn duel_showcase(mut commands: Commands, mut index: ResMut<RemoteIndex>, mut cam
     };
     let layout = std::env::var("MRPG_DUEL_SHOWCASE").unwrap_or_default();
     if layout == "pairs" {
-        let pairs: [(&str, ActorKind, WeaponKind, bool, &str, ActorKind, WeaponKind, bool); 3] = [
-            ("strike:ur:0.4", ActorKind::Player, WeaponKind::Spatha, false, "guard:o:0.2", ActorKind::Player, WeaponKind::Spatha, false),
-            ("recoil:r:0.15", ActorKind::GothWarrior, WeaponKind::Axe, false, "riposte:l:0.8", ActorKind::Player, WeaponKind::Spatha, false),
-            ("strike:t:0.3", ActorKind::AlanLancer, WeaponKind::Spear, false, "guard:o:0.8", ActorKind::Stratiotes, WeaponKind::Spatha, true),
+        let pairs: [(
+            &str,
+            ActorKind,
+            WeaponKind,
+            bool,
+            &str,
+            ActorKind,
+            WeaponKind,
+            bool,
+        ); 3] = [
+            (
+                "strike:ur:0.4",
+                ActorKind::Player,
+                WeaponKind::Spatha,
+                false,
+                "guard:o:0.2",
+                ActorKind::Player,
+                WeaponKind::Spatha,
+                false,
+            ),
+            (
+                "recoil:r:0.15",
+                ActorKind::GothWarrior,
+                WeaponKind::Axe,
+                false,
+                "riposte:l:0.8",
+                ActorKind::Player,
+                WeaponKind::Spatha,
+                false,
+            ),
+            (
+                "strike:t:0.3",
+                ActorKind::AlanLancer,
+                WeaponKind::Spear,
+                false,
+                "guard:o:0.8",
+                ActorKind::Stratiotes,
+                WeaponKind::Spatha,
+                true,
+            ),
         ];
         for (i, (sa, ka, wa, sha, sb, kb, wb, shb)) in pairs.into_iter().enumerate() {
             let a = o + Vec3::X * (i as f32 * 3.6);
             let gap = if wa == WeaponKind::Spear { 2.0 } else { 1.25 };
             spawn(9000 + i as u64 * 2, ka, a, -FRAC_PI_2, wa, sha, sa);
-            spawn(9001 + i as u64 * 2, kb, a + Vec3::X * gap, FRAC_PI_2, wb, shb, sb);
+            spawn(
+                9001 + i as u64 * 2,
+                kb,
+                a + Vec3::X * gap,
+                FRAC_PI_2,
+                wb,
+                shb,
+                sb,
+            );
         }
         if std::env::var("MRPG_CAM").is_err() {
-            let f: f32 = std::env::var("MRPG_DUEL_FOCUS").ok().and_then(|s| s.parse().ok()).unwrap_or(-1.0);
+            let f: f32 = std::env::var("MRPG_DUEL_FOCUS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(-1.0);
             *cam = if f >= 0.0 {
                 let c = o + Vec3::new(f * 3.6 + 0.7, 1.15, 0.0);
                 Transform::from_translation(c + Vec3::new(-0.6, 0.35, 2.6)).looking_at(c, Vec3::Y)
             } else {
-                Transform::from_translation(o + Vec3::new(4.3, 1.9, 6.8)).looking_at(o + Vec3::new(4.3, 1.0, 0.0), Vec3::Y)
+                Transform::from_translation(o + Vec3::new(4.3, 1.9, 6.8))
+                    .looking_at(o + Vec3::new(4.3, 1.0, 0.0), Vec3::Y)
             };
         }
     } else {
-        let row = ["windup:ur:0.95", "strike:o:0.4", "strike:t:0.6", "guard:o:0.2", "recoil:r:0.12", "riposte:l:0.85"];
+        let row = [
+            "windup:ur:0.95",
+            "strike:o:0.4",
+            "strike:t:0.6",
+            "guard:o:0.2",
+            "recoil:r:0.12",
+            "riposte:l:0.85",
+        ];
         for (i, spec) in row.iter().enumerate() {
-            spawn(9100 + i as u64, ActorKind::Player, o + Vec3::X * (i as f32 * 1.3), std::f32::consts::PI, WeaponKind::Spatha, false, spec);
+            spawn(
+                9100 + i as u64,
+                ActorKind::Player,
+                o + Vec3::X * (i as f32 * 1.3),
+                std::f32::consts::PI,
+                WeaponKind::Spatha,
+                false,
+                spec,
+            );
         }
         if std::env::var("MRPG_CAM").is_err() {
-            let f: f32 = std::env::var("MRPG_DUEL_FOCUS").ok().and_then(|s| s.parse().ok()).unwrap_or(-1.0);
+            let f: f32 = std::env::var("MRPG_DUEL_FOCUS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(-1.0);
             *cam = if f >= 0.0 {
                 // Крупно одного бойца, чуть сбоку — чтобы клинок, смотрящий в камеру, был виден.
                 let c = o + Vec3::new(f * 1.3, 1.25, 0.0);
                 Transform::from_translation(c + Vec3::new(1.1, 0.25, 2.2)).looking_at(c, Vec3::Y)
             } else {
-                Transform::from_translation(o + Vec3::new(3.25, 1.5, 5.2)).looking_at(o + Vec3::new(3.25, 1.05, 0.0), Vec3::Y)
+                Transform::from_translation(o + Vec3::new(3.25, 1.5, 5.2))
+                    .looking_at(o + Vec3::new(3.25, 1.05, 0.0), Vec3::Y)
             };
         }
     }
@@ -1062,12 +1669,18 @@ fn refresh_remote_gear(
         let outfit = outfit_of(r.kind, r.id, &new);
         let rebuild = outfit != outfit_of(r.kind, r.id, &old);
         for child in children.iter() {
-            let Ok(mut worn) = bodies.get_mut(child) else { continue };
+            let Ok(mut worn) = bodies.get_mut(child) else {
+                continue;
+            };
             worn.want = worn::Extras::of(&new);
             if rebuild {
                 // Вещи висят на суставах и уходят вместе со скелетом.
                 worn.reset();
-                commands.entity(child).despawn_related::<Children>().remove::<rig::Rig>().insert(NeedsRig(outfit));
+                commands
+                    .entity(child)
+                    .despawn_related::<Children>()
+                    .remove::<rig::Rig>()
+                    .insert(NeedsRig(outfit));
             }
         }
         let has = r.fighter.has_shield;
@@ -1076,18 +1689,31 @@ fn refresh_remote_gear(
                 commands.entity(child).despawn();
             }
             if let Some(kind) = shield_of(r.kind, has, &new) {
-                commands.entity(e).with_children(|p| spawn_remote_shield(p, kind));
+                commands
+                    .entity(e)
+                    .with_children(|p| spawn_remote_shield(p, kind));
             }
         }
     }
 }
 
-fn send_state(mut client: ResMut<RenetClient>, mut timer: ResMut<SendTimer>, time: Res<Time>, local: Query<(&LocalPlayer, &Transform)>) {
+fn send_state(
+    mut client: ResMut<RenetClient>,
+    mut timer: ResMut<SendTimer>,
+    time: Res<Time>,
+    local: Query<(&LocalPlayer, &Transform)>,
+) {
     if !timer.0.tick(time.delta()).just_finished() {
         return;
     }
     let Ok((p, t)) = local.single() else { return };
-    let msg = ClientMessage::PlayerState { pos: t.translation.into(), yaw: p.yaw, pitch: p.pitch, crouching: p.crouching, sprinting: p.sprinting };
+    let msg = ClientMessage::PlayerState {
+        pos: t.translation.into(),
+        yaw: p.yaw,
+        pitch: p.pitch,
+        crouching: p.crouching,
+        sprinting: p.sprinting,
+    };
     client.send_message(CH_UNRELIABLE, encode(&msg));
 }
 
@@ -1096,10 +1722,35 @@ fn animate_remote(
     time: Res<Time>,
     assets: Res<CharacterAssets>,
     models: Option<Res<CharacterModels>>,
-    mut remotes: Query<(&mut RemoteActor, &mut Transform, &Children, Option<&Frozen>), (Without<RemoteSword>, Without<RemoteShield>)>,
-    mut swords: Query<(&mut Transform, &Children), (With<RemoteSword>, Without<RemoteActor>, Without<RemoteShield>)>,
-    mut shields: Query<&mut Transform, (With<RemoteShield>, Without<RemoteActor>, Without<RemoteSword>)>,
-    mut glows: Query<(&mut Transform, &mut Visibility), (With<RiposteGlow>, Without<RemoteActor>, Without<RemoteSword>, Without<RemoteShield>)>,
+    mut remotes: Query<
+        (&mut RemoteActor, &mut Transform, &Children, Option<&Frozen>),
+        (Without<RemoteSword>, Without<RemoteShield>),
+    >,
+    mut swords: Query<
+        (&mut Transform, &Children),
+        (
+            With<RemoteSword>,
+            Without<RemoteActor>,
+            Without<RemoteShield>,
+        ),
+    >,
+    mut shields: Query<
+        &mut Transform,
+        (
+            With<RemoteShield>,
+            Without<RemoteActor>,
+            Without<RemoteSword>,
+        ),
+    >,
+    mut glows: Query<
+        (&mut Transform, &mut Visibility),
+        (
+            With<RiposteGlow>,
+            Without<RemoteActor>,
+            Without<RemoteSword>,
+            Without<RemoteShield>,
+        ),
+    >,
     hints: Option<Res<crate::fight::CombatHints>>,
     mut rigs: Query<&mut RigPose, With<BodyRig>>,
     mut blades: Query<(&Blade, &mut MeshMaterial3d<StandardMaterial>)>,
@@ -1114,7 +1765,9 @@ fn animate_remote(
         // Застывший для снимка боец не живёт по таймеру: иначе замах сам переходит в удар.
         match frozen {
             Some(f) => r.fighter.action = f.0,
-            None => { r.fighter.tick(dt); }
+            None => {
+                r.fighter.tick(dt);
+            }
         }
         if transform.translation.distance(r.target_pos) > 5.0 {
             transform.translation = r.target_pos;
@@ -1122,7 +1775,9 @@ fn animate_remote(
         } else {
             transform.translation = transform.translation.lerp(r.target_pos, t);
         }
-        transform.rotation = transform.rotation.slerp(Quat::from_rotation_y(r.target_yaw), t);
+        transform.rotation = transform
+            .rotation
+            .slerp(Quat::from_rotation_y(r.target_yaw), t);
 
         // Шаг: фаза идёт по пройденному пути, назад — в обратную сторону.
         let moved = transform.translation - r.last_pos;
@@ -1130,7 +1785,11 @@ fn animate_remote(
         let flat = Vec3::new(moved.x, 0.0, moved.z);
         let local = transform.rotation.inverse() * flat;
         let speed = if dt > 0.0 { flat.length() / dt } else { 0.0 };
-        let back = if local.z > 0.3 * flat.length() { -1.0 } else { 1.0 };
+        let back = if local.z > 0.3 * flat.length() {
+            -1.0
+        } else {
+            1.0
+        };
         // Скорость сглаживаем (снимки приходят рывками); шаг или бег выбирается по ней.
         r.speed += (speed.min(9.0) - r.speed) * (1.0 - (-6.0 * dt).exp());
         r.walk_phase += back * flat.length() / rig::step_cycle(r.speed) * std::f32::consts::TAU;
@@ -1146,29 +1805,45 @@ fn animate_remote(
         // Сглаживаем смену фаз (комбо, отбитый удар, снимок сервера пришёл с опозданием).
         let k = 1.0 - (-30.0 * dt).exp();
         let (hilt, dir) = match r.weapon_smooth {
-            Some((h, d)) if h.distance(want_hilt) < 0.8 => (h.lerp(want_hilt, k), d.lerp(want_dir, k).normalize_or(want_dir)),
+            Some((h, d)) if h.distance(want_hilt) < 0.8 => (
+                h.lerp(want_hilt, k),
+                d.lerp(want_dir, k).normalize_or(want_dir),
+            ),
             _ => (want_hilt, want_dir),
         };
         r.weapon_smooth = Some((hilt, dir));
         // Ответный удар после парирования подсвечиваем.
-        let riposte = matches!(r.fighter.action, Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. }) && hints.as_ref().is_none_or(|h| h.0);
+        let riposte = matches!(
+            r.fighter.action,
+            Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. }
+        ) && hints.as_ref().is_none_or(|h| h.0);
         // Корпус работает вместе с клинком: на замахе торс закручен в сторону удара, в ударе
         // раскручивается, сверху — наклон вперёд, укол — выпад, отбитый — откинут назад.
         let d = aim * dir;
         let (twist, lean) = match r.fighter.action {
-            Action::Windup { swing, .. } | Action::Strike { swing, .. } | Action::Recovery { swing, .. } => {
+            Action::Windup { swing, .. }
+            | Action::Strike { swing, .. }
+            | Action::Recovery { swing, .. } => {
                 let striking = matches!(r.fighter.action, Action::Strike { .. });
                 let lean = match swing.class() {
-                    combat::SwingClass::Overhead | combat::SwingClass::Diagonal => -0.25 * d.z.abs().min(1.0),
+                    combat::SwingClass::Overhead | combat::SwingClass::Diagonal => {
+                        -0.25 * d.z.abs().min(1.0)
+                    }
                     combat::SwingClass::Thrust if striking => -0.22,
                     combat::SwingClass::Rising => 0.04,
                     _ => -0.06,
                 };
                 (-d.x * 0.6, lean)
             }
-            Action::Recoil { t, dur } => (0.12, 0.3 * (1.0 - t / dur).max(0.0) + (now * 25.0).sin() * 0.03 * (1.0 - t / dur).max(0.0)),
+            Action::Recoil { t, dur } => (
+                0.12,
+                0.3 * (1.0 - t / dur).max(0.0)
+                    + (now * 25.0).sin() * 0.03 * (1.0 - t / dur).max(0.0),
+            ),
             Action::ParryRecovery { .. } => (0.08, 0.1),
-            Action::Stagger { t, .. } => (0.0, 0.32 + (now * 25.0).sin() * 0.05 * (1.0 - t).max(0.0)),
+            Action::Stagger { t, .. } => {
+                (0.0, 0.32 + (now * 25.0).sin() * 0.05 * (1.0 - t).max(0.0))
+            }
             Action::GuardStagger { .. } => (0.15, 0.12),
             Action::Flinch { .. } => (0.1, 0.15),
             Action::Guard { .. } => (0.2, 0.05),
@@ -1192,12 +1867,16 @@ fn animate_remote(
         }
 
         // Меч и щит ставятся как раньше (по ним считается бой), руки тянутся к ним.
-        let mut sword_tf = Transform::from_translation(Vec3::Y * (eye - 0.25) + aim * hilt).with_rotation(Quat::from_rotation_arc(Vec3::Y, aim * dir));
+        let mut sword_tf = Transform::from_translation(Vec3::Y * (eye - 0.25) + aim * hilt)
+            .with_rotation(Quat::from_rotation_arc(Vec3::Y, aim * dir));
         let mut shield_tf = None;
         if let Some(e) = shield_entity
             && let Ok(mut shield) = shields.get_mut(e)
         {
-            let (pos, rot) = if matches!(r.fighter.action, Action::Guard { .. } | Action::GuardStagger { .. }) {
+            let (pos, rot) = if matches!(
+                r.fighter.action,
+                Action::Guard { .. } | Action::GuardStagger { .. }
+            ) {
                 (Vec3::new(-0.05, 1.25, -0.5), Quat::IDENTITY)
             } else {
                 (Vec3::new(-0.38, 1.0, -0.22), Quat::from_rotation_y(1.0))
@@ -1210,8 +1889,17 @@ fn animate_remote(
         let (right, left) = weapon_grips(r.fighter.weapon);
         // Без оружия и без щита левый кулак тоже поднят (стойка кулачного бойца).
         let fist_l = (r.fighter.weapon == WeaponKind::Fists && shield_tf.is_none()).then(|| {
-            let guard = matches!(r.fighter.action, Action::Windup { .. } | Action::Strike { .. } | Action::Recovery { .. });
-            Vec3::Y * (eye - 0.25) + aim * if guard { Vec3::new(-0.16, -0.08, -0.28) } else { Vec3::new(-0.2, -0.18, -0.3) }
+            let guard = matches!(
+                r.fighter.action,
+                Action::Windup { .. } | Action::Strike { .. } | Action::Recovery { .. }
+            );
+            Vec3::Y * (eye - 0.25)
+                + aim
+                    * if guard {
+                        Vec3::new(-0.16, -0.08, -0.28)
+                    } else {
+                        Vec3::new(-0.2, -0.18, -0.3)
+                    }
         });
         let mut input = PoseInput {
             crouch: r.crouch,
@@ -1223,10 +1911,19 @@ fn animate_remote(
             lean,
             time: now + r.id as f32,
             right_grip: Some(sword_tf.transform_point(right)),
-            left_grip: left.map(|l| sword_tf.transform_point(l)).or(shield_tf.map(|s| s.transform_point(SHIELD_GRIP))).or(fist_l),
+            left_grip: left
+                .map(|l| sword_tf.transform_point(l))
+                .or(shield_tf.map(|s| s.transform_point(SHIELD_GRIP)))
+                .or(fist_l),
             // Кулак обхватывает рукоять/древко по оси оружия, щит — за горизонтальную ручку.
             right_axis: Some(sword_tf.rotation * Vec3::Y),
-            left_axis: if left.is_some() { Some(sword_tf.rotation * Vec3::Y) } else { shield_tf.map(|s| s.rotation * Vec3::NEG_X).or(fist_l.map(|_| aim * Vec3::new(0.15, 0.25, -1.0).normalize())) },
+            left_axis: if left.is_some() {
+                Some(sword_tf.rotation * Vec3::Y)
+            } else {
+                shield_tf
+                    .map(|s| s.rotation * Vec3::NEG_X)
+                    .or(fist_l.map(|_| aim * Vec3::new(0.15, 0.25, -1.0).normalize()))
+            },
         };
         let mut solved = rig::solve_pose(&input);
         // Если руки не дотягиваются до рукояти, меч придвигается к ним (только внешний вид,
@@ -1254,8 +1951,14 @@ fn animate_remote(
         if let Some(e) = glow_entity
             && let Ok((mut gt, mut gv)) = glows.get_mut(e)
         {
-            let glow = riposte.then(|| riposte_glow_transform(&sword_tf, r.fighter.weapon)).flatten();
-            *gv = if glow.is_some() { Visibility::Inherited } else { Visibility::Hidden };
+            let glow = riposte
+                .then(|| riposte_glow_transform(&sword_tf, r.fighter.weapon))
+                .flatten();
+            *gv = if glow.is_some() {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
             if let Some(g) = glow {
                 *gt = g;
             }
@@ -1266,7 +1969,11 @@ fn animate_remote(
             *sword = sword_tf;
             for bc in blade_children.iter() {
                 if let Ok((b, mut m)) = blades.get_mut(bc) {
-                    m.0 = if riposte { assets.blade_red.clone() } else { tints.get(&mut materials, &b.0, r.finish) };
+                    m.0 = if riposte {
+                        assets.blade_red.clone()
+                    } else {
+                        tints.get(&mut materials, &b.0, r.finish)
+                    };
                 }
             }
         }

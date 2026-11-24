@@ -42,12 +42,29 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FrameTimeDiagnosticsPlugin::default())
             .add_systems(Startup, setup_hud.after(crate::inventory_ui::setup_fonts))
-            .add_systems(Update, (update_status, update_health, update_banner, update_target, update_aim, toggle_help));
+            .add_systems(
+                Update,
+                (
+                    update_status,
+                    update_health,
+                    update_banner,
+                    update_target,
+                    update_aim,
+                    toggle_help,
+                ),
+            );
     }
 }
 
 fn text(s: &str, size: f32, color: Color) -> (Text, TextFont, TextColor) {
-    (Text::new(s), TextFont { font_size: FontSize::Px(size), ..default() }, TextColor(color))
+    (
+        Text::new(s),
+        TextFont {
+            font_size: FontSize::Px(size),
+            ..default()
+        },
+        TextColor(color),
+    )
 }
 
 const AIM_BOX: f32 = 76.0;
@@ -55,14 +72,48 @@ const AIM_RADIUS: f32 = 26.0;
 
 pub fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
     // Красная вспышка при уроне (на весь экран).
-    commands.spawn((HudRoot, FlashOverlay, Node { width: percent(100), height: percent(100), position_type: PositionType::Absolute, ..default() }, BackgroundColor(Color::NONE)));
+    commands.spawn((
+        HudRoot,
+        FlashOverlay,
+        Node {
+            width: percent(100),
+            height: percent(100),
+            position_type: PositionType::Absolute,
+            ..default()
+        },
+        BackgroundColor(Color::NONE),
+    ));
     // Прицел.
     commands
-        .spawn((HudRoot, Node { width: percent(100), height: percent(100), position_type: PositionType::Absolute, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() }))
+        .spawn((
+            HudRoot,
+            Node {
+                width: percent(100),
+                height: percent(100),
+                position_type: PositionType::Absolute,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+        ))
         .with_children(|p| {
             // Прицел, вокруг — восемь точек направлений удара и кольцо парирования.
-            p.spawn(Node { width: px(AIM_BOX), height: px(AIM_BOX), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() }).with_children(|b| {
-                b.spawn((Node { width: px(4), height: px(4), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.8))));
+            p.spawn(Node {
+                width: px(AIM_BOX),
+                height: px(AIM_BOX),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|b| {
+                b.spawn((
+                    Node {
+                        width: px(4),
+                        height: px(4),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.8)),
+                ));
                 let ring = 34.0;
                 b.spawn((
                     ParryRing,
@@ -99,25 +150,46 @@ pub fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
         });
     // Надпись по центру (парирование, смерть).
     commands
-        .spawn((HudRoot, Node { width: percent(100), position_type: PositionType::Absolute, top: percent(30), justify_content: JustifyContent::Center, ..default() }))
+        .spawn((
+            HudRoot,
+            Node {
+                width: percent(100),
+                position_type: PositionType::Absolute,
+                top: percent(30),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+        ))
         .with_children(|p| {
             p.spawn((BannerText, theme.title_colored("", 40.0, Color::WHITE)));
         });
     // Цель (враг перед вами) — вверху по центру.
     commands
-        .spawn((HudRoot, Node { width: percent(100), position_type: PositionType::Absolute, top: px(14), justify_content: JustifyContent::Center, ..default() }))
+        .spawn((
+            HudRoot,
+            Node {
+                width: percent(100),
+                position_type: PositionType::Absolute,
+                top: px(14),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+        ))
         .with_children(|p| {
             p.spawn((TargetText, text("", 18.0, Color::srgb(1.0, 0.9, 0.8))));
         });
     // Здоровье внизу по центру.
     commands
-        .spawn((HudRoot, Node {
-            width: percent(100),
-            position_type: PositionType::Absolute,
-            bottom: px(96),
-            justify_content: JustifyContent::Center,
-            ..default()
-        }))
+        .spawn((
+            HudRoot,
+            Node {
+                width: percent(100),
+                position_type: PositionType::Absolute,
+                bottom: px(96),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+        ))
         .with_children(|p| {
             p.spawn((
                 Node {
@@ -157,7 +229,16 @@ pub fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
         });
     // Выносливость — тонкая полоска под здоровьем.
     commands
-        .spawn((HudRoot, Node { width: percent(100), position_type: PositionType::Absolute, bottom: px(80), justify_content: JustifyContent::Center, ..default() }))
+        .spawn((
+            HudRoot,
+            Node {
+                width: percent(100),
+                position_type: PositionType::Absolute,
+                bottom: px(80),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+        ))
         .with_children(|p| {
             p.spawn((
                 Node {
@@ -185,15 +266,43 @@ pub fn setup_hud(mut commands: Commands, theme: Res<crate::ui_theme::UiTheme>) {
     let column = commands
         .spawn((
             HudRoot,
-            Node { position_type: PositionType::Absolute, left: px(12), top: px(10), flex_direction: FlexDirection::Column, align_items: AlignItems::FlexStart, row_gap: px(6), ..default() },
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(12),
+                top: px(10),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::FlexStart,
+                row_gap: px(6),
+                ..default()
+            },
             // Под окнами (сумка, торговля), если они дотянутся до угла.
             GlobalZIndex(-1),
             Pickable::IGNORE,
         ))
         .id();
     commands.insert_resource(HudLeftColumn(column));
-    commands.spawn((StatusText, text("Connecting...", 14.0, Color::WHITE), TextShadow { offset: Vec2::splat(1.0), color: Color::srgba(0.0, 0.0, 0.0, 0.8) }, Node { display: Display::None, ..default() }, ChildOf(column)));
-    commands.spawn((HelpHint, theme.text("F2 — управление", 12.0, Color::srgba(1.0, 1.0, 1.0, 0.7)), TextShadow { offset: Vec2::splat(1.0), color: Color::srgba(0.0, 0.0, 0.0, 0.8) }, ChildOf(column)));
+    commands.spawn((
+        StatusText,
+        text("Connecting...", 14.0, Color::WHITE),
+        TextShadow {
+            offset: Vec2::splat(1.0),
+            color: Color::srgba(0.0, 0.0, 0.0, 0.8),
+        },
+        Node {
+            display: Display::None,
+            ..default()
+        },
+        ChildOf(column),
+    ));
+    commands.spawn((
+        HelpHint,
+        theme.text("F2 — управление", 12.0, Color::srgba(1.0, 1.0, 1.0, 0.7)),
+        TextShadow {
+            offset: Vec2::splat(1.0),
+            color: Color::srgba(0.0, 0.0, 0.0, 0.8),
+        },
+        ChildOf(column),
+    ));
     commands.spawn((
         HelpText,
         TextShadow { offset: Vec2::splat(1.0), color: Color::srgba(0.0, 0.0, 0.0, 0.8) },
@@ -236,7 +345,11 @@ fn toggle_help(
         s.save();
     }
     let (shown, hidden) = (Display::Flex, Display::None);
-    let want = if s.show_controls { (shown, hidden) } else { (hidden, shown) };
+    let want = if s.show_controls {
+        (shown, hidden)
+    } else {
+        (hidden, shown)
+    };
     if help.display != want.0 {
         help.display = want.0;
     }
@@ -258,8 +371,15 @@ fn update_aim(
     use crate::combat::{Action, Swing};
     let Ok(f) = local.single() else { return };
     let melee = !f.fighter.weapon.ranged() && !f.fighter.is_dead() && hints.0;
-    let active = f.fighter.action.swing().filter(|_| f.fighter.action.is_attacking());
-    let riposte = matches!(f.fighter.action, Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. });
+    let active = f
+        .fighter
+        .action
+        .swing()
+        .filter(|_| f.fighter.action.is_attacking());
+    let riposte = matches!(
+        f.fighter.action,
+        Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. }
+    );
     let pulse = 0.6 + 0.4 * (time.elapsed_secs() * 14.0).sin();
     for (dot, mut bg) in &mut dots {
         let swing = Swing::ALL[dot.0];
@@ -267,7 +387,11 @@ fn update_aim(
         bg.0 = if !melee || !allowed {
             Color::NONE
         } else if active == Some(swing) {
-            if riposte { Color::srgb(1.0, 0.25, 0.15) } else { Color::srgb(1.0, 0.65, 0.2) }
+            if riposte {
+                Color::srgb(1.0, 0.25, 0.15)
+            } else {
+                Color::srgb(1.0, 0.65, 0.2)
+            }
         } else if active.is_none() && aim.pending == Some(swing) {
             Color::srgba(1.0, 1.0, 1.0, 0.95)
         } else if active.is_none() && f.fighter.can_riposte() {
@@ -284,7 +408,10 @@ fn update_aim(
         Color::srgba(1.0, 0.85, 0.3, 0.95)
     } else if f.fighter.guard_active() {
         Color::srgba(0.75, 0.75, 0.8, 0.55)
-    } else if matches!(f.fighter.action, Action::ParryRecovery { .. } | Action::Recoil { .. }) {
+    } else if matches!(
+        f.fighter.action,
+        Action::ParryRecovery { .. } | Action::Recoil { .. }
+    ) {
         Color::srgba(1.0, 0.3, 0.2, 0.6)
     } else {
         Color::NONE
@@ -301,27 +428,54 @@ fn update_status(
     mut text: Single<(&mut Text, &mut Node), With<StatusText>>,
     settings: Option<Res<crate::settings::Settings>>,
 ) {
-    let fps = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS).and_then(|d| d.smoothed()).unwrap_or(0.0);
+    let fps = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FPS)
+        .and_then(|d| d.smoothed())
+        .unwrap_or(0.0);
     let addr = state.server_addr.map(|a| a.to_string()).unwrap_or_default();
     let status = match (&client, state.my_id, &state.error) {
         (_, _, Some(err)) => format!("Network error: {err}"),
         (Some(c), Some(_), _) if c.is_connected() => {
             let ping = c.rtt() * 1000.0;
-            let players = remotes.iter().filter(|r| r.kind == ActorKind::Player).count() + 1;
+            let players = remotes
+                .iter()
+                .filter(|r| r.kind == ActorKind::Player)
+                .count()
+                + 1;
             let enemies = remotes.iter().filter(|r| r.kind.is_npc()).count();
-            format!("Connected to {addr} | players: {players} | enemies: {enemies} | ping {ping:.0} ms")
+            format!(
+                "Connected to {addr} | players: {players} | enemies: {enemies} | ping {ping:.0} ms"
+            )
         }
         (Some(c), _, _) if c.is_disconnected() => format!("Disconnected from {addr}"),
         _ => format!("Connecting to {addr}..."),
     };
-    let pos = player.single().map(|t| format!(" | pos {:.1} {:.1} {:.1}", t.translation.x, t.translation.y, t.translation.z)).unwrap_or_default();
+    let pos = player
+        .single()
+        .map(|t| {
+            format!(
+                " | pos {:.1} {:.1} {:.1}",
+                t.translation.x, t.translation.y, t.translation.z
+            )
+        })
+        .unwrap_or_default();
     // Без «Показывать FPS» строка видна, только пока что-то не так со связью.
     let show = settings.is_none_or(|s| s.show_fps);
     let connected = client.as_ref().is_some_and(|c| c.is_connected()) && state.error.is_none();
     let (text, node) = &mut *text;
-    text.0 = if show { format!("{status}\nFPS {fps:.0}{pos}") } else if connected { String::new() } else { status };
+    text.0 = if show {
+        format!("{status}\nFPS {fps:.0}{pos}")
+    } else if connected {
+        String::new()
+    } else {
+        status
+    };
     // Пустая строка не занимает места в колонке.
-    let want = if text.0.is_empty() { Display::None } else { Display::Flex };
+    let want = if text.0.is_empty() {
+        Display::None
+    } else {
+        Display::Flex
+    };
     if node.display != want {
         node.display = want;
     }
@@ -333,14 +487,21 @@ fn update_health(
     mut fill: Single<&mut Node, (With<HealthFill>, Without<StaminaFill>)>,
     mut label: Single<&mut Text, With<HealthText>>,
     mut overlay: Single<&mut BackgroundColor, (With<FlashOverlay>, Without<StaminaFill>)>,
-    mut stamina: Single<(&mut Node, &mut BackgroundColor), (With<StaminaFill>, Without<HealthFill>)>,
+    mut stamina: Single<
+        (&mut Node, &mut BackgroundColor),
+        (With<StaminaFill>, Without<HealthFill>),
+    >,
 ) {
     if let Ok(f) = local.single() {
         let s = (f.fighter.stamina / f.fighter.max_stamina.max(1.0)).clamp(0.0, 1.0);
         let (node, color) = &mut *stamina;
         node.width = percent(s * 100.0);
         // Почти без сил — полоска краснеет.
-        color.0 = if s < 0.2 { Color::srgb(0.85, 0.3, 0.15) } else { Color::srgb(0.85, 0.75, 0.25) };
+        color.0 = if s < 0.2 {
+            Color::srgb(0.85, 0.3, 0.15)
+        } else {
+            Color::srgb(0.85, 0.75, 0.25)
+        };
         let k = (f.fighter.hp / f.fighter.max_hp).clamp(0.0, 1.0);
         fill.width = percent(k * 100.0);
         label.0 = format!("{:.0} / {:.0}", f.fighter.hp, f.fighter.max_hp);
@@ -350,7 +511,10 @@ fn update_health(
     }
 }
 
-fn update_banner(banner: Res<Banner>, mut q: Single<(&mut Text, &mut TextColor), With<BannerText>>) {
+fn update_banner(
+    banner: Res<Banner>,
+    mut q: Single<(&mut Text, &mut TextColor), With<BannerText>>,
+) {
     let (text, color) = &mut *q;
     if banner.time_left > 0.0 {
         text.0 = banner.text.clone();
@@ -386,7 +550,13 @@ fn update_target(
         .min_by(|a, b| a.1.total_cmp(&b.1));
     label.0 = match best {
         Some((r, _)) => {
-            let name = if r.kind == ActorKind::Player { names.as_ref().map_or_else(|| r.kind.name_ru().to_string(), |n| n.of(r.id)) } else { r.kind.name_ru().to_string() };
+            let name = if r.kind == ActorKind::Player {
+                names
+                    .as_ref()
+                    .map_or_else(|| r.kind.name_ru().to_string(), |n| n.of(r.id))
+            } else {
+                r.kind.name_ru().to_string()
+            };
             format!("{name}  {:.0} / {:.0}", r.fighter.hp, r.fighter.max_hp)
         }
         None => String::new(),

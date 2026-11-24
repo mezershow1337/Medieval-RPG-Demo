@@ -282,7 +282,14 @@ fn rebuild(
             if let Some(view) = &state.view {
                 merchant_window(root, &fonts, &icons, &state, &loot, view, elapsed);
             } else if let Some(p2p) = &state.p2p {
-                p2p_window(root, &fonts, &icons, &loot, p2p, &partner_name(party.as_deref(), p2p.partner));
+                p2p_window(
+                    root,
+                    &fonts,
+                    &icons,
+                    &loot,
+                    p2p,
+                    &partner_name(party.as_deref(), p2p.partner),
+                );
             } else if state.rep_open {
                 reputation_window(root, &fonts, &state);
             }
@@ -473,10 +480,15 @@ fn merchant_window(
                     } else {
                         format!("платят {}", format_money_short(l.money))
                     };
+                    let started = if l.done > 0.0 {
+                        format!(" · начато {:.0}%", l.done * 100.0)
+                    } else {
+                        String::new()
+                    };
                     r.spawn((
                         text(
                             fonts,
-                            format!("{} · {}, {:.0} с", l.title, money, l.secs),
+                            format!("{} · {}, {:.0} с{started}", l.title, money, l.secs),
                             13.0,
                             TEXT,
                             false,
@@ -493,7 +505,9 @@ fn merchant_window(
                         None => button(
                             r,
                             fonts,
-                            if l.paid {
+                            if l.done > 0.0 {
+                                "Продолжить"
+                            } else if l.paid {
                                 "Учиться"
                             } else {
                                 "Работать"
@@ -544,13 +558,25 @@ fn merchant_window(
                 })
                 .with_children(|r| {
                     r.spawn((
-                        text(fonts, format!("{} — {:.0}%", o.name, o.condition * 100.0), 15.0, TEXT, false),
+                        text(
+                            fonts,
+                            format!("{} — {:.0}%", o.name, o.condition * 100.0),
+                            15.0,
+                            TEXT,
+                            false,
+                        ),
                         Node {
                             flex_grow: 1.0,
                             ..default()
                         },
                     ));
-                    button(r, fonts, &format_money_short(o.price), Act::Repair(o.uid), !refused);
+                    button(
+                        r,
+                        fonts,
+                        &format_money_short(o.price),
+                        Act::Repair(o.uid),
+                        !refused,
+                    );
                 });
             }
         }
@@ -815,13 +841,7 @@ fn p2p_window(
 ) {
     let inv = loot.inventory.as_ref();
     panel(root, 380.0).with_children(|p| {
-        p.spawn(text(
-            fonts,
-            format!("Обмен: {partner}"),
-            22.0,
-            TITLE,
-            true,
-        ));
+        p.spawn(text(fonts, format!("Обмен: {partner}"), 22.0, TITLE, true));
         section(p, fonts, "Вы отдаёте");
         for item in &p2p.mine {
             item_row(p, fonts, icons, item, item.count, |r| {

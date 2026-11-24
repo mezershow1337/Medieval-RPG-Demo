@@ -147,6 +147,8 @@ pub struct LessonOffer {
     pub money: u32,
     pub secs: f32,
     pub locked: Option<String>,
+    /// Отложенный урок: сколько уже сделано (0 — не начинали).
+    pub done: f32,
 }
 
 /// Кузнец может выправить и наточить сбитую вещь.
@@ -214,6 +216,8 @@ pub enum TradeServerMessage {
     LessonStarted {
         title: String,
         secs: f32,
+        /// Сколько уже сделано (продолжение отложенного урока).
+        done: f32,
         drill: Option<crate::work::Drill>,
         skill: f32,
     },

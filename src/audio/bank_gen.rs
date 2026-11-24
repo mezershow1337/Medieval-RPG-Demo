@@ -65,6 +65,24 @@ pub const SFX_VARIANTS: &[(&str, u8)] = &[
     ("cart", 2),
 ];
 /// Фоновые петли (assets/audio/ambient/<имя>.ogg).
-pub const AMBIENT: &[&str] = &["sea", "wind", "wind_strong", "market", "city", "night", "fire", "boiling", "room", "basilica", "steppe"];
+pub const AMBIENT: &[&str] = &[
+    "sea",
+    "wind",
+    "wind_strong",
+    "market",
+    "city",
+    "night",
+    "fire",
+    "boiling",
+    "room",
+    "basilica",
+    "steppe",
+];
 /// Музыка (assets/audio/music/<имя>.ogg) и длительность пьесы в секундах.
-pub const MUSIC: &[(&str, f32)] = &[("city", 120.0), ("evening", 128.2), ("night", 115.6), ("combat", 89.6), ("sacred", 157.7)];
+pub const MUSIC: &[(&str, f32)] = &[
+    ("city", 120.0),
+    ("evening", 128.2),
+    ("night", 115.6),
+    ("combat", 89.6),
+    ("sacred", 157.7),
+];

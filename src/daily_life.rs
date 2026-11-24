@@ -30,7 +30,10 @@ pub const CELL: f32 = 0.5;
 /// Наибольший перепад пола между соседними клетками (ступенька).
 const STEP: f32 = 0.42;
 /// Тело для проверки прохода (чуть уже игрока, чтобы проходить в двери).
-const NAV_BODY: Body = Body { half_width: 0.22, height: 1.7 };
+const NAV_BODY: Body = Body {
+    half_width: 0.22,
+    height: 1.7,
+};
 const UNREACHED: u16 = u16::MAX;
 
 /// Где можно ходить: высота пола в каждой клетке (NaN — нельзя).
@@ -42,7 +45,16 @@ pub struct Nav {
     floor: Vec<f32>,
 }
 
-const DIRS: [(i32, i32, u16); 8] = [(1, 0, 2), (-1, 0, 2), (0, 1, 2), (0, -1, 2), (1, 1, 3), (1, -1, 3), (-1, 1, 3), (-1, -1, 3)];
+const DIRS: [(i32, i32, u16); 8] = [
+    (1, 0, 2),
+    (-1, 0, 2),
+    (0, 1, 2),
+    (0, -1, 2),
+    (1, 1, 3),
+    (1, -1, 3),
+    (-1, 1, 3),
+    (-1, -1, 3),
+];
 
 impl Nav {
     /// Сетка в прямоугольнике `min..max` (X/Z) по коллизиям уровня. Двери и жители не мешают.
@@ -59,7 +71,13 @@ impl Nav {
                 }
             }
         }
-        Nav { x0: min.x, z0: min.y, nx, nz, floor }
+        Nav {
+            x0: min.x,
+            z0: min.y,
+            nx,
+            nz,
+            floor,
+        }
     }
 
     fn idx(&self, i: i32, k: i32) -> Option<usize> {
@@ -71,7 +89,10 @@ impl Nav {
     }
 
     fn cell_at(&self, x: f32, z: f32) -> Option<usize> {
-        self.idx(((x - self.x0) / CELL).floor() as i32, ((z - self.z0) / CELL).floor() as i32)
+        self.idx(
+            ((x - self.x0) / CELL).floor() as i32,
+            ((z - self.z0) / CELL).floor() as i32,
+        )
     }
 
     pub fn walkable(&self, c: usize) -> bool {
@@ -80,7 +101,11 @@ impl Nav {
 
     fn point(&self, c: usize) -> Vec3 {
         let (i, k) = self.ik(c);
-        Vec3::new(self.x0 + (i as f32 + 0.5) * CELL, self.floor[c], self.z0 + (k as f32 + 0.5) * CELL)
+        Vec3::new(
+            self.x0 + (i as f32 + 0.5) * CELL,
+            self.floor[c],
+            self.z0 + (k as f32 + 0.5) * CELL,
+        )
     }
 
     /// Соседи клетки, куда можно шагнуть (без срезания углов), и цена шага.
@@ -93,7 +118,10 @@ impl Nav {
             if !ok(n) {
                 return None;
             }
-            if di != 0 && dk != 0 && !(self.idx(i + di, k).is_some_and(ok) && self.idx(i, k + dk).is_some_and(ok)) {
+            if di != 0
+                && dk != 0
+                && !(self.idx(i + di, k).is_some_and(ok) && self.idx(i, k + dk).is_some_and(ok))
+            {
                 return None;
             }
             Some((n, cost))
@@ -102,12 +130,17 @@ impl Nav {
 
     /// Ближайшая проходимая клетка к точке (в радиусе `r` м), на похожей высоте.
     pub fn nearest(&self, p: Vec3, r: f32) -> Option<usize> {
-        let (ci, ck) = (((p.x - self.x0) / CELL).floor() as i32, ((p.z - self.z0) / CELL).floor() as i32);
+        let (ci, ck) = (
+            ((p.x - self.x0) / CELL).floor() as i32,
+            ((p.z - self.z0) / CELL).floor() as i32,
+        );
         let n = (r / CELL).ceil() as i32;
         let mut best: Option<(f32, usize)> = None;
         for dk in -n..=n {
             for di in -n..=n {
-                let Some(c) = self.idx(ci + di, ck + dk) else { continue };
+                let Some(c) = self.idx(ci + di, ck + dk) else {
+                    continue;
+                };
                 if !self.walkable(c) || (self.floor[c] - p.y).abs() > 0.9 {
                     continue;
                 }
@@ -128,7 +161,9 @@ impl Nav {
         for s in 0..=steps {
             let t = s as f32 / steps as f32;
             let (x, z) = (a.x + d.x * t, a.z + d.y * t);
-            let Some(c) = self.cell_at(x, z) else { return false };
+            let Some(c) = self.cell_at(x, z) else {
+                return false;
+            };
             let y = self.floor[c];
             if y.is_nan() || (y - prev).abs() > STEP {
                 return false;
@@ -140,7 +175,10 @@ impl Nav {
             let si = if fx < 0.5 { -1 } else { 1 };
             let sk = if fz < 0.5 { -1 } else { 1 };
             for (di, dk) in [(si, 0), (0, sk), (si, sk)] {
-                if self.idx(i + di, k + dk).is_none_or(|m| self.floor[m].is_nan()) {
+                if self
+                    .idx(i + di, k + dk)
+                    .is_none_or(|m| self.floor[m].is_nan())
+                {
                     return false;
                 }
             }
@@ -161,7 +199,12 @@ impl Nav {
         let b = self.nearest(to, 1.6)?;
         let ((ai, ak), (bi, bk)) = (self.ik(a), self.ik(b));
         let m = (margin / CELL) as i32;
-        let (i0, i1, k0, k1) = (ai.min(bi) - m, ai.max(bi) + m, ak.min(bk) - m, ak.max(bk) + m);
+        let (i0, i1, k0, k1) = (
+            ai.min(bi) - m,
+            ai.max(bi) + m,
+            ak.min(bk) - m,
+            ak.max(bk) + m,
+        );
         let w = i1 - i0 + 1;
         let h = k1 - k0 + 1;
         if (w * h) as usize > 600_000 {
@@ -207,7 +250,9 @@ impl Nav {
             cells.push(c);
         }
         cells.reverse();
-        let mut pts: Vec<Vec3> = std::iter::once(from).chain(cells.iter().map(|c| self.point(*c))).collect();
+        let mut pts: Vec<Vec3> = std::iter::once(from)
+            .chain(cells.iter().map(|c| self.point(*c)))
+            .collect();
         pts.push(to);
         Some(self.smooth(&pts))
     }
@@ -259,7 +304,10 @@ impl Nav {
         let mut path = vec![from];
         let mut c = from;
         while field.dist[c] > 0 {
-            let next = self.neighbours(c).filter(|(n, _)| field.dist[*n] < field.dist[c]).min_by_key(|(n, cost)| (field.dist[*n], *cost))?;
+            let next = self
+                .neighbours(c)
+                .filter(|(n, _)| field.dist[*n] < field.dist[c])
+                .min_by_key(|(n, cost)| (field.dist[*n], *cost))?;
             c = next.0;
             path.push(c);
             if path.len() > 20_000 {
@@ -293,11 +341,23 @@ impl Nav {
 /// землёй), над которой человек помещается. Верхние этажи не считаются.
 fn standing_floor(level: &LevelColliders, x: f32, z: f32) -> Option<f32> {
     // Над морем (причалы, набережная) мерило — уровень города, а не дно.
-    let natural = crate::level::ground_y(x, z).max(if crate::level::ground_y(x, z) < crate::level::WATER_Y { 0.0 } else { f32::MIN });
+    let natural =
+        crate::level::ground_y(x, z).max(if crate::level::ground_y(x, z) < crate::level::WATER_Y {
+            0.0
+        } else {
+            f32::MIN
+        });
     let hf = level.ground_height(x, z);
     // Выше 0,4 м над землёй — уже не пол, а лавка, ложе или стол.
-    let probe = crate::collision::Aabb::new(Vec3::new(x - 0.01, natural - 1.5, z - 0.01), Vec3::new(x + 0.01, natural + 0.4, z + 0.01));
-    let mut cands: Vec<f32> = level.boxes_touching(probe).map(|b| b.max.y).filter(|y| *y <= natural + 0.4).collect();
+    let probe = crate::collision::Aabb::new(
+        Vec3::new(x - 0.01, natural - 1.5, z - 0.01),
+        Vec3::new(x + 0.01, natural + 0.4, z + 0.01),
+    );
+    let mut cands: Vec<f32> = level
+        .boxes_touching(probe)
+        .map(|b| b.max.y)
+        .filter(|y| *y <= natural + 0.4)
+        .collect();
     if hf.is_finite() {
         cands.push(hf);
     }
@@ -418,7 +478,11 @@ pub struct Spot {
 
 pub fn yaw_to(from: Vec3, to: Vec3) -> f32 {
     let d = to - from;
-    if d.x * d.x + d.z * d.z < 1e-6 { 0.0 } else { (-d.x).atan2(-d.z) }
+    if d.x * d.x + d.z * d.z < 1e-6 {
+        0.0
+    } else {
+        (-d.x).atan2(-d.z)
+    }
 }
 
 /// Направление взгляда по `yaw`.
@@ -589,7 +653,17 @@ impl Plan {
         }
         let i = self.segs.partition_point(|s| s.t0() <= t).saturating_sub(1);
         Some(match &self.segs[i] {
-            Seg::Stay(s) => NpcState { pos: s.pos, yaw: s.yaw, act: s.act, walking: false, walked: 0.0, carry: false, patrol: false, partner: s.partner, lie: s.lie },
+            Seg::Stay(s) => NpcState {
+                pos: s.pos,
+                yaw: s.yaw,
+                act: s.act,
+                walking: false,
+                walked: 0.0,
+                carry: false,
+                patrol: false,
+                partner: s.partner,
+                lie: s.lie,
+            },
             Seg::Walk(w) => {
                 let total = *w.cum.last().unwrap_or(&0.0);
                 let k = ((t - w.t0) / (w.t1 - w.t0).max(1e-3)).clamp(0.0, 1.0) as f32;
@@ -598,11 +672,20 @@ impl Plan {
                 let (a, b) = (w.pts[j - 1], w.pts[j]);
                 let seg = (w.cum[j] - w.cum[j - 1]).max(1e-4);
                 let pos = a.lerp(b, ((d - w.cum[j - 1]) / seg).clamp(0.0, 1.0));
-                NpcState { pos, yaw: yaw_to(a, b), act: if w.carry { Act::Carry } else { Act::Idle }, walking: k < 1.0, walked: d, carry: w.carry, patrol: w.patrol, partner: None, lie: None }
+                NpcState {
+                    pos,
+                    yaw: yaw_to(a, b),
+                    act: if w.carry { Act::Carry } else { Act::Idle },
+                    walking: k < 1.0,
+                    walked: d,
+                    carry: w.carry,
+                    patrol: w.patrol,
+                    partner: None,
+                    lie: None,
+                }
             }
         })
     }
-
 }
 
 /// Планы всех жителей на один день.
@@ -658,7 +741,10 @@ pub fn warm_up() {
         .spawn(|| {
             let started = std::time::Instant::now();
             let town = Town::build(crate::level::layout());
-            info!("Распорядок жителей: город готов за {:.1} с", started.elapsed().as_secs_f32());
+            info!(
+                "Распорядок жителей: город готов за {:.1} с",
+                started.elapsed().as_secs_f32()
+            );
             let _ = TOWN.set(town);
         })
         .ok();
@@ -684,7 +770,9 @@ pub fn prefetch(day: u32) {
 }
 
 fn request(town: &'static Town, day: u32) {
-    let Ok(mut busy) = PLANNING.lock() else { return };
+    let Ok(mut busy) = PLANNING.lock() else {
+        return;
+    };
     if busy.is_some() {
         return;
     }
@@ -721,7 +809,11 @@ fn nav_bounds(residents: &[Resident]) -> (Vec2, Vec2) {
     let (a, b) = (min, max);
     for r in residents {
         // Жители за стенами (усадьбы, деревни) остаются у себя: сетку на всю округу не строим.
-        let inside = crate::level::inside_city(r.pos.x, r.pos.z) || (r.pos.x > a.x - 40.0 && r.pos.x < b.x + 40.0 && r.pos.z > a.y - 40.0 && r.pos.z < b.y + 40.0);
+        let inside = crate::level::inside_city(r.pos.x, r.pos.z)
+            || (r.pos.x > a.x - 40.0
+                && r.pos.x < b.x + 40.0
+                && r.pos.z > a.y - 40.0
+                && r.pos.z < b.y + 40.0);
         if inside {
             add(r.pos, &mut min, &mut max);
         }
@@ -745,15 +837,22 @@ impl Town {
         let mut dest_cells = HashMap::new();
         let mut fields = HashMap::new();
         for d in Dest::ALL {
-            let Some(p) = crate::level::places::place_pos(d.place_id()) else { continue };
-            let Some(c) = nav.nearest(p, 4.0) else { continue };
+            let Some(p) = crate::level::places::place_pos(d.place_id()) else {
+                continue;
+            };
+            let Some(c) = nav.nearest(p, 4.0) else {
+                continue;
+            };
             dest_cells.insert(d, c);
             fields.insert(d, nav.field(&[c]));
         }
         // Главная площадь — мерило связности: дом, откуда не дойти до агоры, считается «вне сетки».
         let home_cell: Vec<Option<usize>> = residents
             .iter()
-            .map(|r| nav.nearest(r.pos, 1.2).filter(|c| fields.get(&Dest::Agora).is_none_or(|f| f.reached(*c))))
+            .map(|r| {
+                nav.nearest(r.pos, 1.2)
+                    .filter(|c| fields.get(&Dest::Agora).is_none_or(|f| f.reached(*c)))
+            })
             .collect();
 
         // Постель: ближайшая к дому на том же этаже (не дальше 9 м), по одной на человека.
@@ -766,8 +865,16 @@ impl Town {
             let best = beds
                 .iter()
                 .enumerate()
-                .filter(|(j, b)| !taken[*j] && (b.pos.y - 0.62 - r.pos.y).abs() < 0.8 && Vec2::new(b.pos.x - r.pos.x, b.pos.z - r.pos.z).length() < 9.0)
-                .min_by(|a, b| a.1.pos.distance_squared(r.pos).total_cmp(&b.1.pos.distance_squared(r.pos)));
+                .filter(|(j, b)| {
+                    !taken[*j]
+                        && (b.pos.y - 0.62 - r.pos.y).abs() < 0.8
+                        && Vec2::new(b.pos.x - r.pos.x, b.pos.z - r.pos.z).length() < 9.0
+                })
+                .min_by(|a, b| {
+                    a.1.pos
+                        .distance_squared(r.pos)
+                        .total_cmp(&b.1.pos.distance_squared(r.pos))
+                });
             if let Some((j, b)) = best {
                 taken[j] = true;
                 bed[i] = Some(*b);
@@ -781,15 +888,32 @@ impl Town {
                 .filter_map(|k| {
                     let ang = k as f32 * std::f32::consts::FRAC_PI_4;
                     let q = a + Vec3::new(ang.cos(), 0.0, ang.sin()) * 0.8;
-                    nav.cell_at(q.x, q.z).filter(|c| nav.walkable(*c) && (nav.floor[*c] - a.y).abs() < 0.3 && fields.get(&Dest::Agora).is_some_and(|f| f.reached(*c))).map(|c| nav.point(c))
+                    nav.cell_at(q.x, q.z)
+                        .filter(|c| {
+                            nav.walkable(*c)
+                                && (nav.floor[*c] - a.y).abs() < 0.3
+                                && fields.get(&Dest::Agora).is_some_and(|f| f.reached(*c))
+                        })
+                        .map(|c| nav.point(c))
                 })
                 .collect();
-            let Some(&first) = sides.first() else { continue };
-            let second = sides.iter().copied().max_by(|x, y| x.distance(first).total_cmp(&y.distance(first))).filter(|s| s.distance(first) > 1.0);
+            let Some(&first) = sides.first() else {
+                continue;
+            };
+            let second = sides
+                .iter()
+                .copied()
+                .max_by(|x, y| x.distance(first).total_cmp(&y.distance(first)))
+                .filter(|s| s.distance(first) > 1.0);
             let mut men: Vec<(f32, usize)> = residents
                 .iter()
                 .enumerate()
-                .filter(|(i, r)| matches!(r.role, Role::Craftsman | Role::Householder) && home_cell[*i].is_some() && job[*i] == Job::Default && r.pos.distance(a) < 45.0)
+                .filter(|(i, r)| {
+                    matches!(r.role, Role::Craftsman | Role::Householder)
+                        && home_cell[*i].is_some()
+                        && job[*i] == Job::Default
+                        && r.pos.distance(a) < 45.0
+                })
                 .map(|(i, r)| (r.pos.distance(a), i))
                 .collect();
             men.sort_by(|x, y| x.0.total_cmp(&y.0));
@@ -803,7 +927,11 @@ impl Town {
         if let (Some(fq), Some(fh)) = (fields.get(&Dest::Quay), fields.get(&Dest::Horrea)) {
             for (i, r) in residents.iter().enumerate() {
                 let Some(c) = home_cell[i] else { continue };
-                if r.role != Role::Householder || job[i] != Job::Default || !fq.reached(c) || fq.meters(c) > 260.0 {
+                if r.role != Role::Householder
+                    || job[i] != Job::Default
+                    || !fq.reached(c)
+                    || fq.meters(c) > 260.0
+                {
                     continue;
                 }
                 job[i] = match hash(i as u64, 0x9047) % 4 {
@@ -816,7 +944,9 @@ impl Town {
 
         let mut spots = HashMap::new();
         for d in Dest::ALL {
-            let (Some(f), Some(&c)) = (fields.get(&d), dest_cells.get(&d)) else { continue };
+            let (Some(f), Some(&c)) = (fields.get(&d), dest_cells.get(&d)) else {
+                continue;
+            };
             spots.insert(d, make_spots(&nav, f, c, d));
         }
         let fishing = fishing_spots(&nav, &fields, &dest_cells);
@@ -826,12 +956,32 @@ impl Town {
             .zip(&home_cell)
             .map(|(r, c)| {
                 c.as_ref()?;
-                let mut near: Vec<(f32, usize)> = street.iter().enumerate().map(|(k, s)| (s.pos.distance(r.pos), k)).filter(|(d, k)| *d < 26.0 && (street[*k].pos.y - r.pos.y).abs() < 1.0).collect();
+                let mut near: Vec<(f32, usize)> = street
+                    .iter()
+                    .enumerate()
+                    .map(|(k, s)| (s.pos.distance(r.pos), k))
+                    .filter(|(d, k)| *d < 26.0 && (street[*k].pos.y - r.pos.y).abs() < 1.0)
+                    .collect();
                 near.sort_by(|a, b| a.0.total_cmp(&b.0));
-                near.into_iter().take(3).map(|(_, k)| k).find(|k| nav.local_path(r.pos, street[*k].pos, 10.0).is_some())
+                near.into_iter()
+                    .take(3)
+                    .map(|(_, k)| k)
+                    .find(|k| nav.local_path(r.pos, street[*k].pos, 10.0).is_some())
             })
             .collect();
-        Town { nav, residents, home_cell, bed, anvil, job, fields, spots, fishing, street, street_of }
+        Town {
+            nav,
+            residents,
+            home_cell,
+            bed,
+            anvil,
+            job,
+            fields,
+            spots,
+            fishing,
+            street,
+            street_of,
+        }
     }
 
     /// Путь от точки `from` к месту `d` (через поле), заканчивая в `to` (место у цели).
@@ -839,10 +989,16 @@ impl Town {
         let f = self.fields.get(&d)?;
         let start = self.nav.nearest(from, 2.0).filter(|c| f.reached(*c))?;
         let cells = self.nav.descend(f, start)?;
-        let mut pts: Vec<Vec3> = std::iter::once(from).chain(cells.iter().map(|c| self.nav.point(*c))).collect();
+        let mut pts: Vec<Vec3> = std::iter::once(from)
+            .chain(cells.iter().map(|c| self.nav.point(*c)))
+            .collect();
         // Последний участок: от центра места к своему месту — по полю этого места обратно не
         // спустишься, поэтому спрямляем с конца: ищем самую раннюю точку пути, откуда видно `to`.
-        let cut = (0..pts.len()).rev().take(400).filter(|&k| self.nav.straight(pts[k], to)).last();
+        let cut = (0..pts.len())
+            .rev()
+            .take(400)
+            .filter(|&k| self.nav.straight(pts[k], to))
+            .last();
         if let Some(k) = cut {
             pts.truncate(k + 1);
         }
@@ -851,7 +1007,13 @@ impl Town {
     }
 
     /// Путь между двумя точками, где цель — место `d` или дом (тогда — обратный путь из дома).
-    fn route(&self, from: Vec3, from_dest: Option<Dest>, to: Vec3, to_dest: Option<Dest>) -> Option<Vec<Vec3>> {
+    fn route(
+        &self,
+        from: Vec3,
+        from_dest: Option<Dest>,
+        to: Vec3,
+        to_dest: Option<Dest>,
+    ) -> Option<Vec<Vec3>> {
         if from.distance(to) < 0.05 {
             return Some(vec![from, to]);
         }
@@ -881,15 +1043,20 @@ impl Town {
 
     /// План на день для всех жителей.
     pub fn plan_day(&self, day: u32) -> DayPlans {
-        let wishes: Vec<Vec<Wish>> = (0..self.residents.len()).map(|i| self.wishes(i, day)).collect();
+        let wishes: Vec<Vec<Wish>> = (0..self.residents.len())
+            .map(|i| self.wishes(i, day))
+            .collect();
         let places = self.allocate(day, &wishes);
-        let people = (0..self.residents.len()).map(|i| self.build_plan(i, &wishes[i], &places[i])).collect();
+        let people = (0..self.residents.len())
+            .map(|i| self.build_plan(i, &wishes[i], &places[i]))
+            .collect();
         DayPlans { day, people }
     }
 
     /// Распределяет места: собеседники встают парами лицом к лицу, остальные — порознь.
     fn allocate(&self, day: u32, wishes: &[Vec<Wish>]) -> Vec<Vec<Option<(Spot, Option<u16>)>>> {
-        let mut out: Vec<Vec<Option<(Spot, Option<u16>)>>> = wishes.iter().map(|w| vec![None; w.len()]).collect();
+        let mut out: Vec<Vec<Option<(Spot, Option<u16>)>>> =
+            wishes.iter().map(|w| vec![None; w.len()]).collect();
         // (место) -> посетители: (время прихода, ухода, житель, номер желания)
         let mut visits: HashMap<Key, Vec<(f32, f32, usize, usize)>> = HashMap::new();
         for (i, ws) in wishes.iter().enumerate() {
@@ -918,7 +1085,12 @@ impl Town {
                 Key::Street(k) => {
                     // Своё место и соседние (не дальше 14 м): у одного дома тесно.
                     let c = self.street[k].pos;
-                    let mut n: Vec<(f32, Spot)> = self.street.iter().map(|s| (s.pos.distance(c), *s)).filter(|(d, _)| *d < 14.0).collect();
+                    let mut n: Vec<(f32, Spot)> = self
+                        .street
+                        .iter()
+                        .map(|s| (s.pos.distance(c), *s))
+                        .filter(|(d, _)| *d < 14.0)
+                        .collect();
                     n.sort_by(|a, b| a.0.total_cmp(&b.0));
                     near = n.into_iter().map(|(_, s)| s).collect();
                     (near.as_slice(), 1000 + k as u64)
@@ -929,21 +1101,38 @@ impl Town {
             let mut busy = vec![[0.0f32; 2]; spots.len()];
             // Ждущий собеседника: (место, житель, номер желания, до какого часа там будет).
             let mut waiting: Vec<(usize, usize, usize, f32)> = Vec::new();
-            let start = if matches!(key, Key::Street(_)) { 0 } else { (hash(day as u64, d) % spots.len() as u64) as usize };
+            let start = if matches!(key, Key::Street(_)) {
+                0
+            } else {
+                (hash(day as u64, d) % spots.len() as u64) as usize
+            };
             for (at, end, i, k) in v {
                 let talk = wishes[i][k].act == Act::Talk;
-                if talk && let Some(w) = waiting.iter().position(|(_, j, _, until)| *j != i && *until > at + 0.3) {
+                if talk
+                    && let Some(w) = waiting
+                        .iter()
+                        .position(|(_, j, _, until)| *j != i && *until > at + 0.3)
+                {
                     let (s, j, kj, until) = waiting.remove(w);
                     busy[s][1] = end;
                     busy[s][0] = busy[s][0].max(until);
                     let spot = spots[s];
-                    out[i][k] = Some((Spot { pos: spot.partner, yaw: yaw_to(spot.partner, spot.pos), partner: spot.pos }, Some(j as u16)));
+                    out[i][k] = Some((
+                        Spot {
+                            pos: spot.partner,
+                            yaw: yaw_to(spot.partner, spot.pos),
+                            partner: spot.pos,
+                        },
+                        Some(j as u16),
+                    ));
                     if let Some((sp, _)) = out[j][kj] {
                         out[j][kj] = Some((sp, Some(i as u16)));
                     }
                     continue;
                 }
-                let free = (0..spots.len()).map(|n| (start + n) % spots.len()).find(|&s| busy[s][0] <= at && busy[s][1] <= at);
+                let free = (0..spots.len())
+                    .map(|n| (start + n) % spots.len())
+                    .find(|&s| busy[s][0] <= at && busy[s][1] <= at);
                 let s = free.unwrap_or_else(|| (start + i) % spots.len());
                 busy[s][0] = end;
                 out[i][k] = Some((spots[s], None));
@@ -955,7 +1144,12 @@ impl Town {
         out
     }
 
-    fn build_plan(&self, i: usize, wishes: &[Wish], places: &[Option<(Spot, Option<u16>)>]) -> Plan {
+    fn build_plan(
+        &self,
+        i: usize,
+        wishes: &[Wish],
+        places: &[Option<(Spot, Option<u16>)>],
+    ) -> Plan {
         let r = &self.residents[i];
         let mut segs = Vec::new();
         let home = r.pos;
@@ -972,11 +1166,26 @@ impl Town {
                     _ => Act::Idle,
                 };
                 let (pos, yaw, act, lie) = match (act, self.bed[i]) {
-                    (Act::Sleep | Act::Lie, Some(b)) => (home, yaw_to(Vec3::ZERO, b.along), act, Some(b.pos)),
+                    (Act::Sleep | Act::Lie, Some(b)) => {
+                        (home, yaw_to(Vec3::ZERO, b.along), act, Some(b.pos))
+                    }
                     (Act::Sleep, None) => (home, r.yaw, Act::Away, None),
-                    _ => (home, r.yaw, if act == Act::Lie { Act::Idle } else { act }, None),
+                    _ => (
+                        home,
+                        r.yaw,
+                        if act == Act::Lie { Act::Idle } else { act },
+                        None,
+                    ),
                 };
-                segs.push(Seg::Stay(Stay { t0, t1, pos, yaw, act, partner: None, lie }));
+                segs.push(Seg::Stay(Stay {
+                    t0,
+                    t1,
+                    pos,
+                    yaw,
+                    act,
+                    partner: None,
+                    lie,
+                }));
             }
             return Plan { segs };
         };
@@ -987,7 +1196,8 @@ impl Town {
         };
         // Сейчас: где стоит и у какого места.
         let first_bed = matches!(wishes.first().map(|w| w.act), Some(Act::Sleep));
-        let (mut at_pos, mut at_dest): (Vec3, Option<Dest>) = (if first_bed { self.bed_spot(i).0 } else { home }, None);
+        let (mut at_pos, mut at_dest): (Vec3, Option<Dest>) =
+            (if first_bed { self.bed_spot(i).0 } else { home }, None);
         // Лежит ли в постели на этом шаге (середина ложа).
         let mut lie: Option<Vec3>;
         let mut t = 0.0f64;
@@ -1001,22 +1211,57 @@ impl Town {
                 Target::Bed => {
                     let (p, y, act, l) = self.bed_spot(i);
                     lie = l;
-                    (p, y, None, None, if w.act == Act::Sleep { act } else if l.is_some() { w.act } else { Act::Idle })
+                    (
+                        p,
+                        y,
+                        None,
+                        None,
+                        if w.act == Act::Sleep {
+                            act
+                        } else if l.is_some() {
+                            w.act
+                        } else {
+                            Act::Idle
+                        },
+                    )
                 }
                 Target::Street => match places.get(k).copied().flatten() {
-                    Some((s, partner)) => (s.pos, s.yaw, None, partner, if w.act == Act::Talk && partner.is_none() { Act::Idle } else { w.act }),
+                    Some((s, partner)) => (
+                        s.pos,
+                        s.yaw,
+                        None,
+                        partner,
+                        if w.act == Act::Talk && partner.is_none() {
+                            Act::Idle
+                        } else {
+                            w.act
+                        },
+                    ),
                     None => (home, r.yaw, None, None, Act::Idle),
                 },
                 Target::Anvil => match self.anvil[i] {
                     Some((p, a)) => (p, yaw_to(p, a), None, None, Act::Hammer),
                     None => (home, r.yaw, None, None, Act::Work),
                 },
-                Target::Fishing => match self.fishing.get((hash(i as u64, 0xF15) % self.fishing.len().max(1) as u64) as usize) {
+                Target::Fishing => match self
+                    .fishing
+                    .get((hash(i as u64, 0xF15) % self.fishing.len().max(1) as u64) as usize)
+                {
                     Some(s) => (s.pos, s.yaw, Some(Dest::Quay), None, Act::Fish),
                     None => (home, r.yaw, None, None, Act::Idle),
                 },
                 Target::Dest(d) => match places.get(k).copied().flatten() {
-                    Some((s, partner)) => (s.pos, s.yaw, Some(d), partner, if w.act == Act::Talk && partner.is_none() { Act::Idle } else { w.act }),
+                    Some((s, partner)) => (
+                        s.pos,
+                        s.yaw,
+                        Some(d),
+                        partner,
+                        if w.act == Act::Talk && partner.is_none() {
+                            Act::Idle
+                        } else {
+                            w.act
+                        },
+                    ),
                     None => (home, r.yaw, None, None, Act::Idle),
                 },
             };
@@ -1026,7 +1271,10 @@ impl Town {
             }
             // Дорога.
             if pos.distance(at_pos) > 0.3 {
-                let path = self.route(at_pos, at_dest, pos, dest).or_else(|| self.route(at_pos, at_dest, home, None).map(|_| vec![at_pos, pos]));
+                let path = self.route(at_pos, at_dest, pos, dest).or_else(|| {
+                    self.route(at_pos, at_dest, home, None)
+                        .map(|_| vec![at_pos, pos])
+                });
                 let Some(path) = path else {
                     continue;
                 };
@@ -1036,21 +1284,37 @@ impl Town {
                 }
                 let len = *cum.last().unwrap();
                 let patrol = w.act == Act::Guard && dest.is_some();
-                let mut t1 = start + Self::walk_time(len, if patrol { speed * 0.85 } else { speed });
+                let mut t1 =
+                    start + Self::walk_time(len, if patrol { speed * 0.85 } else { speed });
                 // Домой к ночи успевают любой ценой (а то в полночь план начнётся сначала).
                 // Дорога домой тоже: дальше по плану только сон дома, а затянувшийся обход
                 // иначе застал бы солдата в полночь посреди улицы.
                 if (k + 1 == wishes.len() || pos.distance(home) < 1.0) && t1 > DAY - 120.0 {
                     t1 = (DAY - 120.0).max(start + 1.0);
                 }
-                segs.push(Seg::Walk(Walk { t0: start, t1, pts: path, cum, carry: w.carry, patrol }));
+                segs.push(Seg::Walk(Walk {
+                    t0: start,
+                    t1,
+                    pts: path,
+                    cum,
+                    carry: w.carry,
+                    patrol,
+                }));
                 t = t1;
             } else {
                 t = start;
             }
             let t1 = next_t.max(t + 1.0).min(DAY);
             if t1 > t {
-                segs.push(Seg::Stay(Stay { t0: t, t1, pos, yaw, act, partner, lie }));
+                segs.push(Seg::Stay(Stay {
+                    t0: t,
+                    t1,
+                    pos,
+                    yaw,
+                    act,
+                    partner,
+                    lie,
+                }));
                 t = t1;
             }
             at_pos = pos;
@@ -1061,7 +1325,18 @@ impl Town {
         }
         if let Some(Seg::Walk(_)) = segs.first() {
             // День всегда начинается на месте (на случай, если первым шагом оказалась дорога).
-            segs.insert(0, Seg::Stay(Stay { t0: 0.0, t1: 0.0, pos: home, yaw: r.yaw, act: Act::Idle, partner: None, lie: None }));
+            segs.insert(
+                0,
+                Seg::Stay(Stay {
+                    t0: 0.0,
+                    t1: 0.0,
+                    pos: home,
+                    yaw: r.yaw,
+                    act: Act::Idle,
+                    partner: None,
+                    lie: None,
+                }),
+            );
         }
         Plan { segs }
     }
@@ -1090,7 +1365,10 @@ impl Town {
 
     /// Ближайшее из мест.
     fn nearest_of(&self, i: usize, ds: &[Dest]) -> Option<Dest> {
-        ds.iter().copied().filter(|d| self.dist_home(i, *d).is_finite()).min_by(|a, b| self.dist_home(i, *a).total_cmp(&self.dist_home(i, *b)))
+        ds.iter()
+            .copied()
+            .filter(|d| self.dist_home(i, *d).is_finite())
+            .min_by(|a, b| self.dist_home(i, *a).total_cmp(&self.dist_home(i, *b)))
     }
 }
 
@@ -1103,13 +1381,21 @@ fn make_spots(nav: &Nav, f: &Field, c: usize, d: Dest) -> Vec<Spot> {
     let mut cand = Vec::new();
     for dk in -n..=n {
         for di in -n..=n {
-            let Some(m) = nav.idx(ci + di, ck + dk) else { continue };
+            let Some(m) = nav.idx(ci + di, ck + dk) else {
+                continue;
+            };
             let p = nav.point(m);
-            if !nav.walkable(m) || !f.reached(m) || p.distance(center) > r || f.meters(m) > r * 2.0 {
+            if !nav.walkable(m) || !f.reached(m) || p.distance(center) > r || f.meters(m) > r * 2.0
+            {
                 continue;
             }
             // Просторно вокруг (не у самой стены).
-            let open = (-2..=2).all(|a| (-2..=2).all(|b| nav.idx(ci + di + a, ck + dk + b).is_some_and(|q| nav.walkable(q) && (nav.floor[q] - p.y).abs() < 0.3)));
+            let open = (-2..=2).all(|a| {
+                (-2..=2).all(|b| {
+                    nav.idx(ci + di + a, ck + dk + b)
+                        .is_some_and(|q| nav.walkable(q) && (nav.floor[q] - p.y).abs() < 0.3)
+                })
+            });
             if open {
                 cand.push(m);
             }
@@ -1119,21 +1405,38 @@ fn make_spots(nav: &Nav, f: &Field, c: usize, d: Dest) -> Vec<Spot> {
     let mut out: Vec<Spot> = Vec::new();
     for m in cand {
         let p = nav.point(m);
-        if out.iter().any(|s| s.pos.distance(p) < 2.3 || s.partner.distance(p) < 1.6) {
+        if out
+            .iter()
+            .any(|s| s.pos.distance(p) < 2.3 || s.partner.distance(p) < 1.6)
+        {
             continue;
         }
         // Собеседник — в 1,3 м, лицом друг к другу.
         let a = unit(m as u64, 7) * std::f32::consts::TAU;
         let dir = Vec3::new(a.cos(), 0.0, a.sin());
         let q = p + dir * 1.3;
-        let Some(qc) = nav.nearest(q, 0.3) else { continue };
+        let Some(qc) = nav.nearest(q, 0.3) else {
+            continue;
+        };
         let q = nav.point(qc);
-        if out.iter().any(|s| s.pos.distance(q) < 1.6 || s.partner.distance(q) < 1.6) || !nav.straight(p, q) {
+        if out
+            .iter()
+            .any(|s| s.pos.distance(q) < 1.6 || s.partner.distance(q) < 1.6)
+            || !nav.straight(p, q)
+        {
             continue;
         }
         // Молятся лицом на восток (к алтарю), остальные — друг к другу.
-        let yaw = if matches!(d, Dest::Basilica | Dest::ChurchWest) { yaw_to(Vec3::ZERO, Vec3::X) } else { yaw_to(p, q) };
-        out.push(Spot { pos: p, yaw, partner: q });
+        let yaw = if matches!(d, Dest::Basilica | Dest::ChurchWest) {
+            yaw_to(Vec3::ZERO, Vec3::X)
+        } else {
+            yaw_to(p, q)
+        };
+        out.push(Spot {
+            pos: p,
+            yaw,
+            partner: q,
+        });
         if out.len() >= 48 {
             break;
         }
@@ -1146,13 +1449,30 @@ fn street_spots(nav: &Nav, agora: Option<&Field>) -> Vec<Spot> {
     let Some(f) = agora else { return Vec::new() };
     let step = (7.0 / CELL) as i32;
     let mut out = Vec::new();
-    let open = |i: i32, k: i32, y: f32| (-2..=2).all(|a| (-2..=2).all(|b| nav.idx(i + a, k + b).is_some_and(|q| nav.walkable(q) && (nav.floor[q] - y).abs() < 0.25)));
+    let open = |i: i32, k: i32, y: f32| {
+        (-2..=2).all(|a| {
+            (-2..=2).all(|b| {
+                nav.idx(i + a, k + b)
+                    .is_some_and(|q| nav.walkable(q) && (nav.floor[q] - y).abs() < 0.25)
+            })
+        })
+    };
     for bk in (0..nav.nz).step_by(step as usize) {
         for bi in (0..nav.nx).step_by(step as usize) {
             // В квадрате ищем открытую клетку, начиная от середины.
             let mut found = None;
             'search: for r in 0..step / 2 {
-                for (di, dk) in [(0, 0), (r, 0), (-r, 0), (0, r), (0, -r), (r, r), (-r, -r), (r, -r), (-r, r)] {
+                for (di, dk) in [
+                    (0, 0),
+                    (r, 0),
+                    (-r, 0),
+                    (0, r),
+                    (0, -r),
+                    (r, r),
+                    (-r, -r),
+                    (r, -r),
+                    (-r, r),
+                ] {
                     let (i, k) = (bi + step / 2 + di, bk + step / 2 + dk);
                     let Some(c) = nav.idx(i, k) else { continue };
                     if nav.walkable(c) && f.reached(c) && open(i, k, nav.floor[c]) {
@@ -1165,10 +1485,16 @@ fn street_spots(nav: &Nav, agora: Option<&Field>) -> Vec<Spot> {
             let p = nav.point(c);
             let a = unit(c as u64, 11) * std::f32::consts::TAU;
             let q = p + Vec3::new(a.cos(), 0.0, a.sin()) * 1.3;
-            let Some(qc) = nav.nearest(q, 0.3) else { continue };
+            let Some(qc) = nav.nearest(q, 0.3) else {
+                continue;
+            };
             let q = nav.point(qc);
             if nav.straight(p, q) {
-                out.push(Spot { pos: p, yaw: yaw_to(p, q), partner: q });
+                out.push(Spot {
+                    pos: p,
+                    yaw: yaw_to(p, q),
+                    partner: q,
+                });
             }
         }
     }
@@ -1176,8 +1502,14 @@ fn street_spots(nav: &Nav, agora: Option<&Field>) -> Vec<Spot> {
 }
 
 /// Края набережной у воды: стоят лицом к морю.
-fn fishing_spots(nav: &Nav, fields: &HashMap<Dest, Field>, cells: &HashMap<Dest, usize>) -> Vec<Spot> {
-    let (Some(f), Some(&c)) = (fields.get(&Dest::Quay), cells.get(&Dest::Quay)) else { return Vec::new() };
+fn fishing_spots(
+    nav: &Nav,
+    fields: &HashMap<Dest, Field>,
+    cells: &HashMap<Dest, usize>,
+) -> Vec<Spot> {
+    let (Some(f), Some(&c)) = (fields.get(&Dest::Quay), cells.get(&Dest::Quay)) else {
+        return Vec::new();
+    };
     let center = nav.point(c);
     let water = crate::level::WATER_Y;
     let mut out: Vec<Spot> = Vec::new();
@@ -1186,7 +1518,9 @@ fn fishing_spots(nav: &Nav, fields: &HashMap<Dest, Field>, cells: &HashMap<Dest,
     let mut cand = Vec::new();
     for dk in -n..=n {
         for di in -n..=n {
-            let Some(m) = nav.idx(ci + di, ck + dk) else { continue };
+            let Some(m) = nav.idx(ci + di, ck + dk) else {
+                continue;
+            };
             if !nav.walkable(m) || !f.reached(m) {
                 continue;
             }
@@ -1197,8 +1531,11 @@ fn fishing_spots(nav: &Nav, fields: &HashMap<Dest, Field>, cells: &HashMap<Dest,
                 // У края бывает бортик: вода в пределах пары метров.
                 let deep = [1.2f32, 1.8, 2.4].iter().any(|d| {
                     let q = p + dir * *d;
-                    crate::level::ground_y(q.x, q.z) < water && nav.cell_at(q.x, q.z).is_none_or(|qc| !nav.walkable(qc))
-                }) && nav.cell_at(p.x + dir.x * 0.7, p.z + dir.z * 0.7).is_none_or(|qc| !f.reached(qc) || !nav.walkable(qc));
+                    crate::level::ground_y(q.x, q.z) < water
+                        && nav.cell_at(q.x, q.z).is_none_or(|qc| !nav.walkable(qc))
+                }) && nav
+                    .cell_at(p.x + dir.x * 0.7, p.z + dir.z * 0.7)
+                    .is_none_or(|qc| !f.reached(qc) || !nav.walkable(qc));
                 let q = p + dir * 1.2;
                 if deep && p.y > water + 0.3 {
                     cand.push((m, yaw_to(p, q), p.distance(center)));
@@ -1211,7 +1548,11 @@ fn fishing_spots(nav: &Nav, fields: &HashMap<Dest, Field>, cells: &HashMap<Dest,
     for (m, yaw, _) in cand {
         let p = nav.point(m);
         if out.iter().all(|s| s.pos.distance(p) > 3.0) {
-            out.push(Spot { pos: p, yaw, partner: p });
+            out.push(Spot {
+                pos: p,
+                yaw,
+                partner: p,
+            });
         }
         if out.len() >= 24 {
             break;
@@ -1261,11 +1602,21 @@ struct Wish {
 }
 
 fn w(at: f32, target: Target, act: Act) -> Wish {
-    Wish { at, target, act, carry: false }
+    Wish {
+        at,
+        target,
+        act,
+        carry: false,
+    }
 }
 
 fn carry(at: f32, target: Target) -> Wish {
-    Wish { at, target, act: Act::Work, carry: true }
+    Wish {
+        at,
+        target,
+        act: Act::Work,
+        carry: true,
+    }
 }
 
 /// Чем занят на работе (по роли).
@@ -1305,7 +1656,13 @@ impl Town {
         let near = |d: Option<Dest>, max: f32| d.filter(|d| self.dist_home(i, *d) < max);
         let street = self.street_of[i].is_some();
         // Поболтать с соседями у дома (если есть где), иначе — дома.
-        let doorstep = |at: f32| if street { w(at, Target::Street, Talk) } else { w(at, Home, Idle) };
+        let doorstep = |at: f32| {
+            if street {
+                w(at, Target::Street, Talk)
+            } else {
+                w(at, Home, Idle)
+            }
+        };
         // Вечерний досуг (17–19.5): куда пойти.
         let leisure = |k: u64, from: f32, men: bool| -> Wish {
             let p = pick(k);
@@ -1346,7 +1703,10 @@ impl Town {
                 v.push(w(wake + 0.4, D(c), Pray));
             }
         };
-        let men = !matches!(r.role, Role::Housewife | Role::Weaver | Role::Cook | Role::Child);
+        let men = !matches!(
+            r.role,
+            Role::Housewife | Role::Weaver | Role::Cook | Role::Child
+        );
         let role = match self.job[i] {
             Job::Smith => Role::Craftsman,
             Job::Porter | Job::Fisher => Role::Sailor,
@@ -1355,10 +1715,20 @@ impl Town {
         let work = work_act(role);
         let mut v = vec![w(0.0, Bed, Sleep)];
         match role {
-            Role::Craftsman | Role::Weaver | Role::Cook | Role::Shopkeeper | Role::Bather | Role::Scholar | Role::Student => {
+            Role::Craftsman
+            | Role::Weaver
+            | Role::Cook
+            | Role::Shopkeeper
+            | Role::Bather
+            | Role::Scholar
+            | Role::Student => {
                 v.push(w(wake, Home, Idle));
                 devout_morning(&mut v);
-                let at_work = if self.anvil[i].is_some() { Target::Anvil } else { Home };
+                let at_work = if self.anvil[i].is_some() {
+                    Target::Anvil
+                } else {
+                    Home
+                };
                 v.push(w(7.2 + j(4), at_work, work));
                 v.push(w(12.0 + j(5), Home, Eat));
                 if r.role == Role::Scholar && self.dist_home(i, Dest::Library) < 300.0 {
@@ -1387,7 +1757,11 @@ impl Town {
                 v.push(w(wake + 0.5, Home, Idle));
                 devout_morning(&mut v);
                 match near(market, 400.0) {
-                    Some(m) if !rain(8.0, 10.5) => v.push(w(8.0 + j(4), D(m), if pick(10) < 0.6 { Talk } else { Browse })),
+                    Some(m) if !rain(8.0, 10.5) => v.push(w(
+                        8.0 + j(4),
+                        D(m),
+                        if pick(10) < 0.6 { Talk } else { Browse },
+                    )),
                     _ if !rain(8.0, 10.5) => v.push(doorstep(8.0 + j(4))),
                     _ => {}
                 }
@@ -1441,7 +1815,9 @@ impl Town {
                 v.push(w(6.8 + j(1), Home, Idle));
                 // Дети играют на улице с соседскими, постарше — бегают на агору.
                 match near(market, 260.0) {
-                    Some(m) if !rain(9.0, 11.5) && pick(13) < 0.4 => v.push(w(9.0 + j(4), D(m), Talk)),
+                    Some(m) if !rain(9.0, 11.5) && pick(13) < 0.4 => {
+                        v.push(w(9.0 + j(4), D(m), Talk))
+                    }
                     _ if !rain(9.0, 11.5) => v.push(doorstep(9.0 + j(4))),
                     _ => {}
                 }
@@ -1456,7 +1832,8 @@ impl Town {
             Role::Priest => {
                 v.push(w(4.6, Home, Preach)); // утреня
                 v.push(w(7.0, Home, Pray));
-                if let Some(m) = near(market, 350.0).filter(|_| pick(12) < 0.4 && !rain(9.5, 11.0)) {
+                if let Some(m) = near(market, 350.0).filter(|_| pick(12) < 0.4 && !rain(9.5, 11.0))
+                {
                     v.push(w(9.5 + j(4), D(m), Talk));
                 }
                 v.push(w(11.0, Home, Pray));
@@ -1491,8 +1868,12 @@ impl Town {
             }
             Role::Sailor => {
                 // Половина — носильщики (амфоры с набережной в хорреи), половина — рыбаки.
-                let porter = self.job[i] == Job::Porter || (self.job[i] == Job::Default && hash(i as u64, 0x5A11) % 2 == 0);
-                if porter && self.dist_home(i, Dest::Horrea) < 400.0 && self.dist_home(i, Dest::Quay) < 400.0 {
+                let porter = self.job[i] == Job::Porter
+                    || (self.job[i] == Job::Default && hash(i as u64, 0x5A11) % 2 == 0);
+                if porter
+                    && self.dist_home(i, Dest::Horrea) < 400.0
+                    && self.dist_home(i, Dest::Quay) < 400.0
+                {
                     v.push(w(wake, Home, Idle));
                     let mut h = 6.5 + j(4).abs();
                     while h < 17.5 {
@@ -1534,9 +1915,11 @@ impl Town {
         v.push(w(sleep, Bed, Sleep));
         v.sort_by(|a, b| a.at.total_cmp(&b.at));
         // Желания с одинаковым временем — оставляем последнее.
-        v.dedup_by(|b, a| (b.at - a.at).abs() < 0.05 && {
-            *a = *b;
-            true
+        v.dedup_by(|b, a| {
+            (b.at - a.at).abs() < 0.05 && {
+                *a = *b;
+                true
+            }
         });
         v
     }
@@ -1566,7 +1949,10 @@ impl Town {
                 patrol(&mut v, 6.0, 14.0);
                 v.push(w(14.3, Home, Eat));
                 v.push(w(15.0, Home, Idle));
-                if let Some(t) = self.nearest_of(i, &[Dest::Tavern, Dest::TavernPort]).filter(|t| self.dist_home(i, *t) < 300.0) {
+                if let Some(t) = self
+                    .nearest_of(i, &[Dest::Tavern, Dest::TavernPort])
+                    .filter(|t| self.dist_home(i, *t) < 300.0)
+                {
                     v.push(w(18.0, D(t), Drink));
                 }
                 v.push(w(20.0, Home, Idle));
@@ -1597,8 +1983,20 @@ impl Town {
 
     /// Обход: ворота, агора, порт — каждому солдату со своего места.
     fn patrol_route(&self, i: usize) -> Vec<Dest> {
-        let all = [Dest::MainGate, Dest::Agora, Dest::Basilica, Dest::PortGate, Dest::Quay, Dest::Horrea, Dest::SouthGate, Dest::Thermae];
-        let mut r: Vec<Dest> = all.into_iter().filter(|d| self.dist_home(i, *d) < 500.0).collect();
+        let all = [
+            Dest::MainGate,
+            Dest::Agora,
+            Dest::Basilica,
+            Dest::PortGate,
+            Dest::Quay,
+            Dest::Horrea,
+            Dest::SouthGate,
+            Dest::Thermae,
+        ];
+        let mut r: Vec<Dest> = all
+            .into_iter()
+            .filter(|d| self.dist_home(i, *d) < 500.0)
+            .collect();
         if r.is_empty() {
             return r;
         }
@@ -1634,8 +2032,12 @@ impl Fright {
     /// Удар в точке `at` в момент `now` (игровые секунды от полуночи).
     pub fn alarm(&mut self, plans: &DayPlans, at: Vec3, now: f64) {
         for (i, p) in plans.people.iter().enumerate() {
-            let Some(s) = self.state(p, i, now) else { continue };
-            if s.pos.distance(at) > FRIGHT_RANGE || matches!(s.act, Act::Sleep | Act::Away | Act::Lie) {
+            let Some(s) = self.state(p, i, now) else {
+                continue;
+            };
+            if s.pos.distance(at) > FRIGHT_RANGE
+                || matches!(s.act, Act::Sleep | Act::Away | Act::Lie)
+            {
                 continue;
             }
             let until = now + FRIGHT_SECS * TIME_SCALE;
@@ -1667,7 +2069,12 @@ impl Fright {
             self.lag.clear();
             return;
         }
-        let done: Vec<(usize, f64)> = self.scared.iter().filter(|(_, (_, until))| now >= *until).map(|(i, (from, until))| (*i, until - from)).collect();
+        let done: Vec<(usize, f64)> = self
+            .scared
+            .iter()
+            .filter(|(_, (_, until))| now >= *until)
+            .map(|(i, (from, until))| (*i, until - from))
+            .collect();
         for (i, d) in done {
             self.scared.remove(&i);
             *self.lag.entry(i).or_default() += d;
@@ -1684,11 +2091,19 @@ pub struct LifeServerPlugin;
 impl Plugin for LifeServerPlugin {
     fn build(&self, app: &mut App) {
         warm_up();
-        app.init_resource::<Fright>().add_systems(Update, move_residents_server.before(crate::civil_server::civil_tick));
+        app.init_resource::<Fright>().add_systems(
+            Update,
+            move_residents_server.before(crate::civil_server::civil_tick),
+        );
     }
 }
 
-fn move_residents_server(clock: Res<crate::world_clock::WorldClock>, mut civil: ResMut<crate::civil_server::CivilWorld>, level: Res<LevelColliders>, mut fright: ResMut<Fright>) {
+fn move_residents_server(
+    clock: Res<crate::world_clock::WorldClock>,
+    mut civil: ResMut<crate::civil_server::CivilWorld>,
+    level: Res<LevelColliders>,
+    mut fright: ResMut<Fright>,
+) {
     let day = clock.day();
     let now = clock.of_day();
     if clock.hour() > 18.0 {
@@ -1700,19 +2115,26 @@ fn move_residents_server(clock: Res<crate::world_clock::WorldClock>, mut civil: 
     }
     fright.settle(day, now);
     for (i, plan) in plans.people.iter().enumerate() {
-        let Some(p) = civil.people.get_mut(i) else { break };
+        let Some(p) = civil.people.get_mut(i) else {
+            break;
+        };
         // Схватился за оружие и бегает бойцом (`civil_server::rally`): им правит сервер боя.
         if p.role.is_none() || !p.alive() || p.rallied.is_some() {
             continue;
         }
-        let Some(s) = fright.state(plan, i, now) else { continue };
+        let Some(s) = fright.state(plan, i, now) else {
+            continue;
+        };
         p.act = s.act;
         let anchor = town().map_or(p.pos, |t| t.residents[i].pos);
         p.pos = s.pos;
         p.yaw = s.yaw;
         // Тело-коробка стоит в доме: пока житель не там (или спит), она не мешает.
         // (Ставим каждый тик: так и вернувшийся на место погибшего сразу получает верное тело.)
-        level.set_body_gone(i, s.pos.distance(anchor) > 0.4 || matches!(s.act, Act::Sleep | Act::Away));
+        level.set_body_gone(
+            i,
+            s.pos.distance(anchor) > 0.4 || matches!(s.act, Act::Sleep | Act::Away),
+        );
     }
 }
 
@@ -1735,10 +2157,22 @@ mod tests {
         let t0 = std::time::Instant::now();
         let town = test_town();
         let walk = town.nav.floor.iter().filter(|f| !f.is_nan()).count();
-        eprintln!("сетка {}x{} ({} проходимых) за {:.1} с", town.nav.nx, town.nav.nz, walk, t0.elapsed().as_secs_f32());
+        eprintln!(
+            "сетка {}x{} ({} проходимых) за {:.1} с",
+            town.nav.nx,
+            town.nav.nz,
+            walk,
+            t0.elapsed().as_secs_f32()
+        );
         let on = town.home_cell.iter().filter(|c| c.is_some()).count();
         let beds = town.bed.iter().filter(|b| b.is_some()).count();
-        eprintln!("жителей {}, на сетке {}, с постелью {}, рыбацких мест {}", town.residents.len(), on, beds, town.fishing.len());
+        eprintln!(
+            "жителей {}, на сетке {}, с постелью {}, рыбацких мест {}",
+            town.residents.len(),
+            on,
+            beds,
+            town.fishing.len()
+        );
         let mut roles: HashMap<String, (usize, usize)> = HashMap::new();
         for (i, r) in town.residents.iter().enumerate() {
             let e = roles.entry(format!("{:?}", r.role)).or_default();
@@ -1753,10 +2187,22 @@ mod tests {
         let plans = town.plan_day(3);
         eprintln!("план дня за {:.2} с", t1.elapsed().as_secs_f32());
         // Больше половины жителей за день куда-то ходят.
-        let walkers = plans.people.iter().filter(|p| p.segs.iter().any(|s| matches!(s, Seg::Walk(_)))).count();
+        let walkers = plans
+            .people
+            .iter()
+            .filter(|p| p.segs.iter().any(|s| matches!(s, Seg::Walk(_))))
+            .count();
         eprintln!("ходят {walkers}");
         assert!(walkers * 3 >= on, "ходят {walkers} из {on}");
-        let talkers = plans.people.iter().filter(|p| p.segs.iter().any(|s| matches!(s, Seg::Stay(x) if x.partner.is_some()))).count();
+        let talkers = plans
+            .people
+            .iter()
+            .filter(|p| {
+                p.segs
+                    .iter()
+                    .any(|s| matches!(s, Seg::Stay(x) if x.partner.is_some()))
+            })
+            .count();
         eprintln!("беседуют {talkers}");
         assert!(talkers >= 6);
     }
@@ -1776,7 +2222,11 @@ mod tests {
                 assert!(t0 + 1e-6 >= t, "житель {i}: время идёт назад");
                 assert!(t1 >= t0);
                 if let Some(pp) = prev {
-                    assert!(pp.distance(a) < 0.6, "житель {i} ({:?}) телепортируется: {pp} -> {a}", town.residents[i].role);
+                    assert!(
+                        pp.distance(a) < 0.6,
+                        "житель {i} ({:?}) телепортируется: {pp} -> {a}",
+                        town.residents[i].role
+                    );
                 }
                 prev = Some(b);
                 t = t1;
@@ -1784,7 +2234,11 @@ mod tests {
             // К полуночи — там же, где начинал день.
             let start = p.state(0.0).unwrap().pos;
             let end = p.state(DAY - 1.0).unwrap().pos;
-            assert!(start.distance(end) < 0.6, "житель {i} ({:?}) к ночи не вернулся: {start} / {end}", town.residents[i].role);
+            assert!(
+                start.distance(end) < 0.6,
+                "житель {i} ({:?}) к ночи не вернулся: {start} / {end}",
+                town.residents[i].role
+            );
         }
     }
 
@@ -1814,27 +2268,47 @@ mod tests {
                 while d < total {
                     let t = w.t0 + (w.t1 - w.t0) * (d / total) as f64;
                     let st = p.state(t).unwrap();
-                    if town.nav.cell_at(st.pos.x, st.pos.z).is_none_or(|c| !town.nav.walkable(c)) && town.nav.nearest(st.pos, 0.6).is_none() {
+                    if town
+                        .nav
+                        .cell_at(st.pos.x, st.pos.z)
+                        .is_none_or(|c| !town.nav.walkable(c))
+                        && town.nav.nearest(st.pos, 0.6).is_none()
+                    {
                         bad.push((i, st.pos));
                     }
                     d += 0.5;
                 }
             }
         }
-        assert!(bad.len() < 20, "сквозь стены: {:?}", &bad[..bad.len().min(10)]);
+        assert!(
+            bad.len() < 20,
+            "сквозь стены: {:?}",
+            &bad[..bad.len().min(10)]
+        );
     }
 
     #[test]
     fn smith_hammers_and_priest_serves() {
         let town = test_town();
         let plans = town.plan_day(4);
-        let at = |act: Act, h: f32| plans.people.iter().filter(|p| p.state(h as f64 * 3600.0).is_some_and(|s| s.act == act)).count();
-        eprintln!("в 10:00 куют {}, служат в 5:00 {}, спят в 2:00 {}, удят в 7:00 {}", at(Act::Hammer, 10.0), at(Act::Preach, 5.0), at(Act::Sleep, 2.0), at(Act::Fish, 7.0));
+        let at = |act: Act, h: f32| {
+            plans
+                .people
+                .iter()
+                .filter(|p| p.state(h as f64 * 3600.0).is_some_and(|s| s.act == act))
+                .count()
+        };
+        eprintln!(
+            "в 10:00 куют {}, служат в 5:00 {}, спят в 2:00 {}, удят в 7:00 {}",
+            at(Act::Hammer, 10.0),
+            at(Act::Preach, 5.0),
+            at(Act::Sleep, 2.0),
+            at(Act::Fish, 7.0)
+        );
         assert!(at(Act::Sleep, 2.0) > town.residents.len() / 3);
         assert!(at(Act::Preach, 5.0) >= 1);
     }
 }
-
 
 #[cfg(test)]
 mod shot_tests {
@@ -1845,28 +2319,74 @@ mod shot_tests {
     #[ignore]
     fn print_tour() {
         let town = test_town();
-        let h: f32 = std::env::var("TOUR_HOUR").ok().and_then(|s| s.parse().ok()).unwrap_or(10.0);
+        let h: f32 = std::env::var("TOUR_HOUR")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(10.0);
         let day = (h / 24.0) as u32;
         let plans = town.plan_day(day);
         let t = (h % 24.0) as f64 * 3600.0;
         let mut out = Vec::new();
         let mut used = Vec::new();
-        for act in [Act::Hammer, Act::Talk, Act::Carry, Act::Fish, Act::Sleep, Act::Preach, Act::Pray, Act::Stir, Act::Sweep, Act::Browse, Act::Drink, Act::Guard, Act::Weave, Act::Treat, Act::Lie, Act::Idle] {
+        for act in [
+            Act::Hammer,
+            Act::Talk,
+            Act::Carry,
+            Act::Fish,
+            Act::Sleep,
+            Act::Preach,
+            Act::Pray,
+            Act::Stir,
+            Act::Sweep,
+            Act::Browse,
+            Act::Drink,
+            Act::Guard,
+            Act::Weave,
+            Act::Treat,
+            Act::Lie,
+            Act::Idle,
+        ] {
             let mut n = 0;
             for (i, p) in plans.people.iter().enumerate() {
                 let Some(s) = p.state(t) else { continue };
-                let ok = if act == Act::Carry { s.carry } else { s.act == act && !s.walking };
+                let ok = if act == Act::Carry {
+                    s.carry
+                } else {
+                    s.act == act && !s.walking
+                };
                 if !ok || used.iter().any(|u: &Vec3| u.distance(s.pos) < 15.0) {
                     continue;
                 }
                 let base = s.lie.unwrap_or(s.pos);
                 let fwd = forward(s.yaw);
                 let side = Vec3::new(fwd.z, 0.0, -fwd.x);
-                let cands = [fwd * 3.2 + side * 1.2, fwd * 2.5 - side * 1.5, side * 3.0, -side * 3.0, fwd * 4.5];
-                let Some(off) = cands.iter().find(|o| town.nav.nearest(s.pos + **o, 0.3).is_some() && town.nav.straight(s.pos, s.pos + **o)) else { continue };
+                let cands = [
+                    fwd * 3.2 + side * 1.2,
+                    fwd * 2.5 - side * 1.5,
+                    side * 3.0,
+                    -side * 3.0,
+                    fwd * 4.5,
+                ];
+                let Some(off) = cands.iter().find(|o| {
+                    town.nav.nearest(s.pos + **o, 0.3).is_some()
+                        && town.nav.straight(s.pos, s.pos + **o)
+                }) else {
+                    continue;
+                };
                 let cam = s.pos + *off + Vec3::Y * 1.75;
                 used.push(s.pos);
-                out.push(format!("{:?}{}_{}:{:.1},{:.1},{:.1},{:.1},{:.1},{:.1}", act, n, i, cam.x, cam.y, cam.z, base.x, base.y + 1.1, base.z));
+                out.push(format!(
+                    "{:?}{}_{}:{:.1},{:.1},{:.1},{:.1},{:.1},{:.1}",
+                    act,
+                    n,
+                    i,
+                    cam.x,
+                    cam.y,
+                    cam.z,
+                    base.x,
+                    base.y + 1.1,
+                    base.z
+                ));
                 n += 1;
                 if n >= 2 {
                     break;

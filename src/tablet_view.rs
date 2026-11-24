@@ -20,8 +20,11 @@ pub struct TabletViewPlugin;
 
 impl Plugin for TabletViewPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_tablet.after(crate::inventory_ui::setup_fonts))
-            .add_systems(Update, draw_tablet.after(crate::work_client::WorkSet));
+        app.add_systems(
+            Startup,
+            setup_tablet.after(crate::inventory_ui::setup_fonts),
+        )
+        .add_systems(Update, draw_tablet.after(crate::work_client::WorkSet));
     }
 }
 
@@ -55,15 +58,41 @@ enum Label {
 fn setup_tablet(mut commands: Commands, mut images: ResMut<Assets<Image>>, fonts: Res<UiFonts>) {
     let wax = background(false);
     let board = background(true);
-    let image = Image::new(Extent3d { width: W as u32, height: H as u32, depth_or_array_layers: 1 }, TextureDimension::D2, wax.clone(), TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::all());
+    let image = Image::new(
+        Extent3d {
+            width: W as u32,
+            height: H as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        wax.clone(),
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::all(),
+    );
     let handle = images.add(image);
-    commands.insert_resource(TabletImage { handle: handle.clone(), wax, board });
+    commands.insert_resource(TabletImage {
+        handle: handle.clone(),
+        wax,
+        board,
+    });
     let text = |size: f32, bold: bool| {
         (
             Text::new(""),
-            TextFont { font: if bold { fonts.bold.clone() } else { fonts.regular.clone() }.into(), font_size: bevy::text::FontSize::Px(size), ..default() },
+            TextFont {
+                font: if bold {
+                    fonts.bold.clone()
+                } else {
+                    fonts.regular.clone()
+                }
+                .into(),
+                font_size: bevy::text::FontSize::Px(size),
+                ..default()
+            },
             TextColor(Color::srgb(0.95, 0.88, 0.7)),
-            TextShadow { offset: Vec2::new(1.0, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
+            TextShadow {
+                offset: Vec2::new(1.0, 1.5),
+                color: Color::srgba(0.0, 0.0, 0.0, 0.85),
+            },
         )
     };
     commands
@@ -81,14 +110,31 @@ fn setup_tablet(mut commands: Commands, mut images: ResMut<Assets<Image>>, fonts
                 ..default()
             },
             ImageNode::new(handle),
-            BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.6), px(0), px(6), px(2), px(18)),
+            BoxShadow::new(
+                Color::srgba(0.0, 0.0, 0.0, 0.6),
+                px(0),
+                px(6),
+                px(2),
+                px(18),
+            ),
         ))
         .with_children(|p| {
-            let abs = |l: f32, t: f32, w: f32| Node { position_type: PositionType::Absolute, left: px(l), top: px(t), width: px(w), ..default() };
+            let abs = |l: f32, t: f32, w: f32| Node {
+                position_type: PositionType::Absolute,
+                left: px(l),
+                top: px(t),
+                width: px(w),
+                ..default()
+            };
             p.spawn((Label::Big, text(26.0, true), abs(0.0, 0.0, 240.0)));
             p.spawn((Label::Small, text(15.0, false), abs(0.0, 0.0, 240.0)));
             for k in 0..3 {
-                p.spawn((Label::Column(k), text(14.0, true), abs(0.0, 0.0, 150.0), TextLayout::justify(Justify::Center)));
+                p.spawn((
+                    Label::Column(k),
+                    text(14.0, true),
+                    abs(0.0, 0.0, 150.0),
+                    TextLayout::justify(Justify::Center),
+                ));
             }
         });
 }
@@ -119,7 +165,11 @@ fn background(board: bool) -> Vec<u8> {
             let c: Rgb = if edge < FRAME {
                 // Дерево: волокна вдоль длинной стороны, тёмный кант снаружи и у воска.
                 let grain = (y as f32 * 0.55 + (x as f32 * 0.021).sin() * 6.0).sin() * 0.5 + 0.5;
-                let shade = if edge < 2 || edge >= FRAME - 2 { 0.62 } else { 1.0 };
+                let shade = if edge < 2 || edge >= FRAME - 2 {
+                    0.62
+                } else {
+                    1.0
+                };
                 let k = (0.82 + 0.18 * grain + 0.06 * (n - 0.5)) * shade;
                 [0.46 * k, 0.30 * k, 0.16 * k]
             } else if board {
@@ -149,7 +199,12 @@ struct Canvas<'a> {
 
 impl Canvas<'_> {
     fn blend(&mut self, x: i32, y: i32, c: Rgb, a: f32) {
-        if x < FRAME as i32 || y < FRAME as i32 || x >= (W - FRAME) as i32 || y >= (H - FRAME) as i32 || a <= 0.0 {
+        if x < FRAME as i32
+            || y < FRAME as i32
+            || x >= (W - FRAME) as i32
+            || y >= (H - FRAME) as i32
+            || a <= 0.0
+        {
             return;
         }
         let i = (y as usize * W + x as usize) * 4;
@@ -177,8 +232,14 @@ impl Canvas<'_> {
     /// Отрезок толщиной `w` (капсула).
     fn line(&mut self, a: Vec2, b: Vec2, w: f32, c: Rgb, alpha: f32) {
         let r = w / 2.0;
-        let (x0, x1) = ((a.x.min(b.x) - r - 1.0) as i32, (a.x.max(b.x) + r + 1.0) as i32);
-        let (y0, y1) = ((a.y.min(b.y) - r - 1.0) as i32, (a.y.max(b.y) + r + 1.0) as i32);
+        let (x0, x1) = (
+            (a.x.min(b.x) - r - 1.0) as i32,
+            (a.x.max(b.x) + r + 1.0) as i32,
+        );
+        let (y0, y1) = (
+            (a.y.min(b.y) - r - 1.0) as i32,
+            (a.y.max(b.y) + r + 1.0) as i32,
+        );
         let ab = b - a;
         let len2 = ab.length_squared().max(1e-6);
         for y in y0..=y1 {
@@ -204,7 +265,12 @@ impl Canvas<'_> {
     }
 
     fn rect_outline(&mut self, x: f32, y: f32, w: f32, h: f32, c: Rgb, a: f32) {
-        let (p0, p1, p2, p3) = (Vec2::new(x, y), Vec2::new(x + w, y), Vec2::new(x + w, y + h), Vec2::new(x, y + h));
+        let (p0, p1, p2, p3) = (
+            Vec2::new(x, y),
+            Vec2::new(x + w, y),
+            Vec2::new(x + w, y + h),
+            Vec2::new(x, y + h),
+        );
         for (s, e) in [(p0, p1), (p1, p2), (p2, p3), (p3, p0)] {
             self.line(s, e, 1.5, c, a);
         }
@@ -260,8 +326,16 @@ fn draw_rules(c: &mut Canvas, cell: Cell) {
 fn draw_writing(c: &mut Canvas, m: &Meter) {
     let Some(g) = m.glyph() else { return };
     let big = match m.drill {
-        Drill::Scribe => Cell { x: 52.0, y: 96.0, size: 170.0 },
-        _ => Cell { x: 60.0, y: 46.0, size: 210.0 },
+        Drill::Scribe => Cell {
+            x: 52.0,
+            y: 96.0,
+            size: 170.0,
+        },
+        _ => Cell {
+            x: 60.0,
+            y: 46.0,
+            size: 210.0,
+        },
     };
     if m.drill == Drill::Scribe {
         // Слово целиком: сверху маленькими клетками.
@@ -270,7 +344,11 @@ fn draw_writing(c: &mut Canvas, m: &Meter) {
         let s = s.min(54.0);
         let x0 = (W as f32 - s * n as f32) / 2.0;
         for (k, &li) in m.letters.iter().enumerate() {
-            let cell = Cell { x: x0 + k as f32 * s + s * 0.12, y: 26.0 + s * 0.06, size: s * 0.76 };
+            let cell = Cell {
+                x: x0 + k as f32 * s + s * 0.12,
+                y: 26.0 + s * 0.06,
+                size: s * 0.76,
+            };
             let gl = letters::glyph(li);
             if k == m.letter_i {
                 c.rect_outline(x0 + k as f32 * s + 2.0, 24.0, s - 4.0, s, GOAL, 0.7);
@@ -286,7 +364,13 @@ fn draw_writing(c: &mut Canvas, m: &Meter) {
     // Образец: пройденные черты бледнее, текущая — ярче.
     for (k, s) in g.strokes.iter().enumerate() {
         let pts: Vec<Vec2> = s.iter().map(|p| big.at(*p)).collect();
-        let a = if k == m.stroke_i { 0.85 } else if k < m.stroke_i { 0.3 } else { 0.55 };
+        let a = if k == m.stroke_i {
+            0.85
+        } else if k < m.stroke_i {
+            0.3
+        } else {
+            0.55
+        };
         let w = if k == m.stroke_i { 7.0 } else { 6.0 };
         c.polyline(&pts, w, MODEL, a);
     }
@@ -304,7 +388,13 @@ fn draw_writing(c: &mut Canvas, m: &Meter) {
         let a0 = k as f32 / 48.0 * std::f32::consts::TAU;
         if k % 2 == 0 {
             let a1 = a0 + std::f32::consts::TAU / 48.0;
-            c.line(nib + Vec2::from_angle(a0) * tol, nib + Vec2::from_angle(a1) * tol, 1.2, [0.9, 0.8, 0.6], 0.35);
+            c.line(
+                nib + Vec2::from_angle(a0) * tol,
+                nib + Vec2::from_angle(a1) * tol,
+                1.2,
+                [0.9, 0.8, 0.6],
+                0.35,
+            );
         }
     }
     c.disc(nib, 4.5, NIB, 1.0);
@@ -325,22 +415,42 @@ fn draw_counting(c: &mut Canvas, m: &Meter) {
         let active = k == m.col;
         if active {
             for dx in -60..=60 {
-                c.line(Vec2::new(x + dx as f32, top), Vec2::new(x + dx as f32, bottom), 1.0, [0.95, 0.85, 0.55], 0.06);
+                c.line(
+                    Vec2::new(x + dx as f32, top),
+                    Vec2::new(x + dx as f32, bottom),
+                    1.0,
+                    [0.95, 0.85, 0.55],
+                    0.06,
+                );
             }
         }
         // Желоб столбца.
         for side in [-62.0, 62.0] {
-            c.line(Vec2::new(x + side, top - 6.0), Vec2::new(x + side, bottom), 2.0, [0.33, 0.24, 0.14], 0.8);
+            c.line(
+                Vec2::new(x + side, top - 6.0),
+                Vec2::new(x + side, bottom),
+                2.0,
+                [0.33, 0.24, 0.14],
+                0.8,
+            );
         }
         // Камешки: по пять в ряд, снизу вверх.
         let n = m.pebbles[k] as usize;
         let dim = k < first;
         for i in 0..n {
             let (row, col) = (i / 5, i % 5);
-            let p = Vec2::new(x - 44.0 + col as f32 * 22.0, bottom - 16.0 - row as f32 * 24.0);
+            let p = Vec2::new(
+                x - 44.0 + col as f32 * 22.0,
+                bottom - 16.0 - row as f32 * 24.0,
+            );
             let shade = 0.85 + 0.15 * hash(i, k);
             c.disc(p + Vec2::new(1.5, 2.5), 10.0, [0.1, 0.07, 0.04], 0.45);
-            c.disc(p, 10.0, [0.88 * shade, 0.86 * shade, 0.8 * shade], if dim { 0.4 } else { 1.0 });
+            c.disc(
+                p,
+                10.0,
+                [0.88 * shade, 0.86 * shade, 0.8 * shade],
+                if dim { 0.4 } else { 1.0 },
+            );
             c.disc(p - Vec2::new(3.0, 3.0), 3.5, [1.0, 1.0, 0.98], 0.5);
         }
     }
@@ -349,7 +459,11 @@ fn draw_counting(c: &mut Canvas, m: &Meter) {
     let s = 50.0;
     let x0 = W as f32 - FRAME as f32 - 24.0 - s * nums.len() as f32;
     for (k, &g) in nums.iter().enumerate() {
-        let cell = Cell { x: x0 + k as f32 * s, y: 30.0, size: s * 0.8 };
+        let cell = Cell {
+            x: x0 + k as f32 * s,
+            y: 30.0,
+            size: s * 0.8,
+        };
         let pts_w = 4.0;
         for st in &letters::glyph(g).strokes {
             let pts: Vec<Vec2> = st.iter().map(|p| cell.at(*p)).collect();
@@ -357,7 +471,13 @@ fn draw_counting(c: &mut Canvas, m: &Meter) {
         }
     }
     // Чёрточка над числом (так отличали цифры от слов).
-    c.line(Vec2::new(x0, 24.0), Vec2::new(x0 + s * nums.len() as f32 - 8.0, 24.0), 2.5, [0.2, 0.12, 0.06], 0.9);
+    c.line(
+        Vec2::new(x0, 24.0),
+        Vec2::new(x0 + s * nums.len() as f32 - 8.0, 24.0),
+        2.5,
+        [0.2, 0.12, 0.06],
+        0.9,
+    );
 }
 
 #[allow(clippy::type_complexity)]
@@ -376,9 +496,17 @@ fn draw_tablet(
     };
     view.display = Display::Flex;
     let Some(t) = tablet else { return };
-    let Some(mut image) = images.get_mut(&t.handle) else { return };
-    let base = if m.drill == Drill::Count { &t.board } else { &t.wax };
-    let Some(data) = image.data.as_mut() else { return };
+    let Some(mut image) = images.get_mut(&t.handle) else {
+        return;
+    };
+    let base = if m.drill == Drill::Count {
+        &t.board
+    } else {
+        &t.wax
+    };
+    let Some(data) = image.data.as_mut() else {
+        return;
+    };
     data.copy_from_slice(base);
     let mut c = Canvas { px: data };
     match m.drill {
@@ -398,30 +526,70 @@ fn draw_tablet(
         let light = Color::srgb(0.95, 0.88, 0.7);
         let ink = Color::srgb(0.22, 0.13, 0.06);
         match (m.drill, label) {
-            (Drill::Trace, Label::Big) => set(g.map_or(String::new(), |g| format!("{}  {}", g.lower, g.name)), 300.0, 70.0, light),
+            (Drill::Trace, Label::Big) => set(
+                g.map_or(String::new(), |g| format!("{}  {}", g.lower, g.name)),
+                300.0,
+                70.0,
+                light,
+            ),
             (Drill::Trace, Label::Small) => {
                 let n = m.stroke_i + 1;
                 let all = g.map_or(1, |g| g.strokes.len());
-                set(format!("Черта {n} из {all}.\nВедите стиль от зелёной точки по бледному образцу."), 300.0, 120.0, light)
+                set(
+                    format!(
+                        "Черта {n} из {all}.\nВедите стиль от зелёной точки по бледному образцу."
+                    ),
+                    300.0,
+                    120.0,
+                    light,
+                )
             }
             (Drill::Scribe, Label::Big) => {
                 let w = letters::WORDS.get(m.word);
-                set(w.map_or(String::new(), |w| w.1.to_string()), 262.0, 112.0, light)
+                set(
+                    w.map_or(String::new(), |w| w.1.to_string()),
+                    262.0,
+                    112.0,
+                    light,
+                )
             }
             (Drill::Scribe, Label::Small) => {
                 let w = letters::WORDS.get(m.word);
-                let now = g.map_or(String::new(), |g| format!("\nСейчас: {} ({})", g.lower, g.name));
-                set(w.map_or(String::new(), |w| format!("«{}»{now}", w.2)), 262.0, 150.0, light)
+                let now = g.map_or(String::new(), |g| {
+                    format!("\nСейчас: {} ({})", g.lower, g.name)
+                });
+                set(
+                    w.map_or(String::new(), |w| format!("«{}»{now}", w.2)),
+                    262.0,
+                    150.0,
+                    light,
+                )
             }
-            (Drill::Count, Label::Big) => set(format!("Отложите: {}", letters::numeral_text(m.number)), 30.0, 26.0, ink),
+            (Drill::Count, Label::Big) => set(
+                format!("Отложите: {}", letters::numeral_text(m.number)),
+                30.0,
+                26.0,
+                ink,
+            ),
             (Drill::Count, Label::Small) => {
                 // Новичку учитель подсказывает, какой знак сколько значит.
-                let s = if m.skill < 0.4 { format!("{}\nЛКМ — к следующему столбцу", letters::numeral_legend(m.number)) } else { "ЛКМ — к следующему столбцу".to_string() };
+                let s = if m.skill < 0.4 {
+                    format!(
+                        "{}\nЛКМ — к следующему столбцу",
+                        letters::numeral_legend(m.number)
+                    )
+                } else {
+                    "ЛКМ — к следующему столбцу".to_string()
+                };
                 set(s, 30.0, 62.0, ink)
             }
             (Drill::Count, Label::Column(k)) => {
                 let name = ["Η · сотни", "Δ · десятки", "Ι · единицы"][*k];
-                let col = if *k == m.col { Color::srgb(0.45, 0.12, 0.05) } else { ink };
+                let col = if *k == m.col {
+                    Color::srgb(0.45, 0.12, 0.05)
+                } else {
+                    ink
+                };
                 set(name.to_string(), column_x(*k) - 75.0, 96.0, col)
             }
             _ => set(String::new(), 0.0, 0.0, light),

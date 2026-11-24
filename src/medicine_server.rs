@@ -12,8 +12,8 @@
 use crate::items::Rng;
 use crate::lore_net::{CH_LORE, LoreServerMessage};
 use crate::medicine::{Body, BodyMods, Toxin};
-use crate::protocol::encode;
 use crate::protocol::ActorKind;
+use crate::protocol::encode;
 use crate::server::GameWorld;
 use bevy::prelude::*;
 use bevy_renet::RenetServer;
@@ -58,7 +58,11 @@ pub struct Bodies {
 
 impl Default for Bodies {
     fn default() -> Self {
-        Self { bodies: HashMap::new(), send_timer: HashMap::new(), rng: Rng::from_time() }
+        Self {
+            bodies: HashMap::new(),
+            send_timer: HashMap::new(),
+            rng: Rng::from_time(),
+        }
     }
 }
 
@@ -87,16 +91,41 @@ fn on_poisoned(event: On<Poisoned>, mut bodies: ResMut<Bodies>) {
 }
 
 /// Попадания этого кадра — в раны.
-fn take_hits(mut game: ResMut<GameWorld>, mut bodies: ResMut<Bodies>, mut seeded: Local<std::collections::HashSet<u64>>) {
+fn take_hits(
+    mut game: ResMut<GameWorld>,
+    mut bodies: ResMut<Bodies>,
+    mut seeded: Local<std::collections::HashSet<u64>>,
+) {
     // Для проверки картинкой: `MRPG_DEBUG_WOUNDS=1` — каждый вошедший сразу ранен и отравлен.
     if std::env::var("MRPG_DEBUG_WOUNDS").is_ok() {
-        let players: Vec<(u64, f32)> = game.actors.iter().filter(|(id, a)| a.kind == ActorKind::Player && a.alive && !seeded.contains(*id)).map(|(id, a)| (*id, a.fighter.max_hp)).collect();
+        let players: Vec<(u64, f32)> = game
+            .actors
+            .iter()
+            .filter(|(id, a)| a.kind == ActorKind::Player && a.alive && !seeded.contains(*id))
+            .map(|(id, a)| (*id, a.fighter.max_hp))
+            .collect();
         for (id, max_hp) in players {
             seeded.insert(id);
             let b = bodies.body(id);
             use crate::medicine::{BodyPart, WoundKind};
-            b.hit_on(WoundKind::Stab, 30.0, max_hp, BodyPart::Belly, 0.9, 0.0, 1.0);
-            b.hit_on(WoundKind::Arrow, 20.0, max_hp, BodyPart::LeftArm, 0.1, 0.0, 1.0);
+            b.hit_on(
+                WoundKind::Stab,
+                30.0,
+                max_hp,
+                BodyPart::Belly,
+                0.9,
+                0.0,
+                1.0,
+            );
+            b.hit_on(
+                WoundKind::Arrow,
+                20.0,
+                max_hp,
+                BodyPart::LeftArm,
+                0.1,
+                0.0,
+                1.0,
+            );
             b.hit_on(WoundKind::Cut, 15.0, max_hp, BodyPart::Head, 0.9, 0.0, 1.0);
             b.fracture(BodyPart::RightLeg, 0.7);
             b.burn(0.3);
@@ -105,12 +134,28 @@ fn take_hits(mut game: ResMut<GameWorld>, mut bodies: ResMut<Bodies>, mut seeded
         }
     }
     for hit in std::mem::take(&mut game.hits_taken) {
-        let Some(actor) = game.actors.get(&hit.target).filter(|a| a.alive) else { continue };
-        let Some(kind) = hit.wound_kind() else { continue };
+        let Some(actor) = game.actors.get(&hit.target).filter(|a| a.alive) else {
+            continue;
+        };
+        let Some(kind) = hit.wound_kind() else {
+            continue;
+        };
         let max_hp = actor.fighter.max_hp;
         let roll = bodies.rng.f32();
         let bone_roll = bodies.rng.f32();
-        if bodies.body(hit.target).hit_on(kind, hit.amount, max_hp, hit.part, roll, hit.bone_chance(), bone_roll).is_some() {
+        if bodies
+            .body(hit.target)
+            .hit_on(
+                kind,
+                hit.amount,
+                max_hp,
+                hit.part,
+                roll,
+                hit.bone_chance(),
+                bone_roll,
+            )
+            .is_some()
+        {
             bodies.touch(hit.target);
         } else if bodies.bodies.get(&hit.target).is_some_and(Body::is_healthy) {
             bodies.bodies.remove(&hit.target);
@@ -119,14 +164,28 @@ fn take_hits(mut game: ResMut<GameWorld>, mut bodies: ResMut<Bodies>, mut seeded
 }
 
 fn send_body(server: &mut RenetServer, player: u64, body: &Body) {
-    server.send_message(player, CH_LORE, encode(&LoreServerMessage::Body(body.clone())));
+    server.send_message(
+        player,
+        CH_LORE,
+        encode(&LoreServerMessage::Body(body.clone())),
+    );
 }
 
-fn tick_bodies(time: Res<Time>, mut server: ResMut<RenetServer>, mut game: ResMut<GameWorld>, mut bodies: ResMut<Bodies>) {
+fn tick_bodies(
+    time: Res<Time>,
+    mut server: ResMut<RenetServer>,
+    mut game: ResMut<GameWorld>,
+    mut bodies: ResMut<Bodies>,
+) {
     let dt = time.delta_secs().min(0.1);
     let bodies = &mut *bodies;
     // Ушедшие и погибшие: тело заново здорово (после смерти игрок появляется целым).
-    let gone: Vec<u64> = bodies.bodies.keys().copied().filter(|id| game.actors.get(id).is_none_or(|a| !a.alive)).collect();
+    let gone: Vec<u64> = bodies
+        .bodies
+        .keys()
+        .copied()
+        .filter(|id| game.actors.get(id).is_none_or(|a| !a.alive))
+        .collect();
     for id in gone {
         bodies.bodies.remove(&id);
         bodies.send_timer.remove(&id);
@@ -155,7 +214,18 @@ fn tick_bodies(time: Res<Time>, mut server: ResMut<RenetServer>, mut game: ResMu
         }
     }
     // Выздоровевшие: последнее (пустое) состояние ушло, тело можно забыть.
-    let healed: Vec<u64> = bodies.bodies.iter().filter(|(id, b)| b.is_healthy() && bodies.send_timer.get(*id).is_some_and(|t| *t >= SEND_EVERY - dt)).map(|(id, _)| *id).collect();
+    let healed: Vec<u64> = bodies
+        .bodies
+        .iter()
+        .filter(|(id, b)| {
+            b.is_healthy()
+                && bodies
+                    .send_timer
+                    .get(*id)
+                    .is_some_and(|t| *t >= SEND_EVERY - dt)
+        })
+        .map(|(id, _)| *id)
+        .collect();
     for id in healed {
         bodies.bodies.remove(&id);
         bodies.send_timer.remove(&id);

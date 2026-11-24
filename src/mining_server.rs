@@ -23,7 +23,9 @@ pub struct MiningServerPlugin;
 
 impl Plugin for MiningServerPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(MineWorld::new()).add_observer(on_connection).add_systems(Update, tick_mines);
+        app.insert_resource(MineWorld::new())
+            .add_observer(on_connection)
+            .add_systems(Update, tick_mines);
     }
 }
 
@@ -63,10 +65,41 @@ pub struct MineWorld {
 
 impl MineWorld {
     pub fn new() -> Self {
-        let sites = mine_sites().iter().map(|s| (s.id, SiteState { kind: s.kind, pos: s.pos, radius: s.radius, charges: s.kind.info().charges, regrow: 0.0 })).collect();
-        let mut piles: HashMap<u32, PileState> = pile_spots().iter().map(|p| (p.id, PileState { pos: p.pos, pile: Pile::new(p.kind), owner: None, done_for: 0.0, dirty: false })).collect();
+        let sites = mine_sites()
+            .iter()
+            .map(|s| {
+                (
+                    s.id,
+                    SiteState {
+                        kind: s.kind,
+                        pos: s.pos,
+                        radius: s.radius,
+                        charges: s.kind.info().charges,
+                        regrow: 0.0,
+                    },
+                )
+            })
+            .collect();
+        let mut piles: HashMap<u32, PileState> = pile_spots()
+            .iter()
+            .map(|p| {
+                (
+                    p.id,
+                    PileState {
+                        pos: p.pos,
+                        pile: Pile::new(p.kind),
+                        owner: None,
+                        done_for: 0.0,
+                        dirty: false,
+                    },
+                )
+            })
+            .collect();
         // Одна угольная куча стана уже горит — её ведут углежоги (и её видно издалека).
-        if let Some(id) = pile_spots().iter().find(|p| p.kind == PileKind::Clamp).map(|p| p.id)
+        if let Some(id) = pile_spots()
+            .iter()
+            .find(|p| p.kind == PileKind::Clamp)
+            .map(|p| p.id)
             && let Some(p) = piles.get_mut(&id)
         {
             p.pile.add_wood(30, 0.9);
@@ -82,7 +115,13 @@ impl MineWorld {
         if frozen {
             demo_piles(&mut piles);
         }
-        MineWorld { sites, piles, rng: Rng::from_time(), send_in: 0.0, frozen }
+        MineWorld {
+            sites,
+            piles,
+            rng: Rng::from_time(),
+            send_in: 0.0,
+            frozen,
+        }
     }
 
     fn view(&self, id: u32) -> Option<PileView> {
@@ -109,8 +148,16 @@ impl MineWorld {
 fn demo_piles(piles: &mut HashMap<u32, PileState>) {
     let mut ids: Vec<(u32, PileKind)> = piles.iter().map(|(id, p)| (*id, p.pile.kind)).collect();
     ids.sort_by_key(|(id, _)| *id);
-    let clamps: Vec<u32> = ids.iter().filter(|(_, k)| *k == PileKind::Clamp).map(|(id, _)| *id).collect();
-    let roasts: Vec<u32> = ids.iter().filter(|(_, k)| *k == PileKind::Roast).map(|(id, _)| *id).collect();
+    let clamps: Vec<u32> = ids
+        .iter()
+        .filter(|(_, k)| *k == PileKind::Clamp)
+        .map(|(id, _)| *id)
+        .collect();
+    let roasts: Vec<u32> = ids
+        .iter()
+        .filter(|(_, k)| *k == PileKind::Roast)
+        .map(|(id, _)| *id)
+        .collect();
     // Вторая куча: наполовину укрыта; третья — кладут поленья.
     if let Some(p) = clamps.get(1).and_then(|id| piles.get_mut(id)) {
         p.pile.add_wood(34, 0.9);
@@ -160,17 +207,26 @@ pub enum Outcome {
 }
 
 fn count(inv: &Inventory, name: &str) -> u32 {
-    inv.all_items().filter(|i| i.info().name == name).map(|i| i.count as u32).sum()
+    inv.all_items()
+        .filter(|i| i.info().name == name)
+        .map(|i| i.count as u32)
+        .sum()
 }
 
 fn take(inv: &mut Inventory, name: &str, mut n: u32) -> u32 {
     let mut taken = 0;
-    let stacks: Vec<ItemUid> = inv.all_items().filter(|i| i.info().name == name).map(|i| i.uid).collect();
+    let stacks: Vec<ItemUid> = inv
+        .all_items()
+        .filter(|i| i.info().name == name)
+        .map(|i| i.uid)
+        .collect();
     for uid in stacks {
         if n == 0 {
             break;
         }
-        let Some((mut item, loc)) = inv.take(uid) else { continue };
+        let Some((mut item, loc)) = inv.take(uid) else {
+            continue;
+        };
         let used = (item.count as u32).min(n);
         n -= used;
         taken += used;
@@ -187,11 +243,20 @@ fn has_tool(inv: &Inventory, tool: Tool) -> bool {
 }
 
 /// Положить в сумку; сколько не влезло.
-fn give(inv: &mut Inventory, name: &str, n: u16, quality: Quality, rng: &mut Rng, uids: &mut UidGen) -> u16 {
+fn give(
+    inv: &mut Inventory,
+    name: &str,
+    n: u16,
+    quality: Quality,
+    rng: &mut Rng,
+    uids: &mut UidGen,
+) -> u16 {
     if n == 0 {
         return 0;
     }
-    let Some(base) = ItemBaseId::find(name) else { return n };
+    let Some(base) = ItemBaseId::find(name) else {
+        return n;
+    };
     let item = roll_item(base, quality, n, rng, uids);
     match inv.place(item, Target::Auto) {
         Ok(_) => 0,
@@ -212,7 +277,15 @@ fn stack_verb(kind: PileKind) -> &'static str {
 }
 
 /// Игрок просит что-то сделать. `busy` — уже занят работой руками (тогда можно только мгновенное).
-pub fn act(world: &mut MineWorld, k: &Knowledge, inv: &mut Inventory, feet: Vec3, player: u64, busy: bool, act: MineAct) -> Result<Outcome, String> {
+pub fn act(
+    world: &mut MineWorld,
+    k: &Knowledge,
+    inv: &mut Inventory,
+    feet: Vec3,
+    player: u64,
+    busy: bool,
+    act: MineAct,
+) -> Result<Outcome, String> {
     let smith = k.skill(Skill::Smithing);
     let start = |task: MineTask, verb: &str, secs: f32, drill: Drill| -> Result<Outcome, String> {
         if busy {
@@ -230,8 +303,14 @@ pub fn act(world: &mut MineWorld, k: &Knowledge, inv: &mut Inventory, feet: Vec3
             && !k.knows(Lore::Technique(t))
         {
             return Err(match s.kind {
-                SiteKind::Adit => "Десятник не пускает в забой: «Крепь не знаешь — завалит. Сначала поучись»".into(),
-                _ => format!("Сначала нужно знать: {}", Lore::Technique(t).name().to_lowercase()),
+                SiteKind::Adit => {
+                    "Десятник не пускает в забой: «Крепь не знаешь — завалит. Сначала поучись»"
+                        .into()
+                }
+                _ => format!(
+                    "Сначала нужно знать: {}",
+                    Lore::Technique(t).name().to_lowercase()
+                ),
             });
         }
         if let Some(tool) = info.tool
@@ -271,7 +350,11 @@ pub fn act(world: &mut MineWorld, k: &Knowledge, inv: &mut Inventory, feet: Vec3
     match act {
         MineAct::StackWood { .. } => {
             if p.stage != Stage::Stack {
-                return Err(if kind == PileKind::Clamp { "Куча уже укрыта — поленьев не добавить".into() } else { "Кострище уже горит — подбрасывайте дров".into() });
+                return Err(if kind == PileKind::Clamp {
+                    "Куча уже укрыта — поленьев не добавить".into()
+                } else {
+                    "Кострище уже горит — подбрасывайте дров".into()
+                });
             }
             let room = (p.wood_limits().1 - p.wood) as u32;
             if room == 0 {
@@ -279,10 +362,17 @@ pub fn act(world: &mut MineWorld, k: &Knowledge, inv: &mut Inventory, feet: Vec3
             }
             let have = count(inv, WOOD);
             if have == 0 {
-                return Err("Нет дров. Наколите на делянке (нужен топор) или купите у углежога".into());
+                return Err(
+                    "Нет дров. Наколите на делянке (нужен топор) или купите у углежога".into(),
+                );
             }
             let n = have.min(room).min(STACK_BATCH);
-            start(MineTask::StackWood { pile: id, n }, stack_verb(kind), 0.6 * n as f32 + 1.5, Drill::Tension)
+            start(
+                MineTask::StackWood { pile: id, n },
+                stack_verb(kind),
+                0.6 * n as f32 + 1.5,
+                Drill::Tension,
+            )
         }
         MineAct::LoadOre { .. } => {
             if kind != PileKind::Roast || p.stage != Stage::Stack {
@@ -292,33 +382,51 @@ pub fn act(world: &mut MineWorld, k: &Knowledge, inv: &mut Inventory, feet: Vec3
             let raw = count(inv, ORE).min(room);
             let bog = count(inv, BOG_ORE).min(room - raw);
             if raw + bog == 0 {
-                return Err(if room == 0 { "Кострище полно".into() } else { "Нет сырой руды (горной или болотной)".into() });
+                return Err(if room == 0 {
+                    "Кострище полно".into()
+                } else {
+                    "Нет сырой руды (горной или болотной)".into()
+                });
             }
             take(inv, ORE, raw);
             take(inv, BOG_ORE, bog);
             p.add_ore(raw as u16, bog as u16);
             ps.owner.get_or_insert(player);
             ps.dirty = true;
-            Ok(Outcome::Done(format!("Насыпали руды: {} (на кострище {} из {ROAST_ORE})", raw + bog, ps.pile.ore + ps.pile.bog)))
+            Ok(Outcome::Done(format!(
+                "Насыпали руды: {} (на кострище {} из {ROAST_ORE})",
+                raw + bog,
+                ps.pile.ore + ps.pile.bog
+            )))
         }
         MineAct::Cover { .. } => {
             if kind != PileKind::Clamp || !matches!(p.stage, Stage::Stack | Stage::Cover) {
                 return Err("Укрывать нечего".into());
             }
             if p.wood < CLAMP_WOOD.0 {
-                return Err(format!("Сначала сложите кучу: нужно хотя бы {} поленьев", CLAMP_WOOD.0));
+                return Err(format!(
+                    "Сначала сложите кучу: нужно хотя бы {} поленьев",
+                    CLAMP_WOOD.0
+                ));
             }
             if !has_tool(inv, Tool::Spade) {
                 return Err("Нужен заступ — кидать землю".into());
             }
-            start(MineTask::Cover { pile: id }, "Кроете кучу листвой и дёрном, засыпаете землёй", 5.0, Drill::Pump)
+            start(
+                MineTask::Cover { pile: id },
+                "Кроете кучу листвой и дёрном, засыпаете землёй",
+                5.0,
+                Drill::Pump,
+            )
         }
         MineAct::Light { .. } => {
             p.light().map_err(String::from)?;
             ps.owner.get_or_insert(player);
             ps.dirty = true;
             Ok(Outcome::Done(match kind {
-                PileKind::Clamp if knows_coal => "Подожгли сверху через кол. Следите за дымом и отдушинами".into(),
+                PileKind::Clamp if knows_coal => {
+                    "Подожгли сверху через кол. Следите за дымом и отдушинами".into()
+                }
                 PileKind::Clamp => "Подожгли кучу".into(),
                 PileKind::Roast => "Кострище занялось. Ворошите руду, чтобы не спеклась".into(),
             }))
@@ -327,7 +435,11 @@ pub fn act(world: &mut MineWorld, k: &Knowledge, inv: &mut Inventory, feet: Vec3
             if kind != PileKind::Clamp || p.stage != Stage::Burning {
                 return Err("Куча не горит".into());
             }
-            let v = if open { (p.vents + 1).min(VENTS) } else { p.vents.saturating_sub(1) };
+            let v = if open {
+                (p.vents + 1).min(VENTS)
+            } else {
+                p.vents.saturating_sub(1)
+            };
             p.set_vents(v);
             ps.dirty = true;
             Ok(Outcome::Done(format!("Отдушин открыто: {v} из {VENTS}")))
@@ -339,7 +451,12 @@ pub fn act(world: &mut MineWorld, k: &Knowledge, inv: &mut Inventory, feet: Vec3
             if p.cracks <= 0.0 {
                 return Err("Прогаров нет".into());
             }
-            start(MineTask::Patch { pile: id }, "Засыпаете прогар землёй", 2.5, Drill::Pump)
+            start(
+                MineTask::Patch { pile: id },
+                "Засыпаете прогар землёй",
+                2.5,
+                Drill::Pump,
+            )
         }
         MineAct::Smother { .. } => {
             if kind != PileKind::Clamp || p.stage != Stage::Burning {
@@ -347,13 +464,20 @@ pub fn act(world: &mut MineWorld, k: &Knowledge, inv: &mut Inventory, feet: Vec3
             }
             p.smother();
             ps.dirty = true;
-            Ok(Outcome::Done("Закрыли отдушины, засыпали кучу землёй — пусть остынет".into()))
+            Ok(Outcome::Done(
+                "Закрыли отдушины, засыпали кучу землёй — пусть остынет".into(),
+            ))
         }
         MineAct::Stir { .. } => {
             if kind != PileKind::Roast || p.stage != Stage::Burning {
                 return Err("Кострище не горит".into());
             }
-            start(MineTask::Stir { pile: id }, "Ворошите руду в огне длинной кочергой", 10.0, Drill::Stir)
+            start(
+                MineTask::Stir { pile: id },
+                "Ворошите руду в огне длинной кочергой",
+                10.0,
+                Drill::Stir,
+            )
         }
         MineAct::Feed { .. } => {
             if kind != PileKind::Roast || p.stage != Stage::Burning {
@@ -379,7 +503,11 @@ pub fn act(world: &mut MineWorld, k: &Knowledge, inv: &mut Inventory, feet: Vec3
                 Stage::Cooling => false,
             };
             if !ok {
-                return Err(if p.stage == Stage::Cooling { "Ещё горячо — пусть остынет".into() } else { "Горит — сейчас не разобрать".into() });
+                return Err(if p.stage == Stage::Cooling {
+                    "Ещё горячо — пусть остынет".into()
+                } else {
+                    "Горит — сейчас не разобрать".into()
+                });
             }
             if p.wood == 0 && p.ore + p.bog == 0 {
                 return Err("Разбирать нечего".into());
@@ -390,7 +518,16 @@ pub fn act(world: &mut MineWorld, k: &Knowledge, inv: &mut Inventory, feet: Vec3
             {
                 return Err("Это чужая куча — хозяин ещё придёт за ней".into());
             }
-            start(MineTask::Rake { pile: id }, if kind == PileKind::Clamp { "Разгребаете кучу, выбираете уголь" } else { "Выгребаете руду из золы" }, 5.0, Drill::Pump)
+            start(
+                MineTask::Rake { pile: id },
+                if kind == PileKind::Clamp {
+                    "Разгребаете кучу, выбираете уголь"
+                } else {
+                    "Выгребаете руду из золы"
+                },
+                5.0,
+                Drill::Pump,
+            )
         }
         MineAct::Dig { .. } => unreachable!(),
     }
@@ -404,29 +541,64 @@ pub struct Finished {
 }
 
 /// Работа руками кончилась с качеством `q`.
-pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uids: &mut UidGen, player: u64, task: &MineTask, q: f32) -> Finished {
+pub fn finish(
+    world: &mut MineWorld,
+    k: &mut Knowledge,
+    inv: &mut Inventory,
+    uids: &mut UidGen,
+    player: u64,
+    task: &MineTask,
+    q: f32,
+) -> Finished {
     let mut wage = 0;
-    let MineWorld { sites, piles, rng, .. } = world;
+    let MineWorld {
+        sites, piles, rng, ..
+    } = world;
     let notice = match *task {
         MineTask::Dig { site } => {
-            let Some(s) = sites.get_mut(&site) else { return Finished { notice: String::new(), wage } };
+            let Some(s) = sites.get_mut(&site) else {
+                return Finished {
+                    notice: String::new(),
+                    wage,
+                };
+            };
             if s.charges == 0 {
-                return Finished { notice: "Здесь уже всё выбрано".into(), wage };
+                return Finished {
+                    notice: "Здесь уже всё выбрано".into(),
+                    wage,
+                };
             }
             let prospect = k.knows(Lore::Technique(Technique::Prospecting));
-            let dug = dig_yield(s.kind, prospect, k.skill(Skill::Smithing), q, [rng.f32(), rng.f32(), rng.f32()]);
-            let quality = if dug.rich { Quality::Uncommon } else { Quality::Common };
+            let dug = dig_yield(
+                s.kind,
+                prospect,
+                k.skill(Skill::Smithing),
+                q,
+                [rng.f32(), rng.f32(), rng.f32()],
+            );
+            let quality = if dug.rich {
+                Quality::Uncommon
+            } else {
+                Quality::Common
+            };
             let mut got = Vec::new();
             let mut lost = false;
             for (name, n) in &dug.items {
                 let rest = give(inv, name, *n, quality, rng, uids);
                 lost |= rest > 0;
                 if rest < *n {
-                    got.push(format!("{} ×{}", k.item_name(ItemBaseId::by_name(name)), n - rest));
+                    got.push(format!(
+                        "{} ×{}",
+                        k.item_name(ItemBaseId::by_name(name)),
+                        n - rest
+                    ));
                 }
             }
             if got.is_empty() && !dug.items.is_empty() {
-                return Finished { notice: "Нет места в сумке".into(), wage };
+                return Finished {
+                    notice: "Нет места в сумке".into(),
+                    wage,
+                };
             }
             s.charges -= 1;
             k.practice(Skill::Smithing, 0.3);
@@ -436,7 +608,10 @@ pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uid
                     if wage > 0 && give_money(inv, wage, uids).is_err() {
                         wage = 0;
                     }
-                    let mut m = format!("Подняли бадью. Десятник заплатил {}", crate::economy::format_money(wage));
+                    let mut m = format!(
+                        "Подняли бадью. Десятник заплатил {}",
+                        crate::economy::format_money(wage)
+                    );
                     if !got.is_empty() {
                         m.push_str(&format!(" и дал кусок руды: {}", got.join(", ")));
                     }
@@ -454,13 +629,22 @@ pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uid
                 msg.push_str(". Остальное не влезло в сумку");
             }
             // Рудознатство приходит и с опытом: кто долго копает, начинает отличать руду.
-            if s.kind.ore() && !prospect && rng.f32() < 0.04 + k.skill(Skill::Smithing) / 1500.0 && k.learn(Lore::Technique(Technique::Prospecting)) {
+            if s.kind.ore()
+                && !prospect
+                && rng.f32() < 0.04 + k.skill(Skill::Smithing) / 1500.0
+                && k.learn(Lore::Technique(Technique::Prospecting))
+            {
                 msg.push_str(". Вы начали отличать руду от пустой породы: она тяжелее и черта у неё бурая (рудознатство)");
             }
             msg
         }
         MineTask::StackWood { pile, n } => {
-            let Some(ps) = piles.get_mut(&pile) else { return Finished { notice: String::new(), wage } };
+            let Some(ps) = piles.get_mut(&pile) else {
+                return Finished {
+                    notice: String::new(),
+                    wage,
+                };
+            };
             let taken = take(inv, WOOD, n);
             // Знающий ставит плотно, без щелей: качество укладки выше.
             let knows = k.knows(Lore::Technique(Technique::Charcoal));
@@ -483,7 +667,12 @@ pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uid
             m
         }
         MineTask::Cover { pile } => {
-            let Some(ps) = piles.get_mut(&pile) else { return Finished { notice: String::new(), wage } };
+            let Some(ps) = piles.get_mut(&pile) else {
+                return Finished {
+                    notice: String::new(),
+                    wage,
+                };
+            };
             ps.pile.add_cover(q);
             if ps.pile.stage == Stage::Stack {
                 ps.pile.stage = Stage::Cover;
@@ -493,13 +682,26 @@ pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uid
             }
             ps.dirty = true;
             k.practice(Skill::Smithing, 0.2);
-            if ps.pile.cover >= 1.0 { "Куча укрыта целиком — можно поджигать".into() } else { format!("Укрыто примерно на {:.0}%", ps.pile.cover * 100.0) }
+            if ps.pile.cover >= 1.0 {
+                "Куча укрыта целиком — можно поджигать".into()
+            } else {
+                format!("Укрыто примерно на {:.0}%", ps.pile.cover * 100.0)
+            }
         }
         MineTask::Patch { pile } => {
-            let Some(ps) = piles.get_mut(&pile) else { return Finished { notice: String::new(), wage } };
+            let Some(ps) = piles.get_mut(&pile) else {
+                return Finished {
+                    notice: String::new(),
+                    wage,
+                };
+            };
             ps.pile.patch(q);
             ps.dirty = true;
-            if ps.pile.cracks > 0.0 { "Прогар засыпан не до конца".into() } else { "Прогар засыпан".into() }
+            if ps.pile.cracks > 0.0 {
+                "Прогар засыпан не до конца".into()
+            } else {
+                "Прогар засыпан".into()
+            }
         }
         MineTask::Stir { pile } => {
             if let Some(ps) = piles.get_mut(&pile) {
@@ -509,11 +711,21 @@ pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uid
             "Поворошили руду".into()
         }
         MineTask::Rake { pile } => {
-            let Some(ps) = piles.get_mut(&pile) else { return Finished { notice: String::new(), wage } };
+            let Some(ps) = piles.get_mut(&pile) else {
+                return Finished {
+                    notice: String::new(),
+                    wage,
+                };
+            };
             let kind = ps.pile.kind;
             // Не дожжённое (разобрали раньше) — дрова и руда возвращаются как есть.
             let h = if matches!(ps.pile.stage, Stage::Stack | Stage::Cover | Stage::Ready) {
-                Harvest { wood: ps.pile.wood, ore: ps.pile.ore, bog: ps.pile.bog, ..default() }
+                Harvest {
+                    wood: ps.pile.wood,
+                    ore: ps.pile.ore,
+                    bog: ps.pile.bog,
+                    ..default()
+                }
             } else {
                 ps.pile.harvest(q)
             };
@@ -524,14 +736,25 @@ pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uid
             };
             let mut lost = 0;
             let mut parts = Vec::new();
-            for (name, n) in [(CHARCOAL, h.charcoal), (ROASTED_ORE, h.roasted), (ORE, h.ore), (BOG_ORE, h.bog), (WOOD, h.wood), (WASTE, h.waste)] {
+            for (name, n) in [
+                (CHARCOAL, h.charcoal),
+                (ROASTED_ORE, h.roasted),
+                (ORE, h.ore),
+                (BOG_ORE, h.bog),
+                (WOOD, h.wood),
+                (WASTE, h.waste),
+            ] {
                 if n == 0 {
                     continue;
                 }
                 let rest = give(inv, name, n, Quality::Common, rng, uids);
                 lost += rest;
                 if rest < n {
-                    let label = if name == WOOD && was_done { "Головни (недожог)".to_string() } else { name.to_string() };
+                    let label = if name == WOOD && was_done {
+                        "Головни (недожог)".to_string()
+                    } else {
+                        name.to_string()
+                    };
                     parts.push(format!("{label} ×{}", n - rest));
                 }
             }
@@ -540,14 +763,32 @@ pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uid
             ps.done_for = 0.0;
             ps.dirty = true;
             k.practice(Skill::Smithing, if was_done { 1.0 } else { 0.2 });
-            let mut m = if parts.is_empty() { "Ничего путного не вышло: одна зола".to_string() } else { format!("Достали: {}", parts.join(", ")) };
+            let mut m = if parts.is_empty() {
+                "Ничего путного не вышло: одна зола".to_string()
+            } else {
+                format!("Достали: {}", parts.join(", "))
+            };
             if lost > 0 {
-                m.push_str(&format!(". В сумку не влезло: {lost} шт. — осталось в золе"));
+                m.push_str(&format!(
+                    ". В сумку не влезло: {lost} шт. — осталось в золе"
+                ));
             }
             // Удачная куча учит сама: понял, по какому дыму глушить.
-            let tech = if kind == PileKind::Clamp { Technique::Charcoal } else { Technique::Roasting };
-            if was_done && good && !k.knows(Lore::Technique(tech)) && rng.f32() < 0.3 && k.learn(Lore::Technique(tech)) {
-                m.push_str(&format!(". Вы поняли, как это делается: {}", Lore::Technique(tech).name().to_lowercase()));
+            let tech = if kind == PileKind::Clamp {
+                Technique::Charcoal
+            } else {
+                Technique::Roasting
+            };
+            if was_done
+                && good
+                && !k.knows(Lore::Technique(tech))
+                && rng.f32() < 0.3
+                && k.learn(Lore::Technique(tech))
+            {
+                m.push_str(&format!(
+                    ". Вы поняли, как это делается: {}",
+                    Lore::Technique(tech).name().to_lowercase()
+                ));
             }
             m
         }
@@ -555,18 +796,42 @@ pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uid
     Finished { notice, wage }
 }
 
-fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, world: Res<MineWorld>) {
+fn on_connection(
+    event: On<RenetServerEvent>,
+    mut server: ResMut<RenetServer>,
+    world: Res<MineWorld>,
+) {
     if let ServerEvent::ClientConnected { client_id } = &event.0 {
-        let mut sites: Vec<(u32, u8)> = world.sites.iter().map(|(id, s)| (*id, s.charges)).collect();
+        let mut sites: Vec<(u32, u8)> =
+            world.sites.iter().map(|(id, s)| (*id, s.charges)).collect();
         sites.sort();
-        server.send_message(*client_id, CH_MINE, encode(&MineServerMessage::Sites(sites)));
-        server.send_message(*client_id, CH_MINE, encode(&MineServerMessage::Piles(world.views())));
+        server.send_message(
+            *client_id,
+            CH_MINE,
+            encode(&MineServerMessage::Sites(sites)),
+        );
+        server.send_message(
+            *client_id,
+            CH_MINE,
+            encode(&MineServerMessage::Piles(world.views())),
+        );
     }
 }
 
-fn tick_mines(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMut<MineWorld>, game: Res<crate::server::GameWorld>) {
+fn tick_mines(
+    time: Res<Time>,
+    mut server: ResMut<RenetServer>,
+    mut world: ResMut<MineWorld>,
+    game: Res<crate::server::GameWorld>,
+) {
     let dt = time.delta_secs();
-    let MineWorld { sites, piles, rng, send_in, frozen } = &mut *world;
+    let MineWorld {
+        sites,
+        piles,
+        rng,
+        send_in,
+        frozen,
+    } = &mut *world;
     let dt_piles = if *frozen { 0.0 } else { dt };
     for (id, s) in sites.iter_mut() {
         let info = s.kind.info();
@@ -578,12 +843,24 @@ fn tick_mines(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMu
         if s.regrow >= info.regrow {
             s.regrow = 0.0;
             s.charges += 1;
-            server.broadcast_message(CH_MINE, encode(&MineServerMessage::SiteCharges { id: *id, charges: s.charges }));
+            server.broadcast_message(
+                CH_MINE,
+                encode(&MineServerMessage::SiteCharges {
+                    id: *id,
+                    charges: s.charges,
+                }),
+            );
         }
     }
     let mut notes: Vec<(Vec3, &'static str)> = Vec::new();
     for ps in piles.values_mut() {
-        let before = (ps.pile.stage, ps.pile.smoke(), ps.pile.vents, (ps.pile.cracks * 4.0) as i32, ps.pile.out);
+        let before = (
+            ps.pile.stage,
+            ps.pile.smoke(),
+            ps.pile.vents,
+            (ps.pile.cracks * 4.0) as i32,
+            ps.pile.out,
+        );
         for e in ps.pile.step(dt_piles, rng.f32()) {
             let line = match (ps.pile.kind, e) {
                 (_, PileEvent::Crack) => "В кровле угольной кучи прогар — оттуда пламя!",
@@ -599,7 +876,13 @@ fn tick_mines(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMu
         if ps.pile.stage == Stage::Done {
             ps.done_for += dt;
         }
-        let after = (ps.pile.stage, ps.pile.smoke(), ps.pile.vents, (ps.pile.cracks * 4.0) as i32, ps.pile.out);
+        let after = (
+            ps.pile.stage,
+            ps.pile.smoke(),
+            ps.pile.vents,
+            (ps.pile.cracks * 4.0) as i32,
+            ps.pile.out,
+        );
         if before != after {
             ps.dirty = true;
         }
@@ -621,7 +904,9 @@ fn tick_mines(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMu
     let ids: Vec<u32> = piles.keys().copied().collect();
     for id in ids {
         let dirty = piles.get(&id).is_some_and(|p| p.dirty);
-        let lit = piles.get(&id).is_some_and(|p| p.pile.lit() || p.pile.stage == Stage::Cooling);
+        let lit = piles
+            .get(&id)
+            .is_some_and(|p| p.pile.lit() || p.pile.stage == Stage::Cooling);
         if !(dirty || periodic && lit) {
             continue;
         }
@@ -665,7 +950,13 @@ fn view_of(piles: &HashMap<u32, PileState>, id: u32) -> Option<PileView> {
 /// Изменились места добычи (после копки) — разослать.
 pub fn broadcast_site(server: &mut RenetServer, world: &MineWorld, site: u32) {
     if let Some(s) = world.sites.get(&site) {
-        server.broadcast_message(CH_MINE, encode(&MineServerMessage::SiteCharges { id: site, charges: s.charges }));
+        server.broadcast_message(
+            CH_MINE,
+            encode(&MineServerMessage::SiteCharges {
+                id: site,
+                charges: s.charges,
+            }),
+        );
     }
 }
 
@@ -699,7 +990,11 @@ pub fn target_of(act: &MineAct) -> (Option<u32>, Option<u32>) {
 pub fn task_target(task: &MineTask) -> (Option<u32>, Option<u32>) {
     match *task {
         MineTask::Dig { site } => (Some(site), None),
-        MineTask::StackWood { pile, .. } | MineTask::Cover { pile } | MineTask::Patch { pile } | MineTask::Stir { pile } | MineTask::Rake { pile } => (None, Some(pile)),
+        MineTask::StackWood { pile, .. }
+        | MineTask::Cover { pile }
+        | MineTask::Patch { pile }
+        | MineTask::Stir { pile }
+        | MineTask::Rake { pile } => (None, Some(pile)),
     }
 }
 
@@ -711,9 +1006,18 @@ mod tests {
     fn mine_sites_and_piles_exist_in_the_world() {
         let w = MineWorld::new();
         for kind in SiteKind::ALL {
-            assert!(w.sites.values().any(|s| s.kind == kind), "нет места {kind:?}");
+            assert!(
+                w.sites.values().any(|s| s.kind == kind),
+                "нет места {kind:?}"
+            );
         }
-        assert!(w.piles.values().filter(|p| p.pile.kind == PileKind::Clamp).count() >= 2);
+        assert!(
+            w.piles
+                .values()
+                .filter(|p| p.pile.kind == PileKind::Clamp)
+                .count()
+                >= 2
+        );
         assert!(w.piles.values().any(|p| p.pile.kind == PileKind::Roast));
         // Одна куча углежогов уже горит.
         assert!(w.piles.values().any(|p| p.pile.lit()));
@@ -722,13 +1026,39 @@ mod tests {
     #[test]
     fn adit_needs_mining_lore_and_a_pick() {
         let mut w = MineWorld::new();
-        let (id, pos) = w.sites.iter().find(|(_, s)| s.kind == SiteKind::Adit).map(|(id, s)| (*id, s.pos)).unwrap();
+        let (id, pos) = w
+            .sites
+            .iter()
+            .find(|(_, s)| s.kind == SiteKind::Adit)
+            .map(|(id, s)| (*id, s.pos))
+            .unwrap();
         let mut inv = Inventory::new((6, 6));
         let k = Knowledge::default();
-        assert!(act(&mut w, &k, &mut inv, pos, 1, false, MineAct::Dig { site: id }).is_err());
+        assert!(
+            act(
+                &mut w,
+                &k,
+                &mut inv,
+                pos,
+                1,
+                false,
+                MineAct::Dig { site: id }
+            )
+            .is_err()
+        );
         let mut k = Knowledge::default();
         k.learn(Lore::Technique(Technique::Mining));
-        let e = act(&mut w, &k, &mut inv, pos, 1, false, MineAct::Dig { site: id }).err().unwrap();
+        let e = act(
+            &mut w,
+            &k,
+            &mut inv,
+            pos,
+            1,
+            false,
+            MineAct::Dig { site: id },
+        )
+        .err()
+        .unwrap();
         assert!(e.contains("кайло"), "{e}");
     }
 }

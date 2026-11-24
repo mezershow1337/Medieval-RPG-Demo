@@ -17,10 +17,10 @@
 //! Оси: X — вдоль главной улицы (в натуре она идёт с юго-запада на северо-восток),
 //! Z — поперёк: −Z к морю (северный берег), +Z к суше (южная стена). Бухта — на +X.
 
+pub(crate) mod cozy;
 pub(crate) mod crafts;
 pub(crate) mod estate;
 pub(crate) mod houses;
-pub(crate) mod cozy;
 pub(crate) mod interior;
 pub(crate) mod kit;
 pub(crate) mod outside;
@@ -140,7 +140,9 @@ pub fn block_use(i: i32, j: i32) -> Use {
 /// Квартал целиком внутри стен с запасом на улицу вдоль стены.
 pub fn block_fits(i: i32, j: i32) -> bool {
     let r = block(i, j);
-    [(r.x0, r.z0), (r.x1, r.z0), (r.x0, r.z1), (r.x1, r.z1)].iter().all(|&(x, z)| terrain::inside_city(x, z) && edge_distance(x, z) > 7.0)
+    [(r.x0, r.z0), (r.x1, r.z0), (r.x0, r.z1), (r.x1, r.z1)]
+        .iter()
+        .all(|&(x, z)| terrain::inside_city(x, z) && edge_distance(x, z) > 7.0)
 }
 
 /// Расстояние до ближайшего участка городской стены.
@@ -165,7 +167,8 @@ pub fn city_layout() -> Layout {
             b.keep_clear.push(p.pos + Vec3::X * dx);
         }
     }
-    b.keep_clear.extend(super::places::npc_posts().iter().map(|p| p.pos));
+    b.keep_clear
+        .extend(super::places::npc_posts().iter().map(|p| p.pos));
 
     walls::fortifications(&mut b);
     streets(&mut b);
@@ -204,8 +207,14 @@ pub fn city_layout() -> Layout {
     // Край карты.
     let e = WORLD_HALF - 4.0;
     for (min, max) in [
-        (Vec3::new(-e - 2.0, -20.0, -e - 2.0), Vec3::new(e + 2.0, 200.0, -e)),
-        (Vec3::new(-e - 2.0, -20.0, e), Vec3::new(e + 2.0, 200.0, e + 2.0)),
+        (
+            Vec3::new(-e - 2.0, -20.0, -e - 2.0),
+            Vec3::new(e + 2.0, 200.0, -e),
+        ),
+        (
+            Vec3::new(-e - 2.0, -20.0, e),
+            Vec3::new(e + 2.0, 200.0, e + 2.0),
+        ),
         (Vec3::new(-e - 2.0, -20.0, -e), Vec3::new(-e, 200.0, e)),
         (Vec3::new(e, -20.0, -e), Vec3::new(e + 2.0, 200.0, e)),
     ] {
@@ -224,8 +233,20 @@ pub fn city_layout() -> Layout {
 /// Факелы у дверей лавок и домов на мощёной главной улице и агоре (у каждой второй двери):
 /// ночью от них на мостовой тёплые пятна света. Снаружи — та сторона, где под ногами плиты.
 fn door_lamps(layout: &Layout) -> Vec<super::Torch> {
-    let paving: Vec<&super::Block> = layout.blocks.iter().filter(|b| b.mat == Mat::Paving).collect();
-    let paved = |p: Vec3| paving.iter().any(|b| b.aabb.min.x <= p.x && p.x <= b.aabb.max.x && b.aabb.min.z <= p.z && p.z <= b.aabb.max.z && (b.aabb.max.y - p.y).abs() < 0.5);
+    let paving: Vec<&super::Block> = layout
+        .blocks
+        .iter()
+        .filter(|b| b.mat == Mat::Paving)
+        .collect();
+    let paved = |p: Vec3| {
+        paving.iter().any(|b| {
+            b.aabb.min.x <= p.x
+                && p.x <= b.aabb.max.x
+                && b.aabb.min.z <= p.z
+                && p.z <= b.aabb.max.z
+                && (b.aabb.max.y - p.y).abs() < 0.5
+        })
+    };
     let mut out = Vec::new();
     for (i, d) in layout.doors.iter().enumerate() {
         if crate::world_clock::unit(i as u64, 0x1A4) > 0.5 || d.height < 1.8 {
@@ -239,7 +260,10 @@ fn door_lamps(layout: &Layout) -> Vec<super::Torch> {
             _ => continue,
         };
         let side = if d.along_x { Vec3::X } else { Vec3::Z };
-        let pos = d.center + dir * (d.wall_t * 0.5 + 0.22) + side * (d.width * 0.5 + 0.4) + Vec3::Y * 2.15;
+        let pos = d.center
+            + dir * (d.wall_t * 0.5 + 0.22)
+            + side * (d.width * 0.5 + 0.4)
+            + Vec3::Y * 2.15;
         out.push(super::Torch { pos, out: dir });
     }
     out
@@ -256,9 +280,11 @@ fn streets(b: &mut Builder) {
         b.at((x + x1) / 2.0, 0.0);
         b.decor([x, 0.0, -MAIN_HALF], [x1, 0.03, MAIN_HALF], Mat::Paving);
         // Плиты, перекрывающие водосток, и бордюры.
-        b.mesh(Mat::Limestone).cuboid(Vec3::new(x, 0.0, -0.45), Vec3::new(x1, 0.045, 0.45));
+        b.mesh(Mat::Limestone)
+            .cuboid(Vec3::new(x, 0.0, -0.45), Vec3::new(x1, 0.045, 0.45));
         for z in [-MAIN_HALF, MAIN_HALF] {
-            b.mesh(Mat::Limestone).cuboid(Vec3::new(x, 0.0, z - 0.2), Vec3::new(x1, 0.1, z + 0.2));
+            b.mesh(Mat::Limestone)
+                .cuboid(Vec3::new(x, 0.0, z - 0.2), Vec3::new(x1, 0.1, z + 0.2));
         }
         x = x1;
     }
@@ -311,10 +337,20 @@ mod tests {
                     break;
                 }
                 let step = flat.normalize() * 0.15;
-                grounded = level.move_body(&Body::STANDING, &mut feet, step + Vec3::new(0.0, -0.08, 0.0), grounded).grounded;
+                grounded = level
+                    .move_body(
+                        &Body::STANDING,
+                        &mut feet,
+                        step + Vec3::new(0.0, -0.08, 0.0),
+                        grounded,
+                    )
+                    .grounded;
             }
             let to = *target - feet;
-            assert!(Vec2::new(to.x, to.z).length() < 0.6, "застрял по пути к {target}: стою в {feet}");
+            assert!(
+                Vec2::new(to.x, to.z).length() < 0.6,
+                "застрял по пути к {target}: стою в {feet}"
+            );
         }
         feet
     }
@@ -324,12 +360,22 @@ mod tests {
     #[ignore]
     fn probe() {
         let level = level();
-        let mut pts: Vec<(String, Vec3)> = places::places().iter().map(|p| (p.id.to_string(), p.pos)).collect();
-        pts.extend(places::npc_posts().iter().map(|p| (format!("{:?}", p.group), p.pos)));
+        let mut pts: Vec<(String, Vec3)> = places::places()
+            .iter()
+            .map(|p| (p.id.to_string(), p.pos))
+            .collect();
+        pts.extend(
+            places::npc_posts()
+                .iter()
+                .map(|p| (format!("{:?}", p.group), p.pos)),
+        );
         if let Ok(s) = std::env::var("CITY_PROBE") {
             for q in s.split(';') {
                 let v: Vec<f32> = q.split(',').map(|t| t.parse().unwrap()).collect();
-                pts.push((q.to_string(), Vec3::new(v[0], v.get(2).copied().unwrap_or(0.0), v[1])));
+                pts.push((
+                    q.to_string(),
+                    Vec3::new(v[0], v.get(2).copied().unwrap_or(0.0), v[1]),
+                ));
             }
         }
         for (name, p) in pts {
@@ -338,7 +384,17 @@ mod tests {
                 continue;
             }
             let a = Body::STANDING.aabb_at(p);
-            let hits: Vec<_> = level.0.iter().filter(|c| c.overlaps(&a)).map(|c| format!("[{:.2} {:.2} {:.2}]-[{:.2} {:.2} {:.2}]", c.min.x, c.min.y, c.min.z, c.max.x, c.max.y, c.max.z)).collect();
+            let hits: Vec<_> = level
+                .0
+                .iter()
+                .filter(|c| c.overlaps(&a))
+                .map(|c| {
+                    format!(
+                        "[{:.2} {:.2} {:.2}]-[{:.2} {:.2} {:.2}]",
+                        c.min.x, c.min.y, c.min.z, c.max.x, c.max.y, c.max.z
+                    )
+                })
+                .collect();
             let mut best = None;
             'search: for r in 1..40 {
                 for k in 0..(r * 8) {
@@ -351,7 +407,10 @@ mod tests {
                     }
                 }
             }
-            println!("{name} @ {p}: ground {:.2}; hits {hits:?}; nearest free {best:?}", level.ground_height(p.x, p.z));
+            println!(
+                "{name} @ {p}: ground {:.2}; hits {hits:?}; nearest free {best:?}",
+                level.ground_height(p.x, p.z)
+            );
         }
     }
 
@@ -359,7 +418,11 @@ mod tests {
     fn spawn_points_and_npc_posts_are_free() {
         let level = level();
         for i in 0..16 {
-            assert!(free(&level, spawn_point(i)), "точка появления {i} в стене: {}", spawn_point(i));
+            assert!(
+                free(&level, spawn_point(i)),
+                "точка появления {i} в стене: {}",
+                spawn_point(i)
+            );
         }
         for p in places::npc_posts() {
             let pos = p.pos + Vec3::Y * 0.1;
@@ -367,7 +430,10 @@ mod tests {
         }
         for p in super::super::npc_spawn_hints() {
             for i in 0..16 {
-                assert!(p.distance(spawn_point(i)) >= 12.0, "враг {p} слишком близко к появлению");
+                assert!(
+                    p.distance(spawn_point(i)) >= 12.0,
+                    "враг {p} слишком близко к появлению"
+                );
             }
         }
     }
@@ -377,7 +443,12 @@ mod tests {
         let level = level();
         for p in places::places() {
             let pos = p.pos + Vec3::Y * 0.1;
-            assert!(free(&level, pos), "место «{}» ({}) в стене: {pos}", p.name, p.id);
+            assert!(
+                free(&level, pos),
+                "место «{}» ({}) в стене: {pos}",
+                p.name,
+                p.id
+            );
             assert!(places::place(p.id).is_some());
         }
         let mut ids: Vec<&str> = places::places().iter().map(|p| p.id).collect();
@@ -396,7 +467,10 @@ mod tests {
         let idx = move |i: i32, k: i32| (k * nx + i) as usize;
         let mut seen = vec![false; (nx * nz) as usize];
         let start = spawn_point(0);
-        let s = (((start.x - x0) / cell).round() as i32, ((start.z - z0) / cell).round() as i32);
+        let s = (
+            ((start.x - x0) / cell).round() as i32,
+            ((start.z - z0) / cell).round() as i32,
+        );
         let mut queue = std::collections::VecDeque::from([s]);
         seen[idx(s.0, s.1)] = true;
         while let Some((i, k)) = queue.pop_front() {
@@ -413,7 +487,10 @@ mod tests {
             }
         }
         move |p: Vec3| {
-            let (i, k) = (((p.x - x0) / cell).round() as i32, ((p.z - z0) / cell).round() as i32);
+            let (i, k) = (
+                ((p.x - x0) / cell).round() as i32,
+                ((p.z - z0) / cell).round() as i32,
+            );
             (-1..=1).any(|di| {
                 (-1..=1).any(|dk| {
                     let (a, c) = (i + di, k + dk);
@@ -432,12 +509,18 @@ mod tests {
         level.set_all_doors(true);
         let reached = reachable_from_agora(&level);
         let mut lost = Vec::new();
-        for p in places::places().iter().filter(|p| p.pos.y < 0.5 && p.pos.z < 166.0) {
+        for p in places::places()
+            .iter()
+            .filter(|p| p.pos.y < 0.5 && p.pos.z < 166.0)
+        {
             if !reached(p.pos) {
                 lost.push(format!("{} {}", p.id, p.pos));
             }
         }
-        for p in places::npc_posts().iter().filter(|p| p.pos.y < 0.5 && p.pos.z < 182.0) {
+        for p in places::npc_posts()
+            .iter()
+            .filter(|p| p.pos.y < 0.5 && p.pos.z < 182.0)
+        {
             if !reached(p.pos) {
                 lost.push(format!("{:?} {}", p.group, p.pos));
             }
@@ -492,17 +575,30 @@ mod tests {
                 bad.push(format!("{} {}: {}", s.id, p, why.join(", ")));
             }
         }
-        assert!(bad.is_empty(), "плохие места появления:\n{}", bad.join("\n"));
+        assert!(
+            bad.is_empty(),
+            "плохие места появления:\n{}",
+            bad.join("\n")
+        );
         for (i, a) in spots.iter().enumerate() {
             for b in &spots[i + 1..] {
-                assert!(a.pos.xz().distance(b.pos.xz()) > 15.0, "{} и {} слишком близко", a.id, b.id);
+                assert!(
+                    a.pos.xz().distance(b.pos.xz()) > 15.0,
+                    "{} и {} слишком близко",
+                    a.id,
+                    b.id
+                );
                 assert_ne!(a.id, b.id);
             }
         }
         // Город велик: места от западной стены до порта.
         let xs: Vec<f32> = spots.iter().map(|s| s.pos.x).collect();
-        let span = xs.iter().cloned().fold(f32::MIN, f32::max) - xs.iter().cloned().fold(f32::MAX, f32::min);
-        assert!(span > 300.0, "места появления жмутся друг к другу: {span} м");
+        let span = xs.iter().cloned().fold(f32::MIN, f32::max)
+            - xs.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(
+            span > 300.0,
+            "места появления жмутся друг к другу: {span} м"
+        );
     }
 
     /// Выбор места: случайный, разный, подальше от других, точка всегда свободна.
@@ -523,16 +619,31 @@ mod tests {
             assert!(free(&level, p), "{id} {p}");
             seen.insert(id);
         }
-        assert!(seen.len() >= crate::level::spawn_spots().len() - 1, "выпадают не все места: {seen:?}");
+        assert!(
+            seen.len() >= crate::level::spawn_spots().len() - 1,
+            "выпадают не все места: {seen:?}"
+        );
         // Прошлое место не повторяется; рядом с другим игроком не ставим.
         let first = &crate::level::spawn_spots()[0];
         for _ in 0..50 {
-            let (id, p, _) = pick_spawn(&SpawnChoice::Random, &level, &[first.pos], Some("main_middle"), &mut rand);
+            let (id, p, _) = pick_spawn(
+                &SpawnChoice::Random,
+                &level,
+                &[first.pos],
+                Some("main_middle"),
+                &mut rand,
+            );
             assert_ne!(id, "main_middle");
             assert!(p.xz().distance(first.pos.xz()) > 12.0);
         }
         // Выбранное место — ровно оно.
-        let (id, p, yaw) = pick_spawn(&SpawnChoice::At("port_market".into()), &level, &[], None, &mut rand);
+        let (id, p, yaw) = pick_spawn(
+            &SpawnChoice::At("port_market".into()),
+            &level,
+            &[],
+            None,
+            &mut rand,
+        );
         let spot = crate::level::spawn_spot("port_market").unwrap();
         assert_eq!(id, "port_market");
         assert!(p.distance(spot.pos) < 1.7 && yaw == spot.yaw);
@@ -541,9 +652,22 @@ mod tests {
     #[test]
     fn herb_patches_on_land_outside_walls() {
         for h in places::herb_patches() {
-            assert!(!terrain::inside_city(h.pos.x, h.pos.z), "трава {} внутри стен", h.herb);
-            assert!(h.pos.y > WATER_Y + 0.3, "трава {} под водой: {}", h.herb, h.pos);
-            assert!(crate::lore::Substance::from_latin(h.herb).is_some(), "трава {} неизвестна травнику", h.herb);
+            assert!(
+                !terrain::inside_city(h.pos.x, h.pos.z),
+                "трава {} внутри стен",
+                h.herb
+            );
+            assert!(
+                h.pos.y > WATER_Y + 0.3,
+                "трава {} под водой: {}",
+                h.herb,
+                h.pos
+            );
+            assert!(
+                crate::lore::Substance::from_latin(h.herb).is_some(),
+                "трава {} неизвестна травнику",
+                h.herb
+            );
         }
     }
 
@@ -555,14 +679,27 @@ mod tests {
         let gx = main_gate_x();
         let sx = south_gate_x();
         let a = spawn_point(0);
-        walk(&level, &[
-            a,
-            Vec3::new(a.x, 0.0, 0.0),
-            Vec3::new(gx, 0.0, 0.0),
-            Vec3::new(gx, 0.0, 150.0),
-            Vec3::new(gx, 0.0, 200.0),
-        ]);
-        walk(&level, &[Vec3::new(sx, 0.0, 200.0), Vec3::new(sx, 0.0, 150.0), Vec3::new(sx, 0.0, 0.0), Vec3::new(272.0, 0.0, 0.0), Vec3::new(297.0, 0.0, 0.0), Vec3::new(297.0, 0.0, -60.0)]);
+        walk(
+            &level,
+            &[
+                a,
+                Vec3::new(a.x, 0.0, 0.0),
+                Vec3::new(gx, 0.0, 0.0),
+                Vec3::new(gx, 0.0, 150.0),
+                Vec3::new(gx, 0.0, 200.0),
+            ],
+        );
+        walk(
+            &level,
+            &[
+                Vec3::new(sx, 0.0, 200.0),
+                Vec3::new(sx, 0.0, 150.0),
+                Vec3::new(sx, 0.0, 0.0),
+                Vec3::new(272.0, 0.0, 0.0),
+                Vec3::new(297.0, 0.0, 0.0),
+                Vec3::new(297.0, 0.0, -60.0),
+            ],
+        );
     }
 
     #[test]
@@ -596,9 +733,21 @@ mod interior_tests {
     #[test]
     fn interiors_are_lived_in_and_doors_passable() {
         let layout = city_layout();
-        assert!(layout.doors.len() > 1500, "дверей мало: {}", layout.doors.len());
-        assert!(layout.containers.len() > 1500, "сундуков мало: {}", layout.containers.len());
-        assert!(layout.residents.len() > 600, "жителей мало: {}", layout.residents.len());
+        assert!(
+            layout.doors.len() > 1500,
+            "дверей мало: {}",
+            layout.doors.len()
+        );
+        assert!(
+            layout.containers.len() > 1500,
+            "сундуков мало: {}",
+            layout.containers.len()
+        );
+        assert!(
+            layout.residents.len() > 600,
+            "жителей мало: {}",
+            layout.residents.len()
+        );
         let doors = layout.doors.clone();
         let level = super::super::colliders(layout);
         level.set_all_doors(true);
@@ -609,15 +758,31 @@ mod interior_tests {
             for k in [-1.0f32, 0.0, 1.0] {
                 let p = d.center + across * (k * (d.wall_t / 2.0 + 0.45)) + Vec3::Y * 0.1;
                 // Низкую скамью перешагнуть можно.
-                let free = level.body_is_free(&Body::STANDING, p) || level.body_is_free(&Body::STANDING, p + Vec3::Y * 0.5);
+                let free = level.body_is_free(&Body::STANDING, p)
+                    || level.body_is_free(&Body::STANDING, p + Vec3::Y * 0.5);
                 if level.ground_height(p.x, p.z) < 0.3 && !free {
                     let a = Body::STANDING.aabb_at(p);
-                    let hits: Vec<String> = level.0.iter().filter(|c| c.overlaps(&a)).map(|c| format!("[{:.2} {:.2} {:.2}]-[{:.2} {:.2} {:.2}]", c.min.x, c.min.y, c.min.z, c.max.x, c.max.y, c.max.z)).collect();
+                    let hits: Vec<String> = level
+                        .0
+                        .iter()
+                        .filter(|c| c.overlaps(&a))
+                        .map(|c| {
+                            format!(
+                                "[{:.2} {:.2} {:.2}]-[{:.2} {:.2} {:.2}]",
+                                c.min.x, c.min.y, c.min.z, c.max.x, c.max.y, c.max.z
+                            )
+                        })
+                        .collect();
                     blocked.push(format!("{} ({k}) {hits:?}", d.center));
                     break;
                 }
             }
         }
-        assert!(blocked.len() < 3, "загорожено {} дверей: {:?}", blocked.len(), &blocked[..blocked.len().min(20)]);
+        assert!(
+            blocked.len() < 3,
+            "загорожено {} дверей: {:?}",
+            blocked.len(),
+            &blocked[..blocked.len().min(20)]
+        );
     }
 }

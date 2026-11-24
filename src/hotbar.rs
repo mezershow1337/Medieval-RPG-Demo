@@ -54,7 +54,10 @@ impl Bind {
         if item.info().max_stack > 1 || item.base.consumable().is_some() {
             Bind::Kind(item.base)
         } else {
-            Bind::Item { uid: item.uid, base: item.base }
+            Bind::Item {
+                uid: item.uid,
+                base: item.base,
+            }
         }
     }
     pub fn base(self) -> ItemBaseId {
@@ -73,7 +76,11 @@ impl Bind {
     fn count(self, inv: &Inventory) -> u32 {
         match self {
             Bind::Item { uid, .. } => inv.find(uid).map_or(0, |_| 1),
-            Bind::Kind(base) => inv.all_items().filter(|i| i.base == base).map(|i| i.count as u32).sum(),
+            Bind::Kind(base) => inv
+                .all_items()
+                .filter(|i| i.base == base)
+                .map(|i| i.count as u32)
+                .sum(),
         }
     }
 }
@@ -84,7 +91,11 @@ pub enum Act {
     /// Убрать оружие / взять снова (флаг «убрано»).
     Holster(bool),
     /// Переложить предмет (надеть или снять).
-    Move { uid: ItemUid, target: Target, unholster: bool },
+    Move {
+        uid: ItemUid,
+        target: Target,
+        unholster: bool,
+    },
     /// Применить расходник.
     Use(ItemUid),
     /// Читать, лечить, поставить (lore_client::try_use).
@@ -105,7 +116,13 @@ pub struct Hotbar {
 
 impl Default for Hotbar {
     fn default() -> Self {
-        Self { slots: [None; SLOTS], holstered: false, sent: None, seeded: false, last_main: None }
+        Self {
+            slots: [None; SLOTS],
+            holstered: false,
+            sent: None,
+            seeded: false,
+            last_main: None,
+        }
     }
 }
 
@@ -164,8 +181,17 @@ impl Hotbar {
 
     /// Какой слот сейчас «в руках»: 0 — руки, иначе слот с оружием из правой руки.
     pub fn active(&self, inv: &Inventory) -> usize {
-        let Some(main) = inv.equipped(EquipSlot::MainHand).filter(|_| !self.holstered) else { return 0 };
-        (1..SLOTS).find(|i| self.slots[*i].is_some_and(|b| b.resolve(inv).is_some_and(|it| it.uid == main.uid))).unwrap_or(usize::MAX)
+        let Some(main) = inv
+            .equipped(EquipSlot::MainHand)
+            .filter(|_| !self.holstered)
+        else {
+            return 0;
+        };
+        (1..SLOTS)
+            .find(|i| {
+                self.slots[*i].is_some_and(|b| b.resolve(inv).is_some_and(|it| it.uid == main.uid))
+            })
+            .unwrap_or(usize::MAX)
     }
 
     /// Решить, что делает выбор слота `i`.
@@ -173,8 +199,16 @@ impl Hotbar {
         if i == 0 {
             return Act::Holster(true);
         }
-        let Some(bind) = self.slots.get(i).copied().flatten() else { return Act::Nothing(format!("Слот {} пуст: наведите на вещь в инвентаре и нажмите {}", i + 1, i + 1)) };
-        let Some(item) = bind.resolve(inv) else { return Act::Nothing(format!("Нет предмета: {}", bind.base().base().name)) };
+        let Some(bind) = self.slots.get(i).copied().flatten() else {
+            return Act::Nothing(format!(
+                "Слот {} пуст: наведите на вещь в инвентаре и нажмите {}",
+                i + 1,
+                i + 1
+            ));
+        };
+        let Some(item) = bind.resolve(inv) else {
+            return Act::Nothing(format!("Нет предмета: {}", bind.base().base().name));
+        };
         let loc = inv.find(item.uid).map(|(l, _)| l);
         match item.info().slot {
             Some(EquipSlot::MainHand) => {
@@ -182,11 +216,23 @@ impl Hotbar {
                     // Уже в руке: повторное нажатие убирает оружие и обратно.
                     Act::Holster(!self.holstered)
                 } else {
-                    Act::Move { uid: item.uid, target: Target::Equip(EquipSlot::MainHand), unholster: true }
+                    Act::Move {
+                        uid: item.uid,
+                        target: Target::Equip(EquipSlot::MainHand),
+                        unholster: true,
+                    }
                 }
             }
-            Some(EquipSlot::OffHand) if loc == Some(Loc::Equip(EquipSlot::OffHand)) => Act::Move { uid: item.uid, target: Target::Auto, unholster: false },
-            Some(slot) if loc != Some(Loc::Equip(slot)) => Act::Move { uid: item.uid, target: Target::Equip(slot), unholster: false },
+            Some(EquipSlot::OffHand) if loc == Some(Loc::Equip(EquipSlot::OffHand)) => Act::Move {
+                uid: item.uid,
+                target: Target::Auto,
+                unholster: false,
+            },
+            Some(slot) if loc != Some(Loc::Equip(slot)) => Act::Move {
+                uid: item.uid,
+                target: Target::Equip(slot),
+                unholster: false,
+            },
             Some(_) => Act::Nothing(format!("{} уже надет", item.info().name)),
             None if item.base.consumable().is_some() => Act::Use(item.uid),
             None if crate::lore_client::usable(item.base) => Act::Lore(item.uid),
@@ -197,7 +243,11 @@ impl Hotbar {
     /// Слоты, которые листает колесо: руки и оружие.
     fn wheel_slots(&self, inv: &Inventory) -> Vec<usize> {
         let mut v = vec![0];
-        v.extend((1..SLOTS).filter(|i| self.slots[*i].and_then(|b| b.resolve(inv)).is_some_and(|it| it.info().slot == Some(EquipSlot::MainHand))));
+        v.extend((1..SLOTS).filter(|i| {
+            self.slots[*i]
+                .and_then(|b| b.resolve(inv))
+                .is_some_and(|it| it.info().slot == Some(EquipSlot::MainHand))
+        }));
         v
     }
 }
@@ -207,8 +257,14 @@ pub struct HotbarPlugin;
 impl Plugin for HotbarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Hotbar>()
-            .add_systems(Startup, setup_hotbar.after(crate::inventory_ui::setup_fonts))
-            .add_systems(Update, (track_inventory, hotbar_input, sync_holster, draw_hotbar).chain());
+            .add_systems(
+                Startup,
+                setup_hotbar.after(crate::inventory_ui::setup_fonts),
+            )
+            .add_systems(
+                Update,
+                (track_inventory, hotbar_input, sync_holster, draw_hotbar).chain(),
+            );
     }
 }
 
@@ -219,12 +275,33 @@ fn track_inventory(state: Res<LootState>, mut bar: ResMut<Hotbar>) {
 }
 
 /// Выполнить выбор слота.
-pub fn activate(i: usize, bar: &mut Hotbar, state: &mut LootState, client: &mut RenetClient, body: Option<&crate::medicine::Body>, now: f32) {
-    let Some(inv) = state.inventory.as_ref() else { return };
+pub fn activate(
+    i: usize,
+    bar: &mut Hotbar,
+    state: &mut LootState,
+    client: &mut RenetClient,
+    body: Option<&crate::medicine::Body>,
+    now: f32,
+) {
+    let Some(inv) = state.inventory.as_ref() else {
+        return;
+    };
     match bar.plan(i, inv) {
         Act::Holster(on) => bar.holstered = on,
-        Act::Move { uid, target, unholster } => {
-            send(client, &LootClientMessage::Move { uid, from: Owner::Me, to: Owner::Me, target });
+        Act::Move {
+            uid,
+            target,
+            unholster,
+        } => {
+            send(
+                client,
+                &LootClientMessage::Move {
+                    uid,
+                    from: Owner::Me,
+                    to: Owner::Me,
+                    target,
+                },
+            );
             if unholster {
                 bar.holstered = false;
             }
@@ -276,20 +353,31 @@ fn hotbar_input(
     }
     let cur = bar.active(inv);
     let pos = order.iter().position(|s| *s == cur).unwrap_or(0);
-    let step = if scroll.delta.y < 0.0 { 1 } else { order.len() - 1 };
+    let step = if scroll.delta.y < 0.0 {
+        1
+    } else {
+        order.len() - 1
+    };
     let next = order[(pos + step) % order.len()];
     activate(next, &mut bar, &mut state, &mut client, body, now);
 }
 
 /// Сообщить серверу, убрано ли оружие (при изменении и после подключения).
-fn sync_holster(mut bar: ResMut<Hotbar>, client: Option<ResMut<RenetClient>>, net: Option<Res<crate::client::NetState>>) {
+fn sync_holster(
+    mut bar: ResMut<Hotbar>,
+    client: Option<ResMut<RenetClient>>,
+    net: Option<Res<crate::client::NetState>>,
+) {
     let Some(mut client) = client else { return };
     if !client.is_connected() || net.as_ref().is_none_or(|n| n.my_id.is_none()) {
         bar.sent = None;
         return;
     }
     if bar.sent != Some(bar.holstered) {
-        client.send_message(CH_RELIABLE, encode(&ClientMessage::Holster { on: bar.holstered }));
+        client.send_message(
+            CH_RELIABLE,
+            encode(&ClientMessage::Holster { on: bar.holstered }),
+        );
         bar.sent = Some(bar.holstered);
     }
 }
@@ -335,7 +423,9 @@ fn draw_hotbar(
     root: Single<(Entity, &mut Node), With<HotbarRoot>>,
     mut drawn: Local<Drawn>,
 ) {
-    let (Some(fonts), Some(icons)) = (fonts, icons) else { return };
+    let (Some(fonts), Some(icons)) = (fonts, icons) else {
+        return;
+    };
     let (root, mut node) = root.into_inner();
     let Some(inv) = state.inventory.as_ref() else {
         node.display = Display::None;
@@ -349,7 +439,12 @@ fn draw_hotbar(
             .map(|s| match s {
                 Some(b) => {
                     let item = b.resolve(inv);
-                    (Some(b.base()), b.count(inv), item.is_some(), item.map_or(0, |i| i.quality as u16))
+                    (
+                        Some(b.base()),
+                        b.count(inv),
+                        item.is_some(),
+                        item.map_or(0, |i| i.quality as u16),
+                    )
                 }
                 None => (None, 0, false, 0),
             })
@@ -385,27 +480,58 @@ fn draw_hotbar(
                 let label = |t: String, size: f32, color: Color| {
                     (
                         Text::new(t),
-                        TextFont { font: fonts.bold.clone().into(), font_size: bevy::text::FontSize::Px(size), ..default() },
+                        TextFont {
+                            font: fonts.bold.clone().into(),
+                            font_size: bevy::text::FontSize::Px(size),
+                            ..default()
+                        },
                         TextColor(color),
-                        TextShadow { offset: Vec2::splat(1.0), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
+                        TextShadow {
+                            offset: Vec2::splat(1.0),
+                            color: Color::srgba(0.0, 0.0, 0.0, 0.9),
+                        },
                         FocusPolicy::Pass,
                     )
                 };
                 if i == 0 {
-                    s.spawn((label("Руки".into(), 14.0, Color::srgb(0.92, 0.86, 0.72)), TextLayout::justify(Justify::Center)));
+                    s.spawn((
+                        label("Руки".into(), 14.0, Color::srgb(0.92, 0.86, 0.72)),
+                        TextLayout::justify(Justify::Center),
+                    ));
                 } else if let Some(base) = base {
                     let alpha = if *present { 1.0 } else { 0.3 };
                     let (w, h) = base.base().size;
                     s.spawn((
                         ImageNode::new(icons.get(*base)).with_color(Color::WHITE.with_alpha(alpha)),
-                        Node { height: percent(100), aspect_ratio: Some(w as f32 / h as f32), max_width: percent(100), ..default() },
+                        Node {
+                            height: percent(100),
+                            aspect_ratio: Some(w as f32 / h as f32),
+                            max_width: percent(100),
+                            ..default()
+                        },
                         FocusPolicy::Pass,
                     ));
                     if matches!(bar.slots[i], Some(Bind::Kind(_))) {
-                        s.spawn((label(count.to_string(), 12.0, Color::WHITE), Node { position_type: PositionType::Absolute, right: px(3), bottom: px(1), ..default() }));
+                        s.spawn((
+                            label(count.to_string(), 12.0, Color::WHITE),
+                            Node {
+                                position_type: PositionType::Absolute,
+                                right: px(3),
+                                bottom: px(1),
+                                ..default()
+                            },
+                        ));
                     }
                 }
-                s.spawn((label((i + 1).to_string(), 12.0, Color::srgba(1.0, 0.95, 0.8, 0.8)), Node { position_type: PositionType::Absolute, left: px(3), top: px(1), ..default() }));
+                s.spawn((
+                    label((i + 1).to_string(), 12.0, Color::srgba(1.0, 0.95, 0.8, 0.8)),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(3),
+                        top: px(1),
+                        ..default()
+                    },
+                ));
             });
         }
     });
@@ -417,7 +543,13 @@ mod tests {
     use crate::items::*;
 
     fn make(name: &str, uids: &mut UidGen) -> Item {
-        roll_item(ItemBaseId::by_name(name), Quality::Common, 1, &mut Rng::new(3), uids)
+        roll_item(
+            ItemBaseId::by_name(name),
+            Quality::Common,
+            1,
+            &mut Rng::new(3),
+            uids,
+        )
     }
 
     #[test]
@@ -427,11 +559,18 @@ mod tests {
         let sword = make("Спата", &mut uids);
         let axe = make("Боевой топор", &mut uids);
         let (sid, aid) = (sword.uid, axe.uid);
-        inv.place(sword, Target::Equip(EquipSlot::MainHand)).unwrap();
+        inv.place(sword, Target::Equip(EquipSlot::MainHand))
+            .unwrap();
         inv.place(axe, Target::Auto).unwrap();
         let mut bar = Hotbar::default();
         bar.update_from_inventory(&inv);
-        assert_eq!(bar.slots[1], Some(Bind::Item { uid: sid, base: ItemBaseId::by_name("Спата") }));
+        assert_eq!(
+            bar.slots[1],
+            Some(Bind::Item {
+                uid: sid,
+                base: ItemBaseId::by_name("Спата")
+            })
+        );
         assert_eq!(bar.active(&inv), 1);
         assert_eq!(bar.plan(0, &inv), Act::Holster(true));
         bar.holstered = true;
@@ -441,7 +580,14 @@ mod tests {
         // Топор из сумки — в правую руку.
         let axe_item = inv.find(aid).unwrap().1.clone();
         bar.bind(2, &axe_item);
-        assert_eq!(bar.plan(2, &inv), Act::Move { uid: aid, target: Target::Equip(EquipSlot::MainHand), unholster: true });
+        assert_eq!(
+            bar.plan(2, &inv),
+            Act::Move {
+                uid: aid,
+                target: Target::Equip(EquipSlot::MainHand),
+                unholster: true
+            }
+        );
         assert_eq!(bar.wheel_slots(&inv), vec![0, 1, 2]);
     }
 
@@ -460,13 +606,28 @@ mod tests {
         assert!(matches!(bar.plan(4, &inv), Act::Nothing(_)));
         let s = inv.find(shid).unwrap().1.clone();
         bar.bind(5, &s);
-        assert_eq!(bar.plan(5, &inv), Act::Move { uid: shid, target: Target::Equip(EquipSlot::OffHand), unholster: false });
+        assert_eq!(
+            bar.plan(5, &inv),
+            Act::Move {
+                uid: shid,
+                target: Target::Equip(EquipSlot::OffHand),
+                unholster: false
+            }
+        );
         inv = {
             let mut v = vec![inv];
-            crate::inventory::transfer(&mut v, 0, 0, shid, Target::Equip(EquipSlot::OffHand)).unwrap();
+            crate::inventory::transfer(&mut v, 0, 0, shid, Target::Equip(EquipSlot::OffHand))
+                .unwrap();
             v.pop().unwrap()
         };
-        assert_eq!(bar.plan(5, &inv), Act::Move { uid: shid, target: Target::Auto, unholster: false });
+        assert_eq!(
+            bar.plan(5, &inv),
+            Act::Move {
+                uid: shid,
+                target: Target::Auto,
+                unholster: false
+            }
+        );
         // Перепривязка: тот же щит в другой слот — старый слот освобождается.
         bar.bind(6, &s);
         assert_eq!(bar.slots[5], None);

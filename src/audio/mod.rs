@@ -24,7 +24,6 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-
 pub struct GameAudioPlugin;
 
 impl Plugin for GameAudioPlugin {
@@ -34,10 +33,24 @@ impl Plugin for GameAudioPlugin {
             .init_resource::<SfxRng>()
             .init_resource::<Ears>()
             .add_systems(Startup, (load_bank, surface::start_building))
-            .add_systems(Update, (attach_listener, play_sfx, update_emitters, reap_one_shots).chain().in_set(AudioSet))
+            .add_systems(
+                Update,
+                (attach_listener, play_sfx, update_emitters, reap_one_shots)
+                    .chain()
+                    .in_set(AudioSet),
+            )
             .configure_sets(Update, AudioSet.after(crate::fight::FightSet))
-            .add_systems(Update, debug_log.run_if(|| std::env::var("MRPG_AUDIO_LOG").is_ok()))
-            .add_plugins((steps::StepsPlugin, combat_sfx::CombatSfxPlugin, world_sfx::WorldSfxPlugin, ambience::AmbiencePlugin, music::MusicPlugin));
+            .add_systems(
+                Update,
+                debug_log.run_if(|| std::env::var("MRPG_AUDIO_LOG").is_ok()),
+            )
+            .add_plugins((
+                steps::StepsPlugin,
+                combat_sfx::CombatSfxPlugin,
+                world_sfx::WorldSfxPlugin,
+                ambience::AmbiencePlugin,
+                music::MusicPlugin,
+            ));
     }
 }
 
@@ -55,7 +68,11 @@ pub struct AudioSettings {
 
 impl Default for AudioSettings {
     fn default() -> Self {
-        Self { music: 0.6, sfx: 0.9, ambient: 0.8 }
+        Self {
+            music: 0.6,
+            sfx: 0.9,
+            ambient: 0.8,
+        }
     }
 }
 
@@ -88,14 +105,18 @@ pub struct Bank {
 fn load_bank(mut commands: Commands, assets: Res<AssetServer>) {
     let mut bank = Bank::default();
     for &(name, n) in bank_gen::SFX_VARIANTS {
-        let v = (1..=n).map(|i| assets.load(format!("audio/sfx/{name}_{i}.ogg"))).collect();
+        let v = (1..=n)
+            .map(|i| assets.load(format!("audio/sfx/{name}_{i}.ogg")))
+            .collect();
         bank.sfx.insert(name, v);
     }
     for &name in bank_gen::AMBIENT {
-        bank.ambient.insert(name, assets.load(format!("audio/ambient/{name}.ogg")));
+        bank.ambient
+            .insert(name, assets.load(format!("audio/ambient/{name}.ogg")));
     }
     for &(name, _) in bank_gen::MUSIC {
-        bank.music.insert(name, assets.load(format!("audio/music/{name}.ogg")));
+        bank.music
+            .insert(name, assets.load(format!("audio/music/{name}.ogg")));
     }
     commands.insert_resource(bank);
 }
@@ -106,7 +127,10 @@ pub struct SfxRng(u64);
 
 impl Default for SfxRng {
     fn default() -> Self {
-        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1);
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(1);
         Self(seed | 1)
     }
 }
@@ -154,10 +178,23 @@ pub struct Sfx {
 
 impl Sfx {
     pub fn at(name: &'static str, pos: Vec3) -> Self {
-        Self { name, at: Some(pos), follow: None, gain: 1.0, pitch: 1.0, spread: 0.06, near: 1.5, range: 40.0, channel: Channel::Sfx }
+        Self {
+            name,
+            at: Some(pos),
+            follow: None,
+            gain: 1.0,
+            pitch: 1.0,
+            spread: 0.06,
+            near: 1.5,
+            range: 40.0,
+            channel: Channel::Sfx,
+        }
     }
     pub fn ui(name: &'static str) -> Self {
-        Self { at: None, ..Self::at(name, Vec3::ZERO) }
+        Self {
+            at: None,
+            ..Self::at(name, Vec3::ZERO)
+        }
     }
     pub fn gain(mut self, g: f32) -> Self {
         self.gain = g;
@@ -235,7 +272,10 @@ const MAX_VOICES: usize = 48;
 fn attach_listener(
     mut commands: Commands,
     cams: Query<(Entity, &GlobalTransform), (With<Camera3d>, Without<SpatialListener>)>,
-    listeners: Query<(Entity, &GlobalTransform, Has<crate::player::PlayerCamera>), With<SpatialListener>>,
+    listeners: Query<
+        (Entity, &GlobalTransform, Has<crate::player::PlayerCamera>),
+        With<SpatialListener>,
+    >,
     player_cam: Query<(), With<crate::player::PlayerCamera>>,
     mut ears: ResMut<Ears>,
 ) {
@@ -265,7 +305,11 @@ fn attach_listener(
 /// Точка «на единичном расстоянии» в направлении источника: Bevy по ней строит панораму.
 fn virtual_pos(ears: &Ears, src: Vec3) -> Vec3 {
     let d = src - ears.pos;
-    let dir = if d.length_squared() < 1e-4 { ears.forward } else { d.normalize() };
+    let dir = if d.length_squared() < 1e-4 {
+        ears.forward
+    } else {
+        d.normalize()
+    };
     ears.pos + dir
 }
 
@@ -301,7 +345,15 @@ fn play_sfx(
             warn!("нет звука «{}»", m.name);
             continue;
         };
-        let em = Emitter { at: m.at, follow: m.follow, gain: m.gain, near: m.near, range: m.range, channel: m.channel, fade: 1.0 };
+        let em = Emitter {
+            at: m.at,
+            follow: m.follow,
+            gain: m.gain,
+            near: m.near,
+            range: m.range,
+            channel: m.channel,
+            fade: 1.0,
+        };
         let pos = world_pos(&em, &follow);
         let dist_gain = match (pos, ears.valid) {
             (Some(p), true) => distance_gain(p.distance(ears.pos), m.near, m.range),
@@ -319,7 +371,12 @@ fn play_sfx(
         voices += 1;
         let handle = list[rng.index(list.len())].clone();
         let speed = (m.pitch * (1.0 + rng.range(-m.spread, m.spread))).clamp(0.3, 3.0);
-        let mut settings = PlaybackSettings { mode: PlaybackMode::Despawn, volume: Volume::Linear(vol), speed, ..default() };
+        let mut settings = PlaybackSettings {
+            mode: PlaybackMode::Despawn,
+            volume: Volume::Linear(vol),
+            speed,
+            ..default()
+        };
         let mut ent = commands.spawn((AudioPlayer(handle), em, OneShot(now)));
         if let Some(p) = pos {
             settings.spatial = true;
@@ -336,7 +393,12 @@ fn update_emitters(
     settings: Res<AudioSettings>,
     global: Res<GlobalVolume>,
     follow: Query<&GlobalTransform>,
-    mut q: Query<(&Emitter, Option<&mut Transform>, Option<&mut AudioSink>, Option<&mut bevy::audio::SpatialAudioSink>)>,
+    mut q: Query<(
+        &Emitter,
+        Option<&mut Transform>,
+        Option<&mut AudioSink>,
+        Option<&mut bevy::audio::SpatialAudioSink>,
+    )>,
 ) {
     let master = global.volume.to_linear();
     for (e, tf, sink, spatial) in &mut q {
@@ -363,7 +425,16 @@ fn update_emitters(
 }
 
 /// Отладка (`MRPG_AUDIO_LOG=1`): раз в 2 с — где уши, что вокруг, что звучит.
-fn debug_log(time: Res<Time>, fighters: Res<combat_sfx::Fighters>, ears: Res<Ears>, scene: Res<ambience::Scene>, dir: Res<music::MusicDirector>, q: Query<(&Emitter, Has<AudioSink>, Has<bevy::audio::SpatialAudioSink>)>, mut next: Local<f32>, mut heard: MessageReader<Sfx>) {
+fn debug_log(
+    time: Res<Time>,
+    fighters: Res<combat_sfx::Fighters>,
+    ears: Res<Ears>,
+    scene: Res<ambience::Scene>,
+    dir: Res<music::MusicDirector>,
+    q: Query<(&Emitter, Has<AudioSink>, Has<bevy::audio::SpatialAudioSink>)>,
+    mut next: Local<f32>,
+    mut heard: MessageReader<Sfx>,
+) {
     let names: Vec<&str> = heard.read().map(|s| s.name).collect();
     let now = time.elapsed_secs();
     if !names.is_empty() {
@@ -374,17 +445,48 @@ fn debug_log(time: Res<Time>, fighters: Res<combat_sfx::Fighters>, ears: Res<Ear
     }
     *next = now + 2.0;
     let playing = q.iter().filter(|(_, a, b)| *a || *b).count();
-    let loops: Vec<String> = q.iter().filter(|(e, _, _)| e.channel != Channel::Sfx && e.fade > 0.01).map(|(e, _, _)| format!("{:?}:{:.2}", e.channel, e.fade)).collect();
+    let loops: Vec<String> = q
+        .iter()
+        .filter(|(e, _, _)| e.channel != Channel::Sfx && e.fade > 0.01)
+        .map(|(e, _, _)| format!("{:?}:{:.2}", e.channel, e.fade))
+        .collect();
     info!(
         "звук: бой {:.0} / враг {:.0} с назад; уши {:.0?}, море {:.2}, крыша {:.2}, город {:.2}, рынок {:.2}, храм {:.2}, высота {:.2}, место {:?}, время {:?}; музыка {:?}; источников {} (звучит {}), петли {:?}",
-        now - fighters.last_fight, now - fighters.hostile_near, ears.pos, scene.sea, scene.indoor, scene.city, scene.market, scene.sacred, scene.height, scene.place, scene.time, dir.want, q.iter().count(), playing, loops
+        now - fighters.last_fight,
+        now - fighters.hostile_near,
+        ears.pos,
+        scene.sea,
+        scene.indoor,
+        scene.city,
+        scene.market,
+        scene.sacred,
+        scene.height,
+        scene.place,
+        scene.time,
+        dir.want,
+        q.iter().count(),
+        playing,
+        loops
     );
 }
 
 /// Создать петлю (окружение, огонь, кипение): громкость задаёт `Emitter::fade`.
-pub fn spawn_loop(commands: &mut Commands, handle: Handle<AudioSource>, emitter: Emitter, ears: &Ears) -> Entity {
+pub fn spawn_loop(
+    commands: &mut Commands,
+    handle: Handle<AudioSource>,
+    emitter: Emitter,
+    ears: &Ears,
+) -> Entity {
     let spatial = emitter.at.is_some() && emitter.follow.is_none();
-    let mut ent = commands.spawn((AudioPlayer(handle), PlaybackSettings { mode: PlaybackMode::Loop, volume: Volume::Linear(0.0), spatial, ..default() }));
+    let mut ent = commands.spawn((
+        AudioPlayer(handle),
+        PlaybackSettings {
+            mode: PlaybackMode::Loop,
+            volume: Volume::Linear(0.0),
+            spatial,
+            ..default()
+        },
+    ));
     if let Some(p) = emitter.at.filter(|_| spatial) {
         ent.insert(Transform::from_translation(virtual_pos(ears, p)));
     }
@@ -414,10 +516,16 @@ mod tests {
             }
         }
         for name in bank_gen::AMBIENT {
-            assert!(root.join(format!("ambient/{name}.ogg")).exists(), "нет петли {name}");
+            assert!(
+                root.join(format!("ambient/{name}.ogg")).exists(),
+                "нет петли {name}"
+            );
         }
         for (name, _) in bank_gen::MUSIC {
-            assert!(root.join(format!("music/{name}.ogg")).exists(), "нет музыки {name}");
+            assert!(
+                root.join(format!("music/{name}.ogg")).exists(),
+                "нет музыки {name}"
+            );
         }
     }
 }

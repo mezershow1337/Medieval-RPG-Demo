@@ -37,9 +37,16 @@ pub struct StationView {
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum Fx {
     /// Удар молота; `temp` — жар поковки (окалина летит с горячего).
-    Strike { heavy: bool, temp: f32 },
+    Strike {
+        heavy: bool,
+        temp: f32,
+    },
     /// Клинок опустили в корыто (или в масло).
-    Quench { medium: Quench, temp: f32, cracked: bool },
+    Quench {
+        medium: Quench,
+        temp: f32,
+        cracked: bool,
+    },
     /// Касание точила.
     Grind,
     /// Металл горит в горне: сноп искр.
@@ -73,9 +80,15 @@ pub struct PieceView {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Plan {
     /// Ковать из полос (или крицы, или лома) из своей сумки.
-    Forge { pattern: Pattern, metal: Vec<ItemUid> },
+    Forge {
+        pattern: Pattern,
+        metal: Vec<ItemUid>,
+    },
     /// Литьё: сколько штук какого металла положить в тигель.
-    Cast { piece: CastPiece, metals: Vec<(CastMetal, u8)> },
+    Cast {
+        piece: CastPiece,
+        metals: Vec<(CastMetal, u8)>,
+    },
     /// Заложить сыродутный горн.
     Smelt { ore: u8, charcoal: u8 },
     /// Цементация железной полосы.
@@ -93,26 +106,47 @@ pub enum Job {
     Cast(Casting),
     Soak(Soak),
     /// Ремонт: вещь лежит у горна, `progress` 0..1.
-    Repair { item: Item, progress: f32 },
+    Repair {
+        item: Item,
+        progress: f32,
+    },
     /// Стрельное дело на верстаке. `acc` — средняя аккуратность, `head` — качество наконечников.
-    Fletch { what: crate::archery::Fletch, progress: f32, acc: f32, strokes: u16, head: crate::items::Quality, sinew: bool },
+    Fletch {
+        what: crate::archery::Fletch,
+        progress: f32,
+        acc: f32,
+        strokes: u16,
+        head: crate::items::Quality,
+        sinew: bool,
+    },
 }
 
 /// Клиент -> сервер.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum SmithClientMessage {
-    Begin { station: u32, plan: Plan },
+    Begin {
+        station: u32,
+        plan: Plan,
+    },
     /// Подсыпать угля в горн (одна мера из сумки).
-    AddFuel { station: u32 },
+    AddFuel {
+        station: u32,
+    },
     /// Качать меха (держать) или отпустить.
     Bellows(bool),
     /// Переложить поковку или тигель.
     Move(Spot),
-    Strike { zone: u8, heavy: bool, acc: f32 },
+    Strike {
+        zone: u8,
+        heavy: bool,
+        acc: f32,
+    },
     /// Перевернуть поковку клещами на другую грань.
     Flip,
     Quench(Quench),
-    Grind { acc: f32 },
+    Grind {
+        acc: f32,
+    },
     /// Снять шлак с расплава.
     Skim,
     /// Поставить форму греться у горна.
@@ -120,7 +154,9 @@ pub enum SmithClientMessage {
     Pour(bool),
     OpenMould,
     /// Собрать вещь (`fitting` — с бронзовым навершием).
-    Finish { fitting: bool },
+    Finish {
+        fitting: bool,
+    },
     Abandon,
 }
 
@@ -129,11 +165,19 @@ pub enum SmithClientMessage {
 pub enum SmithServerMessage {
     Stations(Vec<StationView>),
     /// Сколько угля в горне (секунды) и сила дутья 0..1.
-    Fire { station: u32, fuel: f32, blast: f32 },
+    Fire {
+        station: u32,
+        fuel: f32,
+        blast: f32,
+    },
     /// Своя работа (None — нет).
     Work(Option<WorkView>),
     Notice(String),
-    Fx { station: u32, player: u64, fx: Fx },
+    Fx {
+        station: u32,
+        player: u64,
+        fx: Fx,
+    },
     /// Все раскалённые поковки и тигли (несколько раз в секунду, пока что-то есть).
     Pieces(Vec<PieceView>),
 }
@@ -149,8 +193,24 @@ impl PieceView {
     /// Что видно у горна от этой работы (ремонт и плавка — без поковки в клещах).
     pub fn of(player: u64, station: u32, job: &Job) -> Option<Self> {
         match job {
-            Job::Forge(f) => Some(Self { player, station, spot: f.spot, temp: f.temp, pattern: Some(f.pattern), drawn: f.drawn(), pouring: false }),
-            Job::Cast(c) if !c.opened => Some(Self { player, station, spot: c.spot, temp: c.temp, pattern: None, drawn: c.poured, pouring: c.pouring }),
+            Job::Forge(f) => Some(Self {
+                player,
+                station,
+                spot: f.spot,
+                temp: f.temp,
+                pattern: Some(f.pattern),
+                drawn: f.drawn(),
+                pouring: false,
+            }),
+            Job::Cast(c) if !c.opened => Some(Self {
+                player,
+                station,
+                spot: c.spot,
+                temp: c.temp,
+                pattern: None,
+                drawn: c.poured,
+                pouring: c.pouring,
+            }),
             _ => None,
         }
     }

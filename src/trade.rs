@@ -201,9 +201,22 @@ const WINE_OIL: &[&str] = &[
 ];
 const TEXTILES: &[&str] = &["Отрез льна", "Отрез шерсти", "Моток пряжи"];
 const HIDES: &[&str] = &["Сырая шкура", "Овчина", "Войлок"];
-const FOOD: &[&str] = &["Солёная рыба", "Мешок соли", "Воск", "Горшок мёда", "Каравай хлеба", "Головка сыра", "Сушёные смоквы"];
+const FOOD: &[&str] = &[
+    "Солёная рыба",
+    "Мешок соли",
+    "Воск",
+    "Горшок мёда",
+    "Каравай хлеба",
+    "Головка сыра",
+    "Сушёные смоквы",
+];
 /// Серебро, кость и бронза для себя: ложки, гребни, зеркальца, энколпионы.
-const JEWELS: &[&str] = &["Серебряная ложка", "Костяной гребень", "Бронзовое зеркальце", "Энколпион"];
+const JEWELS: &[&str] = &[
+    "Серебряная ложка",
+    "Костяной гребень",
+    "Бронзовое зеркальце",
+    "Энколпион",
+];
 /// Школьные книги и письменный прибор — товар книжника.
 const WRITING: &[&str] = &[
     "Псалтирь",
@@ -263,7 +276,11 @@ pub fn category(base: ItemBaseId) -> Category {
     if name == "Рубин" {
         return Category::Gem;
     }
-    if name == "Наконечники стрел" || crate::arsenal::find(name).is_some() || crate::archery::is_arrow(name) || crate::archery::is_bow(name) {
+    if name == "Наконечники стрел"
+        || crate::arsenal::find(name).is_some()
+        || crate::archery::is_arrow(name)
+        || crate::archery::is_bow(name)
+    {
         return Category::Weapon;
     }
     if name.starts_with("Бронзов") {
@@ -1026,7 +1043,11 @@ pub const MERCHANTS: &[MerchantDef] = &[
         faction: Faction::Citizens,
         place: "fish_salting",
         greeting: "Хамса, кефаль, осётр — из цистерн, в рассоле по-херсонски. Корабли берут бочками.",
-        stock: &[s("Солёная рыба", 8, 20, 0.85), s("Мешок соли", 2, 5, 0.9), s("Рыбий клей", 2, 6, 0.9)],
+        stock: &[
+            s("Солёная рыба", 8, 20, 0.85),
+            s("Мешок соли", 2, 5, 0.9),
+            s("Рыбий клей", 2, 6, 0.9),
+        ],
         buys: &[(Category::Food, 0.7)],
         money: MoneyPolicy::Coins,
         vigilance: 0.35,
@@ -1048,7 +1069,11 @@ pub const MERCHANTS: &[MerchantDef] = &[
         faction: Faction::Church,
         place: "basilica",
         greeting: "В ксеноне всегда нужны руки. Поработай — увидишь больше, чем вычитаешь у Галена.",
-        stock: &[s("Бинт", 2, 6, 1.0), s("Лубок", 1, 4, 1.0), s("Отвар шалфея", 0, 2, 1.0)],
+        stock: &[
+            s("Бинт", 2, 6, 1.0),
+            s("Лубок", 1, 4, 1.0),
+            s("Отвар шалфея", 0, 2, 1.0),
+        ],
         buys: &[(Category::Herb, 0.9), (Category::Remedy, 0.8)],
         money: MoneyPolicy::Coins,
         vigilance: 0.3,
@@ -1435,7 +1460,11 @@ pub const MERCHANTS: &[MerchantDef] = &[
             s("Дрова", 4, 12, 1.0),
             s("Известняковый блок", 0, 2, 1.0),
         ],
-        buys: &[(Category::Material, 0.8), (Category::Food, 1.1), (Category::WineOil, 1.1)],
+        buys: &[
+            (Category::Material, 0.8),
+            (Category::Food, 1.1),
+            (Category::WineOil, 1.1),
+        ],
         money: MoneyPolicy::Coins,
         vigilance: 0.6,
         cash: 40 * 300,
@@ -1480,8 +1509,16 @@ pub const MERCHANTS: &[MerchantDef] = &[
             s("Топор дровосека", 1, 2, 1.0),
             s("Заступ", 0, 1, 1.0),
         ],
-        buys: &[(Category::Food, 1.3), (Category::WineOil, 1.4), (Category::Textile, 1.2), (Category::Material, 0.8)],
-        money: MoneyPolicy::Barter { bronze: 0.85, gold: 1.0 },
+        buys: &[
+            (Category::Food, 1.3),
+            (Category::WineOil, 1.4),
+            (Category::Textile, 1.2),
+            (Category::Material, 0.8),
+        ],
+        money: MoneyPolicy::Barter {
+            bronze: 0.85,
+            gold: 1.0,
+        },
         vigilance: 0.4,
         cash: 0,
         orders: &[],
@@ -1842,11 +1879,23 @@ pub struct StallBox {
 /// за стенами — войлок на земле.
 pub fn stall_layout(outside: bool, side_table: bool) -> Vec<StallBox> {
     if outside {
-        return vec![StallBox { center: [0.0, 0.015, -1.15], half: [1.2, 0.015, 0.75], felt: true }];
+        return vec![StallBox {
+            center: [0.0, 0.015, -1.15],
+            half: [1.2, 0.015, 0.75],
+            felt: true,
+        }];
     }
-    let mut v = vec![StallBox { center: [0.0, 0.45, -0.95], half: [1.0, 0.45, 0.35], felt: false }];
+    let mut v = vec![StallBox {
+        center: [0.0, 0.45, -0.95],
+        half: [1.0, 0.45, 0.35],
+        felt: false,
+    }];
     if side_table {
-        v.push(StallBox { center: [1.65, 0.38, -0.6], half: [0.45, 0.38, 0.4], felt: false });
+        v.push(StallBox {
+            center: [1.65, 0.38, -0.6],
+            half: [0.45, 0.38, 0.4],
+            felt: false,
+        });
     }
     v
 }
@@ -1856,7 +1905,11 @@ pub fn stall_obbs(pos: bevy::math::Vec3, yaw: f32, boxes: &[StallBox]) -> Vec<cr
     let rot = bevy::math::Quat::from_rotation_y(yaw);
     boxes
         .iter()
-        .map(|b| crate::props::Obb { center: pos + rot * bevy::math::Vec3::from_array(b.center), rot, half: bevy::math::Vec3::from_array(b.half) })
+        .map(|b| crate::props::Obb {
+            center: pos + rot * bevy::math::Vec3::from_array(b.center),
+            rot,
+            half: bevy::math::Vec3::from_array(b.half),
+        })
         .collect()
 }
 
@@ -2116,18 +2169,12 @@ mod tests {
     #[test]
     fn arms_to_barbarians_is_contraband() {
         let steppe = merchant_by_key("eskam").unwrap().def();
-        assert!(is_contraband_for(
-            steppe,
-            ItemBaseId::by_name("Спата")
-        ));
+        assert!(is_contraband_for(steppe, ItemBaseId::by_name("Спата")));
         assert!(!is_contraband_for(
             steppe,
             ItemBaseId::by_name("Амфора вина")
         ));
         let garrison = merchant_by_key("markianos").unwrap().def();
-        assert!(!is_contraband_for(
-            garrison,
-            ItemBaseId::by_name("Спата")
-        ));
+        assert!(!is_contraband_for(garrison, ItemBaseId::by_name("Спата")));
     }
 }

@@ -249,7 +249,11 @@ fn sliced(image: Handle<Image>, border: f32, tile: bool) -> ImageNode {
 
 fn with_mode(image: Handle<Image>, image_mode: NodeImageMode) -> ImageNode {
     // Картинка рамки — на весь узел, включая отступы (по умолчанию Bevy рисует только в content box).
-    ImageNode { image_mode, visual_box: VisualBox::BorderBox, ..ImageNode::new(image) }
+    ImageNode {
+        image_mode,
+        visual_box: VisualBox::BorderBox,
+        ..ImageNode::new(image)
+    }
 }
 
 impl UiTheme {
@@ -702,7 +706,11 @@ fn scroll_wheel(
 /// Bevy 0.20 извлекает 9-slice картинки в рендер только при изменении узла. Узлы HUD, созданные
 /// до появления камеры (в Startup), так и оставались невидимыми. Когда появляется новая камера,
 /// несколько кадров «трогаем» все картинки, чтобы они извлеклись заново.
-fn refresh_slices_on_new_camera(cams: Query<(), Added<Camera>>, mut images: Query<&mut ImageNode>, mut frames: Local<u8>) {
+fn refresh_slices_on_new_camera(
+    cams: Query<(), Added<Camera>>,
+    mut images: Query<&mut ImageNode>,
+    mut frames: Local<u8>,
+) {
     if !cams.is_empty() {
         *frames = 3;
     }

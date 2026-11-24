@@ -23,9 +23,9 @@ use crate::collision::LevelColliders;
 use crate::inventory::{CORPSE_GRID, Inventory, MoveError, PLAYER_GRID, Target, transfer};
 use crate::items::*;
 use crate::loot_net::*;
-use crate::protocol::{decode, encode};
-use crate::protocol::ActorKind;
 use crate::props::{GRAB_RANGE, HOLD_MAX, HOLD_MIN, PropBody, throw_speed};
+use crate::protocol::ActorKind;
+use crate::protocol::{decode, encode};
 use crate::server::GameWorld;
 use crate::trade::MerchantId;
 use bevy::prelude::*;
@@ -51,7 +51,16 @@ impl Plugin for LootServerPlugin {
             .add_observer(on_spawn_ground_item)
             .add_systems(Startup, (spawn_demo_loot, spawn_world_containers))
             .add_systems(Update, refill_world_containers)
-            .add_systems(Update, (sync_combat_corpses, receive_loot_messages, close_far_containers, crate::props_server::tick_props).chain());
+            .add_systems(
+                Update,
+                (
+                    sync_combat_corpses,
+                    receive_loot_messages,
+                    close_far_containers,
+                    crate::props_server::tick_props,
+                )
+                    .chain(),
+            );
     }
 }
 
@@ -206,7 +215,10 @@ impl LootWorld {
     /// Характеристики надетых вещей игрока.
     #[allow(dead_code)] // для боевой системы
     pub fn equipped_stats(&self, player: u64) -> StatTotals {
-        self.inventories.get(&player).map(Inventory::equipped_stats).unwrap_or_default()
+        self.inventories
+            .get(&player)
+            .map(Inventory::equipped_stats)
+            .unwrap_or_default()
     }
 
     /// Бросить таблицу добычи.
@@ -215,21 +227,44 @@ impl LootWorld {
     }
 
     fn make(&mut self, name: &str, quality: Quality, count: u16) -> Item {
-        roll_item(ItemBaseId::by_name(name), quality, count, &mut self.rng, &mut self.uids)
+        roll_item(
+            ItemBaseId::by_name(name),
+            quality,
+            count,
+            &mut self.rng,
+            &mut self.uids,
+        )
     }
 
     /// «Нищий старт»: выбранные игроком простое оружие и доспех, бинт, уксус и пять фоллисов.
     fn starter_inventory(&mut self, player: u64) -> Inventory {
         let mut inv = Inventory::new(PLAYER_GRID);
         let chosen = self.kits.get(&player).copied().unwrap_or_default();
-        let kit = chosen.items().into_iter().map(|(name, quality, count)| self.make(name, quality, count)).collect();
+        let kit = chosen
+            .items()
+            .into_iter()
+            .map(|(name, quality, count)| self.make(name, quality, count))
+            .collect();
         inv.fill(kit, true);
         inv
     }
 
     /// Тело со своей моделью (демо, отладка, `CharacterDied`).
-    fn spawn_corpse(&mut self, server: &mut RenetServer, level: &LevelColliders, pos: Vec3, yaw: f32, name: String, inv: Inventory) -> LootId {
-        let own: Vec<(LootId, u64)> = self.corpses.iter().filter(|(_, c)| c.own_model).map(|(id, c)| (*id, c.created)).collect();
+    fn spawn_corpse(
+        &mut self,
+        server: &mut RenetServer,
+        level: &LevelColliders,
+        pos: Vec3,
+        yaw: f32,
+        name: String,
+        inv: Inventory,
+    ) -> LootId {
+        let own: Vec<(LootId, u64)> = self
+            .corpses
+            .iter()
+            .filter(|(_, c)| c.own_model)
+            .map(|(id, c)| (*id, c.created))
+            .collect();
         if own.len() >= MAX_CORPSES
             && let Some((oldest, _)) = own.iter().min_by_key(|(_, created)| *created)
         {
@@ -244,19 +279,67 @@ impl LootWorld {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn insert_corpse(&mut self, server: &mut RenetServer, id: LootId, pos: Vec3, yaw: f32, name: String, inv: Inventory, own_model: bool) {
-        let msg = LootServerMessage::CorpseSpawned { id, pos: pos.into(), yaw, name: name.clone(), empty: inv.is_empty(), own_model };
+    fn insert_corpse(
+        &mut self,
+        server: &mut RenetServer,
+        id: LootId,
+        pos: Vec3,
+        yaw: f32,
+        name: String,
+        inv: Inventory,
+        own_model: bool,
+    ) {
+        let msg = LootServerMessage::CorpseSpawned {
+            id,
+            pos: pos.into(),
+            yaw,
+            name: name.clone(),
+            empty: inv.is_empty(),
+            own_model,
+        };
         server.broadcast_message(CH_LOOT, encode(&msg));
-        self.corpses.insert(id, Corpse { pos, yaw, name, inv, created: self.next_id, own_model });
+        self.corpses.insert(
+            id,
+            Corpse {
+                pos,
+                yaw,
+                name,
+                inv,
+                created: self.next_id,
+                own_model,
+            },
+        );
     }
 
     /// Бросить предмет в мир из точки `start` (центр) со скоростью `vel`: дальше его ведёт физика.
-    pub fn spawn_ground(&mut self, server: &mut RenetServer, start: Vec3, vel: Vec3, item: Item) -> LootId {
-        let rot = Quat::from_rotation_y(self.rng.range_f32(-std::f32::consts::PI, std::f32::consts::PI)) * Quat::from_rotation_x(self.rng.range_f32(-0.3, 0.3));
+    pub fn spawn_ground(
+        &mut self,
+        server: &mut RenetServer,
+        start: Vec3,
+        vel: Vec3,
+        item: Item,
+    ) -> LootId {
+        let rot = Quat::from_rotation_y(
+            self.rng
+                .range_f32(-std::f32::consts::PI, std::f32::consts::PI),
+        ) * Quat::from_rotation_x(self.rng.range_f32(-0.3, 0.3));
         let mut body = PropBody::for_item(item.base, item.count, start, rot);
         body.vel = vel;
-        body.ang = Vec3::new(self.rng.range_f32(-2.0, 2.0), self.rng.range_f32(-2.0, 2.0), self.rng.range_f32(-2.0, 2.0));
-        self.insert_ground(server, GroundItem { body, item, shelf: None, holder: None, owner: None })
+        body.ang = Vec3::new(
+            self.rng.range_f32(-2.0, 2.0),
+            self.rng.range_f32(-2.0, 2.0),
+            self.rng.range_f32(-2.0, 2.0),
+        );
+        self.insert_ground(
+            server,
+            GroundItem {
+                body,
+                item,
+                shelf: None,
+                holder: None,
+                owner: None,
+            },
+        )
     }
 
     /// Положить готовое тело в мир (для прилавков) и разослать всем.
@@ -279,24 +362,37 @@ impl LootWorld {
 
     /// Отпустить предмет в руках игрока; `throw` — направление броска.
     pub fn release(&mut self, server: &mut RenetServer, player: u64, throw: Option<Vec3>) {
-        let Some(h) = self.holds.remove(&player) else { return };
+        let Some(h) = self.holds.remove(&player) else {
+            return;
+        };
         let strength = self.equipped_stats(player).get(Stat::Strength);
         if let Some(g) = self.ground.get_mut(&h.id) {
             g.holder = None;
             g.body.wake();
             match throw {
-                Some(dir) => g.body.vel += dir.normalize_or_zero() * throw_speed(g.body.mass, strength),
+                Some(dir) => {
+                    g.body.vel += dir.normalize_or_zero() * throw_speed(g.body.mass, strength)
+                }
                 None => g.body.vel = g.body.vel.clamp_length_max(6.0),
             }
         }
-        server.broadcast_message(CH_LOOT, encode(&LootServerMessage::PropHeld { id: h.id, holder: None }));
+        server.broadcast_message(
+            CH_LOOT,
+            encode(&LootServerMessage::PropHeld {
+                id: h.id,
+                holder: None,
+            }),
+        );
     }
 
     /// Вынимает инвентарь на время операции (вернуть через `put_inv`).
     fn take_inv(&mut self, player: u64, owner: Owner) -> Option<Inventory> {
         match owner {
             Owner::Me => self.inventories.remove(&player),
-            Owner::Container(id) => self.corpses.get_mut(&id).map(|c| std::mem::replace(&mut c.inv, Inventory::new((0, 0)))),
+            Owner::Container(id) => self
+                .corpses
+                .get_mut(&id)
+                .map(|c| std::mem::replace(&mut c.inv, Inventory::new((0, 0)))),
         }
     }
 
@@ -327,17 +423,32 @@ impl LootWorld {
     }
 
     /// Разослать изменения: свой инвентарь и тело всем, у кого оно открыто.
-    fn sync(&self, server: &mut RenetServer, player: u64, owners: &[Owner], was_empty: &[(LootId, bool)]) {
+    fn sync(
+        &self,
+        server: &mut RenetServer,
+        player: u64,
+        owners: &[Owner],
+        was_empty: &[(LootId, bool)],
+    ) {
         for owner in owners {
             match owner {
                 Owner::Me => {
                     if let Some(inv) = self.inventories.get(&player) {
-                        server.send_message(player, CH_LOOT, encode(&LootServerMessage::Inventory(inv.clone())));
+                        server.send_message(
+                            player,
+                            CH_LOOT,
+                            encode(&LootServerMessage::Inventory(inv.clone())),
+                        );
                     }
                 }
                 Owner::Container(id) => {
-                    let Some(c) = self.corpses.get(id) else { continue };
-                    let msg = encode(&LootServerMessage::ContainerUpdated { id: *id, inv: c.inv.clone() });
+                    let Some(c) = self.corpses.get(id) else {
+                        continue;
+                    };
+                    let msg = encode(&LootServerMessage::ContainerUpdated {
+                        id: *id,
+                        inv: c.inv.clone(),
+                    });
                     for (viewer, open) in &self.open {
                         if open == id {
                             server.send_message(*viewer, CH_LOOT, msg.clone());
@@ -346,7 +457,13 @@ impl LootWorld {
                     if let Some((_, before)) = was_empty.iter().find(|(i, _)| i == id)
                         && *before != c.inv.is_empty()
                     {
-                        server.broadcast_message(CH_LOOT, encode(&LootServerMessage::CorpseEmpty { id: *id, empty: c.inv.is_empty() }));
+                        server.broadcast_message(
+                            CH_LOOT,
+                            encode(&LootServerMessage::CorpseEmpty {
+                                id: *id,
+                                empty: c.inv.is_empty(),
+                            }),
+                        );
                     }
                 }
             }
@@ -364,15 +481,25 @@ pub fn ground_message(id: LootId, g: &GroundItem) -> LootServerMessage {
         quality: g.item.quality,
         count: g.item.count,
         asleep: g.body.asleep,
-        shelf: g.shelf.as_ref().map(|t| ShelfMark { merchant: t.merchant }),
+        shelf: g.shelf.as_ref().map(|t| ShelfMark {
+            merchant: t.merchant,
+        }),
         // Вид кованой вещи; у прочего — как в модели.
-        finish: if g.item.make.is_some() { (g.item.look() * 255.0) as u8 } else { 255 },
+        finish: if g.item.make.is_some() {
+            (g.item.look() * 255.0) as u8
+        } else {
+            255
+        },
         owned: g.owner.is_some(),
     }
 }
 
 fn notice(server: &mut RenetServer, player: u64, text: &str) {
-    server.send_message(player, CH_LOOT, encode(&LootServerMessage::Notice(text.to_string())));
+    server.send_message(
+        player,
+        CH_LOOT,
+        encode(&LootServerMessage::Notice(text.to_string())),
+    );
 }
 
 /// Можно ли дотянуться от ног игрока до точки.
@@ -389,23 +516,51 @@ fn forward(yaw: f32, pitch: f32) -> Vec3 {
 // Системы
 // ---------------------------------------------------------------------------
 
-fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, mut world: ResMut<LootWorld>, transport: Option<Res<bevy_renet::netcode::NetcodeServerTransport>>) {
+fn on_connection(
+    event: On<RenetServerEvent>,
+    mut server: ResMut<RenetServer>,
+    mut world: ResMut<LootWorld>,
+    transport: Option<Res<bevy_renet::netcode::NetcodeServerTransport>>,
+) {
     match &event.0 {
         ServerEvent::ClientConnected { client_id } => {
             let id = *client_id;
-            let kit = transport.as_ref().and_then(|t| t.user_data(id)).and_then(|d| crate::estates::unpack_profile(&d)).map(|p| p.kit).unwrap_or_default();
+            let kit = transport
+                .as_ref()
+                .and_then(|t| t.user_data(id))
+                .and_then(|d| crate::estates::unpack_profile(&d))
+                .map(|p| p.kit)
+                .unwrap_or_default();
             world.kits.insert(id, kit);
             let inv = world.starter_inventory(id);
-            server.send_message(id, CH_LOOT, encode(&LootServerMessage::Inventory(inv.clone())));
+            server.send_message(
+                id,
+                CH_LOOT,
+                encode(&LootServerMessage::Inventory(inv.clone())),
+            );
             world.inventories.insert(id, inv);
             for (cid, c) in &world.corpses {
-                let msg = LootServerMessage::CorpseSpawned { id: *cid, pos: c.pos.into(), yaw: c.yaw, name: c.name.clone(), empty: c.inv.is_empty(), own_model: c.own_model };
+                let msg = LootServerMessage::CorpseSpawned {
+                    id: *cid,
+                    pos: c.pos.into(),
+                    yaw: c.yaw,
+                    name: c.name.clone(),
+                    empty: c.inv.is_empty(),
+                    own_model: c.own_model,
+                };
                 server.send_message(id, CH_LOOT, encode(&msg));
             }
             for (gid, g) in &world.ground {
                 server.send_message(id, CH_LOOT, encode(&ground_message(*gid, g)));
                 if let Some(h) = g.holder {
-                    server.send_message(id, CH_LOOT, encode(&LootServerMessage::PropHeld { id: *gid, holder: Some(h) }));
+                    server.send_message(
+                        id,
+                        CH_LOOT,
+                        encode(&LootServerMessage::PropHeld {
+                            id: *gid,
+                            holder: Some(h),
+                        }),
+                    );
                 }
             }
         }
@@ -418,7 +573,12 @@ fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, m
     }
 }
 
-fn on_character_died(event: On<CharacterDied>, mut server: ResMut<RenetServer>, level: Res<LevelColliders>, mut world: ResMut<LootWorld>) {
+fn on_character_died(
+    event: On<CharacterDied>,
+    mut server: ResMut<RenetServer>,
+    level: Res<LevelColliders>,
+    mut world: ResMut<LootWorld>,
+) {
     let ev = event.event().clone();
     let inv = match ev.loot {
         DeathLoot::Table { table, luck } => {
@@ -434,9 +594,16 @@ fn on_character_died(event: On<CharacterDied>, mut server: ResMut<RenetServer>, 
             inv
         }
         DeathLoot::Player(player) => {
-            let inv = world.inventories.insert(player, Inventory::new(PLAYER_GRID)).unwrap_or_else(|| Inventory::new(PLAYER_GRID));
+            let inv = world
+                .inventories
+                .insert(player, Inventory::new(PLAYER_GRID))
+                .unwrap_or_else(|| Inventory::new(PLAYER_GRID));
             if let Some(fresh) = world.inventories.get(&player) {
-                server.send_message(player, CH_LOOT, encode(&LootServerMessage::Inventory(fresh.clone())));
+                server.send_message(
+                    player,
+                    CH_LOOT,
+                    encode(&LootServerMessage::Inventory(fresh.clone())),
+                );
             }
             if world.open.remove(&player).is_some() {
                 server.send_message(player, CH_LOOT, encode(&LootServerMessage::ContainerClosed));
@@ -447,7 +614,11 @@ fn on_character_died(event: On<CharacterDied>, mut server: ResMut<RenetServer>, 
     world.spawn_corpse(&mut server, &level, ev.pos, ev.yaw, ev.name, inv);
 }
 
-fn on_spawn_ground_item(event: On<SpawnGroundItem>, mut server: ResMut<RenetServer>, mut world: ResMut<LootWorld>) {
+fn on_spawn_ground_item(
+    event: On<SpawnGroundItem>,
+    mut server: ResMut<RenetServer>,
+    mut world: ResMut<LootWorld>,
+) {
     let ev = event.event().clone();
     world.spawn_ground(&mut server, ev.pos, ev.vel, ev.item);
 }
@@ -475,19 +646,38 @@ fn container_inventory(world: &mut LootWorld, table: LootTableId) -> Inventory {
 }
 
 /// Сундуки, шкафы и корзины в домах, лавках и казармах (места задаёт уровень).
-fn spawn_world_containers(mut server: ResMut<RenetServer>, mut world: ResMut<LootWorld>, mut homes: ResMut<crate::home_items::HomeItems>) {
+fn spawn_world_containers(
+    mut server: ResMut<RenetServer>,
+    mut world: ResMut<LootWorld>,
+    mut homes: ResMut<crate::home_items::HomeItems>,
+) {
     let layout = crate::level::layout();
     for (i, c) in layout.containers.iter().enumerate() {
         let id = CONTAINER_ID_BASE + i as LootId;
         let inv = container_inventory(&mut world, c.table);
         world.fixed.insert(id, (c.table, None));
-        world.corpses.insert(id, Corpse { pos: c.pos, yaw: 0.0, name: c.name.to_string(), inv, created: 0, own_model: false });
+        world.corpses.insert(
+            id,
+            Corpse {
+                pos: c.pos,
+                yaw: 0.0,
+                name: c.name.to_string(),
+                inv,
+                created: 0,
+                own_model: false,
+            },
+        );
     }
     // Вещи хозяев в жилых домах: на столах, полках, сундуках.
     homes.setup(&mut server, &mut world, &layout);
 }
 
-fn refill_world_containers(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMut<LootWorld>, mut next: Local<f32>) {
+fn refill_world_containers(
+    time: Res<Time>,
+    mut server: ResMut<RenetServer>,
+    mut world: ResMut<LootWorld>,
+    mut next: Local<f32>,
+) {
     let now = time.elapsed_secs();
     if now < *next {
         return;
@@ -507,8 +697,16 @@ fn refill_world_containers(time: Res<Time>, mut server: ResMut<RenetServer>, mut
                 if let Some(c) = world.corpses.get_mut(&id) {
                     c.inv = inv;
                 }
-                server.broadcast_message(CH_LOOT, encode(&LootServerMessage::CorpseEmpty { id, empty: now_empty }));
-                world.fixed.insert(id, (table, if now_empty { Some(now) } else { None }))
+                server.broadcast_message(
+                    CH_LOOT,
+                    encode(&LootServerMessage::CorpseEmpty {
+                        id,
+                        empty: now_empty,
+                    }),
+                );
+                world
+                    .fixed
+                    .insert(id, (table, if now_empty { Some(now) } else { None }))
             }
             _ => None,
         };
@@ -521,13 +719,23 @@ fn spawn_demo_loot(mut commands: Commands) {
         pos: crate::level::spawn_point(0) + Vec3::new(5.5, 0.4, -5.5),
         yaw: 0.6,
         name: "Павший рыцарь".into(),
-        loot: DeathLoot::Table { table: LootTableId::Knight, luck: 0.0 },
+        loot: DeathLoot::Table {
+            table: LootTableId::Knight,
+            luck: 0.0,
+        },
     });
     let mut rng = Rng::from_time();
     let mut uids = UidGen(1_000_000_000);
-    for (i, item) in roll_loot(LootTableId::Chest, 30.0, &mut rng, &mut uids).into_iter().enumerate() {
+    for (i, item) in roll_loot(LootTableId::Chest, 30.0, &mut rng, &mut uids)
+        .into_iter()
+        .enumerate()
+    {
         let a = i as f32 * 1.3;
-        commands.trigger(SpawnGroundItem { pos: crate::level::spawn_point(0) + Vec3::new(8.0, 1.1, -3.0), vel: Vec3::new(a.cos() * 2.0, 2.0, a.sin() * 2.0), item });
+        commands.trigger(SpawnGroundItem {
+            pos: crate::level::spawn_point(0) + Vec3::new(8.0, 1.1, -3.0),
+            vel: Vec3::new(a.cos() * 2.0, 2.0, a.sin() * 2.0),
+            item,
+        });
     }
 }
 
@@ -543,9 +751,13 @@ fn receive_loot_messages(
 ) {
     for pid in server.clients_id() {
         while let Some(bytes) = server.receive_message(pid, CH_LOOT) {
-            let Some(msg) = decode::<LootClientMessage>(&bytes) else { continue };
+            let Some(msg) = decode::<LootClientMessage>(&bytes) else {
+                continue;
+            };
             // Мёртвые не обыскивают.
-            let Some(actor) = game.actors.get(&pid).filter(|a| a.alive) else { continue };
+            let Some(actor) = game.actors.get(&pid).filter(|a| a.alive) else {
+                continue;
+            };
             let (feet, yaw, pitch) = (actor.pose.feet, actor.pose.yaw, actor.pose.pitch);
             if !world.inventories.contains_key(&pid) {
                 continue;
@@ -557,7 +769,9 @@ fn receive_loot_messages(
                             notice(&mut server, pid, "Слишком далеко");
                             continue;
                         }
-                        if id >= CONTAINER_ID_BASE && !crate::combat::line_of_sight(&level, feet + Vec3::Y * 1.6, c.pos) {
+                        if id >= CONTAINER_ID_BASE
+                            && !crate::combat::line_of_sight(&level, feet + Vec3::Y * 1.6, c.pos)
+                        {
                             notice(&mut server, pid, "Не дотянуться");
                             continue;
                         }
@@ -568,7 +782,11 @@ fn receive_loot_messages(
                         {
                             continue;
                         }
-                        let msg = LootServerMessage::ContainerOpened { id, title: c.name.clone(), inv: c.inv.clone() };
+                        let msg = LootServerMessage::ContainerOpened {
+                            id,
+                            title: c.name.clone(),
+                            inv: c.inv.clone(),
+                        };
                         server.send_message(pid, CH_LOOT, encode(&msg));
                         world.open.insert(pid, id);
                     } else if let Some(g) = world.ground.get(&id) {
@@ -578,7 +796,9 @@ fn receive_loot_messages(
                         }
                         if g.shelf.is_some() {
                             // Товар на прилавке: «E» — купить.
-                            world.shelf_requests.push(ShelfRequest::Buy { player: pid, id });
+                            world
+                                .shelf_requests
+                                .push(ShelfRequest::Buy { player: pid, id });
                             continue;
                         }
                         if g.holder.is_some_and(|h| h != pid) {
@@ -594,7 +814,13 @@ fn receive_loot_messages(
                             Ok(_) => {
                                 world.remove_ground(&mut server, id);
                                 if let Some(house) = owner {
-                                    world.taken.push(crate::home_items::OwnedItemTaken { player: pid, house, item, at, how: crate::home_items::TakeHow::Pocketed });
+                                    world.taken.push(crate::home_items::OwnedItemTaken {
+                                        player: pid,
+                                        house,
+                                        item,
+                                        at,
+                                        how: crate::home_items::TakeHow::Pocketed,
+                                    });
                                 }
                             }
                             Err(rest) => {
@@ -603,7 +829,13 @@ fn receive_loot_messages(
                                 {
                                     let mut part = item.clone();
                                     part.count = before - rest.count;
-                                    world.taken.push(crate::home_items::OwnedItemTaken { player: pid, house, item: part, at, how: crate::home_items::TakeHow::Pocketed });
+                                    world.taken.push(crate::home_items::OwnedItemTaken {
+                                        player: pid,
+                                        house,
+                                        item: part,
+                                        at,
+                                        how: crate::home_items::TakeHow::Pocketed,
+                                    });
                                 }
                                 if rest.count != before {
                                     // Часть стопки влезла — на земле остаётся меньше.
@@ -619,17 +851,24 @@ fn receive_loot_messages(
                         world.sync(&mut server, pid, &[Owner::Me], &[]);
                     }
                 }
-                LootClientMessage::Move { uid, from, to, target } => {
+                LootClientMessage::Move {
+                    uid,
+                    from,
+                    to,
+                    target,
+                } => {
                     if !owners_allowed(&world, pid, feet, &[from, to]) {
                         continue;
                     }
                     let was_empty = empty_flags(&world, &[from, to]);
                     // Из сундука уровня к себе — может оказаться кражей.
                     let taking = match (from, to) {
-                        (Owner::Container(id), Owner::Me) if world.fixed.contains_key(&id) => world.corpses.get(&id).and_then(|c| {
-                            let (_, item) = c.inv.find(uid)?;
-                            Some((id, c.pos, item.value(), item.info().name.to_string()))
-                        }),
+                        (Owner::Container(id), Owner::Me) if world.fixed.contains_key(&id) => {
+                            world.corpses.get(&id).and_then(|c| {
+                                let (_, item) = c.inv.find(uid)?;
+                                Some((id, c.pos, item.value(), item.info().name.to_string()))
+                            })
+                        }
                         _ => None,
                     };
                     let src_inv = world.take_inv(pid, from);
@@ -657,12 +896,23 @@ fn receive_loot_messages(
                         Ok(_) => {
                             if let Some((id, at, value, what)) = taking {
                                 let table = world.fixed[&id].0;
-                                commands.trigger(ContainerTaken { player: pid, container: (id - CONTAINER_ID_BASE) as u32, table, at, value, what });
+                                commands.trigger(ContainerTaken {
+                                    player: pid,
+                                    container: (id - CONTAINER_ID_BASE) as u32,
+                                    table,
+                                    at,
+                                    value,
+                                    what,
+                                });
                             }
                         }
                     }
                     // Даже при ошибке шлём состояние: клиент вернёт предмет на место.
-                    let owners: Vec<Owner> = if from == to { vec![from] } else { vec![from, to] };
+                    let owners: Vec<Owner> = if from == to {
+                        vec![from]
+                    } else {
+                        vec![from, to]
+                    };
                     world.sync(&mut server, pid, &owners, &was_empty);
                 }
                 LootClientMessage::Drop { uid, from } => {
@@ -670,12 +920,16 @@ fn receive_loot_messages(
                         continue;
                     }
                     let was_empty = empty_flags(&world, &[from]);
-                    let Some(mut inv) = world.take_inv(pid, from) else { continue };
+                    let Some(mut inv) = world.take_inv(pid, from) else {
+                        continue;
+                    };
                     let taken = inv.take(uid);
                     world.put_inv(pid, from, inv);
                     let Some((item, _)) = taken else { continue };
                     let dir = forward(yaw, pitch);
-                    let mut start = feet + Vec3::Y * 1.3 + Vec3::new(dir.x, 0.0, dir.z).normalize_or_zero() * 0.35;
+                    let mut start = feet
+                        + Vec3::Y * 1.3
+                        + Vec3::new(dir.x, 0.0, dir.z).normalize_or_zero() * 0.35;
                     if !level.body_is_free(&DROP_BODY, start) {
                         start = feet + Vec3::Y * 1.0;
                     }
@@ -690,7 +944,11 @@ fn receive_loot_messages(
                 LootClientMessage::CancelUse => healing.requests.push((pid, None)),
                 LootClientMessage::DebugSpawnCorpse => {
                     let dir = forward(yaw, 0.0);
-                    let table = [LootTableId::Footman, LootTableId::Knight, LootTableId::KnightCaptain][world.rng.range_u32(0, 2) as usize];
+                    let table = [
+                        LootTableId::Footman,
+                        LootTableId::Knight,
+                        LootTableId::KnightCaptain,
+                    ][world.rng.range_u32(0, 2) as usize];
                     let name = match table {
                         LootTableId::Footman => "Пехотинец",
                         LootTableId::KnightCaptain => "Капитан стражи",
@@ -700,31 +958,64 @@ fn receive_loot_messages(
                     let mut inv = Inventory::new(CORPSE_GRID);
                     inv.fill(items, true);
                     let yaw = world.rng.range_f32(-3.1, 3.1);
-                    world.spawn_corpse(&mut server, &level, feet + dir * 1.8 + Vec3::Y * 0.5, yaw, name.into(), inv);
+                    world.spawn_corpse(
+                        &mut server,
+                        &level,
+                        feet + dir * 1.8 + Vec3::Y * 0.5,
+                        yaw,
+                        name.into(),
+                        inv,
+                    );
                 }
                 LootClientMessage::Grab { id, dist } => {
                     if world.holds.contains_key(&pid) {
                         continue;
                     }
                     let eye = feet + Vec3::Y * actor.pose.eye_height();
-                    let Some(g) = world.ground.get_mut(&id) else { continue };
+                    let Some(g) = world.ground.get_mut(&id) else {
+                        continue;
+                    };
                     let refuse = if g.holder.is_some() {
                         Some("Это держит другой")
-                    } else if g.body.pos.distance(eye) > GRAB_RANGE + 0.4 || !crate::combat::line_of_sight(&level, eye, g.body.pos) {
+                    } else if g.body.pos.distance(eye) > GRAB_RANGE + 0.4
+                        || !crate::combat::line_of_sight(&level, eye, g.body.pos)
+                    {
                         Some("Не дотянуться")
                     } else {
                         None
                     };
                     if let Some(why) = refuse {
-                        server.send_message(pid, CH_LOOT, encode(&LootServerMessage::PropHeld { id, holder: g.holder }));
+                        server.send_message(
+                            pid,
+                            CH_LOOT,
+                            encode(&LootServerMessage::PropHeld {
+                                id,
+                                holder: g.holder,
+                            }),
+                        );
                         notice(&mut server, pid, why);
                         continue;
                     }
                     g.holder = Some(pid);
                     g.body.wake();
                     let rot0 = g.body.rot;
-                    world.holds.insert(pid, HoldState { id, dist: dist.clamp(HOLD_MIN, HOLD_MAX), yaw0: yaw, rot0, stuck: 0.0 });
-                    server.broadcast_message(CH_LOOT, encode(&LootServerMessage::PropHeld { id, holder: Some(pid) }));
+                    world.holds.insert(
+                        pid,
+                        HoldState {
+                            id,
+                            dist: dist.clamp(HOLD_MIN, HOLD_MAX),
+                            yaw0: yaw,
+                            rot0,
+                            stuck: 0.0,
+                        },
+                    );
+                    server.broadcast_message(
+                        CH_LOOT,
+                        encode(&LootServerMessage::PropHeld {
+                            id,
+                            holder: Some(pid),
+                        }),
+                    );
                 }
                 LootClientMessage::HoldDistance { dist } => {
                     if let Some(h) = world.holds.get_mut(&pid) {
@@ -732,14 +1023,20 @@ fn receive_loot_messages(
                     }
                 }
                 LootClientMessage::Release => world.release(&mut server, pid, None),
-                LootClientMessage::Throw => world.release(&mut server, pid, Some(forward(yaw, pitch))),
+                LootClientMessage::Throw => {
+                    world.release(&mut server, pid, Some(forward(yaw, pitch)))
+                }
                 LootClientMessage::ShelfSteal { id } | LootClientMessage::ShelfQuery { id } => {
-                    let Some(g) = world.ground.get(&id).filter(|g| g.shelf.is_some()) else { continue };
+                    let Some(g) = world.ground.get(&id).filter(|g| g.shelf.is_some()) else {
+                        continue;
+                    };
                     if !in_reach(feet, g.pos()) {
                         continue;
                     }
                     world.shelf_requests.push(match msg {
-                        LootClientMessage::ShelfSteal { .. } => ShelfRequest::Pocket { player: pid, id },
+                        LootClientMessage::ShelfSteal { .. } => {
+                            ShelfRequest::Pocket { player: pid, id }
+                        }
                         _ => ShelfRequest::Query { player: pid, id },
                     });
                 }
@@ -752,7 +1049,10 @@ fn receive_loot_messages(
 fn owners_allowed(world: &LootWorld, pid: u64, feet: Vec3, owners: &[Owner]) -> bool {
     owners.iter().all(|o| match o {
         Owner::Me => true,
-        Owner::Container(id) => world.open.get(&pid) == Some(id) && world.corpses.get(id).is_some_and(|c| in_reach(feet, c.pos)),
+        Owner::Container(id) => {
+            world.open.get(&pid) == Some(id)
+                && world.corpses.get(id).is_some_and(|c| in_reach(feet, c.pos))
+        }
     })
 }
 
@@ -767,7 +1067,11 @@ fn empty_flags(world: &LootWorld, owners: &[Owner]) -> Vec<(LootId, bool)> {
 }
 
 /// Закрывает окно обыска, если игрок отошёл или тело исчезло.
-fn close_far_containers(mut server: ResMut<RenetServer>, game: Res<GameWorld>, mut world: ResMut<LootWorld>) {
+fn close_far_containers(
+    mut server: ResMut<RenetServer>,
+    game: Res<GameWorld>,
+    mut world: ResMut<LootWorld>,
+) {
     let far: Vec<u64> = world
         .open
         .iter()
@@ -789,7 +1093,11 @@ fn close_far_containers(mut server: ResMut<RenetServer>, game: Res<GameWorld>, m
 
 /// Добыча для тел, которые создаёт боевая система (`GameWorld.corpses`):
 /// враг получает вещи по своей таблице, погибший игрок оставляет в теле всё снаряжение.
-fn sync_combat_corpses(mut server: ResMut<RenetServer>, game: Res<GameWorld>, mut world: ResMut<LootWorld>) {
+fn sync_combat_corpses(
+    mut server: ResMut<RenetServer>,
+    game: Res<GameWorld>,
+    mut world: ResMut<LootWorld>,
+) {
     for c in &game.corpses {
         if world.linked.contains(&c.id) {
             continue;
@@ -797,11 +1105,20 @@ fn sync_combat_corpses(mut server: ResMut<RenetServer>, game: Res<GameWorld>, mu
         world.linked.insert(c.id);
         // Мирный человек: что было при нём и кошель.
         if let Some(cc) = &c.civ {
-            let luck = c.killer.map(|k| world.equipped_stats(k).get(Stat::Luck)).unwrap_or(0.0);
+            let luck = c
+                .killer
+                .map(|k| world.equipped_stats(k).get(Stat::Luck))
+                .unwrap_or(0.0);
             let mut items = world.roll(cc.table, luck);
             for (base, count) in crate::economy::coins_for(cc.coins) {
                 let w = &mut *world;
-                items.push(roll_item(base, Quality::Common, count, &mut w.rng, &mut w.uids));
+                items.push(roll_item(
+                    base,
+                    Quality::Common,
+                    count,
+                    &mut w.rng,
+                    &mut w.uids,
+                ));
             }
             let mut inv = Inventory::new(CORPSE_GRID);
             inv.fill(items, false);
@@ -811,10 +1128,21 @@ fn sync_combat_corpses(mut server: ResMut<RenetServer>, game: Res<GameWorld>, mu
         let (name, inv) = match c.kind {
             ActorKind::Player => {
                 let fresh = world.starter_inventory(c.actor);
-                let old = world.inventories.insert(c.actor, fresh.clone()).unwrap_or_else(|| Inventory::new(PLAYER_GRID));
-                server.send_message(c.actor, CH_LOOT, encode(&LootServerMessage::Inventory(fresh)));
+                let old = world
+                    .inventories
+                    .insert(c.actor, fresh.clone())
+                    .unwrap_or_else(|| Inventory::new(PLAYER_GRID));
+                server.send_message(
+                    c.actor,
+                    CH_LOOT,
+                    encode(&LootServerMessage::Inventory(fresh)),
+                );
                 if world.open.remove(&c.actor).is_some() {
-                    server.send_message(c.actor, CH_LOOT, encode(&LootServerMessage::ContainerClosed));
+                    server.send_message(
+                        c.actor,
+                        CH_LOOT,
+                        encode(&LootServerMessage::ContainerClosed),
+                    );
                 }
                 ("Тело игрока", old)
             }
@@ -824,7 +1152,10 @@ fn sync_combat_corpses(mut server: ResMut<RenetServer>, game: Res<GameWorld>, mu
                     _ => LootTableId::Knight,
                 };
                 let name = kind.name_ru();
-                let luck = c.killer.map(|k| world.equipped_stats(k).get(Stat::Luck)).unwrap_or(0.0);
+                let luck = c
+                    .killer
+                    .map(|k| world.equipped_stats(k).get(Stat::Luck))
+                    .unwrap_or(0.0);
                 let items = world.roll(table, luck);
                 let mut inv = Inventory::new(CORPSE_GRID);
                 inv.fill(items, true);
@@ -835,7 +1166,12 @@ fn sync_combat_corpses(mut server: ResMut<RenetServer>, game: Res<GameWorld>, mu
     }
     // Боевая система убрала старое тело — убираем и добычу.
     let alive: HashSet<u64> = game.corpses.iter().map(|c| c.id).collect();
-    let gone: Vec<u64> = world.linked.iter().copied().filter(|id| !alive.contains(id)).collect();
+    let gone: Vec<u64> = world
+        .linked
+        .iter()
+        .copied()
+        .filter(|id| !alive.contains(id))
+        .collect();
     for id in gone {
         world.linked.remove(&id);
         if world.corpses.remove(&id).is_some() {
@@ -861,12 +1197,23 @@ mod tests {
         assert_eq!(worn(EquipSlot::MainHand), Some("Пехотное копьё"));
         assert_eq!(worn(EquipSlot::Chest), Some("Кольчуга"));
         assert_eq!(worn(EquipSlot::Feet), Some("Кожаные сапоги"));
-        let count = |name: &str| inv.all_items().filter(|i| i.info().name == name).map(|i| i.count as u32).sum::<u32>();
+        let count = |name: &str| {
+            inv.all_items()
+                .filter(|i| i.info().name == name)
+                .map(|i| i.count as u32)
+                .sum::<u32>()
+        };
         assert_eq!(count("Бинт"), 1);
         assert_eq!(count("Винный уксус"), 1);
-        assert_eq!(crate::economy::purse(&inv), 5 * crate::economy::NUMMI_PER_FOLLIS);
+        assert_eq!(
+            crate::economy::purse(&inv),
+            5 * crate::economy::NUMMI_PER_FOLLIS
+        );
         // Без набора (старый клиент) — набор по умолчанию: спата и стёганка.
         let plain = world.starter_inventory(8);
-        assert_eq!(plain.equipped(EquipSlot::MainHand).map(|i| i.info().name), Some("Спата"));
+        assert_eq!(
+            plain.equipped(EquipSlot::MainHand).map(|i| i.info().name),
+            Some("Спата")
+        );
     }
 }

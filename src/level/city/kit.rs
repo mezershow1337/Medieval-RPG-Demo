@@ -66,7 +66,12 @@ impl Rect {
         Rect::new(self.x0 + m, self.z0 + m, self.x1 - m, self.z1 - m)
     }
     pub fn union(&self, o: &Rect) -> Rect {
-        Rect::new(self.x0.min(o.x0), self.z0.min(o.z0), self.x1.max(o.x1), self.z1.max(o.z1))
+        Rect::new(
+            self.x0.min(o.x0),
+            self.z0.min(o.z0),
+            self.x1.max(o.x1),
+            self.z1.max(o.z1),
+        )
     }
     pub fn min3(&self, y: f32) -> Vec3 {
         Vec3::new(self.x0, y, self.z0)
@@ -94,18 +99,26 @@ impl Op {
     fn gap(&self, y0: f32, y1: f32) -> (f32, f32) {
         match *self {
             Op::Door { h, .. } => (y0, (y0 + h).min(y1)),
-            Op::Window { sill, top, .. } | Op::Upper { sill, top, .. } => ((y0 + sill).min(y1), (y0 + top).min(y1)),
+            Op::Window { sill, top, .. } | Op::Upper { sill, top, .. } => {
+                ((y0 + sill).min(y1), (y0 + top).min(y1))
+            }
             Op::Arch { w, spring, .. } => (y0, (y0 + spring + w / 2.0).min(y1)),
         }
     }
     fn s(&self) -> f32 {
         match *self {
-            Op::Door { s, .. } | Op::Window { s, .. } | Op::Arch { s, .. } | Op::Upper { s, .. } => s,
+            Op::Door { s, .. }
+            | Op::Window { s, .. }
+            | Op::Arch { s, .. }
+            | Op::Upper { s, .. } => s,
         }
     }
     fn w(&self) -> f32 {
         match *self {
-            Op::Door { w, .. } | Op::Window { w, .. } | Op::Arch { w, .. } | Op::Upper { w, .. } => w,
+            Op::Door { w, .. }
+            | Op::Window { w, .. }
+            | Op::Arch { w, .. }
+            | Op::Upper { w, .. } => w,
         }
     }
 }
@@ -119,8 +132,24 @@ pub fn fz() -> WallFrame {
 
 /// Стена от `s0` до `s1` (толщина `d0..d1`, высота `y0..y1`) с проёмами.
 /// `trim` — материал откосов и перемычек каменных проёмов (обычно известняк).
-pub fn wall(b: &mut Builder, f: WallFrame, s0: f32, s1: f32, d0: f32, d1: f32, y0: f32, y1: f32, ops: &[Op], mat: Mat, trim: Mat) {
-    let mut ops: Vec<Op> = ops.iter().copied().filter(|o| o.s() > s0 && o.s() < s1).collect();
+pub fn wall(
+    b: &mut Builder,
+    f: WallFrame,
+    s0: f32,
+    s1: f32,
+    d0: f32,
+    d1: f32,
+    y0: f32,
+    y1: f32,
+    ops: &[Op],
+    mat: Mat,
+    trim: Mat,
+) {
+    let mut ops: Vec<Op> = ops
+        .iter()
+        .copied()
+        .filter(|o| o.s() > s0 && o.s() < s1)
+        .collect();
     ops.sort_by(|a, b| a.s().total_cmp(&b.s()));
     let mut cursor = s0;
     let dm = (d0 + d1) / 2.0;
@@ -178,7 +207,13 @@ pub fn wall(b: &mut Builder, f: WallFrame, s0: f32, s1: f32, d0: f32, d1: f32, y
 /// Цоколь: ряд тёсаных известняковых блоков у земли, чуть шире кладки стены
 /// (так строили в Херсонесе: бут на глине стоит на цоколе из тёсаного камня).
 fn socle(b: &mut Builder, f: WallFrame, s0: f32, s1: f32, y0: f32, d0: f32, d1: f32, mat: Mat) {
-    if s1 - s0 < 0.05 || y0.abs() > 0.3 || !matches!(mat, Mat::Rubble | Mat::Plaster | Mat::OpusMixtum | Mat::Signinum) {
+    if s1 - s0 < 0.05
+        || y0.abs() > 0.3
+        || !matches!(
+            mat,
+            Mat::Rubble | Mat::Plaster | Mat::OpusMixtum | Mat::Signinum
+        )
+    {
         return;
     }
     let (a, c) = f.bounds((s0, s1), (y0 - 0.15, y0 + 0.42), (d0 - 0.05, d1 + 0.05));
@@ -186,15 +221,40 @@ fn socle(b: &mut Builder, f: WallFrame, s0: f32, s1: f32, y0: f32, d0: f32, d1: 
 }
 
 /// Один проём: кладка над и под ним, обрамление, решётка, дверь.
-fn opening(b: &mut Builder, f: WallFrame, o: Op, l: f32, r: f32, y0: f32, y1: f32, d0: f32, d1: f32, dm: f32, mat: Mat, trim: Mat) {
+fn opening(
+    b: &mut Builder,
+    f: WallFrame,
+    o: Op,
+    l: f32,
+    r: f32,
+    y0: f32,
+    y1: f32,
+    d0: f32,
+    d1: f32,
+    dm: f32,
+    mat: Mat,
+    trim: Mat,
+) {
     match o {
         Op::Door { h, w, .. } => {
             let top = (y0 + h).min(y1);
             // Створка: двустворчатые ворота и ставни лавок (широкие — открыты днём).
-            b.door(DoorSpec { center: f.p(o.s(), y0, dm), along_x: f.along_x, width: w, height: top - y0, wall_t: d1 - d0, double: w > 1.9, open: w > 2.5 });
+            b.door(DoorSpec {
+                center: f.p(o.s(), y0, dm),
+                along_x: f.along_x,
+                width: w,
+                height: top - y0,
+                wall_t: d1 - d0,
+                double: w > 1.9,
+                open: w > 2.5,
+            });
             b.solid_v(f.bounds((l, r), (top, y1), (d0, d1)), mat);
             // Деревянная перемычка и каменные откосы.
-            let (a, c) = f.bounds((l - 0.25, r + 0.25), (top - 0.02, top + 0.22), (d0 - 0.03, d1 + 0.03));
+            let (a, c) = f.bounds(
+                (l - 0.25, r + 0.25),
+                (top - 0.02, top + 0.22),
+                (d0 - 0.03, d1 + 0.03),
+            );
             b.mesh(Mat::Wood).cuboid(a, c);
             for s in [l, r] {
                 let (a, c) = f.bounds((s - 0.16, s + 0.16), (y0, top), (d0 - 0.02, d1 + 0.02));
@@ -208,9 +268,17 @@ fn opening(b: &mut Builder, f: WallFrame, o: Op, l: f32, r: f32, y0: f32, y1: f3
             let (sill, top) = ((y0 + sill).min(y1), (y0 + top).min(y1));
             b.solid_v(f.bounds((l, r), (y0, sill), (d0, d1)), mat);
             b.solid_v(f.bounds((l, r), (top, y1), (d0, d1)), mat);
-            let (a, c) = f.bounds((l - 0.12, r + 0.12), (sill - 0.08, sill), (d0 - 0.06, d1 + 0.06));
+            let (a, c) = f.bounds(
+                (l - 0.12, r + 0.12),
+                (sill - 0.08, sill),
+                (d0 - 0.06, d1 + 0.06),
+            );
             b.mesh(trim).cuboid(a, c);
-            let (a, c) = f.bounds((l - 0.15, r + 0.15), (top, top + 0.16), (d0 - 0.03, d1 + 0.03));
+            let (a, c) = f.bounds(
+                (l - 0.15, r + 0.15),
+                (top, top + 0.16),
+                (d0 - 0.03, d1 + 0.03),
+            );
             b.mesh(Mat::Wood).cuboid(a, c);
             // Деревянная решётка посередине толщины.
             let m = b.mesh(Mat::Wood);
@@ -220,22 +288,40 @@ fn opening(b: &mut Builder, f: WallFrame, o: Op, l: f32, r: f32, y0: f32, y1: f3
                 let (a, c) = f.bounds((s - 0.02, s + 0.02), (sill, top), (dm - 0.02, dm + 0.02));
                 m.cuboid(a, c);
             }
-            let (a, c) = f.bounds((l, r), ((sill + top) / 2.0 - 0.02, (sill + top) / 2.0 + 0.02), (dm - 0.02, dm + 0.02));
+            let (a, c) = f.bounds(
+                (l, r),
+                ((sill + top) / 2.0 - 0.02, (sill + top) / 2.0 + 0.02),
+                (dm - 0.02, dm + 0.02),
+            );
             m.cuboid(a, c);
-            b.invisible.push(Aabb::new(f.p(l, sill, dm - 0.05), f.p(r, top, dm + 0.05)));
-            b.windows.push(Aabb::new(f.p(l, sill, dm - 0.01), f.p(r, top, dm + 0.01)));
+            b.invisible
+                .push(Aabb::new(f.p(l, sill, dm - 0.05), f.p(r, top, dm + 0.05)));
+            b.windows
+                .push(Aabb::new(f.p(l, sill, dm - 0.01), f.p(r, top, dm + 0.01)));
         }
         Op::Upper { sill, top, w, .. } => {
             let (sill, top) = ((y0 + sill).min(y1), (y0 + top).min(y1));
             b.solid_v(f.bounds((l, r), (y0, sill), (d0, d1)), mat);
             b.solid_v(f.bounds((l, r), (top, y1), (d0, d1)), mat);
-            let (a, c) = f.bounds((l - 0.25, r + 0.25), (top - 0.02, top + 0.22), (d0 - 0.03, d1 + 0.03));
+            let (a, c) = f.bounds(
+                (l - 0.25, r + 0.25),
+                (top - 0.02, top + 0.22),
+                (d0 - 0.03, d1 + 0.03),
+            );
             b.mesh(Mat::Wood).cuboid(a, c);
             for s in [l, r] {
                 let (a, c) = f.bounds((s - 0.16, s + 0.16), (sill, top), (d0 - 0.02, d1 + 0.02));
                 b.mesh(trim).cuboid(a, c);
             }
-            b.door(DoorSpec { center: f.p(o.s(), sill, dm), along_x: f.along_x, width: w, height: top - sill, wall_t: d1 - d0, double: false, open: false });
+            b.door(DoorSpec {
+                center: f.p(o.s(), sill, dm),
+                along_x: f.along_x,
+                width: w,
+                height: top - sill,
+                wall_t: d1 - d0,
+                double: false,
+                open: false,
+            });
         }
         Op::Arch { w, spring, .. } => {
             let apex = (y0 + spring + w / 2.0).min(y1);
@@ -246,12 +332,31 @@ fn opening(b: &mut Builder, f: WallFrame, o: Op, l: f32, r: f32, y0: f32, y1: f3
             b.solid_v(f.bounds((r - q * 0.6, r), (band, apex), (d0, d1)), mat);
             let mut infill = std::mem::take(b.mesh(mat));
             let mut tr = std::mem::take(b.mesh(trim));
-            geom::arch_infill(&mut infill, &mut tr, f, o.s(), w, y0 + spring, w / 2.0, apex, d0, d1);
+            geom::arch_infill(
+                &mut infill,
+                &mut tr,
+                f,
+                o.s(),
+                w,
+                y0 + spring,
+                w / 2.0,
+                apex,
+                d0,
+                d1,
+            );
             for s in [l, r] {
-                let (a, c) = f.bounds((s - 0.14, s + 0.14), (y0, y0 + spring), (d0 - 0.04, d1 + 0.04));
+                let (a, c) = f.bounds(
+                    (s - 0.14, s + 0.14),
+                    (y0, y0 + spring),
+                    (d0 - 0.04, d1 + 0.04),
+                );
                 tr.cuboid(a, c);
                 // Импост.
-                let (a, c) = f.bounds((s - 0.25, s + 0.25), (y0 + spring - 0.2, y0 + spring), (d0 - 0.1, d1 + 0.1));
+                let (a, c) = f.bounds(
+                    (s - 0.25, s + 0.25),
+                    (y0 + spring - 0.2, y0 + spring),
+                    (d0 - 0.1, d1 + 0.1),
+                );
                 tr.cuboid(a, c);
             }
             *b.mesh(mat) = infill;
@@ -262,11 +367,35 @@ fn opening(b: &mut Builder, f: WallFrame, o: Op, l: f32, r: f32, y0: f32, y1: f3
 
 /// Стена вдоль X на линии `z` (толщина `t`, по центру).
 pub fn wall_x(b: &mut Builder, x0: f32, x1: f32, z: f32, t: f32, h: f32, ops: &[Op], mat: Mat) {
-    wall(b, fx(), x0, x1, z - t / 2.0, z + t / 2.0, 0.0, h, ops, mat, Mat::Limestone);
+    wall(
+        b,
+        fx(),
+        x0,
+        x1,
+        z - t / 2.0,
+        z + t / 2.0,
+        0.0,
+        h,
+        ops,
+        mat,
+        Mat::Limestone,
+    );
 }
 /// Стена вдоль Z на линии `x`.
 pub fn wall_z(b: &mut Builder, z0: f32, z1: f32, x: f32, t: f32, h: f32, ops: &[Op], mat: Mat) {
-    wall(b, fz(), z0, z1, x - t / 2.0, x + t / 2.0, 0.0, h, ops, mat, Mat::Limestone);
+    wall(
+        b,
+        fz(),
+        z0,
+        z1,
+        x - t / 2.0,
+        x + t / 2.0,
+        0.0,
+        h,
+        ops,
+        mat,
+        Mat::Limestone,
+    );
 }
 
 /// Угловые камни (крупные тёсаные блоки) на углу дома.
@@ -277,7 +406,10 @@ pub fn quoins(b: &mut Builder, x: f32, z: f32, h: f32, t: f32) {
     while y < h - 0.1 {
         let hh = 0.42f32.min(h - y);
         let (lx, lz) = if k % 2 == 0 { (0.9, 0.5) } else { (0.5, 0.9) };
-        m.cuboid(Vec3::new(x - t / 2.0 - 0.02 - lx * 0.0, y, z - t / 2.0 - 0.02), Vec3::new(x - t / 2.0 + lx, y + hh, z - t / 2.0 + lz));
+        m.cuboid(
+            Vec3::new(x - t / 2.0 - 0.02 - lx * 0.0, y, z - t / 2.0 - 0.02),
+            Vec3::new(x - t / 2.0 + lx, y + hh, z - t / 2.0 + lz),
+        );
         y += hh;
         k += 1;
     }
@@ -285,38 +417,92 @@ pub fn quoins(b: &mut Builder, x: f32, z: f32, h: f32, t: f32) {
 
 /// Двускатная черепичная крыша над прямоугольником (по наружным граням стен) со свесом.
 /// Фронтоны (треугольники) — из `gable_mat`. Снизу — дощатый настил.
-pub fn gable_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32, ridge_x: bool, over: f32, gable_mat: Mat) {
+pub fn gable_roof(
+    b: &mut Builder,
+    r: Rect,
+    eave: f32,
+    rise: f32,
+    ridge_x: bool,
+    over: f32,
+    gable_mat: Mat,
+) {
     let ro = Rect::new(r.x0 - over, r.z0 - over, r.x1 + over, r.z1 + over);
     let drop = rise / ((if ridge_x { r.d() } else { r.w() }) / 2.0) * over;
     let e = eave - drop;
     let top = eave + rise;
     {
         let m = b.mesh(Mat::Tile);
-        m.gable_roof_slopes(Vec2::new(ro.x0, ro.z0), Vec2::new(ro.x1, ro.z1), e, top, ridge_x);
+        m.gable_roof_slopes(
+            Vec2::new(ro.x0, ro.z0),
+            Vec2::new(ro.x1, ro.z1),
+            e,
+            top,
+            ridge_x,
+        );
     }
     {
         let m = b.mesh(Mat::Wood);
         let mut under = MeshBuilder::default();
-        under.gable_roof_slopes(Vec2::new(ro.x0, ro.z0), Vec2::new(ro.x1, ro.z1), e - ROOF_T, top - ROOF_T, ridge_x);
+        under.gable_roof_slopes(
+            Vec2::new(ro.x0, ro.z0),
+            Vec2::new(ro.x1, ro.z1),
+            e - ROOF_T,
+            top - ROOF_T,
+            ridge_x,
+        );
         m.append(under.flipped());
     }
     // Толщина кровли по краям: торцы черепицы на карнизах и на свесах у фронтонов.
     // Точки — в осях крыши: `al` вдоль конька, `ac` поперёк.
-    let w = |al: f32, y: f32, ac: f32| if ridge_x { Vec3::new(al, y, ac) } else { Vec3::new(ac, y, al) };
-    let (a0, a1, c0, c1, cm) = if ridge_x { (ro.x0, ro.x1, ro.z0, ro.z1, r.cz()) } else { (ro.z0, ro.z1, ro.x0, ro.x1, r.cx()) };
+    let w = |al: f32, y: f32, ac: f32| {
+        if ridge_x {
+            Vec3::new(al, y, ac)
+        } else {
+            Vec3::new(ac, y, al)
+        }
+    };
+    let (a0, a1, c0, c1, cm) = if ridge_x {
+        (ro.x0, ro.x1, ro.z0, ro.z1, r.cz())
+    } else {
+        (ro.z0, ro.z1, ro.x0, ro.x1, r.cx())
+    };
     let slope = Vec2::new((c1 - c0) / 2.0, top - e).length();
-    roof_edges(b.mesh(Mat::Tile), &w, (a0, a1), [(c0, -1.0), (c1, 1.0)], e, top, cm, slope);
+    roof_edges(
+        b.mesh(Mat::Tile),
+        &w,
+        (a0, a1),
+        [(c0, -1.0), (c1, 1.0)],
+        e,
+        top,
+        cm,
+        slope,
+    );
     // Конёк — ряд полукруглых калиптеров на растворе.
-    b.mesh(Mat::Tile).ridge_pipe(w(a0 - 0.04, top - 0.03, cm), w(a1 + 0.04, top - 0.03, cm), 0.13, 8);
+    b.mesh(Mat::Tile).ridge_pipe(
+        w(a0 - 0.04, top - 0.03, cm),
+        w(a1 + 0.04, top - 0.03, cm),
+        0.13,
+        8,
+    );
     // Фронтоны.
     let m = b.mesh(gable_mat);
     if ridge_x {
         for (x, s) in [(r.x0, -1.0f32), (r.x1, 1.0)] {
-            m.tri(Vec3::new(x, eave, r.z0), Vec3::new(x, eave, r.z1), Vec3::new(x, top, r.cz()), Vec3::X * s);
+            m.tri(
+                Vec3::new(x, eave, r.z0),
+                Vec3::new(x, eave, r.z1),
+                Vec3::new(x, top, r.cz()),
+                Vec3::X * s,
+            );
         }
     } else {
         for (z, s) in [(r.z0, -1.0f32), (r.z1, 1.0)] {
-            m.tri(Vec3::new(r.x0, eave, z), Vec3::new(r.x1, eave, z), Vec3::new(r.cx(), top, z), Vec3::Z * s);
+            m.tri(
+                Vec3::new(r.x0, eave, z),
+                Vec3::new(r.x1, eave, z),
+                Vec3::new(r.cx(), top, z),
+                Vec3::Z * s,
+            );
         }
     }
 }
@@ -327,19 +513,48 @@ const ROOF_T: f32 = 0.11;
 /// Торцы кровли двускатной крыши: полосы черепицы на карнизах (последние сантиметры развёртки
 /// загнуты вниз — тон и стыки те же, что у нижнего ряда) и на свесах у фронтонов (крайний
 /// калиптер). `w` переводит (вдоль конька, высота, поперёк) в мир.
-fn roof_edges(t: &mut MeshBuilder, w: &dyn Fn(f32, f32, f32) -> Vec3, (a0, a1): (f32, f32), eaves: [(f32, f32); 2], e: f32, top: f32, cm: f32, slope: f32) {
+fn roof_edges(
+    t: &mut MeshBuilder,
+    w: &dyn Fn(f32, f32, f32) -> Vec3,
+    (a0, a1): (f32, f32),
+    eaves: [(f32, f32); 2],
+    e: f32,
+    top: f32,
+    cm: f32,
+    slope: f32,
+) {
     let l = a1 - a0;
     let lip = 0.12;
     for (ce, s) in eaves {
         t.quad_uv(
-            [w(a0, e, ce), w(a1, e, ce), w(a1, e - ROOF_T, ce), w(a0, e - ROOF_T, ce)],
-            [Vec2::new(0.0, slope), Vec2::new(l, slope), Vec2::new(l, slope - lip), Vec2::new(0.0, slope - lip)],
+            [
+                w(a0, e, ce),
+                w(a1, e, ce),
+                w(a1, e - ROOF_T, ce),
+                w(a0, e - ROOF_T, ce),
+            ],
+            [
+                Vec2::new(0.0, slope),
+                Vec2::new(l, slope),
+                Vec2::new(l, slope - lip),
+                Vec2::new(0.0, slope - lip),
+            ],
             w(0.0, 0.0, s),
         );
         for (ae, u0, u1, out) in [(a0, 0.0, lip, -1.0f32), (a1, l, l - lip, 1.0)] {
             t.quad_uv(
-                [w(ae, e, ce), w(ae, top, cm), w(ae, top - ROOF_T, cm), w(ae, e - ROOF_T, ce)],
-                [Vec2::new(u0, slope), Vec2::new(u0, 0.0), Vec2::new(u1, 0.0), Vec2::new(u1, slope)],
+                [
+                    w(ae, e, ce),
+                    w(ae, top, cm),
+                    w(ae, top - ROOF_T, cm),
+                    w(ae, e - ROOF_T, ce),
+                ],
+                [
+                    Vec2::new(u0, slope),
+                    Vec2::new(u0, 0.0),
+                    Vec2::new(u1, 0.0),
+                    Vec2::new(u1, slope),
+                ],
                 w(out, 0.0, 0.0),
             );
         }
@@ -377,10 +592,46 @@ pub fn lean_roof(b: &mut Builder, r: Rect, high: Side, y_high: f32, y_low: f32, 
     let yl = y_low - slope * over;
     let ro = Rect::new(r.x0 - 0.25, r.z0 - 0.25, r.x1 + 0.25, r.z1 + 0.25);
     let (hi, lo): ([Vec3; 2], [Vec3; 2]) = match high {
-        Side::N => ([Vec3::new(ro.x0, yh, r.z0 - 0.25), Vec3::new(ro.x1, yh, r.z0 - 0.25)], [Vec3::new(ro.x0, yl, r.z1 + over), Vec3::new(ro.x1, yl, r.z1 + over)]),
-        Side::S => ([Vec3::new(ro.x0, yh, r.z1 + 0.25), Vec3::new(ro.x1, yh, r.z1 + 0.25)], [Vec3::new(ro.x0, yl, r.z0 - over), Vec3::new(ro.x1, yl, r.z0 - over)]),
-        Side::W => ([Vec3::new(r.x0 - 0.25, yh, ro.z0), Vec3::new(r.x0 - 0.25, yh, ro.z1)], [Vec3::new(r.x1 + over, yl, ro.z0), Vec3::new(r.x1 + over, yl, ro.z1)]),
-        Side::E => ([Vec3::new(r.x1 + 0.25, yh, ro.z0), Vec3::new(r.x1 + 0.25, yh, ro.z1)], [Vec3::new(r.x0 - over, yl, ro.z0), Vec3::new(r.x0 - over, yl, ro.z1)]),
+        Side::N => (
+            [
+                Vec3::new(ro.x0, yh, r.z0 - 0.25),
+                Vec3::new(ro.x1, yh, r.z0 - 0.25),
+            ],
+            [
+                Vec3::new(ro.x0, yl, r.z1 + over),
+                Vec3::new(ro.x1, yl, r.z1 + over),
+            ],
+        ),
+        Side::S => (
+            [
+                Vec3::new(ro.x0, yh, r.z1 + 0.25),
+                Vec3::new(ro.x1, yh, r.z1 + 0.25),
+            ],
+            [
+                Vec3::new(ro.x0, yl, r.z0 - over),
+                Vec3::new(ro.x1, yl, r.z0 - over),
+            ],
+        ),
+        Side::W => (
+            [
+                Vec3::new(r.x0 - 0.25, yh, ro.z0),
+                Vec3::new(r.x0 - 0.25, yh, ro.z1),
+            ],
+            [
+                Vec3::new(r.x1 + over, yl, ro.z0),
+                Vec3::new(r.x1 + over, yl, ro.z1),
+            ],
+        ),
+        Side::E => (
+            [
+                Vec3::new(r.x1 + 0.25, yh, ro.z0),
+                Vec3::new(r.x1 + 0.25, yh, ro.z1),
+            ],
+            [
+                Vec3::new(r.x0 - over, yl, ro.z0),
+                Vec3::new(r.x0 - over, yl, ro.z1),
+            ],
+        ),
     };
     b.mesh(Mat::Tile).lean_roof(hi, lo);
     let down = Vec3::Y * -ROOF_T;
@@ -396,11 +647,28 @@ pub fn lean_roof(b: &mut Builder, r: Rect, high: Side, y_high: f32, y_low: f32, 
     let t = b.mesh(Mat::Tile);
     t.quad_uv(
         [lo[0], lo[1], lo[1] + down, lo[0] + down],
-        [Vec2::new(0.0, slope_len), Vec2::new(along, slope_len), Vec2::new(along, slope_len - lip), Vec2::new(0.0, slope_len - lip)],
+        [
+            Vec2::new(0.0, slope_len),
+            Vec2::new(along, slope_len),
+            Vec2::new(along, slope_len - lip),
+            Vec2::new(0.0, slope_len - lip),
+        ],
         out,
     );
-    for (h, l, u0, u1, f) in [(hi[0], lo[0], 0.0, lip, -ax), (hi[1], lo[1], along, along - lip, ax)] {
-        t.quad_uv([h, l, l + down, h + down], [Vec2::new(u0, 0.0), Vec2::new(u0, slope_len), Vec2::new(u1, slope_len), Vec2::new(u1, 0.0)], f);
+    for (h, l, u0, u1, f) in [
+        (hi[0], lo[0], 0.0, lip, -ax),
+        (hi[1], lo[1], along, along - lip, ax),
+    ] {
+        t.quad_uv(
+            [h, l, l + down, h + down],
+            [
+                Vec2::new(u0, 0.0),
+                Vec2::new(u0, slope_len),
+                Vec2::new(u1, slope_len),
+                Vec2::new(u1, 0.0),
+            ],
+            f,
+        );
     }
     // Треугольные торцы между стеной и скатом закрываем кладкой — делает вызывающий (стены выше),
     // а здесь — концы стропил под карнизом.
@@ -410,28 +678,67 @@ pub fn lean_roof(b: &mut Builder, r: Rect, high: Side, y_high: f32, y_low: f32, 
 }
 
 /// Треугольный кусок кладки под односкатной крышей на торце крыла.
-pub fn lean_gable(b: &mut Builder, mat: Mat, a: Vec3, c: Vec3, rise_at_a: f32, facing: Vec3, t: f32) {
+pub fn lean_gable(
+    b: &mut Builder,
+    mat: Mat,
+    a: Vec3,
+    c: Vec3,
+    rise_at_a: f32,
+    facing: Vec3,
+    t: f32,
+) {
     let m = b.mesh(mat);
     let top = a + Vec3::Y * rise_at_a;
     for off in [facing * t / 2.0, -facing * t / 2.0] {
-        m.tri(a + off, c + off, top + off, if off.dot(facing) > 0.0 { facing } else { -facing });
+        m.tri(
+            a + off,
+            c + off,
+            top + off,
+            if off.dot(facing) > 0.0 {
+                facing
+            } else {
+                -facing
+            },
+        );
     }
     let up = (top - c).cross(facing);
-    m.quad([c + facing * t / 2.0, top + facing * t / 2.0, top - facing * t / 2.0, c - facing * t / 2.0], if up.y > 0.0 { up } else { -up });
+    m.quad(
+        [
+            c + facing * t / 2.0,
+            top + facing * t / 2.0,
+            top - facing * t / 2.0,
+            c - facing * t / 2.0,
+        ],
+        if up.y > 0.0 { up } else { -up },
+    );
 }
 
 /// Пирамидальная черепичная крыша (башни).
 pub fn hip_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32) {
     let c = r.center(eave);
     let m = b.mesh(Mat::Tile);
-    let pts = [Vec3::new(r.x0, eave, r.z0), Vec3::new(r.x1, eave, r.z0), Vec3::new(r.x1, eave, r.z1), Vec3::new(r.x0, eave, r.z1)];
+    let pts = [
+        Vec3::new(r.x0, eave, r.z0),
+        Vec3::new(r.x1, eave, r.z0),
+        Vec3::new(r.x1, eave, r.z1),
+        Vec3::new(r.x0, eave, r.z1),
+    ];
     let apex = c + Vec3::Y * rise;
     for i in 0..4 {
         let (a, bb) = (pts[i], pts[(i + 1) % 4]);
         let out = ((a + bb) / 2.0 - c).normalize() + Vec3::Y * 0.5;
         let w = a.distance(bb);
         let sl = ((a + bb) / 2.0).distance(apex);
-        m.quad_uv([a, bb, apex, apex], [Vec2::new(0.0, sl), Vec2::new(w, sl), Vec2::new(w / 2.0, 0.0), Vec2::new(w / 2.0, 0.0)], out);
+        m.quad_uv(
+            [a, bb, apex, apex],
+            [
+                Vec2::new(0.0, sl),
+                Vec2::new(w, sl),
+                Vec2::new(w / 2.0, 0.0),
+                Vec2::new(w / 2.0, 0.0),
+            ],
+            out,
+        );
     }
 }
 
@@ -455,9 +762,44 @@ pub fn stairs(b: &mut Builder, start: Vec3, dir: Vec3, width: f32, h: f32, mat: 
 pub fn amphora(b: &mut Builder, p: Vec3, scale: f32, kind: u32) {
     // Профили по типам: 0 — LR2 (шаровидная, рифлёная), 1 — херсонесская узкогорлая, 2 — LR1 (цилиндрическая).
     let prof: &[(f32, f32)] = match kind % 3 {
-        0 => &[(0.0, 0.0), (0.04, 0.01), (0.1, 0.06), (0.17, 0.16), (0.2, 0.3), (0.19, 0.42), (0.13, 0.52), (0.06, 0.57), (0.05, 0.66), (0.06, 0.68), (0.0, 0.69)],
-        1 => &[(0.0, 0.0), (0.025, 0.0), (0.06, 0.08), (0.12, 0.22), (0.15, 0.38), (0.14, 0.5), (0.09, 0.6), (0.045, 0.66), (0.035, 0.8), (0.05, 0.82), (0.0, 0.83)],
-        _ => &[(0.0, 0.0), (0.05, 0.0), (0.1, 0.05), (0.14, 0.15), (0.15, 0.4), (0.13, 0.55), (0.07, 0.62), (0.05, 0.7), (0.06, 0.72), (0.0, 0.73)],
+        0 => &[
+            (0.0, 0.0),
+            (0.04, 0.01),
+            (0.1, 0.06),
+            (0.17, 0.16),
+            (0.2, 0.3),
+            (0.19, 0.42),
+            (0.13, 0.52),
+            (0.06, 0.57),
+            (0.05, 0.66),
+            (0.06, 0.68),
+            (0.0, 0.69),
+        ],
+        1 => &[
+            (0.0, 0.0),
+            (0.025, 0.0),
+            (0.06, 0.08),
+            (0.12, 0.22),
+            (0.15, 0.38),
+            (0.14, 0.5),
+            (0.09, 0.6),
+            (0.045, 0.66),
+            (0.035, 0.8),
+            (0.05, 0.82),
+            (0.0, 0.83),
+        ],
+        _ => &[
+            (0.0, 0.0),
+            (0.05, 0.0),
+            (0.1, 0.05),
+            (0.14, 0.15),
+            (0.15, 0.4),
+            (0.13, 0.55),
+            (0.07, 0.62),
+            (0.05, 0.7),
+            (0.06, 0.72),
+            (0.0, 0.73),
+        ],
     };
     let scaled: Vec<(f32, f32)> = prof.iter().map(|&(r, y)| (r * scale, y * scale)).collect();
     let m = b.mesh(Mat::Ceramic);
@@ -478,7 +820,9 @@ pub fn amphora_lying(b: &mut Builder, p: Vec3, along_x: bool, scale: f32) {
     let len = 0.7 * scale;
     let dir = if along_x { Vec3::X } else { Vec3::Z };
     let r = 0.17 * scale;
-    let segs: Vec<Vec3> = (0..=6).map(|k| p + dir * (k as f32 / 6.0 - 0.5) * len).collect();
+    let segs: Vec<Vec3> = (0..=6)
+        .map(|k| p + dir * (k as f32 / 6.0 - 0.5) * len)
+        .collect();
     for (k, w) in segs.windows(2).enumerate() {
         let t = (k as f32 + 0.5) / 6.0;
         let rr = r * (1.0 - (2.0 * t - 0.8).powi(2) * 0.55).max(0.25);
@@ -489,21 +833,44 @@ pub fn amphora_lying(b: &mut Builder, p: Vec3, along_x: bool, scale: f32) {
 /// Пифос — большой зерновой или винный сосуд. `buried` — врыт в землю на столько метров.
 pub fn pithos(b: &mut Builder, p: Vec3, h: f32, buried: f32) {
     let r = h * 0.38;
-    let prof = [(0.0, 0.0), (r * 0.45, 0.0), (r * 0.85, h * 0.18), (r, h * 0.48), (r * 0.88, h * 0.78), (r * 0.5, h * 0.95), (r * 0.52, h), (r * 0.42, h), (r * 0.4, h * 0.96)];
+    let prof = [
+        (0.0, 0.0),
+        (r * 0.45, 0.0),
+        (r * 0.85, h * 0.18),
+        (r, h * 0.48),
+        (r * 0.88, h * 0.78),
+        (r * 0.5, h * 0.95),
+        (r * 0.52, h),
+        (r * 0.42, h),
+        (r * 0.4, h * 0.96),
+    ];
     let base = p - Vec3::Y * buried;
     b.mesh(Mat::Ceramic).lathe(base, &prof, 14);
     // Тёмное нутро.
-    b.mesh(Mat::Coals).disc(base + Vec3::Y * (h * 0.955), r * 0.4, 10, true);
+    b.mesh(Mat::Coals)
+        .disc(base + Vec3::Y * (h * 0.955), r * 0.4, 10, true);
     let hh = h - buried;
     if hh > 0.3 {
-        hidden(b, Vec3::new(p.x - r * 0.8, p.y, p.z - r * 0.8), Vec3::new(p.x + r * 0.8, p.y + hh, p.z + r * 0.8));
+        hidden(
+            b,
+            Vec3::new(p.x - r * 0.8, p.y, p.z - r * 0.8),
+            Vec3::new(p.x + r * 0.8, p.y + hh, p.z + r * 0.8),
+        );
     }
 }
 
 /// Кувшин/горшок (мелкая посуда на полках и столах).
 pub fn jug(b: &mut Builder, p: Vec3, h: f32, mat: Mat) {
     let r = h * 0.35;
-    let prof = [(0.0, 0.0), (r * 0.6, 0.0), (r, h * 0.35), (r * 0.9, h * 0.65), (r * 0.45, h * 0.85), (r * 0.5, h), (0.0, h)];
+    let prof = [
+        (0.0, 0.0),
+        (r * 0.6, 0.0),
+        (r, h * 0.35),
+        (r * 0.9, h * 0.65),
+        (r * 0.45, h * 0.85),
+        (r * 0.5, h),
+        (0.0, h),
+    ];
     b.mesh(mat).lathe(p, &prof, 8);
 }
 
@@ -517,8 +884,16 @@ pub fn table(b: &mut Builder, r: Rect, h: f32) {
     b.invisible.push(Aabb::new(r.min3(0.0), r.max3(h)));
     let m = b.mesh(Mat::Wood);
     m.cuboid(r.min3(h - 0.06), r.max3(h));
-    for (x, z) in [(r.x0 + 0.08, r.z0 + 0.08), (r.x1 - 0.08, r.z0 + 0.08), (r.x0 + 0.08, r.z1 - 0.08), (r.x1 - 0.08, r.z1 - 0.08)] {
-        m.cuboid(Vec3::new(x - 0.04, 0.0, z - 0.04), Vec3::new(x + 0.04, h - 0.06, z + 0.04));
+    for (x, z) in [
+        (r.x0 + 0.08, r.z0 + 0.08),
+        (r.x1 - 0.08, r.z0 + 0.08),
+        (r.x0 + 0.08, r.z1 - 0.08),
+        (r.x1 - 0.08, r.z1 - 0.08),
+    ] {
+        m.cuboid(
+            Vec3::new(x - 0.04, 0.0, z - 0.04),
+            Vec3::new(x + 0.04, h - 0.06, z + 0.04),
+        );
     }
 }
 
@@ -530,7 +905,10 @@ pub fn bench(b: &mut Builder, r: Rect) {
 /// Ложе (кровать) с соломенным тюфяком.
 pub fn bed(b: &mut Builder, r: Rect) {
     table(b, r, 0.45);
-    b.mesh(Mat::Canvas).cuboid(Vec3::new(r.x0 + 0.05, 0.45, r.z0 + 0.05), Vec3::new(r.x1 - 0.05, 0.6, r.z1 - 0.05));
+    b.mesh(Mat::Canvas).cuboid(
+        Vec3::new(r.x0 + 0.05, 0.45, r.z0 + 0.05),
+        Vec3::new(r.x1 - 0.05, 0.6, r.z1 - 0.05),
+    );
     let along = if r.w() > r.d() { Vec3::X } else { Vec3::Z };
     b.bed(r.center(0.62), along);
 }
@@ -545,14 +923,22 @@ pub fn chest(b: &mut Builder, p: Vec3, along_x: bool) {
 /// Только сам сундук (без добычи).
 pub fn chest_body(b: &mut Builder, p: Vec3, along_x: bool) {
     let (hx, hz) = if along_x { (0.5, 0.3) } else { (0.3, 0.5) };
-    b.solid([p.x - hx, 0.0, p.z - hz], [p.x + hx, 0.55, p.z + hz], Mat::Wood);
+    b.solid(
+        [p.x - hx, 0.0, p.z - hz],
+        [p.x + hx, 0.55, p.z + hz],
+        Mat::Wood,
+    );
     let m = b.mesh(Mat::Iron);
-    m.cuboid(Vec3::new(p.x - hx - 0.01, 0.42, p.z - hz - 0.01), Vec3::new(p.x + hx + 0.01, 0.47, p.z + hz + 0.01));
+    m.cuboid(
+        Vec3::new(p.x - hx - 0.01, 0.42, p.z - hz - 0.01),
+        Vec3::new(p.x + hx + 0.01, 0.47, p.z + hz + 0.01),
+    );
 }
 
 /// Полка у стены с посудой: `r` — прямоугольник полки (узкий), `levels` ярусов.
 pub fn shelf(b: &mut Builder, r: Rect, levels: usize, rng: &mut Rng, wares: Mat) {
-    b.invisible.push(Aabb::new(r.min3(0.0), r.max3(0.4 + 0.5 * levels as f32)));
+    b.invisible
+        .push(Aabb::new(r.min3(0.0), r.max3(0.4 + 0.5 * levels as f32)));
     let along_x = r.w() > r.d();
     for k in 0..levels {
         let y = 0.4 + 0.5 * k as f32;
@@ -564,13 +950,20 @@ pub fn shelf(b: &mut Builder, r: Rect, levels: usize, rng: &mut Rng, wares: Mat)
                 continue;
             }
             let t = (i as f32 + 0.5) / n as f32;
-            let p = if along_x { Vec3::new(r.x0 + r.w() * t, y, r.cz()) } else { Vec3::new(r.cx(), y, r.z0 + r.d() * t) };
+            let p = if along_x {
+                Vec3::new(r.x0 + r.w() * t, y, r.cz())
+            } else {
+                Vec3::new(r.cx(), y, r.z0 + r.d() * t)
+            };
             jug(b, p, rng.range(0.14, 0.3), wares);
         }
     }
     let m = b.mesh(Mat::Wood);
     for (x, z) in [(r.x0, r.z0), (r.x1, r.z1)] {
-        m.cuboid(Vec3::new(x - 0.03, 0.0, z - 0.03), Vec3::new(x + 0.03, 0.4 + 0.5 * levels as f32, z + 0.03));
+        m.cuboid(
+            Vec3::new(x - 0.03, 0.0, z - 0.03),
+            Vec3::new(x + 0.03, 0.4 + 0.5 * levels as f32, z + 0.03),
+        );
     }
 }
 
@@ -578,33 +971,79 @@ pub fn shelf(b: &mut Builder, r: Rect, levels: usize, rng: &mut Rng, wares: Mat)
 pub fn hearth(b: &mut Builder, p: Vec3) {
     b.hearths.push(p);
     let m = b.mesh(Mat::Rubble);
-    m.lathe(p, &[(0.55, 0.0), (0.6, 0.12), (0.55, 0.22), (0.45, 0.22), (0.45, 0.1)], 10);
+    m.lathe(
+        p,
+        &[
+            (0.55, 0.0),
+            (0.6, 0.12),
+            (0.55, 0.22),
+            (0.45, 0.22),
+            (0.45, 0.1),
+        ],
+        10,
+    );
     b.mesh(Mat::Coals).disc(p + Vec3::Y * 0.1, 0.45, 10, true);
 }
 
 /// Хлебная печь — глиняный купол (как танур/подовая печь) с устьем.
 pub fn bread_oven(b: &mut Builder, p: Vec3, r: f32) {
-    hidden(b, Vec3::new(p.x - r * 0.75, 0.0, p.z - r * 0.75), Vec3::new(p.x + r * 0.75, r * 1.1, p.z + r * 0.75));
-    let prof: Vec<(f32, f32)> = (0..=8).map(|k| {
-        let a = k as f32 / 8.0 * FRAC_PI_2;
-        (a.cos() * r, 0.35 + a.sin() * r * 0.85)
-    }).collect();
+    hidden(
+        b,
+        Vec3::new(p.x - r * 0.75, 0.0, p.z - r * 0.75),
+        Vec3::new(p.x + r * 0.75, r * 1.1, p.z + r * 0.75),
+    );
+    let prof: Vec<(f32, f32)> = (0..=8)
+        .map(|k| {
+            let a = k as f32 / 8.0 * FRAC_PI_2;
+            (a.cos() * r, 0.35 + a.sin() * r * 0.85)
+        })
+        .collect();
     let mut full = vec![(r, 0.0)];
     full.extend(prof);
     b.mesh(Mat::Plaster).lathe(p, &full, 12);
-    b.mesh(Mat::Coals).cuboid(p + Vec3::new(r - 0.05, 0.3, -0.2), p + Vec3::new(r + 0.02, 0.7, 0.2));
+    b.mesh(Mat::Coals).cuboid(
+        p + Vec3::new(r - 0.05, 0.3, -0.2),
+        p + Vec3::new(r + 0.02, 0.7, 0.2),
+    );
 }
 
 /// Устье цистерны: круглый каменный венец, внутри — тёмная вода.
 pub fn cistern_mouth(b: &mut Builder, p: Vec3) {
-    hidden(b, Vec3::new(p.x - 0.5, 0.0, p.z - 0.5), Vec3::new(p.x + 0.5, 0.65, p.z + 0.5));
-    b.mesh(Mat::Limestone).lathe(p, &[(0.62, 0.0), (0.62, 0.55), (0.66, 0.6), (0.66, 0.68), (0.42, 0.68), (0.42, 0.3)], 14);
+    hidden(
+        b,
+        Vec3::new(p.x - 0.5, 0.0, p.z - 0.5),
+        Vec3::new(p.x + 0.5, 0.65, p.z + 0.5),
+    );
+    b.mesh(Mat::Limestone).lathe(
+        p,
+        &[
+            (0.62, 0.0),
+            (0.62, 0.55),
+            (0.66, 0.6),
+            (0.66, 0.68),
+            (0.42, 0.68),
+            (0.42, 0.3),
+        ],
+        14,
+    );
     b.mesh(Mat::Water).disc(p + Vec3::Y * 0.32, 0.42, 12, true);
     // Деревянный ворот с ведром.
     let m = b.mesh(Mat::Wood);
-    m.cuboid(p + Vec3::new(-0.7, 0.0, -0.06), p + Vec3::new(-0.6, 1.5, 0.06));
-    m.cuboid(p + Vec3::new(0.6, 0.0, -0.06), p + Vec3::new(0.7, 1.5, 0.06));
-    m.beam(p + Vec3::new(-0.65, 1.35, 0.0), p + Vec3::new(0.65, 1.35, 0.0), 0.06, 0.06, Vec3::Y);
+    m.cuboid(
+        p + Vec3::new(-0.7, 0.0, -0.06),
+        p + Vec3::new(-0.6, 1.5, 0.06),
+    );
+    m.cuboid(
+        p + Vec3::new(0.6, 0.0, -0.06),
+        p + Vec3::new(0.7, 1.5, 0.06),
+    );
+    m.beam(
+        p + Vec3::new(-0.65, 1.35, 0.0),
+        p + Vec3::new(0.65, 1.35, 0.0),
+        0.06,
+        0.06,
+        Vec3::Y,
+    );
 }
 
 /// Давильня для винограда (тарапан): площадка с бортиком и сток в чан.
@@ -617,21 +1056,52 @@ pub fn wine_press(b: &mut Builder, r: Rect) {
     b.solid([r.x1 - 0.25, 0.0, r.z0], [r.x1, 0.45, r.z1], Mat::Limestone);
     // Чан для сусла рядом.
     let p = Vec3::new(r.x1 + 0.7, 0.0, r.cz());
-    b.mesh(Mat::Signinum).lathe(p, &[(0.55, 0.0), (0.55, 0.5), (0.45, 0.5), (0.45, 0.1)], 12);
+    b.mesh(Mat::Signinum)
+        .lathe(p, &[(0.55, 0.0), (0.55, 0.5), (0.45, 0.5), (0.45, 0.1)], 12);
     b.mesh(Mat::Coals).disc(p + Vec3::Y * 0.12, 0.45, 12, true);
-    b.invisible.push(Aabb::new(p - Vec3::new(0.5, 0.0, 0.5), p + Vec3::new(0.5, 0.5, 0.5)));
+    b.invisible.push(Aabb::new(
+        p - Vec3::new(0.5, 0.0, 0.5),
+        p + Vec3::new(0.5, 0.5, 0.5),
+    ));
     // Желоб.
-    b.mesh(Mat::Limestone).cuboid(Vec3::new(r.x1 - 0.1, 0.25, r.cz() - 0.08), Vec3::new(r.x1 + 0.3, 0.33, r.cz() + 0.08));
+    b.mesh(Mat::Limestone).cuboid(
+        Vec3::new(r.x1 - 0.1, 0.25, r.cz() - 0.08),
+        Vec3::new(r.x1 + 0.3, 0.33, r.cz() + 0.08),
+    );
 }
 
 /// Ручная ротационная мельница: два жернова на подставке.
 pub fn hand_mill(b: &mut Builder, p: Vec3) {
-    hidden(b, Vec3::new(p.x - 0.35, 0.0, p.z - 0.35), Vec3::new(p.x + 0.35, 0.55, p.z + 0.35));
+    hidden(
+        b,
+        Vec3::new(p.x - 0.35, 0.0, p.z - 0.35),
+        Vec3::new(p.x + 0.35, 0.55, p.z + 0.35),
+    );
     let m = b.mesh(Mat::Limestone);
     m.lathe(p, &[(0.3, 0.0), (0.3, 0.3)], 10);
-    m.lathe(p + Vec3::Y * 0.3, &[(0.0, 0.0), (0.33, 0.0), (0.33, 0.14), (0.28, 0.16), (0.05, 0.2)], 12);
-    m.lathe(p + Vec3::Y * 0.46, &[(0.32, 0.0), (0.32, 0.12), (0.08, 0.14), (0.08, 0.06)], 12);
-    b.mesh(Mat::Wood).beam(p + Vec3::new(0.22, 0.58, 0.0), p + Vec3::new(0.22, 0.85, 0.0), 0.025, 0.025, Vec3::X);
+    m.lathe(
+        p + Vec3::Y * 0.3,
+        &[
+            (0.0, 0.0),
+            (0.33, 0.0),
+            (0.33, 0.14),
+            (0.28, 0.16),
+            (0.05, 0.2),
+        ],
+        12,
+    );
+    m.lathe(
+        p + Vec3::Y * 0.46,
+        &[(0.32, 0.0), (0.32, 0.12), (0.08, 0.14), (0.08, 0.06)],
+        12,
+    );
+    b.mesh(Mat::Wood).beam(
+        p + Vec3::new(0.22, 0.58, 0.0),
+        p + Vec3::new(0.22, 0.85, 0.0),
+        0.025,
+        0.025,
+        Vec3::X,
+    );
 }
 
 /// Штабель дров.
@@ -647,9 +1117,15 @@ pub fn woodpile(b: &mut Builder, r: Rect, h: f32) {
                 continue;
             }
             let (a, c) = if along_x {
-                (Vec3::new(r.x0 + r.w() * t, y, r.z0 - 0.05), Vec3::new(r.x0 + r.w() * t, y, r.z1 + 0.05))
+                (
+                    Vec3::new(r.x0 + r.w() * t, y, r.z0 - 0.05),
+                    Vec3::new(r.x0 + r.w() * t, y, r.z1 + 0.05),
+                )
             } else {
-                (Vec3::new(r.x0 - 0.05, y, r.z0 + r.d() * t), Vec3::new(r.x1 + 0.05, y, r.z0 + r.d() * t))
+                (
+                    Vec3::new(r.x0 - 0.05, y, r.z0 + r.d() * t),
+                    Vec3::new(r.x1 + 0.05, y, r.z0 + r.d() * t),
+                )
             };
             m.beam(a, c, 0.06, 0.06, Vec3::Y);
         }
@@ -661,19 +1137,36 @@ pub fn loom(b: &mut Builder, p: Vec3, along_x: bool) {
     let side = if along_x { Vec3::X } else { Vec3::Z };
     let m = b.mesh(Mat::Wood);
     for s in [-0.8f32, 0.8] {
-        m.beam(p + side * s, p + side * s + Vec3::new(0.0, 1.9, 0.0) + Vec3::new(side.z, 0.0, side.x) * 0.3, 0.04, 0.04, Vec3::Y);
+        m.beam(
+            p + side * s,
+            p + side * s + Vec3::new(0.0, 1.9, 0.0) + Vec3::new(side.z, 0.0, side.x) * 0.3,
+            0.04,
+            0.04,
+            Vec3::Y,
+        );
     }
     let top = p + Vec3::Y * 1.85 + Vec3::new(side.z, 0.0, side.x) * 0.28;
     m.beam(top - side * 0.9, top + side * 0.9, 0.04, 0.04, Vec3::Y);
     let cloth = b.mesh(Mat::Canvas);
     let lo = p + Vec3::Y * 0.7 + Vec3::new(side.z, 0.0, side.x) * 0.17;
-    cloth.quad([lo - side * 0.7, lo + side * 0.7, top + side * 0.7 - Vec3::Y * 0.05, top - side * 0.7 - Vec3::Y * 0.05], Vec3::new(side.z, 0.3, side.x));
+    cloth.quad(
+        [
+            lo - side * 0.7,
+            lo + side * 0.7,
+            top + side * 0.7 - Vec3::Y * 0.05,
+            top - side * 0.7 - Vec3::Y * 0.05,
+        ],
+        Vec3::new(side.z, 0.3, side.x),
+    );
     let w = b.mesh(Mat::Ceramic);
     for k in 0..8 {
         let q = lo - side * 0.6 + side * (k as f32 * 0.17) - Vec3::Y * 0.2;
         w.lathe(q, &[(0.0, 0.0), (0.05, 0.02), (0.04, 0.1), (0.0, 0.12)], 6);
     }
-    b.invisible.push(Aabb::new(p - side * 0.85 - Vec3::new(side.z, 0.0, side.x) * 0.1, p + side * 0.85 + Vec3::new(side.z, 1.9, side.x) * 0.4));
+    b.invisible.push(Aabb::new(
+        p - side * 0.85 - Vec3::new(side.z, 0.0, side.x) * 0.1,
+        p + side * 0.85 + Vec3::new(side.z, 1.9, side.x) * 0.4,
+    ));
 }
 
 /// Навес из небелёного льна на жердях перед лавкой.
@@ -684,7 +1177,12 @@ pub fn awning(b: &mut Builder, a: Vec3, c: Vec3, out: Vec3, depth: f32, h: f32) 
 /// Навес из полотна `cloth` (некрашеный холст, крашенная мареной или вайдой шерсть).
 pub fn awning_of(b: &mut Builder, a: Vec3, c: Vec3, out: Vec3, depth: f32, h: f32, cloth: Mat) {
     let low = h - 0.5;
-    let p = [a + Vec3::Y * h, c + Vec3::Y * h, c + out * depth + Vec3::Y * low, a + out * depth + Vec3::Y * low];
+    let p = [
+        a + Vec3::Y * h,
+        c + Vec3::Y * h,
+        c + out * depth + Vec3::Y * low,
+        a + out * depth + Vec3::Y * low,
+    ];
     let m = b.mesh(cloth);
     m.quad(p, Vec3::Y + out * 0.3);
     m.quad(p, -Vec3::Y - out * 0.3);
@@ -712,7 +1210,6 @@ pub fn awning_of(b: &mut Builder, a: Vec3, c: Vec3, out: Vec3, depth: f32, h: f3
 
 // ---------------- растения ----------------
 
-
 /// Поворот и вариант модели дерева. Берёт из `rng` ровно `draws` чисел — столько же, сколько
 /// брали прежние деревья из примитивов, чтобы остальная планировка (сады, дворы, жители) не сдвинулась.
 fn look_of(rng: &mut Rng, draws: usize) -> (f32, u32) {
@@ -727,14 +1224,20 @@ fn look_of(rng: &mut Rng, draws: usize) -> (f32, u32) {
 pub fn fig_tree(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
     let (yaw, v) = look_of(rng, 16);
     b.plant(PlantKind::Fig, p, h, yaw, v);
-    b.invisible.push(Aabb::new(p - Vec3::new(0.18, 0.0, 0.18), p + Vec3::new(0.18, h * 0.5, 0.18)));
+    b.invisible.push(Aabb::new(
+        p - Vec3::new(0.18, 0.0, 0.18),
+        p + Vec3::new(0.18, h * 0.5, 0.18),
+    ));
 }
 
 /// Кипарис.
 pub fn cypress(b: &mut Builder, p: Vec3, h: f32) {
     let v = ((p.x * 7.3 + p.z * 3.1).abs() as u32) % 16;
     b.plant(PlantKind::Cypress, p, h, (p.x * 0.37 + p.z * 0.11) % TAU, v);
-    b.invisible.push(Aabb::new(p - Vec3::new(0.3, 0.0, 0.3), p + Vec3::new(0.3, h * 0.6, 0.3)));
+    b.invisible.push(Aabb::new(
+        p - Vec3::new(0.3, 0.0, 0.3),
+        p + Vec3::new(0.3, h * 0.6, 0.3),
+    ));
 }
 
 /// Можжевельник высокий (Juniperus excelsa) — кустарник или невысокое дерево крымских склонов.
@@ -742,21 +1245,30 @@ pub fn juniper(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
     let n = 3 + rng.int(3);
     let (yaw, v) = look_of(rng, 3 * n);
     b.plant(PlantKind::Juniper, p, h, yaw, v);
-    b.invisible.push(Aabb::new(p - Vec3::new(0.25, 0.0, 0.25), p + Vec3::new(0.25, h * 0.5, 0.25)));
+    b.invisible.push(Aabb::new(
+        p - Vec3::new(0.25, 0.0, 0.25),
+        p + Vec3::new(0.25, h * 0.5, 0.25),
+    ));
 }
 
 /// Крымская сосна.
 pub fn pine(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
     let (yaw, v) = look_of(rng, 3);
     b.plant(PlantKind::Pine, p, h, yaw, v);
-    b.invisible.push(Aabb::new(p - Vec3::new(0.25, 0.0, 0.25), p + Vec3::new(0.25, h * 0.6, 0.25)));
+    b.invisible.push(Aabb::new(
+        p - Vec3::new(0.25, 0.0, 0.25),
+        p + Vec3::new(0.25, h * 0.6, 0.25),
+    ));
 }
 
 /// Дуб пушистый (предгорья).
 pub fn oak(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
     let (yaw, v) = look_of(rng, 17);
     b.plant(PlantKind::Oak, p, h, yaw, v);
-    b.invisible.push(Aabb::new(p - Vec3::new(0.3, 0.0, 0.3), p + Vec3::new(0.3, h * 0.5, 0.3)));
+    b.invisible.push(Aabb::new(
+        p - Vec3::new(0.3, 0.0, 0.3),
+        p + Vec3::new(0.3, h * 0.5, 0.3),
+    ));
 }
 
 /// Куст шибляка (шиповник, боярышник, держидерево) — без коллизии.
@@ -781,7 +1293,11 @@ pub fn vine_row(b: &mut Builder, a: Vec3, c: Vec3, h: f32) {
     let leaves = b.mesh(Mat::Leaves);
     for k in 0..n {
         let p = a + dir * (k as f32 + 0.5) + Vec3::Y * (h * 0.7);
-        leaves.lathe(p, &[(0.0, -0.35), (0.45, -0.1), (0.4, 0.25), (0.0, 0.35)], 6);
+        leaves.lathe(
+            p,
+            &[(0.0, -0.35), (0.45, -0.1), (0.4, 0.25), (0.0, 0.35)],
+            6,
+        );
     }
 }
 
@@ -797,7 +1313,12 @@ pub struct ForgeLayout {
 
 pub fn forge_layout(o: Vec3, out: Vec3) -> ForgeLayout {
     let side = Vec3::new(-out.z, 0.0, out.x);
-    ForgeLayout { fire: o, anvil: o + out * 2.7, trough: o + out * 1.4 + side * 1.6, grind: o + out * 2.9 - side * 1.9 }
+    ForgeLayout {
+        fire: o,
+        anvil: o + out * 2.7,
+        trough: o + out * 1.4 + side * 1.6,
+        grind: o + out * 2.9 - side * 1.9,
+    }
 }
 
 /// Полный набор кузнеца: горн (кирпичный под колпаком или полевой из камня и глины),
@@ -807,21 +1328,50 @@ pub fn forge_set(b: &mut Builder, name: &'static str, o: Vec3, out: Vec3, field:
     let side = Vec3::new(-out.z, 0.0, out.x);
     let h = if field { 0.55 } else { 0.9 };
     // Горн.
-    let (mat, hw) = if field { (Mat::Rubble, 0.65) } else { (Mat::Brick, 0.85) };
-    b.solid((o - Vec3::new(hw, 0.0, hw)).to_array(), (o + Vec3::new(hw, h, hw)).to_array(), mat);
-    b.mesh(Mat::Coals).cuboid(o + Vec3::new(-hw + 0.25, h, -hw + 0.25), o + Vec3::new(hw - 0.25, h + 0.08, hw - 0.25));
+    let (mat, hw) = if field {
+        (Mat::Rubble, 0.65)
+    } else {
+        (Mat::Brick, 0.85)
+    };
+    b.solid(
+        (o - Vec3::new(hw, 0.0, hw)).to_array(),
+        (o + Vec3::new(hw, h, hw)).to_array(),
+        mat,
+    );
+    b.mesh(Mat::Coals).cuboid(
+        o + Vec3::new(-hw + 0.25, h, -hw + 0.25),
+        o + Vec3::new(hw - 0.25, h + 0.08, hw - 0.25),
+    );
     if !field {
         b.mesh(Mat::Brick).spire(o + Vec3::Y * 2.3, 1.0, 1.4, 4);
         b.mesh(Mat::Brick).prism(o + Vec3::Y * 3.4, 0.3, 1.4, 4);
     } else {
         // Глиняная обмазка с соплом для мехов.
-        b.mesh(Mat::Earth).lathe(o + Vec3::Y * h, &[(hw, 0.0), (hw * 0.8, 0.18), (hw * 0.6, 0.2)], 10);
+        b.mesh(Mat::Earth).lathe(
+            o + Vec3::Y * h,
+            &[(hw, 0.0), (hw * 0.8, 0.18), (hw * 0.6, 0.2)],
+            10,
+        );
     }
     // Мехи (кожаные, с доской) сбоку, сопло — в угли.
     let m = o - side * (hw + 0.7) + Vec3::Y * (h * 0.6);
-    b.mesh(if field { Mat::Felt } else { Mat::Canvas }).lathe(m - Vec3::Y * 0.2, &[(0.0, 0.0), (0.38, 0.08), (0.42, 0.25), (0.0, 0.42)], 8);
-    b.mesh(Mat::Wood).beam(m + Vec3::Y * 0.1, o - side * (hw - 0.1) + Vec3::Y * (h * 0.8), 0.04, 0.04, Vec3::Y);
-    hidden(b, m - Vec3::new(0.45, 0.6, 0.45), m + Vec3::new(0.45, 0.4, 0.45));
+    b.mesh(if field { Mat::Felt } else { Mat::Canvas }).lathe(
+        m - Vec3::Y * 0.2,
+        &[(0.0, 0.0), (0.38, 0.08), (0.42, 0.25), (0.0, 0.42)],
+        8,
+    );
+    b.mesh(Mat::Wood).beam(
+        m + Vec3::Y * 0.1,
+        o - side * (hw - 0.1) + Vec3::Y * (h * 0.8),
+        0.04,
+        0.04,
+        Vec3::Y,
+    );
+    hidden(
+        b,
+        m - Vec3::new(0.45, 0.6, 0.45),
+        m + Vec3::new(0.45, 0.4, 0.45),
+    );
     // Наковальня на колоде.
     let a = l.anvil;
     let along = out;
@@ -834,17 +1384,37 @@ pub fn forge_set(b: &mut Builder, name: &'static str, o: Vec3, out: Vec3, field:
         bar_stock(b, o - out * (hw + 0.1) + side * 1.3, out, side);
     }
     // Молоты и клещи на колоде.
-    b.mesh(Mat::Wood).beam(a + Vec3::Y * 0.82 - side * 0.1, a + Vec3::Y * 0.82 - side * 0.1 + along * 0.35, 0.015, 0.015, Vec3::Y);
-    b.mesh(Mat::Iron).cuboid(a + Vec3::Y * 0.8 - side * 0.16 - along * 0.05, a + Vec3::Y * 0.88 - side * 0.04 + along * 0.05);
+    b.mesh(Mat::Wood).beam(
+        a + Vec3::Y * 0.82 - side * 0.1,
+        a + Vec3::Y * 0.82 - side * 0.1 + along * 0.35,
+        0.015,
+        0.015,
+        Vec3::Y,
+    );
+    b.mesh(Mat::Iron).cuboid(
+        a + Vec3::Y * 0.8 - side * 0.16 - along * 0.05,
+        a + Vec3::Y * 0.88 - side * 0.04 + along * 0.05,
+    );
     // Корыто для закалки.
     let t = l.trough;
     let half = along.abs() * 0.35 + side.abs() * 0.7 + Vec3::Y * 0.5;
-    b.solid((t - half.with_y(0.0)).to_array(), (t + half).to_array(), Mat::Wood);
-    b.decor((t - half.with_y(0.0) + Vec3::new(0.06, 0.5, 0.06)).to_array(), (t + half.with_y(0.51) - Vec3::new(0.06, 0.0, 0.06)).to_array(), Mat::Water);
+    b.solid(
+        (t - half.with_y(0.0)).to_array(),
+        (t + half).to_array(),
+        Mat::Wood,
+    );
+    b.decor(
+        (t - half.with_y(0.0) + Vec3::new(0.06, 0.5, 0.06)).to_array(),
+        (t + half.with_y(0.51) - Vec3::new(0.06, 0.0, 0.06)).to_array(),
+        Mat::Water,
+    );
     // Точило: круг на станке.
     let g = l.grind;
     for s in [-1.0f32, 1.0] {
-        b.mesh(Mat::Wood).cuboid(g + side * (0.3 * s) - Vec3::new(0.05, 0.0, 0.05), g + side * (0.3 * s) + Vec3::new(0.05, 0.75, 0.05));
+        b.mesh(Mat::Wood).cuboid(
+            g + side * (0.3 * s) - Vec3::new(0.05, 0.0, 0.05),
+            g + side * (0.3 * s) + Vec3::new(0.05, 0.75, 0.05),
+        );
     }
     let c = g + Vec3::Y * 0.75;
     let mm = b.mesh(Mat::Stone);
@@ -853,36 +1423,101 @@ pub fn forge_set(b: &mut Builder, name: &'static str, o: Vec3, out: Vec3, field:
         let r = (out * ang.cos() + Vec3::Y * ang.sin()) * 0.38;
         mm.beam(c, c + r, 0.13, 0.06, side);
     }
-    b.mesh(Mat::Wood).beam(c - side * 0.35, c + side * 0.45, 0.025, 0.025, Vec3::Y);
-    hidden(b, g - Vec3::new(0.45, 0.0, 0.45), g + Vec3::new(0.45, 1.1, 0.45));
-    b.lamp(o + Vec3::Y * (h + 0.8), Color::srgb(1.0, 0.45, 0.15), 16_000.0, 7.0);
-    b.forges.push(crate::level::ForgeSpec { name, kind: crate::smithing_net::StationKind::Forge, fire: o + Vec3::Y * (h + 0.08), anvil: a, trough: l.trough + Vec3::Y * 0.51, grind: l.grind + Vec3::Y * 0.75 });
+    b.mesh(Mat::Wood)
+        .beam(c - side * 0.35, c + side * 0.45, 0.025, 0.025, Vec3::Y);
+    hidden(
+        b,
+        g - Vec3::new(0.45, 0.0, 0.45),
+        g + Vec3::new(0.45, 1.1, 0.45),
+    );
+    b.lamp(
+        o + Vec3::Y * (h + 0.8),
+        Color::srgb(1.0, 0.45, 0.15),
+        16_000.0,
+        7.0,
+    );
+    b.forges.push(crate::level::ForgeSpec {
+        name,
+        kind: crate::smithing_net::StationKind::Forge,
+        fire: o + Vec3::Y * (h + 0.08),
+        anvil: a,
+        trough: l.trough + Vec3::Y * 0.51,
+        grind: l.grind + Vec3::Y * 0.75,
+    });
 }
 
 /// Наковальня на дубовой колоде: широкое основание, перехват, рабочая плита и короткий рог
 /// (поздняя античность — блочная наковальня с небольшим клювом). `along` — вдоль плиты.
 pub fn anvil(b: &mut Builder, a: Vec3, along: Vec3, side: Vec3) {
-    b.mesh(Mat::Wood).lathe(a, &[(0.34, 0.0), (0.31, 0.06), (0.3, 0.5), (0.27, 0.55), (0.0, 0.55)], 12);
+    b.mesh(Mat::Wood).lathe(
+        a,
+        &[
+            (0.34, 0.0),
+            (0.31, 0.06),
+            (0.3, 0.5),
+            (0.27, 0.55),
+            (0.0, 0.55),
+        ],
+        12,
+    );
     // Железные обручи на колоде.
     for y in [0.08, 0.45] {
-        b.mesh(Mat::Iron).lathe(a + Vec3::Y * y, &[(0.315, 0.0), (0.315, 0.035), (0.0, 0.035)], 12);
+        b.mesh(Mat::Iron).lathe(
+            a + Vec3::Y * y,
+            &[(0.315, 0.0), (0.315, 0.035), (0.0, 0.035)],
+            12,
+        );
     }
     let y0 = a + Vec3::Y * 0.55;
     let m = b.mesh(Mat::Iron);
     m.beam(y0 - along * 0.17, y0 + along * 0.17, 0.13, 0.06, side);
-    m.beam(y0 + Vec3::Y * 0.06 - along * 0.11, y0 + Vec3::Y * 0.06 + along * 0.11, 0.08, 0.07, side);
-    m.beam(y0 + Vec3::Y * 0.16 - along * 0.26, y0 + Vec3::Y * 0.16 + along * 0.2, 0.12, 0.055, side);
+    m.beam(
+        y0 + Vec3::Y * 0.06 - along * 0.11,
+        y0 + Vec3::Y * 0.06 + along * 0.11,
+        0.08,
+        0.07,
+        side,
+    );
+    m.beam(
+        y0 + Vec3::Y * 0.16 - along * 0.26,
+        y0 + Vec3::Y * 0.16 + along * 0.2,
+        0.12,
+        0.055,
+        side,
+    );
     // Клюв.
-    m.beam(y0 + Vec3::Y * 0.17 + along * 0.2, y0 + Vec3::Y * 0.2 + along * 0.4, 0.06, 0.035, side);
-    m.beam(y0 + Vec3::Y * 0.2 + along * 0.4, y0 + Vec3::Y * 0.23 + along * 0.48, 0.02, 0.015, side);
-    hidden(b, a - Vec3::new(0.38, 0.0, 0.38), a + Vec3::new(0.38, 0.8, 0.38));
+    m.beam(
+        y0 + Vec3::Y * 0.17 + along * 0.2,
+        y0 + Vec3::Y * 0.2 + along * 0.4,
+        0.06,
+        0.035,
+        side,
+    );
+    m.beam(
+        y0 + Vec3::Y * 0.2 + along * 0.4,
+        y0 + Vec3::Y * 0.23 + along * 0.48,
+        0.02,
+        0.015,
+        side,
+    );
+    hidden(
+        b,
+        a - Vec3::new(0.38, 0.0, 0.38),
+        a + Vec3::new(0.38, 0.8, 0.38),
+    );
 }
 
 /// Молот: рукоять и железный боёк. `p` — конец рукояти, `dir` — к бойку.
 pub fn hammer(b: &mut Builder, p: Vec3, dir: Vec3, up: Vec3, len: f32, head: f32) {
     let top = p + dir * len;
     b.mesh(Mat::Wood).beam(p, top, 0.018, 0.022, up);
-    b.mesh(Mat::Iron).beam(top - up * head * 0.5, top + up * head * 0.5, 0.034, 0.034, dir);
+    b.mesh(Mat::Iron).beam(
+        top - up * head * 0.5,
+        top + up * head * 0.5,
+        0.034,
+        0.034,
+        dir,
+    );
 }
 
 /// Клещи: две сведённые губки и расходящиеся рукояти.
@@ -890,15 +1525,33 @@ pub fn tongs(b: &mut Builder, jaw: Vec3, dir: Vec3, open: Vec3, len: f32) {
     let pivot = jaw + dir * 0.12;
     let m = b.mesh(Mat::Iron);
     for s in [-1.0f32, 1.0] {
-        m.beam(jaw + open * 0.015 * s, pivot - open * 0.015 * s, 0.014, 0.018, open);
-        m.beam(pivot, pivot + dir * len + open * 0.06 * s, 0.011, 0.011, open);
+        m.beam(
+            jaw + open * 0.015 * s,
+            pivot - open * 0.015 * s,
+            0.014,
+            0.018,
+            open,
+        );
+        m.beam(
+            pivot,
+            pivot + dir * len + open * 0.06 * s,
+            0.011,
+            0.011,
+            open,
+        );
     }
 }
 
 /// Доска с инструментом на стене: клещи, молоты, напильник. `p` — середина доски у стены,
 /// `n` — от стены в комнату, `along` — вдоль стены.
 pub fn tool_rack(b: &mut Builder, p: Vec3, n: Vec3, along: Vec3) {
-    b.mesh(Mat::Wood).beam(p - along * 0.8 + n * 0.02, p + along * 0.8 + n * 0.02, 0.2, 0.02, n);
+    b.mesh(Mat::Wood).beam(
+        p - along * 0.8 + n * 0.02,
+        p + along * 0.8 + n * 0.02,
+        0.2,
+        0.02,
+        n,
+    );
     // Колышки.
     for k in 0..7 {
         let q = p + along * (-0.69 + k as f32 * 0.23) + Vec3::Y * 0.12 + n * 0.04;
@@ -907,7 +1560,9 @@ pub fn tool_rack(b: &mut Builder, p: Vec3, n: Vec3, along: Vec3) {
         match k {
             0 | 2 | 5 => tongs(b, hang - Vec3::Y * 0.62, Vec3::Y, along, 0.42),
             1 | 4 => hammer(b, hang - Vec3::Y * 0.5, Vec3::Y, n, 0.42, 0.16),
-            3 => b.mesh(Mat::Iron).beam(hang, hang - Vec3::Y * 0.4, 0.012, 0.004, n),
+            3 => b
+                .mesh(Mat::Iron)
+                .beam(hang, hang - Vec3::Y * 0.4, 0.012, 0.004, n),
             _ => hammer(b, hang - Vec3::Y * 0.36, Vec3::Y, n, 0.3, 0.1),
         }
     }
@@ -935,32 +1590,62 @@ pub fn smith_goods(b: &mut Builder, top: Vec3, along: Vec3, depth: Vec3) {
     }
     for k in 0..2 {
         let c = top + along * (0.1 + k as f32 * 0.12) + Vec3::Y * 0.01;
-        b.mesh(Mat::Iron).beam(c - depth * 0.12, c + depth * 0.14, 0.016, 0.004, Vec3::Y);
-        b.mesh(Mat::Wood).beam(c - depth * 0.22, c - depth * 0.12, 0.012, 0.012, Vec3::Y);
+        b.mesh(Mat::Iron)
+            .beam(c - depth * 0.12, c + depth * 0.14, 0.016, 0.004, Vec3::Y);
+        b.mesh(Mat::Wood)
+            .beam(c - depth * 0.22, c - depth * 0.12, 0.012, 0.012, Vec3::Y);
     }
     // Топор.
     let c = top + along * 0.5 + Vec3::Y * 0.02;
-    b.mesh(Mat::Wood).beam(c - depth * 0.25, c + depth * 0.2, 0.015, 0.015, Vec3::Y);
-    b.mesh(Mat::Iron).beam(c + depth * 0.16 - along * 0.02, c + depth * 0.16 + along * 0.12, 0.03, 0.04, Vec3::Y);
+    b.mesh(Mat::Wood)
+        .beam(c - depth * 0.25, c + depth * 0.2, 0.015, 0.015, Vec3::Y);
+    b.mesh(Mat::Iron).beam(
+        c + depth * 0.16 - along * 0.02,
+        c + depth * 0.16 + along * 0.12,
+        0.03,
+        0.04,
+        Vec3::Y,
+    );
     // Горка гвоздей.
-    b.mesh(Mat::Iron).lathe(top + along * 0.32 - depth * 0.15, &[(0.07, 0.0), (0.0, 0.04)], 7);
+    b.mesh(Mat::Iron).lathe(
+        top + along * 0.32 - depth * 0.15,
+        &[(0.07, 0.0), (0.0, 0.04)],
+        7,
+    );
 }
 
 /// Деревянное ведро с водой.
 pub fn bucket(b: &mut Builder, p: Vec3) {
-    b.mesh(Mat::Wood).lathe(p, &[(0.0, 0.0), (0.15, 0.0), (0.18, 0.32), (0.16, 0.32), (0.13, 0.03), (0.0, 0.03)], 10);
-    b.mesh(Mat::Iron).lathe(p + Vec3::Y * 0.24, &[(0.176, 0.0), (0.176, 0.03), (0.0, 0.03)], 10);
+    b.mesh(Mat::Wood).lathe(
+        p,
+        &[
+            (0.0, 0.0),
+            (0.15, 0.0),
+            (0.18, 0.32),
+            (0.16, 0.32),
+            (0.13, 0.03),
+            (0.0, 0.03),
+        ],
+        10,
+    );
+    b.mesh(Mat::Iron).lathe(
+        p + Vec3::Y * 0.24,
+        &[(0.176, 0.0), (0.176, 0.03), (0.0, 0.03)],
+        10,
+    );
     b.mesh(Mat::Water).disc(p + Vec3::Y * 0.26, 0.16, 10, true);
 }
 
 /// Куча окалины и обрезков у горна.
 pub fn scrap(b: &mut Builder, p: Vec3, rng: &mut Rng) {
-    b.mesh(Mat::DarkStone).lathe(p, &[(0.3, 0.0), (0.15, 0.08), (0.0, 0.1)], 9);
+    b.mesh(Mat::DarkStone)
+        .lathe(p, &[(0.3, 0.0), (0.15, 0.08), (0.0, 0.1)], 9);
     let m = b.mesh(Mat::Iron);
     for _ in 0..6 {
         let a = rng.range(0.0, TAU);
         let c = p + Vec3::new(a.cos(), 0.0, a.sin()) * rng.range(0.0, 0.35) + Vec3::Y * 0.06;
-        let d = Vec3::new(rng.range(-1.0, 1.0), 0.1, rng.range(-1.0, 1.0)).normalize() * rng.range(0.1, 0.3);
+        let d = Vec3::new(rng.range(-1.0, 1.0), 0.1, rng.range(-1.0, 1.0)).normalize()
+            * rng.range(0.1, 0.3);
         m.beam(c - d, c + d, 0.012, 0.008, Vec3::Y);
     }
 }
@@ -969,17 +1654,47 @@ pub fn scrap(b: &mut Builder, p: Vec3, rng: &mut Rng) {
 /// `stand` — где стоит дующий мехами.
 pub fn bloomery(b: &mut Builder, name: &'static str, p: Vec3, out: Vec3) {
     let side = Vec3::new(-out.z, 0.0, out.x);
-    b.mesh(Mat::Earth).lathe(p, &[(0.75, 0.0), (0.72, 0.4), (0.55, 1.2), (0.36, 1.75), (0.26, 1.78), (0.24, 1.6)], 12);
+    b.mesh(Mat::Earth).lathe(
+        p,
+        &[
+            (0.75, 0.0),
+            (0.72, 0.4),
+            (0.55, 1.2),
+            (0.36, 1.75),
+            (0.26, 1.78),
+            (0.24, 1.6),
+        ],
+        12,
+    );
     b.mesh(Mat::Coals).disc(p + Vec3::Y * 1.62, 0.25, 10, true);
-    hidden(b, p - Vec3::new(0.7, 0.0, 0.7), p + Vec3::new(0.7, 1.8, 0.7));
+    hidden(
+        b,
+        p - Vec3::new(0.7, 0.0, 0.7),
+        p + Vec3::new(0.7, 1.8, 0.7),
+    );
     // Мехи у фурмы.
     let m = p + out * 1.25 + Vec3::Y * 0.3;
-    b.mesh(Mat::Felt).lathe(m - Vec3::Y * 0.25, &[(0.0, 0.0), (0.36, 0.08), (0.4, 0.25), (0.0, 0.4)], 8);
-    b.mesh(Mat::Earth).beam(m, p + out * 0.6 + Vec3::Y * 0.25, 0.06, 0.06, Vec3::Y);
+    b.mesh(Mat::Felt).lathe(
+        m - Vec3::Y * 0.25,
+        &[(0.0, 0.0), (0.36, 0.08), (0.4, 0.25), (0.0, 0.4)],
+        8,
+    );
+    b.mesh(Mat::Earth)
+        .beam(m, p + out * 0.6 + Vec3::Y * 0.25, 0.06, 0.06, Vec3::Y);
     // Шлак и руда.
-    b.mesh(Mat::DarkStone).lathe(p - side * 1.6 - out * 0.4, &[(0.7, 0.0), (0.0, 0.35)], 8);
-    b.mesh(Mat::Rubble).lathe(p + side * 1.6 - out * 0.3, &[(0.55, 0.0), (0.0, 0.4)], 8);
-    b.mesh(Mat::Coals).lathe(p + side * 1.5 + out * 1.3, &[(0.5, 0.0), (0.0, 0.3)], 8);
+    b.mesh(Mat::DarkStone)
+        .lathe(p - side * 1.6 - out * 0.4, &[(0.7, 0.0), (0.0, 0.35)], 8);
+    b.mesh(Mat::Rubble)
+        .lathe(p + side * 1.6 - out * 0.3, &[(0.55, 0.0), (0.0, 0.4)], 8);
+    b.mesh(Mat::Coals)
+        .lathe(p + side * 1.5 + out * 1.3, &[(0.5, 0.0), (0.0, 0.3)], 8);
     b.lamp(p + Vec3::Y * 2.0, Color::srgb(1.0, 0.5, 0.2), 8_000.0, 6.0);
-    b.forges.push(crate::level::ForgeSpec { name, kind: crate::smithing_net::StationKind::Bloomery, fire: p + Vec3::Y * 1.6, anvil: p + out * 1.9, trough: p + out * 1.9, grind: p + out * 1.9 });
+    b.forges.push(crate::level::ForgeSpec {
+        name,
+        kind: crate::smithing_net::StationKind::Bloomery,
+        fire: p + Vec3::Y * 1.6,
+        anvil: p + out * 1.9,
+        trough: p + out * 1.9,
+        grind: p + out * 1.9,
+    });
 }
