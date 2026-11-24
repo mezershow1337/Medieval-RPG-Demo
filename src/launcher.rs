@@ -10,7 +10,11 @@ pub fn resolve(s: &str) -> Result<SocketAddr, String> {
     if s.is_empty() {
         return Err("адрес пустой".into());
     }
-    let with_port = if s.contains(':') { s.clone() } else { format!("{s}:{DEFAULT_PORT}") };
+    let with_port = if s.contains(':') {
+        s.clone()
+    } else {
+        format!("{s}:{DEFAULT_PORT}")
+    };
     with_port
         .to_socket_addrs()
         .map_err(|e| format!("не удалось найти «{s}»: {e}"))?
@@ -20,7 +24,10 @@ pub fn resolve(s: &str) -> Result<SocketAddr, String> {
 
 /// Убрать то, что люди часто копируют вместе с адресом: пробелы, кавычки, «udp://», слэш в конце.
 pub fn clean(s: &str) -> String {
-    let s = s.trim().trim_matches(|c| c == '"' || c == '\'' || c == '<' || c == '>').trim();
+    let s = s
+        .trim()
+        .trim_matches(|c| c == '"' || c == '\'' || c == '<' || c == '>')
+        .trim();
     let s = s.split_once("://").map_or(s, |(_, rest)| rest);
     s.trim_end_matches('/').to_string()
 }
@@ -32,8 +39,13 @@ pub fn install_crash_report() {
     std::panic::set_hook(Box::new(move |info| {
         default(info);
         let thread = std::thread::current().name().unwrap_or("?").to_string();
-        let text = format!("Игра остановилась из-за ошибки (поток «{thread}»):\n\n{info}\n\nОтправьте этот текст разработчику.");
-        if let Some(path) = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join("crash.txt"))) {
+        let text = format!(
+            "Игра остановилась из-за ошибки (поток «{thread}»):\n\n{info}\n\nОтправьте этот текст разработчику."
+        );
+        if let Some(path) = std::env::current_exe()
+            .ok()
+            .and_then(|e| Some(e.parent()?.join("crash.txt")))
+        {
             let _ = std::fs::write(&path, &text);
         }
         #[cfg(windows)]
@@ -53,8 +65,12 @@ pub fn clean_name(s: &str) -> String {
 pub fn player_name() -> String {
     let from_env = std::env::var("MRPG_NAME").ok();
     let from_settings = Some(crate::settings::Settings::load().nickname);
-    let from_file = std::env::current_exe().ok().and_then(|e| std::fs::read_to_string(e.parent()?.join("name.txt")).ok());
-    let from_os = std::env::var("USERNAME").or_else(|_| std::env::var("USER")).ok();
+    let from_file = std::env::current_exe()
+        .ok()
+        .and_then(|e| std::fs::read_to_string(e.parent()?.join("name.txt")).ok());
+    let from_os = std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .ok();
     [from_env, from_settings, from_file, from_os]
         .into_iter()
         .flatten()
@@ -78,7 +94,12 @@ mod windows {
     }
     #[link(name = "user32")]
     unsafe extern "system" {
-        fn MessageBoxW(hwnd: *mut core::ffi::c_void, text: *const u16, caption: *const u16, kind: u32) -> i32;
+        fn MessageBoxW(
+            hwnd: *mut core::ffi::c_void,
+            text: *const u16,
+            caption: *const u16,
+            kind: u32,
+        ) -> i32;
     }
 
     pub fn attach_parent_console() {
@@ -88,7 +109,11 @@ mod windows {
     }
 
     pub fn message_box(caption: &str, text: &str) {
-        let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let wide = |s: &str| {
+            s.encode_utf16()
+                .chain(std::iter::once(0))
+                .collect::<Vec<u16>>()
+        };
         let (t, c) = (wide(text), wide(caption));
         const MB_ICONERROR: u32 = 0x10;
         // SAFETY: строки оканчиваются нулём и живут до конца вызова.
@@ -108,7 +133,10 @@ mod tests {
 
     #[test]
     fn default_port_is_added() {
-        assert_eq!(resolve("127.0.0.1").unwrap(), SocketAddr::from(([127, 0, 0, 1], DEFAULT_PORT)));
+        assert_eq!(
+            resolve("127.0.0.1").unwrap(),
+            SocketAddr::from(([127, 0, 0, 1], DEFAULT_PORT))
+        );
         assert_eq!(resolve("127.0.0.1:7777").unwrap().port(), 7777);
         assert!(resolve("   ").is_err());
     }

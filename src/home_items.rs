@@ -16,7 +16,7 @@
 //! пропавшее со временем покупают заново ([`RESTOCK_AFTER`]).
 
 use crate::items::{ItemBaseId, Quality, roll_item};
-use crate::level::{HouseSpec, HouseItemSpec, Layout};
+use crate::level::{HouseItemSpec, HouseSpec, Layout};
 use crate::loot_net::{CH_LOOT, LootId, LootServerMessage};
 use crate::loot_server::{GroundItem, LootWorld, ground_message};
 use crate::props::PropBody;
@@ -93,12 +93,28 @@ pub struct HomeItems {
 impl HomeItems {
     /// Разложить вещи по всем домам (сервер, при запуске).
     pub fn setup(&mut self, server: &mut RenetServer, world: &mut LootWorld, layout: &Layout) {
-        self.houses = layout.houses.iter().map(|h: &HouseSpec| (h.min, h.max)).collect();
-        self.slots = layout.house_items.iter().map(|s| Slot { spec: s.clone(), id: None, gone: 0.0 }).collect();
+        self.houses = layout
+            .houses
+            .iter()
+            .map(|h: &HouseSpec| (h.min, h.max))
+            .collect();
+        self.slots = layout
+            .house_items
+            .iter()
+            .map(|s| Slot {
+                spec: s.clone(),
+                id: None,
+                gone: 0.0,
+            })
+            .collect();
         for i in 0..self.slots.len() {
             self.spawn(server, world, i);
         }
-        info!("Вещи хозяев: {} в {} домах", self.slots.len(), self.houses.len());
+        info!(
+            "Вещи хозяев: {} в {} домах",
+            self.slots.len(),
+            self.houses.len()
+        );
     }
 
     /// Сколько мест в раскладке.
@@ -109,24 +125,51 @@ impl HomeItems {
 
     fn spawn(&mut self, server: &mut RenetServer, world: &mut LootWorld, i: usize) {
         let spec = &self.slots[i].spec;
-        let Some(base) = ItemBaseId::find(spec.item) else { return };
+        let Some(base) = ItemBaseId::find(spec.item) else {
+            return;
+        };
         let mut uids = world.uids.clone();
-        let item = roll_item(base, Quality::Common, spec.count.max(1), &mut world.rng, &mut uids);
+        let item = roll_item(
+            base,
+            Quality::Common,
+            spec.count.max(1),
+            &mut world.rng,
+            &mut uids,
+        );
         world.uids = uids;
         let rot = Quat::from_rotation_y(spec.yaw);
         let half = crate::icons::model_half_extents(base);
         let pos = spec.pos + Vec3::Y * (half[1] + 0.002);
         let mut body = PropBody::for_item(item.base, item.count, pos, rot);
         body.place(pos, rot);
-        let owner = Some(HomeTag { house: spec.house, slot: i as u32, home: (pos, rot), away: 0.0 });
-        let id = world.insert_ground(server, GroundItem { body, item, shelf: None, holder: None, owner });
+        let owner = Some(HomeTag {
+            house: spec.house,
+            slot: i as u32,
+            home: (pos, rot),
+            away: 0.0,
+        });
+        let id = world.insert_ground(
+            server,
+            GroundItem {
+                body,
+                item,
+                shelf: None,
+                holder: None,
+                owner,
+            },
+        );
         self.slots[i].id = Some(id);
         self.slots[i].gone = 0.0;
     }
 
     fn inside(&self, house: u32, p: Vec3) -> bool {
         self.houses.get(house as usize).is_some_and(|(min, max)| {
-            p.x >= min.x - 0.3 && p.x <= max.x + 0.3 && p.z >= min.z - 0.3 && p.z <= max.z + 0.3 && p.y >= min.y - 1.0 && p.y <= max.y + 1.0
+            p.x >= min.x - 0.3
+                && p.x <= max.x + 0.3
+                && p.z >= min.z - 0.3
+                && p.z <= max.z + 0.3
+                && p.y >= min.y - 1.0
+                && p.y <= max.y + 1.0
         })
     }
 }
@@ -135,7 +178,8 @@ pub struct HomeItemsPlugin;
 
 impl Plugin for HomeItemsPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(HomeItems::default()).add_systems(Update, (tick_home_items, flush_taken).chain());
+        app.insert_resource(HomeItems::default())
+            .add_systems(Update, (tick_home_items, flush_taken).chain());
     }
 }
 
@@ -147,15 +191,30 @@ fn flush_taken(mut commands: Commands, mut world: ResMut<LootWorld>) {
 }
 
 /// Вынесли из дома — кража; сдвинутое прибрать; пропавшее завести заново.
-fn tick_home_items(time: Res<Time>, mut server: ResMut<RenetServer>, game: Res<GameWorld>, mut world: ResMut<LootWorld>, mut homes: ResMut<HomeItems>) {
+fn tick_home_items(
+    time: Res<Time>,
+    mut server: ResMut<RenetServer>,
+    game: Res<GameWorld>,
+    mut world: ResMut<LootWorld>,
+    mut homes: ResMut<HomeItems>,
+) {
     let dt = time.delta_secs();
     homes.clock += dt;
     if homes.clock < TICK {
         return;
     }
     let dt = std::mem::take(&mut homes.clock);
-    let players: Vec<Vec3> = game.actors.values().filter(|a| a.kind == ActorKind::Player && a.alive).map(|a| a.pose.feet).collect();
-    let nobody_near = |p: Vec3| players.iter().all(|q| q.distance_squared(p) > NOBODY_NEAR * NOBODY_NEAR);
+    let players: Vec<Vec3> = game
+        .actors
+        .values()
+        .filter(|a| a.kind == ActorKind::Player && a.alive)
+        .map(|a| a.pose.feet)
+        .collect();
+    let nobody_near = |p: Vec3| {
+        players
+            .iter()
+            .all(|q| q.distance_squared(p) > NOBODY_NEAR * NOBODY_NEAR)
+    };
     let world = &mut *world;
     let homes = &mut *homes;
 
@@ -186,25 +245,50 @@ fn tick_home_items(time: Res<Time>, mut server: ResMut<RenetServer>, game: Res<G
             }
         } else if off > 0.12 || g.body.rot.angle_between(tag.home.1) > 0.3 {
             tag.away += dt;
-            if tag.away > TIDY_AFTER && g.body.asleep && nobody_near(tag.home.0) && nobody_near(g.body.pos) {
+            if tag.away > TIDY_AFTER
+                && g.body.asleep
+                && nobody_near(tag.home.0)
+                && nobody_near(g.body.pos)
+            {
                 tag.away = 0.0;
                 let home = tag.home;
                 g.body.place(home.0, home.1);
-                server.broadcast_message(CH_LOOT, encode(&LootServerMessage::PropRest { id, pos: home.0.into(), rot: home.1.to_array() }));
+                server.broadcast_message(
+                    CH_LOOT,
+                    encode(&LootServerMessage::PropRest {
+                        id,
+                        pos: home.0.into(),
+                        rot: home.1.to_array(),
+                    }),
+                );
             }
         } else {
             tag.away = 0.0;
         }
     }
     for (player, id, house) in carried {
-        let Some(g) = world.ground.get_mut(&id) else { continue };
+        let Some(g) = world.ground.get_mut(&id) else {
+            continue;
+        };
         g.owner = None;
         let item = g.item.clone();
         let at = g.body.pos;
         let msg = ground_message(id, g);
         server.broadcast_message(CH_LOOT, encode(&msg));
-        server.broadcast_message(CH_LOOT, encode(&LootServerMessage::PropHeld { id, holder: Some(player) }));
-        world.taken.push(OwnedItemTaken { player, house, item, at, how: TakeHow::CarriedOut });
+        server.broadcast_message(
+            CH_LOOT,
+            encode(&LootServerMessage::PropHeld {
+                id,
+                holder: Some(player),
+            }),
+        );
+        world.taken.push(OwnedItemTaken {
+            player,
+            house,
+            item,
+            at,
+            how: TakeHow::CarriedOut,
+        });
         if let Some(s) = homes.slots.iter_mut().find(|s| s.id == Some(id)) {
             s.id = None;
         }
@@ -218,11 +302,24 @@ mod tests {
     #[test]
     fn houses_are_full_of_things_to_take() {
         let layout = crate::level::layout();
-        assert!(layout.houses.len() > 40, "жилых домов: {}", layout.houses.len());
+        assert!(
+            layout.houses.len() > 40,
+            "жилых домов: {}",
+            layout.houses.len()
+        );
         for s in &layout.house_items {
-            assert!(ItemBaseId::find(s.item).is_some(), "нет предмета «{}»", s.item);
+            assert!(
+                ItemBaseId::find(s.item).is_some(),
+                "нет предмета «{}»",
+                s.item
+            );
             assert!((s.house as usize) < layout.houses.len());
-            assert!(layout.houses[s.house as usize].contains(s.pos), "«{}» вне дома {}", s.item, s.house);
+            assert!(
+                layout.houses[s.house as usize].contains(s.pos),
+                "«{}» вне дома {}",
+                s.item,
+                s.house
+            );
         }
         let mut per_house = vec![0usize; layout.houses.len()];
         for s in &layout.house_items {
@@ -230,10 +327,27 @@ mod tests {
         }
         per_house.sort();
         let median = per_house[per_house.len() / 2];
-        eprintln!("домов {}, вещей {}, в доме от {} до {}, обычно {median}", per_house.len(), layout.house_items.len(), per_house[0], per_house[per_house.len() - 1]);
+        eprintln!(
+            "домов {}, вещей {}, в доме от {} до {}, обычно {median}",
+            per_house.len(),
+            layout.house_items.len(),
+            per_house[0],
+            per_house[per_house.len() - 1]
+        );
         assert!(median >= 12, "в доме обычно {median} вещей");
-        assert!(layout.house_items.len() < 6000, "вещей {} — тяжело для сервера", layout.house_items.len());
+        assert!(
+            layout.house_items.len() < 6000,
+            "вещей {} — тяжело для сервера",
+            layout.house_items.len()
+        );
         // В сундуках жилых домов — тоже хозяйское.
-        assert!(layout.containers.iter().filter(|c| c.house.is_some()).count() > 40);
+        assert!(
+            layout
+                .containers
+                .iter()
+                .filter(|c| c.house.is_some())
+                .count()
+                > 40
+        );
     }
 }

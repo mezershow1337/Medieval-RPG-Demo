@@ -25,9 +25,22 @@ impl Plugin for SmithFxPlugin {
             .init_resource::<FxRng>()
             .init_resource::<DipsOut>()
             .add_systems(Startup, setup_fx)
-            .add_systems(Update, showcase.run_if(|| std::env::var("MRPG_SMITH_SHOWCASE").is_ok()))
-            .add_systems(Update, demo.run_if(|| std::env::var("MRPG_SMITH_DEMO").is_ok()).before(play_fx).after(crate::smithing_client::SmithSet))
-            .add_systems(Update, (play_fx, forge_fires, pieces, dips, hammers, particles).chain().after(crate::smithing_client::SmithSet));
+            .add_systems(
+                Update,
+                showcase.run_if(|| std::env::var("MRPG_SMITH_SHOWCASE").is_ok()),
+            )
+            .add_systems(
+                Update,
+                demo.run_if(|| std::env::var("MRPG_SMITH_DEMO").is_ok())
+                    .before(play_fx)
+                    .after(crate::smithing_client::SmithSet),
+            )
+            .add_systems(
+                Update,
+                (play_fx, forge_fires, pieces, dips, hammers, particles)
+                    .chain()
+                    .after(crate::smithing_client::SmithSet),
+            );
     }
 }
 
@@ -73,14 +86,19 @@ impl Source for SynthDecoder {
         NonZero::new(RATE).unwrap()
     }
     fn total_duration(&self) -> Option<Duration> {
-        Some(Duration::from_secs_f32(self.data.len() as f32 / RATE as f32))
+        Some(Duration::from_secs_f32(
+            self.data.len() as f32 / RATE as f32,
+        ))
     }
 }
 
 impl Decodable for Synth {
     type Decoder = SynthDecoder;
     fn decoder(&self) -> SynthDecoder {
-        SynthDecoder { data: self.data.clone(), pos: 0 }
+        SynthDecoder {
+            data: self.data.clone(),
+            pos: 0,
+        }
     }
 }
 
@@ -118,7 +136,13 @@ fn normalize(mut v: Vec<f32>, peak: f32) -> Synth {
 pub fn synth_clang(base: f32, ring: f32, hot: f32, seed: u32) -> Synth {
     let mut v = buffer(ring + 0.1);
     let mut n = Noise(seed | 1);
-    let partials = [(1.0, 1.0, 1.0), (2.76, 0.55, 1.4), (5.40, 0.35, 2.2), (8.93, 0.22, 3.1), (13.3, 0.12, 4.0)];
+    let partials = [
+        (1.0, 1.0, 1.0),
+        (2.76, 0.55, 1.4),
+        (5.40, 0.35, 2.2),
+        (8.93, 0.22, 3.1),
+        (13.3, 0.12, 4.0),
+    ];
     for (i, s) in v.iter_mut().enumerate() {
         let t = i as f32 / RATE as f32;
         let mut x = 0.0;
@@ -157,8 +181,16 @@ pub fn synth_sizzle(secs: f32, oil: bool, seed: u32) -> Synth {
         lp += (w - lp) * 0.08; // низ — рёв и плеск
         let env = (t / 0.03).min(1.0) * (-t * 2.2 / secs).exp();
         let burst = (-t * 6.0).exp();
-        let crackle = if n.next() > 0.985 { n.next() * 3.0 } else { 0.0 };
-        let hiss = if oil { lp * 1.6 + hp * 0.25 } else { hp * 0.9 + lp * 0.5 };
+        let crackle = if n.next() > 0.985 {
+            n.next() * 3.0
+        } else {
+            0.0
+        };
+        let hiss = if oil {
+            lp * 1.6 + hp * 0.25
+        } else {
+            hp * 0.9 + lp * 0.5
+        };
         *s = (hiss + crackle * 0.3) * env + lp * burst * 1.2;
         for &(b0, f, a) in &bubbles {
             let dt = t - b0;
@@ -197,7 +229,9 @@ pub fn synth_crack(seed: u32) -> Synth {
     let mut n = Noise(seed | 1);
     for (i, s) in v.iter_mut().enumerate() {
         let t = i as f32 / RATE as f32;
-        *s = n.next() * (-t * 60.0).exp() + (TAU * 1700.0 * t).sin() * (-t * 25.0).exp() * 0.5 + (TAU * 95.0 * t).sin() * (-t * 12.0).exp() * 0.4;
+        *s = n.next() * (-t * 60.0).exp()
+            + (TAU * 1700.0 * t).sin() * (-t * 25.0).exp() * 0.5
+            + (TAU * 95.0 * t).sin() * (-t * 12.0).exp() * 0.4;
     }
     normalize(v, 0.8)
 }
@@ -284,7 +318,12 @@ impl FxRng {
     }
 }
 
-fn glow(materials: &mut Assets<StandardMaterial>, c: [f32; 3], k: f32, alpha: AlphaMode) -> Handle<StandardMaterial> {
+fn glow(
+    materials: &mut Assets<StandardMaterial>,
+    c: [f32; 3],
+    k: f32,
+    alpha: AlphaMode,
+) -> Handle<StandardMaterial> {
     materials.add(StandardMaterial {
         base_color: Color::srgb(c[0], c[1], c[2]),
         emissive: LinearRgba::rgb(c[0], c[1], c[2]) * k,
@@ -294,8 +333,18 @@ fn glow(materials: &mut Assets<StandardMaterial>, c: [f32; 3], k: f32, alpha: Al
     })
 }
 
-fn setup_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>, mut synths: ResMut<Assets<Synth>>) {
-    let solid = |c: Color, metal: f32, rough: f32| StandardMaterial { base_color: c, metallic: metal, perceptual_roughness: rough, ..default() };
+fn setup_fx(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut synths: ResMut<Assets<Synth>>,
+) {
+    let solid = |c: Color, metal: f32, rough: f32| StandardMaterial {
+        base_color: c,
+        metallic: metal,
+        perceptual_roughness: rough,
+        ..default()
+    };
     commands.insert_resource(FxAssets {
         cube: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
         ball: meshes.add(Sphere::new(0.5).mesh().ico(1).unwrap()),
@@ -305,7 +354,12 @@ fn setup_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materi
         spark_scale: glow(&mut materials, [0.9, 0.32, 0.08], 6.0, AlphaMode::Opaque),
         ember: glow(&mut materials, [1.0, 0.42, 0.1], 9.0, AlphaMode::Opaque),
         flame: glow(&mut materials, [1.0, 0.55, 0.12], 6.0, AlphaMode::Add),
-        droplet: materials.add(StandardMaterial { base_color: Color::srgba(0.75, 0.82, 0.85, 0.7), alpha_mode: AlphaMode::Blend, perceptual_roughness: 0.1, ..default() }),
+        droplet: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.75, 0.82, 0.85, 0.7),
+            alpha_mode: AlphaMode::Blend,
+            perceptual_roughness: 0.1,
+            ..default()
+        }),
         iron: materials.add(solid(Color::srgb(0.13, 0.12, 0.12), 0.8, 0.55)),
         wood: materials.add(solid(Color::srgb(0.36, 0.24, 0.14), 0.0, 0.85)),
         clay: materials.add(solid(Color::srgb(0.48, 0.32, 0.22), 0.0, 0.95)),
@@ -317,7 +371,10 @@ fn setup_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materi
             synths.add(synth_clang(500.0, 0.4, 0.8, 14)),
         ],
         thud: synths.add(synth_clang(380.0, 0.25, 1.0, 15)),
-        sizzle: [synths.add(synth_sizzle(2.4, false, 21)), synths.add(synth_sizzle(2.0, false, 22))],
+        sizzle: [
+            synths.add(synth_sizzle(2.4, false, 21)),
+            synths.add(synth_sizzle(2.0, false, 22)),
+        ],
         sizzle_short: synths.add(synth_sizzle(0.7, false, 23)),
         oil: synths.add(synth_sizzle(2.2, true, 24)),
         grind: [synths.add(synth_grind(31)), synths.add(synth_grind(32))],
@@ -327,17 +384,35 @@ fn setup_fx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materi
     });
 }
 
-fn play(commands: &mut Commands, sound: &Handle<Synth>, at: Vec3, ear: Vec3, gain: f32, speed: f32) {
+fn play(
+    commands: &mut Commands,
+    sound: &Handle<Synth>,
+    at: Vec3,
+    ear: Vec3,
+    gain: f32,
+    speed: f32,
+) {
     let d = at.distance(ear);
     if d > FX_RANGE {
         return;
     }
     // Громкость по расстоянию, панораму и каналы громкости ведёт `crate::audio`.
     let v = gain / (1.0 + d * 0.25);
-    let emitter = crate::audio::Emitter { at: Some(at), follow: None, gain, near: 4.0, range: FX_RANGE, channel: crate::audio::Channel::Sfx, fade: 1.0 };
+    let emitter = crate::audio::Emitter {
+        at: Some(at),
+        follow: None,
+        gain,
+        near: 4.0,
+        range: FX_RANGE,
+        channel: crate::audio::Channel::Sfx,
+        fade: 1.0,
+    };
     commands.spawn((
         AudioPlayer(sound.clone()),
-        PlaybackSettings::DESPAWN.with_volume(Volume::Linear(v)).with_speed(speed).with_spatial(true),
+        PlaybackSettings::DESPAWN
+            .with_volume(Volume::Linear(v))
+            .with_speed(speed)
+            .with_spatial(true),
         Transform::from_translation(ear + (at - ear).normalize_or(Vec3::NEG_Z)),
         emitter,
     ));
@@ -366,7 +441,17 @@ struct Particle {
 
 impl Particle {
     fn new(vel: Vec3, life: f32, size: f32) -> Self {
-        Self { vel, age: 0.0, life, gravity: 9.8, drag: 0.4, size: (size, size * 0.3), fade: None, streak: true, floor: -1000.0 }
+        Self {
+            vel,
+            age: 0.0,
+            life,
+            gravity: 9.8,
+            drag: 0.4,
+            size: (size, size * 0.3),
+            fade: None,
+            streak: true,
+            floor: -1000.0,
+        }
     }
 }
 
@@ -383,27 +468,64 @@ impl Spawn {
         let room = MAX_PARTICLES.saturating_sub(alive);
         for (p, mesh, mat, at) in self.list.into_iter().take(room) {
             let s = p.size.0;
-            commands.spawn((Transform::from_translation(at).with_scale(Vec3::splat(s)), Mesh3d(mesh), MeshMaterial3d(mat), NotShadowCaster, p));
+            commands.spawn((
+                Transform::from_translation(at).with_scale(Vec3::splat(s)),
+                Mesh3d(mesh),
+                MeshMaterial3d(mat),
+                NotShadowCaster,
+                p,
+            ));
         }
     }
 }
 
 /// Пар или дым: тающий шар со своим материалом.
-fn puff(materials: &mut Assets<StandardMaterial>, c: [f32; 3], alpha: f32) -> (Handle<StandardMaterial>, f32) {
-    let h = materials.add(StandardMaterial { base_color: Color::srgba(c[0], c[1], c[2], alpha), unlit: true, alpha_mode: AlphaMode::Blend, ..default() });
+fn puff(
+    materials: &mut Assets<StandardMaterial>,
+    c: [f32; 3],
+    alpha: f32,
+) -> (Handle<StandardMaterial>, f32) {
+    let h = materials.add(StandardMaterial {
+        base_color: Color::srgba(c[0], c[1], c[2], alpha),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        ..default()
+    });
     (h, alpha)
 }
 
-fn sparks(sp: &mut Spawn, a: &FxAssets, rng: &mut FxRng, at: Vec3, n: usize, speed: f32, up: f32, mat: &Handle<StandardMaterial>, floor: f32) {
+fn sparks(
+    sp: &mut Spawn,
+    a: &FxAssets,
+    rng: &mut FxRng,
+    at: Vec3,
+    n: usize,
+    speed: f32,
+    up: f32,
+    mat: &Handle<StandardMaterial>,
+    floor: f32,
+) {
     for _ in 0..n {
         let d = (rng.dir() + Vec3::Y * up).normalize_or(Vec3::Y);
-        let mut p = Particle::new(d * speed * (0.4 + rng.f()), 0.3 + rng.f() * 0.5, 0.007 + rng.f() * 0.008);
+        let mut p = Particle::new(
+            d * speed * (0.4 + rng.f()),
+            0.3 + rng.f() * 0.5,
+            0.007 + rng.f() * 0.008,
+        );
         p.floor = floor;
         sp.push(p, &a.cube, mat, at);
     }
 }
 
-fn steam(sp: &mut Spawn, a: &FxAssets, materials: &mut Assets<StandardMaterial>, rng: &mut FxRng, at: Vec3, n: usize, power: f32) {
+fn steam(
+    sp: &mut Spawn,
+    a: &FxAssets,
+    materials: &mut Assets<StandardMaterial>,
+    rng: &mut FxRng,
+    at: Vec3,
+    n: usize,
+    power: f32,
+) {
     for _ in 0..n {
         let jitter = Vec3::new(rng.s() * 0.25, 0.0, rng.s() * 0.25);
         let vel = Vec3::new(rng.s() * 0.35, 0.9 + rng.f() * 1.4 * power, rng.s() * 0.35);
@@ -413,13 +535,26 @@ fn steam(sp: &mut Spawn, a: &FxAssets, materials: &mut Assets<StandardMaterial>,
         p.size = (p.size.0, 0.7 + rng.f() * 0.6 * power);
         p.streak = false;
         let g = 0.86 + rng.f() * 0.1;
-        p.fade = Some(puff(materials, [g, g, g * 1.02], 0.22 + 0.14 * power.min(1.0)));
+        p.fade = Some(puff(
+            materials,
+            [g, g, g * 1.02],
+            0.22 + 0.14 * power.min(1.0),
+        ));
         let m = p.fade.as_ref().unwrap().0.clone();
         sp.push(p, &a.ball, &m, at + jitter);
     }
 }
 
-fn smoke(sp: &mut Spawn, a: &FxAssets, materials: &mut Assets<StandardMaterial>, rng: &mut FxRng, at: Vec3, n: usize, dark: f32, size: f32) {
+fn smoke(
+    sp: &mut Spawn,
+    a: &FxAssets,
+    materials: &mut Assets<StandardMaterial>,
+    rng: &mut FxRng,
+    at: Vec3,
+    n: usize,
+    dark: f32,
+    size: f32,
+) {
     for _ in 0..n {
         let jitter = Vec3::new(rng.s() * 0.2, 0.0, rng.s() * 0.2);
         let vel = Vec3::new(rng.s() * 0.25 + 0.15, 0.6 + rng.f() * 0.6, rng.s() * 0.25);
@@ -435,7 +570,12 @@ fn smoke(sp: &mut Spawn, a: &FxAssets, materials: &mut Assets<StandardMaterial>,
     }
 }
 
-fn particles(mut commands: Commands, time: Res<Time>, mut materials: ResMut<Assets<StandardMaterial>>, mut q: Query<(Entity, &mut Particle, &mut Transform)>) {
+fn particles(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut q: Query<(Entity, &mut Particle, &mut Transform)>,
+) {
     let dt = time.delta_secs().min(0.05);
     for (e, mut p, mut tf) in &mut q {
         p.age += dt;
@@ -498,7 +638,10 @@ struct Hammer {
 
 /// Откуда слушаем и смотрим: активная камера (своя голова или камера ожидания).
 fn ear(cams: &Query<(&GlobalTransform, &Camera), With<Camera3d>>) -> Vec3 {
-    cams.iter().find(|(_, c)| c.is_active).map(|(t, _)| t.translation()).unwrap_or(Vec3::splat(1.0e6))
+    cams.iter()
+        .find(|(_, c)| c.is_active)
+        .map(|(t, _)| t.translation())
+        .unwrap_or(Vec3::splat(1.0e6))
 }
 
 /// Направления у горна: `along` — от наковальни к горну, `side` — поперёк.
@@ -529,7 +672,9 @@ fn play_fx(
     let mut sp = Spawn::default();
     let queue = std::mem::take(&mut state.fx_queue);
     for (sid, pid, fx) in queue {
-        let Some(st) = state.station(sid).cloned() else { continue };
+        let Some(st) = state.station(sid).cloned() else {
+            continue;
+        };
         let top = anvil_top(&st);
         if top.distance(ear) > FX_RANGE * 1.5 {
             continue;
@@ -539,36 +684,124 @@ fn play_fx(
         let seed = (time.elapsed_secs() * 1000.0) as usize;
         match fx {
             Fx::Strike { heavy, temp } => {
-                commands.spawn((Hammer { t: 0.0, heavy, at: top + Vec3::Y * 0.04, side }, Transform::from_translation(top), Visibility::default()))
+                commands
+                    .spawn((
+                        Hammer {
+                            t: 0.0,
+                            heavy,
+                            at: top + Vec3::Y * 0.04,
+                            side,
+                        },
+                        Transform::from_translation(top),
+                        Visibility::default(),
+                    ))
                     .with_children(|c| {
                         // Рукоять и боёк.
-                        c.spawn((Mesh3d(a.cube.clone()), MeshMaterial3d(a.wood.clone()), Transform::from_xyz(0.0, 0.0, 0.2).with_scale(Vec3::new(0.035, 0.035, 0.42))));
-                        let head = if heavy { Vec3::new(0.085, 0.085, 0.2) } else { Vec3::new(0.06, 0.06, 0.13) };
-                        c.spawn((Mesh3d(a.cube.clone()), MeshMaterial3d(a.iron.clone()), Transform::from_xyz(0.0, 0.0, 0.0).with_rotation(Quat::from_rotation_y(FRAC_PI_2)).with_scale(head)));
+                        c.spawn((
+                            Mesh3d(a.cube.clone()),
+                            MeshMaterial3d(a.wood.clone()),
+                            Transform::from_xyz(0.0, 0.0, 0.2)
+                                .with_scale(Vec3::new(0.035, 0.035, 0.42)),
+                        ));
+                        let head = if heavy {
+                            Vec3::new(0.085, 0.085, 0.2)
+                        } else {
+                            Vec3::new(0.06, 0.06, 0.13)
+                        };
+                        c.spawn((
+                            Mesh3d(a.cube.clone()),
+                            MeshMaterial3d(a.iron.clone()),
+                            Transform::from_xyz(0.0, 0.0, 0.0)
+                                .with_rotation(Quat::from_rotation_y(FRAC_PI_2))
+                                .with_scale(head),
+                        ));
                     });
                 let hot = ((temp - 650.0) / 500.0).clamp(0.0, 1.0);
                 if temp > 600.0 {
                     // Окалина брызжет с раскалённого железа.
                     let n = (4.0 + hot * 16.0 * if heavy { 1.6 } else { 1.0 }) as usize;
-                    sparks(&mut sp, &a, &mut rng, top + Vec3::Y * 0.05, n, 3.2 + hot * 2.0, 0.6, if hot > 0.6 { &a.spark_white } else { &a.spark_scale }, floor);
-                    sparks(&mut sp, &a, &mut rng, top + Vec3::Y * 0.05, n / 2, 1.8, 0.2, &a.spark_hot, floor);
+                    sparks(
+                        &mut sp,
+                        &a,
+                        &mut rng,
+                        top + Vec3::Y * 0.05,
+                        n,
+                        3.2 + hot * 2.0,
+                        0.6,
+                        if hot > 0.6 {
+                            &a.spark_white
+                        } else {
+                            &a.spark_scale
+                        },
+                        floor,
+                    );
+                    sparks(
+                        &mut sp,
+                        &a,
+                        &mut rng,
+                        top + Vec3::Y * 0.05,
+                        n / 2,
+                        1.8,
+                        0.2,
+                        &a.spark_hot,
+                        floor,
+                    );
                 } else if temp < 100.0 {
-                    sparks(&mut sp, &a, &mut rng, top + Vec3::Y * 0.05, 2, 2.0, 0.5, &a.spark_white, floor);
+                    sparks(
+                        &mut sp,
+                        &a,
+                        &mut rng,
+                        top + Vec3::Y * 0.05,
+                        2,
+                        2.0,
+                        0.5,
+                        &a.spark_white,
+                        floor,
+                    );
                 }
                 let i = if temp > 600.0 { 2 + seed % 2 } else { seed % 2 };
                 let pitch = 0.94 + rng.f() * 0.12 - if heavy { 0.12 } else { 0.0 };
-                let snd = if heavy && temp > 950.0 { &a.thud } else { &a.clang[i] };
-                play(&mut commands, snd, top, ear, if heavy { 1.0 } else { 0.75 }, pitch);
+                let snd = if heavy && temp > 950.0 {
+                    &a.thud
+                } else {
+                    &a.clang[i]
+                };
+                play(
+                    &mut commands,
+                    snd,
+                    top,
+                    ear,
+                    if heavy { 1.0 } else { 0.75 },
+                    pitch,
+                );
             }
-            Fx::Quench { medium, temp, cracked } => {
-                dips.0.insert(pid, Dip { t: 0.0, medium, temp });
+            Fx::Quench {
+                medium,
+                temp,
+                cracked,
+            } => {
+                dips.0.insert(
+                    pid,
+                    Dip {
+                        t: 0.0,
+                        medium,
+                        temp,
+                    },
+                );
                 let water = Vec3::from(st.trough);
                 let hot = ((temp - 300.0) / 600.0).clamp(0.0, 1.0);
                 if medium == Quench::Oil {
                     play(&mut commands, &a.oil, water, ear, 0.9, 1.0);
                     play(&mut commands, &a.bellows, water, ear, 0.6 * hot, 0.7);
                 } else if hot > 0.05 {
-                    play(&mut commands, &a.sizzle[seed % 2], water, ear, 0.5 + hot * 0.6, 0.95 + rng.f() * 0.1);
+                    play(
+                        &mut commands,
+                        &a.sizzle[seed % 2],
+                        water,
+                        ear,
+                        0.5 + hot * 0.6,
+                        0.95 + rng.f() * 0.1,
+                    );
                 } else {
                     play(&mut commands, &a.sizzle_short, water, ear, 0.25, 1.2);
                 }
@@ -590,19 +823,45 @@ fn play_fx(
                 let r = 0.38;
                 let contact = g + Vec3::Y * r * 0.7 - along * r * 0.7;
                 for _ in 0..22 {
-                    let d = (-along * 1.0 - Vec3::Y * (0.3 + rng.f() * 0.5) + side * rng.s() * 0.35).normalize();
-                    let mut p = Particle::new(d * (3.0 + rng.f() * 3.0), 0.25 + rng.f() * 0.45, 0.01 + rng.f() * 0.008);
+                    let d = (-along * 1.0 - Vec3::Y * (0.3 + rng.f() * 0.5)
+                        + side * rng.s() * 0.35)
+                        .normalize();
+                    let mut p = Particle::new(
+                        d * (3.0 + rng.f() * 3.0),
+                        0.25 + rng.f() * 0.45,
+                        0.01 + rng.f() * 0.008,
+                    );
                     p.floor = floor;
                     p.drag = 0.8;
-                    sp.push(p, &a.cube, if rng.f() > 0.5 { &a.spark_white } else { &a.spark_hot }, contact);
+                    sp.push(
+                        p,
+                        &a.cube,
+                        if rng.f() > 0.5 {
+                            &a.spark_white
+                        } else {
+                            &a.spark_hot
+                        },
+                        contact,
+                    );
                 }
-                play(&mut commands, &a.grind[seed % 2], g, ear, 0.7, 0.9 + rng.f() * 0.2);
+                play(
+                    &mut commands,
+                    &a.grind[seed % 2],
+                    g,
+                    ear,
+                    0.7,
+                    0.9 + rng.f() * 0.2,
+                );
             }
             Fx::Burn => {
                 let f = Vec3::from(st.fire);
                 for _ in 0..28 {
                     let d = (Vec3::Y * 1.4 + rng.dir() * 0.6).normalize();
-                    let mut p = Particle::new(d * (2.0 + rng.f() * 3.0), 0.5 + rng.f() * 0.9, 0.012 + rng.f() * 0.01);
+                    let mut p = Particle::new(
+                        d * (2.0 + rng.f() * 3.0),
+                        0.5 + rng.f() * 0.9,
+                        0.012 + rng.f() * 0.01,
+                    );
                     p.gravity = 2.0;
                     sp.push(p, &a.cube, &a.spark_white, f + Vec3::Y * 0.1);
                 }
@@ -610,7 +869,17 @@ fn play_fx(
             }
             Fx::Crack => {
                 play(&mut commands, &a.crack, top, ear, 1.0, 0.9 + rng.f() * 0.2);
-                sparks(&mut sp, &a, &mut rng, top, 6, 1.5, 0.3, &a.spark_scale, floor);
+                sparks(
+                    &mut sp,
+                    &a,
+                    &mut rng,
+                    top,
+                    6,
+                    1.5,
+                    0.3,
+                    &a.spark_scale,
+                    floor,
+                );
             }
             Fx::Pour(true) => {
                 play(&mut commands, &a.pour, top, ear, 0.8, 1.0);
@@ -618,18 +887,47 @@ fn play_fx(
             Fx::Pour(false) => {}
             Fx::Skim => {
                 let f = Vec3::from(st.fire);
-                smoke(&mut sp, &a, &mut materials, &mut rng, f + Vec3::Y * 0.2, 4, 0.6, 0.5);
-                sparks(&mut sp, &a, &mut rng, f + Vec3::Y * 0.15, 8, 1.2, 1.0, &a.spark_hot, floor);
+                smoke(
+                    &mut sp,
+                    &a,
+                    &mut materials,
+                    &mut rng,
+                    f + Vec3::Y * 0.2,
+                    4,
+                    0.6,
+                    0.5,
+                );
+                sparks(
+                    &mut sp,
+                    &a,
+                    &mut rng,
+                    f + Vec3::Y * 0.15,
+                    8,
+                    1.2,
+                    1.0,
+                    &a.spark_hot,
+                    floor,
+                );
             }
             Fx::OpenMould => {
                 play(&mut commands, &a.crack, top, ear, 0.6, 0.6);
                 for _ in 0..16 {
-                    let mut p = Particle::new(rng.dir() * 1.5 + Vec3::Y * 1.2, 0.9, 0.03 + rng.f() * 0.03);
+                    let mut p =
+                        Particle::new(rng.dir() * 1.5 + Vec3::Y * 1.2, 0.9, 0.03 + rng.f() * 0.03);
                     p.floor = floor;
                     p.streak = false;
                     sp.push(p, &a.cube, &a.clay, top - Vec3::Y * 0.3);
                 }
-                smoke(&mut sp, &a, &mut materials, &mut rng, top - Vec3::Y * 0.3, 5, 0.3, 0.6);
+                smoke(
+                    &mut sp,
+                    &a,
+                    &mut materials,
+                    &mut rng,
+                    top - Vec3::Y * 0.3,
+                    5,
+                    0.3,
+                    0.6,
+                );
             }
             Fx::Done => {
                 play(&mut commands, &a.clang[0], top, ear, 0.5, 1.25);
@@ -639,10 +937,19 @@ fn play_fx(
     // Пар идёт, пока клинок в воде; масло горит и чадит.
     let dt = time.delta_secs().min(0.05);
     let stations = state.stations.clone();
-    let station_of: HashMap<u64, u32> = state.all_pieces().iter().map(|p| (p.player, p.station)).collect();
+    let station_of: HashMap<u64, u32> = state
+        .all_pieces()
+        .iter()
+        .map(|p| (p.player, p.station))
+        .collect();
     dips.0.retain(|pid, d| {
         d.t += dt;
-        let Some(st) = station_of.get(pid).and_then(|s| stations.iter().find(|x| x.id == *s)) else { return d.t < 2.0 };
+        let Some(st) = station_of
+            .get(pid)
+            .and_then(|s| stations.iter().find(|x| x.id == *s))
+        else {
+            return d.t < 2.0;
+        };
         let water = Vec3::from(st.trough);
         let hot = ((d.temp - 250.0) / 650.0).clamp(0.0, 1.0) * (1.0 - d.t / 2.4).max(0.0);
         if hot > 0.0 && d.t > 0.25 {
@@ -650,23 +957,54 @@ fn play_fx(
             match d.medium {
                 Quench::Oil => {
                     for _ in 0..n {
-                        let mut p = Particle::new(Vec3::new(rng.s() * 0.2, 0.8 + rng.f() * 1.2, rng.s() * 0.2), 0.35 + rng.f() * 0.4, 0.08 + rng.f() * 0.08);
+                        let mut p = Particle::new(
+                            Vec3::new(rng.s() * 0.2, 0.8 + rng.f() * 1.2, rng.s() * 0.2),
+                            0.35 + rng.f() * 0.4,
+                            0.08 + rng.f() * 0.08,
+                        );
                         p.gravity = -2.0;
                         p.streak = false;
                         p.size = (p.size.0, 0.02);
-                        sp.push(p, &a.ball, &a.flame, water + Vec3::new(rng.s() * 0.2, 0.05, rng.s() * 0.2));
+                        sp.push(
+                            p,
+                            &a.ball,
+                            &a.flame,
+                            water + Vec3::new(rng.s() * 0.2, 0.05, rng.s() * 0.2),
+                        );
                     }
-                    smoke(&mut sp, &a, &mut materials, &mut rng, water + Vec3::Y * 0.3, n.div_ceil(2), 1.0, 0.7);
+                    smoke(
+                        &mut sp,
+                        &a,
+                        &mut materials,
+                        &mut rng,
+                        water + Vec3::Y * 0.3,
+                        n.div_ceil(2),
+                        1.0,
+                        0.7,
+                    );
                 }
                 _ => {
-                    steam(&mut sp, &a, &mut materials, &mut rng, water + Vec3::Y * 0.05, n, hot * 1.3);
+                    steam(
+                        &mut sp,
+                        &a,
+                        &mut materials,
+                        &mut rng,
+                        water + Vec3::Y * 0.05,
+                        n,
+                        hot * 1.3,
+                    );
                     // Пузыри лопаются у клинка.
                     if rng.f() < hot {
                         let mut p = Particle::new(Vec3::Y * 0.3, 0.25, 0.03 + rng.f() * 0.03);
                         p.gravity = 0.0;
                         p.streak = false;
                         p.size = (0.02, p.size.0 * 1.5);
-                        sp.push(p, &a.ball, &a.droplet, water + Vec3::new(rng.s() * 0.12, 0.0, rng.s() * 0.12));
+                        sp.push(
+                            p,
+                            &a.ball,
+                            &a.droplet,
+                            water + Vec3::new(rng.s() * 0.12, 0.0, rng.s() * 0.12),
+                        );
                     }
                 }
             }
@@ -681,7 +1019,11 @@ fn play_fx(
 #[derive(Resource, Default)]
 pub struct DipsOut(HashMap<u64, f32>);
 
-fn hammers(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Hammer, &mut Transform)>) {
+fn hammers(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut q: Query<(Entity, &mut Hammer, &mut Transform)>,
+) {
     for (e, mut h, mut tf) in &mut q {
         h.t += time.delta_secs();
         let up = if h.heavy { 0.55 } else { 0.35 };
@@ -733,27 +1075,62 @@ fn forge_fires(
     if *known != state.stations.len() {
         *known = state.stations.len();
         for st in &state.stations {
-            let coal = materials.add(StandardMaterial { base_color: Color::srgb(0.12, 0.08, 0.06), perceptual_roughness: 0.95, ..default() });
+            let coal = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.12, 0.08, 0.06),
+                perceptual_roughness: 0.95,
+                ..default()
+            });
             let fire = Vec3::from(st.fire);
             commands
                 .spawn((
-                    FireFx { station: st.id, kind: st.kind, phase: st.id as f32 * 1.7, acc: 0.0, smoke_acc: 0.0, coal: coal.clone() },
-                    PointLight { color: Color::srgb(1.0, 0.5, 0.18), intensity: 0.0, range: 9.0, shadow_maps_enabled: false, ..default() },
+                    FireFx {
+                        station: st.id,
+                        kind: st.kind,
+                        phase: st.id as f32 * 1.7,
+                        acc: 0.0,
+                        smoke_acc: 0.0,
+                        coal: coal.clone(),
+                    },
+                    PointLight {
+                        color: Color::srgb(1.0, 0.5, 0.18),
+                        intensity: 0.0,
+                        range: 9.0,
+                        shadow_maps_enabled: false,
+                        ..default()
+                    },
                     Transform::from_translation(fire + Vec3::Y * 0.35),
                     Visibility::default(),
                 ))
                 .with_children(|c| {
                     // Куча углей: тлеют и разгораются, когда качают мехи.
-                    let r = if st.kind == StationKind::Bloomery { 0.2 } else { 0.58 };
+                    let r = if st.kind == StationKind::Bloomery {
+                        0.2
+                    } else {
+                        0.58
+                    };
                     let mut n = Noise(st.id * 7919 + 1);
-                    for _ in 0..if st.kind == StationKind::Bloomery { 10 } else { 44 } {
-                        let (ang, d) = ((n.next() * 0.5 + 0.5) * TAU, (n.next() * 0.5 + 0.5).sqrt() * r);
+                    for _ in 0..if st.kind == StationKind::Bloomery {
+                        10
+                    } else {
+                        44
+                    } {
+                        let (ang, d) = (
+                            (n.next() * 0.5 + 0.5) * TAU,
+                            (n.next() * 0.5 + 0.5).sqrt() * r,
+                        );
                         let s = 0.05 + (n.next() * 0.5 + 0.5) * 0.05;
                         let p = Vec3::new(ang.cos() * d, -0.35 + s * 0.3, ang.sin() * d);
                         c.spawn((
                             Mesh3d(a.cube.clone()),
                             MeshMaterial3d(coal.clone()),
-                            Transform::from_translation(p).with_rotation(Quat::from_euler(EulerRot::XYZ, n.next(), n.next() * 3.0, n.next())).with_scale(Vec3::splat(s)),
+                            Transform::from_translation(p)
+                                .with_rotation(Quat::from_euler(
+                                    EulerRot::XYZ,
+                                    n.next(),
+                                    n.next() * 3.0,
+                                    n.next(),
+                                ))
+                                .with_scale(Vec3::splat(s)),
                             NotShadowCaster,
                         ));
                     }
@@ -767,10 +1144,12 @@ fn forge_fires(
     for (mut f, mut light, tf) in &mut fires {
         let (fuel, blast) = state.fire(f.station).unwrap_or((0.0, 0.0));
         let lit = fuel > 0.0;
-        let flicker = 0.85 + 0.1 * (t * 13.0 + f.phase).sin() + 0.05 * (t * 31.0 + f.phase * 2.0).sin();
+        let flicker =
+            0.85 + 0.1 * (t * 13.0 + f.phase).sin() + 0.05 * (t * 31.0 + f.phase * 2.0).sin();
         let heat = if lit { 0.35 + blast * 0.9 } else { 0.0 };
         if let Some(mut m) = materials.get_mut(&f.coal) {
-            m.emissive = LinearRgba::rgb(1.0, 0.32 + blast * 0.3, 0.06 + blast * 0.15) * (heat * heat * 5.0 * flicker);
+            m.emissive = LinearRgba::rgb(1.0, 0.32 + blast * 0.3, 0.06 + blast * 0.15)
+                * (heat * heat * 5.0 * flicker);
         }
         light.intensity = 60_000.0 * heat * flicker;
         light.color = Color::srgb(1.0, 0.42 + blast * 0.25, 0.14 + blast * 0.2);
@@ -782,23 +1161,57 @@ fn forge_fires(
         f.acc += dt * (1.5 + blast * 30.0);
         while f.acc >= 1.0 {
             f.acc -= 1.0;
-            let mut p = Particle::new(Vec3::new(rng.s() * 0.4, 1.0 + rng.f() * 2.0 * (0.5 + blast), rng.s() * 0.4), 0.8 + rng.f() * 1.2, 0.01 + rng.f() * 0.008);
+            let mut p = Particle::new(
+                Vec3::new(
+                    rng.s() * 0.4,
+                    1.0 + rng.f() * 2.0 * (0.5 + blast),
+                    rng.s() * 0.4,
+                ),
+                0.8 + rng.f() * 1.2,
+                0.01 + rng.f() * 0.008,
+            );
             p.gravity = -0.4;
             p.drag = 0.6;
             p.streak = false;
-            sp.push(p, &a.cube, &a.ember, pos + Vec3::new(rng.s() * 0.3, 0.0, rng.s() * 0.3));
+            sp.push(
+                p,
+                &a.cube,
+                &a.ember,
+                pos + Vec3::new(rng.s() * 0.3, 0.0, rng.s() * 0.3),
+            );
         }
         // Дым: из шахты сыродутного горна валит всегда, у кузнечного — немного.
-        let rate = if f.kind == StationKind::Bloomery { 2.5 + blast * 2.0 } else { 0.4 + blast * 0.8 };
+        let rate = if f.kind == StationKind::Bloomery {
+            2.5 + blast * 2.0
+        } else {
+            0.4 + blast * 0.8
+        };
         f.smoke_acc += dt * rate;
         if f.smoke_acc >= 1.0 {
             f.smoke_acc -= 1.0;
-            let size = if f.kind == StationKind::Bloomery { 0.9 } else { 0.6 };
-            smoke(&mut sp, &a, &mut materials, &mut rng, pos + Vec3::Y * 0.25, 1, 0.4, size);
+            let size = if f.kind == StationKind::Bloomery {
+                0.9
+            } else {
+                0.6
+            };
+            smoke(
+                &mut sp,
+                &a,
+                &mut materials,
+                &mut rng,
+                pos + Vec3::Y * 0.25,
+                1,
+                0.4,
+                size,
+            );
             // Над сыродутным горном пляшут языки пламени.
             if f.kind == StationKind::Bloomery {
                 for _ in 0..3 {
-                    let mut p = Particle::new(Vec3::new(rng.s() * 0.1, 1.0 + blast * 1.5, rng.s() * 0.1), 0.3 + rng.f() * 0.3, 0.12 + rng.f() * 0.08);
+                    let mut p = Particle::new(
+                        Vec3::new(rng.s() * 0.1, 1.0 + blast * 1.5, rng.s() * 0.1),
+                        0.3 + rng.f() * 0.3,
+                        0.12 + rng.f() * 0.08,
+                    );
                     p.gravity = -1.0;
                     p.streak = false;
                     p.size = (p.size.0, 0.02);
@@ -836,7 +1249,9 @@ fn piece_dims(p: Option<Pattern>, drawn: f32) -> Vec3 {
         Some(Pattern::Bloom) => (Vec3::new(0.16, 0.12, 0.12), Vec3::new(0.3, 0.05, 0.04)),
         Some(Pattern::ScrapWeld) => (Vec3::new(0.22, 0.05, 0.05), Vec3::new(0.4, 0.04, 0.02)),
         Some(Pattern::Knife) => (Vec3::new(0.12, 0.02, 0.012), Vec3::new(0.22, 0.03, 0.004)),
-        Some(Pattern::Spatha | Pattern::CavalrySpatha) => (Vec3::new(0.32, 0.03, 0.02), Vec3::new(0.82, 0.05, 0.006)),
+        Some(Pattern::Spatha | Pattern::CavalrySpatha) => {
+            (Vec3::new(0.32, 0.03, 0.02), Vec3::new(0.82, 0.05, 0.006))
+        }
         Some(Pattern::Axe) => (Vec3::new(0.14, 0.05, 0.03), Vec3::new(0.18, 0.12, 0.015)),
         Some(Pattern::Spear) => (Vec3::new(0.2, 0.03, 0.02), Vec3::new(0.38, 0.05, 0.008)),
         Some(Pattern::Mace) => (Vec3::new(0.1, 0.06, 0.06), Vec3::new(0.12, 0.08, 0.08)),
@@ -847,9 +1262,18 @@ fn piece_dims(p: Option<Pattern>, drawn: f32) -> Vec3 {
             let a = &crate::arsenal::ARMS[(i as usize).min(crate::arsenal::ARMS.len() - 1)];
             let len = a.mass * 0.6;
             match a.fam {
-                Fam::Sword => (Vec3::new(len * 0.4, 0.03, 0.02), Vec3::new(len, 0.05, 0.006)),
-                Fam::Seax => (Vec3::new(0.12, 0.025, 0.015), Vec3::new(0.25 + len * 0.2, 0.04, 0.006)),
-                Fam::Axe => (Vec3::new(0.14, 0.05, 0.03), Vec3::new(0.18, 0.12 + a.mass * 0.03, 0.015)),
+                Fam::Sword => (
+                    Vec3::new(len * 0.4, 0.03, 0.02),
+                    Vec3::new(len, 0.05, 0.006),
+                ),
+                Fam::Seax => (
+                    Vec3::new(0.12, 0.025, 0.015),
+                    Vec3::new(0.25 + len * 0.2, 0.04, 0.006),
+                ),
+                Fam::Axe => (
+                    Vec3::new(0.14, 0.05, 0.03),
+                    Vec3::new(0.18, 0.12 + a.mass * 0.03, 0.015),
+                ),
                 Fam::Mace => (Vec3::new(0.1, 0.06, 0.06), Vec3::new(0.12, 0.08, 0.08)),
                 Fam::Spear => (Vec3::new(0.18, 0.03, 0.02), Vec3::new(0.32, 0.045, 0.008)),
                 Fam::Head => (Vec3::new(0.18, 0.012, 0.012), Vec3::new(0.24, 0.02, 0.006)),
@@ -861,7 +1285,13 @@ fn piece_dims(p: Option<Pattern>, drawn: f32) -> Vec3 {
     start.lerp(end, drawn.clamp(0.0, 1.0))
 }
 
-fn piece_pose(st: &StationView, v: &PieceView, dims: Vec3, dip: Option<f32>, t: f32) -> (Vec3, Quat) {
+fn piece_pose(
+    st: &StationView,
+    v: &PieceView,
+    dims: Vec3,
+    dip: Option<f32>,
+    t: f32,
+) -> (Vec3, Quat) {
     let (along, side) = axes(st);
     let fire = Vec3::from(st.fire);
     let flat = Quat::from_mat3(&Mat3::from_cols(side, Vec3::Y, -side.cross(Vec3::Y)));
@@ -879,17 +1309,32 @@ fn piece_pose(st: &StationView, v: &PieceView, dims: Vec3, dip: Option<f32>, t: 
     match v.spot {
         Spot::Fire => {
             let p = fire + along.cross(Vec3::Y) * 0.0 - along * (dims.x * 0.25) - Vec3::Y * 0.02;
-            (p, Quat::from_rotation_arc(Vec3::X, -along) * Quat::from_rotation_x(0.2))
+            (
+                p,
+                Quat::from_rotation_arc(Vec3::X, -along) * Quat::from_rotation_x(0.2),
+            )
         }
-        Spot::Temper => (fire - along * (dims.x * 0.6 + 0.2) + Vec3::Y * 0.12, Quat::from_rotation_arc(Vec3::X, -along)),
-        Spot::Ashes => (Vec3::new(fire.x, Vec3::from(st.anvil).y + 0.04, fire.z) - along * 1.0 + side * 0.9, Quat::from_rotation_arc(Vec3::X, side)),
+        Spot::Temper => (
+            fire - along * (dims.x * 0.6 + 0.2) + Vec3::Y * 0.12,
+            Quat::from_rotation_arc(Vec3::X, -along),
+        ),
+        Spot::Ashes => (
+            Vec3::new(fire.x, Vec3::from(st.anvil).y + 0.04, fire.z) - along * 1.0 + side * 0.9,
+            Quat::from_rotation_arc(Vec3::X, side),
+        ),
         Spot::Grindstone => {
             let g = Vec3::from(st.grind);
-            (g + Vec3::Y * 0.4 - along * 0.15, Quat::from_rotation_arc(Vec3::X, side) * Quat::from_rotation_x(0.3))
+            (
+                g + Vec3::Y * 0.4 - along * 0.15,
+                Quat::from_rotation_arc(Vec3::X, side) * Quat::from_rotation_x(0.3),
+            )
         }
         Spot::Anvil => {
             let _ = flat;
-            (anvil_top(st) + Vec3::Y * (dims.z * 0.5 + 0.005), Quat::from_rotation_arc(Vec3::X, side))
+            (
+                anvil_top(st) + Vec3::Y * (dims.z * 0.5 + 0.005),
+                Quat::from_rotation_arc(Vec3::X, side),
+            )
         }
     }
 }
@@ -903,9 +1348,21 @@ fn pieces(
     time: Res<Time>,
     mut rng: ResMut<FxRng>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut q: Query<(Entity, &mut PieceFx, &mut Transform, &Children, &mut PointLight)>,
-    mut bodies: Query<(&mut Transform, &MeshMaterial3d<StandardMaterial>), (With<PieceBody>, Without<PieceFx>)>,
-    mut streams: Query<(&mut Transform, &mut Visibility), (With<PieceStream>, Without<PieceFx>, Without<PieceBody>)>,
+    mut q: Query<(
+        Entity,
+        &mut PieceFx,
+        &mut Transform,
+        &Children,
+        &mut PointLight,
+    )>,
+    mut bodies: Query<
+        (&mut Transform, &MeshMaterial3d<StandardMaterial>),
+        (With<PieceBody>, Without<PieceFx>),
+    >,
+    mut streams: Query<
+        (&mut Transform, &mut Visibility),
+        (With<PieceStream>, Without<PieceFx>, Without<PieceBody>),
+    >,
     player: Query<(&GlobalTransform, &Camera), With<Camera3d>>,
     alive: Query<(), With<Particle>>,
 ) {
@@ -920,7 +1377,9 @@ fn pieces(
         have.insert(fx.player, e);
     }
     for v in &list {
-        let Some(st) = state.station(v.station) else { continue };
+        let Some(st) = state.station(v.station) else {
+            continue;
+        };
         if Vec3::from(st.anvil).distance(ear) > FX_RANGE * 2.0 {
             continue;
         }
@@ -930,7 +1389,9 @@ fn pieces(
             spawn_piece(&mut commands, &a, &mut materials, v, pos, rot);
             continue;
         };
-        let Ok((_, mut fx, mut tf, children, mut light)) = q.get_mut(e) else { continue };
+        let Ok((_, mut fx, mut tf, children, mut light)) = q.get_mut(e) else {
+            continue;
+        };
         fx.seen = true;
         // Клещи несут поковку, а не телепортируют её.
         let k = 1.0 - (-dt * 9.0).exp();
@@ -954,22 +1415,46 @@ fn pieces(
                         // Расплав в тигле: светится зеркало металла.
                         let mg = ((v.temp - 700.0) / 500.0).clamp(0.0, 1.0);
                         m.base_color = Color::srgb(0.3 + c[0] * 0.5, 0.25 + c[1] * 0.4, 0.15);
-                        m.emissive = LinearRgba::rgb(c[0], c[1] * 0.9, c[2] * 0.6) * (mg * mg * 18.0);
+                        m.emissive =
+                            LinearRgba::rgb(c[0], c[1] * 0.9, c[2] * 0.6) * (mg * mg * 18.0);
                     }
                 }
             }
             if let Ok((mut stf, mut vis)) = streams.get_mut(ch) {
-                *vis = if v.pouring { Visibility::Inherited } else { Visibility::Hidden };
+                *vis = if v.pouring {
+                    Visibility::Inherited
+                } else {
+                    Visibility::Hidden
+                };
                 stf.scale = Vec3::new(0.018 + (t * 40.0).sin().abs() * 0.006, 0.55, 0.018);
             }
         }
         // Остывая на наковальне, железо чуть дымит окалиной; расплав парит.
         if v.temp > 700.0 && rng.f() < dt * 3.0 {
-            smoke(&mut sp, &a, &mut materials, &mut rng, tf.translation + Vec3::Y * 0.05, 1, 0.2, 0.25);
+            smoke(
+                &mut sp,
+                &a,
+                &mut materials,
+                &mut rng,
+                tf.translation + Vec3::Y * 0.05,
+                1,
+                0.2,
+                0.25,
+            );
         }
         if v.pouring && rng.f() < dt * 25.0 {
             let mouth = anvil_top(st) - Vec3::Y * 0.25;
-            sparks(&mut sp, &a, &mut rng, mouth, 1, 1.2, 1.0, &a.spark_hot, Vec3::from(st.anvil).y + 0.02);
+            sparks(
+                &mut sp,
+                &a,
+                &mut rng,
+                mouth,
+                1,
+                1.2,
+                1.0,
+                &a.spark_hot,
+                Vec3::from(st.anvil).y + 0.02,
+            );
             if rng.f() < 0.3 {
                 smoke(&mut sp, &a, &mut materials, &mut rng, mouth, 1, 0.1, 0.35);
             }
@@ -983,38 +1468,94 @@ fn pieces(
     sp.flush(&mut commands, alive.iter().count());
 }
 
-fn spawn_piece(commands: &mut Commands, a: &FxAssets, materials: &mut Assets<StandardMaterial>, v: &PieceView, pos: Vec3, rot: Quat) {
-    let body_mat = materials.add(StandardMaterial { base_color: Color::srgb(0.25, 0.24, 0.23), metallic: 0.6, perceptual_roughness: 0.55, ..default() });
+fn spawn_piece(
+    commands: &mut Commands,
+    a: &FxAssets,
+    materials: &mut Assets<StandardMaterial>,
+    v: &PieceView,
+    pos: Vec3,
+    rot: Quat,
+) {
+    let body_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.25, 0.24, 0.23),
+        metallic: 0.6,
+        perceptual_roughness: 0.55,
+        ..default()
+    });
     let dims = piece_dims(v.pattern, v.drawn);
     commands
         .spawn((
-            PieceFx { player: v.player, seen: true },
+            PieceFx {
+                player: v.player,
+                seen: true,
+            },
             Transform::from_translation(pos).with_rotation(rot),
             Visibility::default(),
-            PointLight { color: Color::srgb(1.0, 0.45, 0.15), intensity: 0.0, range: 3.5, shadow_maps_enabled: false, ..default() },
+            PointLight {
+                color: Color::srgb(1.0, 0.45, 0.15),
+                intensity: 0.0,
+                range: 3.5,
+                shadow_maps_enabled: false,
+                ..default()
+            },
         ))
         .with_children(|c| {
             if v.pattern.is_some() {
                 // Поковка лежит вдоль +X от губок клещей.
-                c.spawn((PieceBody, Mesh3d(a.cube.clone()), MeshMaterial3d(body_mat), Transform::from_xyz(dims.x * 0.5, 0.0, 0.0).with_scale(dims)));
+                c.spawn((
+                    PieceBody,
+                    Mesh3d(a.cube.clone()),
+                    MeshMaterial3d(body_mat),
+                    Transform::from_xyz(dims.x * 0.5, 0.0, 0.0).with_scale(dims),
+                ));
                 // Клещи: две губки и рукояти, разведённые к руке.
                 for s in [-1.0f32, 1.0] {
                     c.spawn((
                         Mesh3d(a.cube.clone()),
                         MeshMaterial3d(a.iron.clone()),
-                        Transform::from_xyz(-0.28, 0.0, s * 0.018).with_rotation(Quat::from_rotation_y(s * 0.06)).with_scale(Vec3::new(0.56, 0.014, 0.012)),
+                        Transform::from_xyz(-0.28, 0.0, s * 0.018)
+                            .with_rotation(Quat::from_rotation_y(s * 0.06))
+                            .with_scale(Vec3::new(0.56, 0.014, 0.012)),
                     ));
                 }
-                c.spawn((Mesh3d(a.cube.clone()), MeshMaterial3d(a.iron.clone()), Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(0.035, 0.03, 0.05))));
+                c.spawn((
+                    Mesh3d(a.cube.clone()),
+                    MeshMaterial3d(a.iron.clone()),
+                    Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(0.035, 0.03, 0.05)),
+                ));
             } else {
                 // Тигель из огнеупорной глины, металл светится в устье.
-                c.spawn((Mesh3d(a.cyl.clone()), MeshMaterial3d(a.clay.clone()), Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(0.13, 0.16, 0.13))));
-                c.spawn((PieceBody, Mesh3d(a.cyl.clone()), MeshMaterial3d(body_mat), Transform::from_xyz(0.0, 0.081, 0.0).with_scale(Vec3::new(0.11, 0.004, 0.11))));
+                c.spawn((
+                    Mesh3d(a.cyl.clone()),
+                    MeshMaterial3d(a.clay.clone()),
+                    Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(0.13, 0.16, 0.13)),
+                ));
+                c.spawn((
+                    PieceBody,
+                    Mesh3d(a.cyl.clone()),
+                    MeshMaterial3d(body_mat),
+                    Transform::from_xyz(0.0, 0.081, 0.0).with_scale(Vec3::new(0.11, 0.004, 0.11)),
+                ));
                 // Струя в форму.
-                c.spawn((PieceStream, Mesh3d(a.cyl.clone()), MeshMaterial3d(a.spark_hot.clone()), Transform::from_xyz(0.07, -0.2, 0.0).with_scale(Vec3::new(0.018, 0.55, 0.018)), Visibility::Hidden, NotShadowCaster));
+                c.spawn((
+                    PieceStream,
+                    Mesh3d(a.cyl.clone()),
+                    MeshMaterial3d(a.spark_hot.clone()),
+                    Transform::from_xyz(0.07, -0.2, 0.0).with_scale(Vec3::new(0.018, 0.55, 0.018)),
+                    Visibility::Hidden,
+                    NotShadowCaster,
+                ));
                 // Клещи-обхват тигля.
-                c.spawn((Mesh3d(a.cube.clone()), MeshMaterial3d(a.iron.clone()), Transform::from_xyz(-0.32, 0.02, 0.0).with_scale(Vec3::new(0.5, 0.016, 0.016))));
-                c.spawn((Mesh3d(a.cyl.clone()), MeshMaterial3d(a.iron.clone()), Transform::from_xyz(0.0, 0.02, 0.0).with_scale(Vec3::new(0.145, 0.02, 0.145))));
+                c.spawn((
+                    Mesh3d(a.cube.clone()),
+                    MeshMaterial3d(a.iron.clone()),
+                    Transform::from_xyz(-0.32, 0.02, 0.0).with_scale(Vec3::new(0.5, 0.016, 0.016)),
+                ));
+                c.spawn((
+                    Mesh3d(a.cyl.clone()),
+                    MeshMaterial3d(a.iron.clone()),
+                    Transform::from_xyz(0.0, 0.02, 0.0).with_scale(Vec3::new(0.145, 0.02, 0.145)),
+                ));
             }
         });
     let _ = &a.stone;
@@ -1042,7 +1583,12 @@ fn dips(
         {
             let (_, side) = axes(st);
             let at = anvil_top(st) - Vec3::Y * 0.55 + side * 0.0;
-            commands.spawn((PieceMould, Mesh3d(a.cube.clone()), MeshMaterial3d(a.stone.clone()), Transform::from_translation(at).with_scale(Vec3::new(0.3, 0.12, 0.22))));
+            commands.spawn((
+                PieceMould,
+                Mesh3d(a.cube.clone()),
+                MeshMaterial3d(a.stone.clone()),
+                Transform::from_translation(at).with_scale(Vec3::new(0.3, 0.12, 0.22)),
+            ));
         }
         *made = want;
     }
@@ -1053,7 +1599,9 @@ fn dips(
         {
             let (_, side) = axes(st);
             tf.translation = anvil_top(st) - Vec3::Y * 0.05 - side * 0.05;
-            tf.rotation = Quat::from_axis_angle(side.cross(Vec3::Y).normalize_or(Vec3::Z), 0.0) * Quat::from_rotation_arc(Vec3::X, side) * Quat::from_rotation_x(1.0);
+            tf.rotation = Quat::from_axis_angle(side.cross(Vec3::Y).normalize_or(Vec3::Z), 0.0)
+                * Quat::from_rotation_arc(Vec3::X, side)
+                * Quat::from_rotation_x(1.0);
         }
     }
 }
@@ -1064,7 +1612,15 @@ mod tests {
 
     #[test]
     fn sounds_are_finite_and_loud_enough() {
-        for s in [synth_clang(800.0, 0.9, 0.0, 1), synth_sizzle(2.0, false, 2), synth_sizzle(2.0, true, 3), synth_grind(4), synth_crack(5), synth_pour(6), synth_roar(0.9, 0.02, 7)] {
+        for s in [
+            synth_clang(800.0, 0.9, 0.0, 1),
+            synth_sizzle(2.0, false, 2),
+            synth_sizzle(2.0, true, 3),
+            synth_grind(4),
+            synth_crack(5),
+            synth_pour(6),
+            synth_roar(0.9, 0.02, 7),
+        ] {
             assert!(s.data.iter().all(|x| x.is_finite()));
             let peak = s.data.iter().fold(0.0f32, |a, x| a.max(x.abs()));
             assert!(peak > 0.3 && peak <= 1.0, "{peak}");
@@ -1085,7 +1641,10 @@ mod where_tests {
     #[ignore]
     fn print_forges() {
         for f in crate::level::forges() {
-            println!("{} fire {:?} anvil {:?} trough {:?} grind {:?}", f.name, f.fire, f.anvil, f.trough, f.grind);
+            println!(
+                "{} fire {:?} anvil {:?} trough {:?} grind {:?}",
+                f.name, f.fire, f.anvil, f.trough, f.grind
+            );
         }
     }
 }
@@ -1102,27 +1661,58 @@ fn demo(mut state: ResMut<SmithState>, time: Res<Time>, mut last: Local<f32>) {
         return;
     }
     let t = time.elapsed_secs();
-    let c = hold.map(|h| h - 2.0 + (t * 0.5).fract() * 2.0).unwrap_or(t % 10.0);
+    let c = hold
+        .map(|h| h - 2.0 + (t * 0.5).fract() * 2.0)
+        .unwrap_or(t % 10.0);
     let (spot, temp, blast) = match c {
         c if c < 3.0 => (Spot::Fire, 700.0 + c * 160.0, 1.0),
         c if c < 6.0 => (Spot::Anvil, 1180.0 - (c - 3.0) * 120.0, 0.3),
         c => (Spot::Anvil, (820.0 - (c - 6.0) * 400.0).max(60.0), 0.2),
     };
-    let piece = PieceView { player: 777, station: sid, spot, temp, pattern: Some(Pattern::Spatha), drawn: 0.75, pouring: false };
+    let piece = PieceView {
+        player: 777,
+        station: sid,
+        spot,
+        temp,
+        pattern: Some(Pattern::Spatha),
+        drawn: 0.75,
+        pouring: false,
+    };
     state.demo(sid, Some(piece), blast);
     let prev = *last;
     *last = c;
     if (3.0..6.0).contains(&c) && (c * 2.0).floor() != (prev * 2.0).floor() {
-        state.fx_queue.push((sid, 777, Fx::Strike { heavy: (c * 2.0) as i32 % 3 == 0, temp }));
+        state.fx_queue.push((
+            sid,
+            777,
+            Fx::Strike {
+                heavy: (c * 2.0) as i32 % 3 == 0,
+                temp,
+            },
+        ));
     }
     if c >= 6.0 && prev < 6.0 {
-        state.fx_queue.push((sid, 777, Fx::Quench { medium: Quench::Water, temp: 820.0, cracked: false }));
+        state.fx_queue.push((
+            sid,
+            777,
+            Fx::Quench {
+                medium: Quench::Water,
+                temp: 820.0,
+                cracked: false,
+            },
+        ));
     }
 }
 
 /// `MRPG_SMITH_SHOWCASE=weapons|armour[,x,y,z]`: витрина для снимков — одни и те же вещи грубой,
 /// средней и отличной работы. Ряды от камеры: грубая, средняя, отличная; по ширине — виды.
-pub fn showcase(mut commands: Commands, models: Option<Res<crate::icons::ItemModels>>, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>, mut done: Local<bool>) {
+pub fn showcase(
+    mut commands: Commands,
+    models: Option<Res<crate::icons::ItemModels>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut done: Local<bool>,
+) {
     let Some(models) = models else { return };
     if *done {
         return;
@@ -1132,23 +1722,82 @@ pub fn showcase(mut commands: Commands, models: Option<Res<crate::icons::ItemMod
     let mut it = arg.split(',');
     let mode = it.next().unwrap_or("weapons").trim().to_string();
     let v: Vec<f32> = it.filter_map(|s| s.trim().parse().ok()).collect();
-    let o = if v.len() == 3 { Vec3::new(v[0], v[1], v[2]) } else { Vec3::new(174.0, 0.0, -22.0) };
+    let o = if v.len() == 3 {
+        Vec3::new(v[0], v[1], v[2])
+    } else {
+        Vec3::new(174.0, 0.0, -22.0)
+    };
     let (kinds, dx, dz): (Vec<&str>, f32, f32) = if mode.starts_with("arm") {
-        (vec!["Спангенхельм", "Гребенчатый шлем", "Кольчуга", "Ламеллярный панцирь", "Железные поножи"], 0.85, 0.95)
+        (
+            vec![
+                "Спангенхельм",
+                "Гребенчатый шлем",
+                "Кольчуга",
+                "Ламеллярный панцирь",
+                "Железные поножи",
+            ],
+            0.85,
+            0.95,
+        )
     } else if mode.starts_with("new") {
-        (crate::arsenal::ARMS.iter().filter(|a| a.fam == crate::arsenal::Fam::Sword).map(|a| a.name).take(12).collect(), 0.32, 1.25)
-    } else if let Some(fam) = crate::arsenal::Fam::ALL.into_iter().find(|f| format!("{f:?}").eq_ignore_ascii_case(&mode)) {
+        (
+            crate::arsenal::ARMS
+                .iter()
+                .filter(|a| a.fam == crate::arsenal::Fam::Sword)
+                .map(|a| a.name)
+                .take(12)
+                .collect(),
+            0.32,
+            1.25,
+        )
+    } else if let Some(fam) = crate::arsenal::Fam::ALL
+        .into_iter()
+        .find(|f| format!("{f:?}").eq_ignore_ascii_case(&mode))
+    {
         // Витрина одного семейства: всё в один ряд, хорошее качество.
         let dx = match fam {
             crate::arsenal::Fam::Axe | crate::arsenal::Fam::Mace => 0.34,
             crate::arsenal::Fam::Head => 0.16,
             _ => 0.26,
         };
-        (crate::arsenal::ARMS.iter().filter(|a| a.fam == fam).map(|a| a.name).collect(), dx, 1.0)
+        (
+            crate::arsenal::ARMS
+                .iter()
+                .filter(|a| a.fam == fam)
+                .map(|a| a.name)
+                .collect(),
+            dx,
+            1.0,
+        )
     } else if mode == "archery" {
-        (vec!["Простой лук", "Гуннский составной лук", "Стрелы", "Бронебойные стрелы", "Трёхлопастные стрелы", "Стрелы-срезни", "Древки стрел", "Маховые перья", "Рыбий клей", "Сухожилия"], 0.3, 1.0)
+        (
+            vec![
+                "Простой лук",
+                "Гуннский составной лук",
+                "Стрелы",
+                "Бронебойные стрелы",
+                "Трёхлопастные стрелы",
+                "Стрелы-срезни",
+                "Древки стрел",
+                "Маховые перья",
+                "Рыбий клей",
+                "Сухожилия",
+            ],
+            0.3,
+            1.0,
+        )
     } else {
-        (vec!["Спата", "Кавалерийская спата", "Кинжал", "Булава", "Боевой топор"], 0.42, 1.3)
+        (
+            vec![
+                "Спата",
+                "Кавалерийская спата",
+                "Кинжал",
+                "Булава",
+                "Боевой топор",
+            ],
+            0.42,
+            1.3,
+        )
     };
     let single = !(mode.starts_with("arm") || mode.starts_with("new") || mode.starts_with("weap"));
     let looks: &[u8] = if single { &[255] } else { &[12, 100, 255] };
@@ -1156,14 +1805,29 @@ pub fn showcase(mut commands: Commands, models: Option<Res<crate::icons::ItemMod
     let d = dz * looks.len() as f32 + 0.2;
     commands.spawn((
         Mesh3d(meshes.add(Cuboid::new(w, 0.04, d))),
-        MeshMaterial3d(materials.add(StandardMaterial { base_color: Color::srgb(0.2, 0.14, 0.1), perceptual_roughness: 0.95, ..default() })),
-        Transform::from_translation(o + Vec3::new(w * 0.5 - 0.2 - dx * 0.5 + dx * 0.5, 0.02, d * 0.5 - 0.1 - dz * 0.5 + dz * 0.5)),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.2, 0.14, 0.1),
+            perceptual_roughness: 0.95,
+            ..default()
+        })),
+        Transform::from_translation(
+            o + Vec3::new(
+                w * 0.5 - 0.2 - dx * 0.5 + dx * 0.5,
+                0.02,
+                d * 0.5 - 0.1 - dz * 0.5 + dz * 0.5,
+            ),
+        ),
     ));
     for (row, f) in looks.iter().enumerate() {
         for (i, name) in kinds.iter().enumerate() {
-            let Some(base) = crate::items::ItemBaseId::find(name) else { continue };
+            let Some(base) = crate::items::ItemBaseId::find(name) else {
+                continue;
+            };
             let p = o + Vec3::new(i as f32 * dx, 0.05, row as f32 * dz);
-            let mut e = commands.spawn((WorldAssetRoot(models.get(base)), Transform::from_translation(p)));
+            let mut e = commands.spawn((
+                WorldAssetRoot(models.get(base)),
+                Transform::from_translation(p),
+            ));
             if *f < 160 {
                 e.insert(crate::rig::LookTint(*f));
             }

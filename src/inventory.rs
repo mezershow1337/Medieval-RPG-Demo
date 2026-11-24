@@ -32,7 +32,11 @@ pub struct Grid {
 
 impl Grid {
     pub fn new(w: u8, h: u8) -> Self {
-        Self { w, h, items: Vec::new() }
+        Self {
+            w,
+            h,
+            items: Vec::new(),
+        }
     }
 
     fn in_bounds(&self, x: u8, y: u8, w: u8, h: u8) -> bool {
@@ -41,7 +45,12 @@ impl Grid {
 
     /// Индексы предметов, которые пересекаются с прямоугольником.
     fn overlapping(&self, x: u8, y: u8, w: u8, h: u8) -> Vec<usize> {
-        self.items.iter().enumerate().filter(|(_, p)| p.overlaps(x, y, w, h)).map(|(i, _)| i).collect()
+        self.items
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.overlaps(x, y, w, h))
+            .map(|(i, _)| i)
+            .collect()
     }
 
     pub fn fits(&self, size: (u8, u8), x: u8, y: u8) -> bool {
@@ -71,7 +80,10 @@ pub enum Loc {
 /// Куда положить предмет.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
-    Grid { x: u8, y: u8 },
+    Grid {
+        x: u8,
+        y: u8,
+    },
     Equip(EquipSlot),
     /// Сначала в подходящие стопки, потом в первое свободное место сетки.
     Auto,
@@ -114,7 +126,10 @@ pub struct Inventory {
 
 impl Inventory {
     pub fn new(size: (u8, u8)) -> Self {
-        Self { grid: Grid::new(size.0, size.1), equipment: vec![None; EquipSlot::ALL.len()] }
+        Self {
+            grid: Grid::new(size.0, size.1),
+            equipment: vec![None; EquipSlot::ALL.len()],
+        }
     }
 
     pub fn equipped(&self, slot: EquipSlot) -> Option<&Item> {
@@ -129,9 +144,12 @@ impl Inventory {
         if let Some(p) = self.grid.items.iter().find(|p| p.item.uid == uid) {
             return Some((Loc::Grid { x: p.x, y: p.y }, &p.item));
         }
-        EquipSlot::ALL
-            .iter()
-            .find_map(|s| self.equipment[s.index()].as_ref().filter(|i| i.uid == uid).map(|i| (Loc::Equip(*s), i)))
+        EquipSlot::ALL.iter().find_map(|s| {
+            self.equipment[s.index()]
+                .as_ref()
+                .filter(|i| i.uid == uid)
+                .map(|i| (Loc::Equip(*s), i))
+        })
     }
 
     pub fn find_mut(&mut self, uid: ItemUid) -> Option<&mut Item> {
@@ -143,7 +161,11 @@ impl Inventory {
 
     /// Все предметы (сетка и экипировка).
     pub fn all_items(&self) -> impl Iterator<Item = &Item> {
-        self.grid.items.iter().map(|p| &p.item).chain(self.equipment.iter().flatten())
+        self.grid
+            .items
+            .iter()
+            .map(|p| &p.item)
+            .chain(self.equipment.iter().flatten())
     }
 
     /// Вынимает предмет и сообщает, где он лежал.
@@ -153,7 +175,10 @@ impl Inventory {
             return Some((p.item, Loc::Grid { x: p.x, y: p.y }));
         }
         for s in EquipSlot::ALL {
-            if self.equipment[s.index()].as_ref().is_some_and(|i| i.uid == uid) {
+            if self.equipment[s.index()]
+                .as_ref()
+                .is_some_and(|i| i.uid == uid)
+            {
                 return self.equipment[s.index()].take().map(|i| (i, Loc::Equip(s)));
             }
         }
@@ -172,7 +197,9 @@ impl Inventory {
                 Ok(self.equipment[slot.index()].replace(item))
             }
             Target::EquipOrAuto => match item.info().slot {
-                Some(slot) if self.equipment[slot.index()].is_none() => self.place(item, Target::Equip(slot)),
+                Some(slot) if self.equipment[slot.index()].is_none() => {
+                    self.place(item, Target::Equip(slot))
+                }
                 _ => self.place(item, Target::Auto),
             },
             Target::Auto => {
@@ -270,7 +297,11 @@ impl Inventory {
     pub fn fill(&mut self, items: Vec<Item>, equip: bool) -> Vec<Item> {
         let mut rest = Vec::new();
         for item in items {
-            let target = if equip { Target::EquipOrAuto } else { Target::Auto };
+            let target = if equip {
+                Target::EquipOrAuto
+            } else {
+                Target::Auto
+            };
             if let Err(item) = self.place(item, target) {
                 rest.push(item);
             }
@@ -281,7 +312,13 @@ impl Inventory {
 
 /// Перемещение предмета между инвентарями из среза (`src` и `dst` могут совпадать).
 /// При любой неудаче всё возвращается как было.
-pub fn transfer(invs: &mut [Inventory], src: usize, dst: usize, uid: ItemUid, target: Target) -> Result<(), MoveError> {
+pub fn transfer(
+    invs: &mut [Inventory],
+    src: usize,
+    dst: usize,
+    uid: ItemUid,
+    target: Target,
+) -> Result<(), MoveError> {
     // Инвентари маленькие, поэтому проще всего откатываться к копии.
     let backup = (invs[src].clone(), invs[dst].clone());
     let rollback = |invs: &mut [Inventory], err| {
@@ -302,8 +339,12 @@ pub fn transfer(invs: &mut [Inventory], src: usize, dst: usize, uid: ItemUid, ta
     };
     // Вытесненный предмет (или излишек стопки) идёт на освободившееся место,
     // иначе в любое свободное место сначала там, откуда брали, потом туда, куда клали.
-    let Err(displaced) = invs[src].place_if_free(displaced, from) else { return Ok(()) };
-    let Err(displaced) = invs[src].place(displaced, Target::Auto) else { return Ok(()) };
+    let Err(displaced) = invs[src].place_if_free(displaced, from) else {
+        return Ok(());
+    };
+    let Err(displaced) = invs[src].place(displaced, Target::Auto) else {
+        return Ok(());
+    };
     match invs[dst].place(displaced, Target::Auto) {
         Ok(_) => Ok(()),
         Err(_) => rollback(invs, MoveError::NoSpace),
@@ -316,7 +357,13 @@ mod tests {
     use crate::items::*;
 
     fn make(name: &str, uids: &mut UidGen) -> Item {
-        roll_item(ItemBaseId::by_name(name), Quality::Common, 1, &mut Rng::new(3), uids)
+        roll_item(
+            ItemBaseId::by_name(name),
+            Quality::Common,
+            1,
+            &mut Rng::new(3),
+            uids,
+        )
     }
 
     #[test]
@@ -347,7 +394,10 @@ mod tests {
         transfer(&mut invs, 0, 0, idb, Target::Equip(EquipSlot::MainHand)).unwrap();
         assert_eq!(invs[0].equipped(EquipSlot::MainHand).unwrap().uid, idb);
         assert!(matches!(invs[0].find(ida), Some((Loc::Grid { .. }, _))));
-        assert_eq!(transfer(&mut invs, 0, 0, ida, Target::Equip(EquipSlot::Head)), Err(MoveError::WrongSlot));
+        assert_eq!(
+            transfer(&mut invs, 0, 0, ida, Target::Equip(EquipSlot::Head)),
+            Err(MoveError::WrongSlot)
+        );
     }
 
     #[test]
@@ -356,7 +406,12 @@ mod tests {
         let mut rng = Rng::new(9);
         let gold = ItemBaseId::by_name("Фоллис");
         let mut invs = vec![Inventory::new((3, 3)), Inventory::new((3, 3))];
-        invs[0].place(roll_item(gold, Quality::Common, 90, &mut rng, &mut uids), Target::Auto).unwrap();
+        invs[0]
+            .place(
+                roll_item(gold, Quality::Common, 90, &mut rng, &mut uids),
+                Target::Auto,
+            )
+            .unwrap();
         let g2 = roll_item(gold, Quality::Common, 30, &mut rng, &mut uids);
         let g2id = g2.uid;
         invs[1].place(g2, Target::Auto).unwrap();
@@ -370,11 +425,16 @@ mod tests {
     fn full_inventory_rolls_back() {
         let mut uids = UidGen::default();
         let mut invs = vec![Inventory::new((1, 3)), Inventory::new((4, 4))];
-        invs[0].place(make("Спата", &mut uids), Target::Auto).unwrap();
+        invs[0]
+            .place(make("Спата", &mut uids), Target::Auto)
+            .unwrap();
         let axe = make("Боевой топор", &mut uids);
         let id = axe.uid;
         invs[1].place(axe, Target::Auto).unwrap();
-        assert_eq!(transfer(&mut invs, 1, 0, id, Target::Auto), Err(MoveError::NoSpace));
+        assert_eq!(
+            transfer(&mut invs, 1, 0, id, Target::Auto),
+            Err(MoveError::NoSpace)
+        );
         assert!(invs[1].find(id).is_some());
     }
 }

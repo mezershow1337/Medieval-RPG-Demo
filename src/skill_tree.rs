@@ -41,7 +41,10 @@ pub fn about(skill: Skill) -> SkillAbout {
             "Защита держит крепче, удары точнее и чуть быстрее.",
             "Настоящий бой: попадания по живому противнику, отражённые и принятые на щит удары.",
         ),
-        Skill::Archery => a("Стрелы ложатся кучнее и бьют сильнее.", "Попадания из лука по живой цели."),
+        Skill::Archery => a(
+            "Стрелы ложатся кучнее и бьют сильнее.",
+            "Попадания из лука по живой цели.",
+        ),
         Skill::Smithing => a(
             "Лучше изделия: ровнее ковка, вернее закалка, крепче сварка.",
             "Работа у горна. Подмастерьем у кузнеца рука набивается быстрее, чем по книгам.",
@@ -179,7 +182,10 @@ fn lore_label(l: Lore) -> String {
 
 /// Сколько диких трав персонаж узнаёт в лицо.
 pub fn herbs_known(k: &Knowledge) -> usize {
-    Substance::ALL.iter().filter(|s| s.is_wild() && k.knows(Lore::Identify(**s))).count()
+    Substance::ALL
+        .iter()
+        .filter(|s| s.is_wild() && k.knows(Lore::Identify(**s)))
+        .count()
 }
 
 pub struct PerkInfo {
@@ -202,15 +208,56 @@ impl Perk {
     pub const ALL: [Perk; 37] = {
         use Perk::*;
         [
-            PortersBack, HeavyHand, Hammerman, SecondWind, ArmourHabit, ForcedMarch, Drill, TurnTheBlade, Veteran, Bucellarius, SteadyAim, SteppeBow, Sagittarius, ForgeEye, Temperer,
-            Bladesmith, MasterSmith, Stoker, Zosimian, Colourman, FireMaster, Rhizotomist, HerbKnower, Pharmacist, Dresser, HerbHealer, Surgeon, Archiatros, Literate, Bookman, Rhetor,
-            KnowsPrice, Haggler, Merchant, SweetWords, Advocate, Calligrapher,
+            PortersBack,
+            HeavyHand,
+            Hammerman,
+            SecondWind,
+            ArmourHabit,
+            ForcedMarch,
+            Drill,
+            TurnTheBlade,
+            Veteran,
+            Bucellarius,
+            SteadyAim,
+            SteppeBow,
+            Sagittarius,
+            ForgeEye,
+            Temperer,
+            Bladesmith,
+            MasterSmith,
+            Stoker,
+            Zosimian,
+            Colourman,
+            FireMaster,
+            Rhizotomist,
+            HerbKnower,
+            Pharmacist,
+            Dresser,
+            HerbHealer,
+            Surgeon,
+            Archiatros,
+            Literate,
+            Bookman,
+            Rhetor,
+            KnowsPrice,
+            Haggler,
+            Merchant,
+            SweetWords,
+            Advocate,
+            Calligrapher,
         ]
     };
 
     pub fn info(self) -> PerkInfo {
         use Perk::*;
-        let p = |name, skill, tier, about, effect, needs| PerkInfo { name, skill, tier, about, effect, needs };
+        let p = |name, skill, tier, about, effect, needs| PerkInfo {
+            name,
+            skill,
+            tier,
+            about,
+            effect,
+            needs,
+        };
         match self {
             PortersBack => p(
                 "Спина грузчика",
@@ -226,7 +273,11 @@ impl Perk {
                 1,
                 "Сильный и обученный бьёт так, что щит гудит.",
                 "Урон в ближнем бою +6%.",
-                &[N::Skill(S::Strength, 35.0), N::Skill(S::Arms, 15.0), N::Perk(PortersBack)],
+                &[
+                    N::Skill(S::Strength, 35.0),
+                    N::Skill(S::Arms, 15.0),
+                    N::Perk(PortersBack),
+                ],
             ),
             Hammerman => p(
                 "Молотобоец",
@@ -234,7 +285,11 @@ impl Perk {
                 2,
                 "Подручный у горна весь день бьёт кувалдой по слову мастера.",
                 "Кузнечное дело +5 в работе, запас сил +10.",
-                &[N::Skill(S::Strength, 50.0), N::Skill(S::Smithing, 25.0), N::Perk(PortersBack)],
+                &[
+                    N::Skill(S::Strength, 50.0),
+                    N::Skill(S::Smithing, 25.0),
+                    N::Perk(PortersBack),
+                ],
             ),
             SecondWind => p(
                 "Второе дыхание",
@@ -250,7 +305,11 @@ impl Perk {
                 1,
                 "Кольчуга и шлем больше не давят: тело привыкло к железу.",
                 "Отдых +8%, шаг +3%.",
-                &[N::Skill(S::Endurance, 35.0), N::Skill(S::Strength, 20.0), N::Perk(SecondWind)],
+                &[
+                    N::Skill(S::Endurance, 35.0),
+                    N::Skill(S::Strength, 20.0),
+                    N::Perk(SecondWind),
+                ],
             ),
             ForcedMarch => p(
                 "Марш-бросок",
@@ -274,7 +333,11 @@ impl Perk {
                 1,
                 "Не ловить удар, а уводить его — и сразу бить в ответ.",
                 "Окно ответного удара после парирования длиннее.",
-                &[N::Skill(S::Arms, 35.0), N::Skill(S::Endurance, 20.0), N::Perk(Drill)],
+                &[
+                    N::Skill(S::Arms, 35.0),
+                    N::Skill(S::Endurance, 20.0),
+                    N::Perk(Drill),
+                ],
             ),
             Veteran => p(
                 "Ветеран",
@@ -282,7 +345,12 @@ impl Perk {
                 2,
                 "Пережил не одну стычку с гуннами за стенами.",
                 "Урон +6%, удары на 4% быстрее.",
-                &[N::Skill(S::Arms, 60.0), N::Skill(S::Strength, 30.0), N::Skill(S::Endurance, 30.0), N::Perk(TurnTheBlade)],
+                &[
+                    N::Skill(S::Arms, 60.0),
+                    N::Skill(S::Strength, 30.0),
+                    N::Skill(S::Endurance, 30.0),
+                    N::Perk(TurnTheBlade),
+                ],
             ),
             Bucellarius => p(
                 "Букелларий",
@@ -290,7 +358,11 @@ impl Perk {
                 3,
                 "Личный дружинник полководца: и копьём, и мечом, и луком.",
                 "Урон +5%, защита +5%.",
-                &[N::Skill(S::Arms, 80.0), N::Skill(S::Archery, 30.0), N::Perk(Veteran)],
+                &[
+                    N::Skill(S::Arms, 80.0),
+                    N::Skill(S::Archery, 30.0),
+                    N::Perk(Veteran),
+                ],
             ),
             SteadyAim => p(
                 "Верный глаз",
@@ -306,7 +378,11 @@ impl Perk {
                 1,
                 "Сложный лук из рога и жил натягивают по-гуннски, к уху.",
                 "Урон стрел +8%.",
-                &[N::Skill(S::Archery, 35.0), N::Skill(S::Strength, 25.0), N::Perk(SteadyAim)],
+                &[
+                    N::Skill(S::Archery, 35.0),
+                    N::Skill(S::Strength, 25.0),
+                    N::Perk(SteadyAim),
+                ],
             ),
             Sagittarius => p(
                 "Сагиттарий",
@@ -314,7 +390,11 @@ impl Perk {
                 2,
                 "Стрелок римского войска: бьёт в щель между щитами.",
                 "Разброс ещё −30%, урон +5%.",
-                &[N::Skill(S::Archery, 60.0), N::Skill(S::Endurance, 25.0), N::Perk(SteppeBow)],
+                &[
+                    N::Skill(S::Archery, 60.0),
+                    N::Skill(S::Endurance, 25.0),
+                    N::Perk(SteppeBow),
+                ],
             ),
             ForgeEye => p(
                 "Глаз на цвет каления",
@@ -322,7 +402,10 @@ impl Perk {
                 0,
                 "Вишнёвый, алый, соломенный — по цвету видно, когда бить.",
                 "Кузнечное дело +4 в работе.",
-                &[N::Skill(S::Smithing, 15.0), N::Lore(Lore::Technique(Technique::Forging))],
+                &[
+                    N::Skill(S::Smithing, 15.0),
+                    N::Lore(Lore::Technique(Technique::Forging)),
+                ],
             ),
             Temperer => p(
                 "Закальщик",
@@ -330,7 +413,11 @@ impl Perk {
                 1,
                 "Знает, в воду или в масло и когда вынуть.",
                 "Кузнечное дело +5 в работе.",
-                &[N::Skill(S::Smithing, 35.0), N::Lore(Lore::Technique(Technique::Quenching)), N::Perk(ForgeEye)],
+                &[
+                    N::Skill(S::Smithing, 35.0),
+                    N::Lore(Lore::Technique(Technique::Quenching)),
+                    N::Perk(ForgeEye),
+                ],
             ),
             Bladesmith => p(
                 "Клинковый мастер",
@@ -338,7 +425,12 @@ impl Perk {
                 2,
                 "Сварить пакет, наварить сталь на лезвие — для этого нужны и сила, и глаз.",
                 "Кузнечное дело +6 в работе.",
-                &[N::Skill(S::Smithing, 60.0), N::Skill(S::Strength, 35.0), N::Lore(Lore::Technique(Technique::ForgeWelding)), N::Perk(Temperer)],
+                &[
+                    N::Skill(S::Smithing, 60.0),
+                    N::Skill(S::Strength, 35.0),
+                    N::Lore(Lore::Technique(Technique::ForgeWelding)),
+                    N::Perk(Temperer),
+                ],
             ),
             MasterSmith => p(
                 "Мастер фабрики",
@@ -348,7 +440,11 @@ impl Perk {
                 "Кузнечное дело +6, алхимия +3 в работе.",
                 &[
                     N::Skill(S::Smithing, 80.0),
-                    N::AnyLore(&[Lore::Technique(Technique::Armoury), Lore::Technique(Technique::MailMaking), Lore::Technique(Technique::LostWax)]),
+                    N::AnyLore(&[
+                        Lore::Technique(Technique::Armoury),
+                        Lore::Technique(Technique::MailMaking),
+                        Lore::Technique(Technique::LostWax),
+                    ]),
                     N::Perk(Bladesmith),
                 ],
             ),
@@ -358,7 +454,15 @@ impl Perk {
                 0,
                 "Ровный жар — половина дела у любого сосуда.",
                 "Алхимия +4 в работе.",
-                &[N::Skill(S::Alchemy, 15.0), N::AnyLore(&[Lore::Technique(Technique::Fermentation), Lore::Technique(Technique::Distillation), Lore::Technique(Technique::Pottery), Lore::Technique(Technique::Glassblowing)])],
+                &[
+                    N::Skill(S::Alchemy, 15.0),
+                    N::AnyLore(&[
+                        Lore::Technique(Technique::Fermentation),
+                        Lore::Technique(Technique::Distillation),
+                        Lore::Technique(Technique::Pottery),
+                        Lore::Technique(Technique::Glassblowing),
+                    ]),
+                ],
             ),
             Zosimian => p(
                 "Ученик Зосима",
@@ -366,7 +470,12 @@ impl Perk {
                 1,
                 "Амбик, водяная баня Марии, керотакис — по книгам александрийцев.",
                 "Алхимия +5 в работе.",
-                &[N::Skill(S::Alchemy, 35.0), N::Lore(Lore::Technique(Technique::Distillation)), N::Lore(Lore::Read(Language::Greek)), N::Perk(Stoker)],
+                &[
+                    N::Skill(S::Alchemy, 35.0),
+                    N::Lore(Lore::Technique(Technique::Distillation)),
+                    N::Lore(Lore::Read(Language::Greek)),
+                    N::Perk(Stoker),
+                ],
             ),
             Colourman => p(
                 "Красильщик",
@@ -374,7 +483,12 @@ impl Perk {
                 2,
                 "Квасцы, марена, вайда: краски держатся, а травы известны.",
                 "Алхимия +4, травничество +3 в работе.",
-                &[N::Skill(S::Alchemy, 45.0), N::Skill(S::Herbalism, 25.0), N::Lore(Lore::Technique(Technique::Mordanting)), N::Perk(Stoker)],
+                &[
+                    N::Skill(S::Alchemy, 45.0),
+                    N::Skill(S::Herbalism, 25.0),
+                    N::Lore(Lore::Technique(Technique::Mordanting)),
+                    N::Perk(Stoker),
+                ],
             ),
             FireMaster => p(
                 "Мастер огня",
@@ -382,7 +496,12 @@ impl Perk {
                 3,
                 "Смола, сера и нефть для обороны стен — как у Энея Тактика.",
                 "Алхимия +6 в работе.",
-                &[N::Skill(S::Alchemy, 65.0), N::Skill(S::Smithing, 20.0), N::Lore(Lore::Technique(Technique::Incendiary)), N::Perk(Zosimian)],
+                &[
+                    N::Skill(S::Alchemy, 65.0),
+                    N::Skill(S::Smithing, 20.0),
+                    N::Lore(Lore::Technique(Technique::Incendiary)),
+                    N::Perk(Zosimian),
+                ],
             ),
             Rhizotomist => p(
                 "Корнерез",
@@ -390,7 +509,10 @@ impl Perk {
                 0,
                 "Ризотом знает, когда и как брать траву, не губя корня.",
                 "Травничество +4 в работе.",
-                &[N::Skill(S::Herbalism, 15.0), N::Lore(Lore::Technique(Technique::Gathering))],
+                &[
+                    N::Skill(S::Herbalism, 15.0),
+                    N::Lore(Lore::Technique(Technique::Gathering)),
+                ],
             ),
             HerbKnower => p(
                 "Знаток трав",
@@ -398,7 +520,11 @@ impl Perk {
                 1,
                 "Узнаёт в степи десяток трав с первого взгляда.",
                 "Травничество +5 в работе.",
-                &[N::Skill(S::Herbalism, 30.0), N::HerbsKnown(8), N::Perk(Rhizotomist)],
+                &[
+                    N::Skill(S::Herbalism, 30.0),
+                    N::HerbsKnown(8),
+                    N::Perk(Rhizotomist),
+                ],
             ),
             Pharmacist => p(
                 "Мирепс",
@@ -406,7 +532,13 @@ impl Perk {
                 2,
                 "Аптекарь: отвары и мази по мере и весу.",
                 "Травничество +4, врачевание +3 в работе.",
-                &[N::Skill(S::Herbalism, 50.0), N::Skill(S::Medicine, 15.0), N::Lore(Lore::Technique(Technique::Decoction)), N::Lore(Lore::Technique(Technique::Salve)), N::Perk(HerbKnower)],
+                &[
+                    N::Skill(S::Herbalism, 50.0),
+                    N::Skill(S::Medicine, 15.0),
+                    N::Lore(Lore::Technique(Technique::Decoction)),
+                    N::Lore(Lore::Technique(Technique::Salve)),
+                    N::Perk(HerbKnower),
+                ],
             ),
             Dresser => p(
                 "Перевязчик",
@@ -414,7 +546,10 @@ impl Perk {
                 0,
                 "Промыть, перевязать, не занести грязи.",
                 "Врачевание +4 в работе.",
-                &[N::Skill(S::Medicine, 15.0), N::Lore(Lore::Technique(Technique::WoundWashing))],
+                &[
+                    N::Skill(S::Medicine, 15.0),
+                    N::Lore(Lore::Technique(Technique::WoundWashing)),
+                ],
             ),
             HerbHealer => p(
                 "Травник-лекарь",
@@ -422,7 +557,12 @@ impl Perk {
                 1,
                 "Лечит не только руками, но и травой.",
                 "Врачевание +5 в работе.",
-                &[N::Skill(S::Medicine, 30.0), N::Skill(S::Herbalism, 25.0), N::Perk(Dresser), N::Perk(Rhizotomist)],
+                &[
+                    N::Skill(S::Medicine, 30.0),
+                    N::Skill(S::Herbalism, 25.0),
+                    N::Perk(Dresser),
+                    N::Perk(Rhizotomist),
+                ],
             ),
             Surgeon => p(
                 "Хирург",
@@ -430,7 +570,12 @@ impl Perk {
                 2,
                 "Вынуть наконечник и вправить кость — по Цельсу и Гиппократу.",
                 "Врачевание +6 в работе.",
-                &[N::Skill(S::Medicine, 50.0), N::Lore(Lore::Technique(Technique::ArrowExtraction)), N::Lore(Lore::Technique(Technique::Bonesetting)), N::Perk(HerbHealer)],
+                &[
+                    N::Skill(S::Medicine, 50.0),
+                    N::Lore(Lore::Technique(Technique::ArrowExtraction)),
+                    N::Lore(Lore::Technique(Technique::Bonesetting)),
+                    N::Perk(HerbHealer),
+                ],
             ),
             Archiatros => p(
                 "Архиатр",
@@ -438,7 +583,12 @@ impl Perk {
                 3,
                 "Городской врач: его зовут к епископу и к комиту.",
                 "Врачевание +6 в работе.",
-                &[N::Skill(S::Medicine, 75.0), N::Skill(S::Letters, 40.0), N::Lore(Lore::Technique(Technique::Theriac)), N::Perk(Surgeon)],
+                &[
+                    N::Skill(S::Medicine, 75.0),
+                    N::Skill(S::Letters, 40.0),
+                    N::Lore(Lore::Technique(Technique::Theriac)),
+                    N::Perk(Surgeon),
+                ],
             ),
             Literate => p(
                 "Грамотей",
@@ -462,7 +612,11 @@ impl Perk {
                 2,
                 "Знает и латынь: читает Цельса и Плиния, пишет прошения комиту.",
                 "Чтение +15%, уроки +10%, торг +2%.",
-                &[N::Skill(S::Letters, 55.0), N::Lore(Lore::Read(Language::Latin)), N::Perk(Bookman)],
+                &[
+                    N::Skill(S::Letters, 55.0),
+                    N::Lore(Lore::Read(Language::Latin)),
+                    N::Perk(Bookman),
+                ],
             ),
             Calligrapher => p(
                 "Каллиграф",
@@ -470,7 +624,12 @@ impl Perk {
                 3,
                 "Твёрдая рука книгописца: ровные строки унциала, ни одной пропущенной строки.",
                 "Переписка +30% быстрее, чтение +10%.",
-                &[N::Skill(S::Letters, 65.0), N::Lore(Lore::Write(Language::Greek)), N::Lore(Lore::Grammar), N::Perk(Rhetor)],
+                &[
+                    N::Skill(S::Letters, 65.0),
+                    N::Lore(Lore::Write(Language::Greek)),
+                    N::Lore(Lore::Grammar),
+                    N::Perk(Rhetor),
+                ],
             ),
             KnowsPrice => p(
                 "Знает цену",
@@ -480,14 +639,26 @@ impl Perk {
                 "Покупка −3%, продажа +3%.",
                 &[N::Skill(S::Trade, 15.0)],
             ),
-            Haggler => p("Торгаш", S::Trade, 1, "Торгуется до последнего фоллиса.", "Покупка −3%, продажа +3%.", &[N::Skill(S::Trade, 35.0), N::Perk(KnowsPrice)]),
+            Haggler => p(
+                "Торгаш",
+                S::Trade,
+                1,
+                "Торгуется до последнего фоллиса.",
+                "Покупка −3%, продажа +3%.",
+                &[N::Skill(S::Trade, 35.0), N::Perk(KnowsPrice)],
+            ),
             Merchant => p(
                 "Купец",
                 S::Trade,
                 2,
                 "Ведёт счета на табличках и знает, куда что везти.",
                 "Покупка −4%, продажа +4%.",
-                &[N::Skill(S::Trade, 60.0), N::Skill(S::Letters, 25.0), N::Lore(Lore::Reckon), N::Perk(Haggler)],
+                &[
+                    N::Skill(S::Trade, 60.0),
+                    N::Skill(S::Letters, 25.0),
+                    N::Lore(Lore::Reckon),
+                    N::Perk(Haggler),
+                ],
             ),
             SweetWords => p(
                 "Ласковое слово",
@@ -503,7 +674,11 @@ impl Perk {
                 1,
                 "Знает, на какой закон сослаться и чьё имя назвать в претории.",
                 "Уговорить стражу ещё легче (+10%), торг +2%.",
-                &[N::Skill(S::Eloquence, 40.0), N::Skill(S::Letters, 20.0), N::Perk(SweetWords)],
+                &[
+                    N::Skill(S::Eloquence, 40.0),
+                    N::Skill(S::Letters, 20.0),
+                    N::Perk(SweetWords),
+                ],
             ),
         }
     }
@@ -537,7 +712,12 @@ impl Perk {
 
     /// Чего ещё не хватает (пусто — умение есть или вот-вот будет).
     pub fn missing(self, k: &Knowledge, earned: &[Perk]) -> Vec<Need> {
-        self.info().needs.iter().filter(|n| !n.met(k, earned)).copied().collect()
+        self.info()
+            .needs
+            .iter()
+            .filter(|n| !n.met(k, earned))
+            .copied()
+            .collect()
     }
 
     /// Другие ветви, от которых зависит умение (для подсветки связей).
@@ -774,8 +954,16 @@ mod tests {
     #[test]
     fn every_branch_has_a_first_step_and_tiers_are_sorted() {
         for s in Skill::ALL {
-            let tiers: Vec<u8> = Perk::ALL.iter().filter(|p| p.info().skill == s).map(|p| p.info().tier).collect();
-            assert!(tiers.contains(&0), "у ветви {} нет первой ступени", s.name());
+            let tiers: Vec<u8> = Perk::ALL
+                .iter()
+                .filter(|p| p.info().skill == s)
+                .map(|p| p.info().tier)
+                .collect();
+            assert!(
+                tiers.contains(&0),
+                "у ветви {} нет первой ступени",
+                s.name()
+            );
             assert!(tiers.windows(2).all(|w| w[0] <= w[1]));
         }
     }
@@ -783,10 +971,14 @@ mod tests {
     #[test]
     fn tree_is_connected_across_branches() {
         // Почти каждая ветвь опирается на другую — древо связано.
-        let linked: std::collections::BTreeSet<Skill> = Perk::ALL.iter().flat_map(|p| p.links()).collect();
+        let linked: std::collections::BTreeSet<Skill> =
+            Perk::ALL.iter().flat_map(|p| p.links()).collect();
         assert!(linked.len() >= 7, "связей мало: {linked:?}");
         for s in Skill::ALL {
-            let out = Perk::ALL.iter().filter(|p| p.info().skill == s).any(|p| !p.links().is_empty());
+            let out = Perk::ALL
+                .iter()
+                .filter(|p| p.info().skill == s)
+                .any(|p| !p.links().is_empty());
             let into = Perk::ALL.iter().any(|p| p.links().contains(&s));
             assert!(out || into, "ветвь {} ни с чем не связана", s.name());
         }
@@ -839,7 +1031,15 @@ mod tests {
         for t in Technique::ALL {
             k.learn(Lore::Technique(t));
         }
-        for l in [Lore::Alphabet, Lore::Read(Language::Greek), Lore::Write(Language::Greek), Lore::Reckon, Lore::Grammar, Lore::Read(Language::Latin), Lore::Write(Language::Latin)] {
+        for l in [
+            Lore::Alphabet,
+            Lore::Read(Language::Greek),
+            Lore::Write(Language::Greek),
+            Lore::Reckon,
+            Lore::Grammar,
+            Lore::Read(Language::Latin),
+            Lore::Write(Language::Latin),
+        ] {
             k.learn(l);
         }
         for s in Substance::ALL {

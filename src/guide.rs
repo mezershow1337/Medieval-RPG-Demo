@@ -88,11 +88,13 @@ fn controls_page() -> Vec<String> {
 
 /// Где стоит место (название для журнала).
 fn place_name(id: &str) -> String {
-    crate::level::place(id).map(|p| p.name.to_string()).unwrap_or_else(|| match id {
-        "church_west" => "Западная церковь".into(),
-        "goth_village" => "Готское селение".into(),
-        _ => id.replace('_', " "),
-    })
+    crate::level::place(id)
+        .map(|p| p.name.to_string())
+        .unwrap_or_else(|| match id {
+            "church_west" => "Западная церковь".into(),
+            "goth_village" => "Готское селение".into(),
+            _ => id.replace('_', " "),
+        })
 }
 
 /// Кто учит навыку: (мастер, где, чему: «урок» / «подмастерье»).
@@ -114,21 +116,48 @@ pub fn teachers(skill: Skill) -> Vec<String> {
             }
         }
         if !modes.is_empty() {
-            out.push(format!("{} ({}, {}) — {}", m.name, m.title, place_name(m.place), modes.join(" и ")));
+            out.push(format!(
+                "{} ({}, {}) — {}",
+                m.name,
+                m.title,
+                place_name(m.place),
+                modes.join(" и ")
+            ));
         }
     }
     // Мастера вне лавок (стоят сами по себе или живут в городе, см. knowledge.rs и school.rs).
     let schooling = [
-        (Teacher::Grammatist, "didaskaleion", "школа с рассвета до полудня: азбука, чтение, счёт, письмо — дёшево"),
-        (Teacher::Grammarian, "library", "письмо, грамматика и латынь — дорого"),
-        (Teacher::Scribe, "church_west", "азбука, чтение и письмо по Псалтири"),
+        (
+            Teacher::Grammatist,
+            "didaskaleion",
+            "школа с рассвета до полудня: азбука, чтение, счёт, письмо — дёшево",
+        ),
+        (
+            Teacher::Grammarian,
+            "library",
+            "письмо, грамматика и латынь — дорого",
+        ),
+        (
+            Teacher::Scribe,
+            "church_west",
+            "азбука, чтение и письмо по Псалтири",
+        ),
         (Teacher::Notary, "praetorium", "письмо и счёт"),
         (Teacher::Logograph, "agora", "письмо и грамматика"),
-        (Teacher::Wisewoman, "goth_village", "уроки и работа подмастерьем"),
+        (
+            Teacher::Wisewoman,
+            "goth_village",
+            "уроки и работа подмастерьем",
+        ),
     ];
     for (teacher, place, what) in schooling {
         if teacher.skill() == Some(skill) {
-            out.push(format!("{} ({}) — {}", teacher.name(), place_name(place), what));
+            out.push(format!(
+                "{} ({}) — {}",
+                teacher.name(),
+                place_name(place),
+                what
+            ));
         }
     }
     out
@@ -141,7 +170,10 @@ pub fn books(skill: Skill) -> Vec<String> {
         .filter(|b| match skill {
             // Для книжности годится любая книга.
             Skill::Letters => !matches!(b, Book::HerbalFragment),
-            _ => b.teaches().iter().any(|l| l.skill() == Some(skill)) || (skill == Skill::Herbalism && *b == Book::HerbalFragment),
+            _ => {
+                b.teaches().iter().any(|l| l.skill() == Some(skill))
+                    || (skill == Skill::Herbalism && *b == Book::HerbalFragment)
+            }
         })
         .map(|b| {
             let i = b.info();
@@ -152,15 +184,28 @@ pub fn books(skill: Skill) -> Vec<String> {
 
 fn skill_page(skill: Skill) -> Vec<String> {
     let about = skill_tree::about(skill);
-    let mut v = vec![format!("Даёт: {}", about.gives), format!("Растёт: {}", about.grows)];
+    let mut v = vec![
+        format!("Даёт: {}", about.gives),
+        format!("Растёт: {}", about.grows),
+    ];
     let spill = skill.spillover();
     if !spill.is_empty() {
         let names: Vec<&str> = spill.iter().map(|(s, _)| s.name()).collect();
-        v.push(format!("Вместе с ним понемногу растёт: {}.", names.join(", ").to_lowercase()));
+        v.push(format!(
+            "Вместе с ним понемногу растёт: {}.",
+            names.join(", ").to_lowercase()
+        ));
     }
-    let from: Vec<&str> = Skill::ALL.iter().filter(|s| s.spillover().iter().any(|(t, _)| *t == skill)).map(|s| s.name()).collect();
+    let from: Vec<&str> = Skill::ALL
+        .iter()
+        .filter(|s| s.spillover().iter().any(|(t, _)| *t == skill))
+        .map(|s| s.name())
+        .collect();
     if !from.is_empty() {
-        v.push(format!("Сам растёт и от дел: {}.", from.join(", ").to_lowercase()));
+        v.push(format!(
+            "Сам растёт и от дел: {}.",
+            from.join(", ").to_lowercase()
+        ));
     }
     v.push("# Кто учит".into());
     let t = teachers(skill);
@@ -185,7 +230,12 @@ fn skill_page(skill: Skill) -> Vec<String> {
     for p in Perk::ALL.iter().filter(|p| p.info().skill == skill) {
         let i = p.info();
         let needs: Vec<String> = i.needs.iter().map(|n| n.label()).collect();
-        v.push(format!("{} — {} Нужно: {}.", i.name, i.effect, needs.join(", ")));
+        v.push(format!(
+            "{} — {} Нужно: {}.",
+            i.name,
+            i.effect,
+            needs.join(", ")
+        ));
     }
     v
 }
@@ -223,7 +273,13 @@ mod tests {
 
     #[test]
     fn crafts_have_teachers_and_books() {
-        for s in [Skill::Medicine, Skill::Herbalism, Skill::Alchemy, Skill::Smithing, Skill::Letters] {
+        for s in [
+            Skill::Medicine,
+            Skill::Herbalism,
+            Skill::Alchemy,
+            Skill::Smithing,
+            Skill::Letters,
+        ] {
             assert!(!teachers(s).is_empty(), "некому учить: {}", s.name());
             assert!(!books(s).is_empty(), "нет книг: {}", s.name());
         }
@@ -232,9 +288,28 @@ mod tests {
     #[test]
     fn named_people_in_start_page_exist() {
         let text = start_page().join(" ") + &law_page().join(" ");
-        for name in ["Иоанн-книжник", "Харитон-ризотом", "Стефан-аптекарь", "Филипп", "Ятрос Агапий", "Актуарий Маркиан"] {
-            assert!(crate::trade::MERCHANTS.iter().any(|m| m.name == name), "нет такого торговца: {name}");
-            let word = name.split(['-', ' ']).nth(if name.starts_with("Ятрос") || name.starts_with("Актуарий") { 1 } else { 0 }).unwrap();
+        for name in [
+            "Иоанн-книжник",
+            "Харитон-ризотом",
+            "Стефан-аптекарь",
+            "Филипп",
+            "Ятрос Агапий",
+            "Актуарий Маркиан",
+        ] {
+            assert!(
+                crate::trade::MERCHANTS.iter().any(|m| m.name == name),
+                "нет такого торговца: {name}"
+            );
+            let word = name
+                .split(['-', ' '])
+                .nth(
+                    if name.starts_with("Ятрос") || name.starts_with("Актуарий") {
+                        1
+                    } else {
+                        0
+                    },
+                )
+                .unwrap();
             // Имя склоняется: сверяем основу.
             let stem: String = word.chars().take(4).collect();
             assert!(text.contains(&stem), "{stem}");

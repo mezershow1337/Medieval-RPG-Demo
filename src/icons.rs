@@ -32,11 +32,15 @@ pub use shapes::ITEM_SHAPES;
 /// Половинные размеры коробки, в которую вписана 3D-модель предмета (низ модели — на y = 0).
 pub fn model_half_extents(base: ItemBaseId) -> [f32; 3] {
     let key = art_key(base);
-    ITEM_SHAPES.iter().find(|(k, _)| *k == key).map(|(_, h)| *h).unwrap_or_else(|| {
-        // Модели ещё нет и размеров нет: оцениваем по клеткам инвентаря (клетка ≈ 9 см).
-        let (w, h) = base.base().size;
-        [0.045 * w as f32, 0.04, 0.045 * h as f32]
-    })
+    ITEM_SHAPES
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, h)| *h)
+        .unwrap_or_else(|| {
+            // Модели ещё нет и размеров нет: оцениваем по клеткам инвентаря (клетка ≈ 9 см).
+            let (w, h) = base.base().size;
+            [0.045 * w as f32, 0.04, 0.045 * h as f32]
+        })
 }
 
 /// Модель для предметов, у которых своей пока нет.
@@ -81,7 +85,11 @@ impl ItemModels {
     }
 }
 
-pub fn setup_icons(mut commands: Commands, assets: Res<AssetServer>, mut images: ResMut<Assets<Image>>) {
+pub fn setup_icons(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    mut images: ResMut<Assets<Image>>,
+) {
     let icons = (0..ITEM_BASES.len())
         .map(|i| {
             let base = ItemBaseId(i as u16);
@@ -95,7 +103,13 @@ pub fn setup_icons(mut commands: Commands, assets: Res<AssetServer>, mut images:
 }
 
 pub fn setup_models(mut commands: Commands, assets: Res<AssetServer>) {
-    let models = (0..ITEM_BASES.len()).map(|i| assets.load(GltfAssetLabel::Scene(0).from_asset(model_path(art_key(ItemBaseId(i as u16)))))).collect();
+    let models = (0..ITEM_BASES.len())
+        .map(|i| {
+            assets.load(
+                GltfAssetLabel::Scene(0).from_asset(model_path(art_key(ItemBaseId(i as u16)))),
+            )
+        })
+        .collect();
     commands.insert_resource(ItemModels(models));
 }
 
@@ -116,14 +130,22 @@ mod tests {
     #[test]
     fn art_names_match_items() {
         for (name, _) in ITEM_ART {
-            assert!(ITEM_BASES.iter().any(|b| b.name == *name), "в ITEM_ART есть «{name}», а такого предмета нет");
+            assert!(
+                ITEM_BASES.iter().any(|b| b.name == *name),
+                "в ITEM_ART есть «{name}», а такого предмета нет"
+            );
         }
     }
 
     #[test]
     fn items_without_art_still_have_icons() {
         // Новые предметы без модели получают мешочек, но список здесь подскажет, что её нет.
-        let missing: Vec<_> = ITEM_BASES.iter().enumerate().filter(|(i, _)| own_art(ItemBaseId(*i as u16)).is_none()).map(|(_, b)| b.name).collect();
+        let missing: Vec<_> = ITEM_BASES
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| own_art(ItemBaseId(*i as u16)).is_none())
+            .map(|(_, b)| b.name)
+            .collect();
         if !missing.is_empty() {
             eprintln!("Предметы без своей 3D-модели (временная плоская иконка): {missing:?}");
         }
@@ -132,7 +154,11 @@ mod tests {
             let base = ItemBaseId(i as u16);
             if own_art(base).is_none() {
                 let (w, h, data) = flat::render_icon(base);
-                assert!(w > 0 && h > 0 && data.chunks(4).any(|p| p[3] > 128), "пустая иконка «{}»", base.base().name);
+                assert!(
+                    w > 0 && h > 0 && data.chunks(4).any(|p| p[3] > 128),
+                    "пустая иконка «{}»",
+                    base.base().name
+                );
             }
         }
     }
@@ -141,9 +167,20 @@ mod tests {
     fn art_files_exist_and_icons_fit_cells() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
         let check = |key: &str, size: (u8, u8)| {
-            assert!(root.join(model_path(key)).exists(), "нет модели {}", model_path(key));
+            assert!(
+                root.join(model_path(key)).exists(),
+                "нет модели {}",
+                model_path(key)
+            );
             let (w, h) = png_size(&root.join(icon_path(key)));
-            assert_eq!((w, h), (size.0 as u32 * ICON_PX_PER_CELL, size.1 as u32 * ICON_PX_PER_CELL), "иконка {key} не по размеру клеток предмета");
+            assert_eq!(
+                (w, h),
+                (
+                    size.0 as u32 * ICON_PX_PER_CELL,
+                    size.1 as u32 * ICON_PX_PER_CELL
+                ),
+                "иконка {key} не по размеру клеток предмета"
+            );
         };
         for (name, key) in ITEM_ART {
             let base = ITEM_BASES.iter().find(|b| b.name == *name).unwrap();

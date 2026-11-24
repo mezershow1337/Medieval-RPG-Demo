@@ -8,8 +8,8 @@
 // Часть полей и функций — для систем, которые подключат их позже (обучение, алхимия, задания).
 #![allow(dead_code)]
 
-use super::city::{self, crafts, houses, kit::Side, outside::mines, port, public};
 pub use super::city::outside::mines::{MineSite, PileSpot, WorkSpots};
+use super::city::{self, crafts, houses, kit::Side, outside::mines, port, public};
 use super::terrain::{self, ground_y};
 use super::{LevelKind, active};
 use bevy::prelude::*;
@@ -137,64 +137,427 @@ fn city_places() -> Vec<Place> {
     let gb = city::outside::goth_bloomery_rect();
     let sf = city::outside::steppe_forge_rect();
     let af = city::outside::alan_forge_rect();
-    let smith_point = |r: city::kit::Rect, dx: f32, dz: f32| Vec3::new(r.cx() + dx, city::outside::smith_floor(r), r.cz() + dz);
+    let smith_point = |r: city::kit::Rect, dx: f32, dz: f32| {
+        Vec3::new(r.cx() + dx, city::outside::smith_floor(r), r.cz() + dz)
+    };
     let wn = crafts::winery_rect();
     let fw = city::block(8, -3);
     let hr = city::block(18, 2);
     let sp = spring_pos();
     let flat = |x: f32, z: f32| Vec3::new(x, 0.0, z);
-    let p = |id, name, greek, kind, pos: Vec3, radius| Place { id, name, greek, kind, pos, radius };
+    let p = |id, name, greek, kind, pos: Vec3, radius| Place {
+        id,
+        name,
+        greek,
+        kind,
+        pos,
+        radius,
+    };
     vec![
-        p("agora", "Агора", "ἀγορά", Agora, flat(a.cx() - 6.0, a.cz() + 2.0), 22.0),
-        p("basilica", "Епископская базилика", "βασιλική", Basilica, flat(bp.naos.x0 + 3.0, bp.naos.cz()), 14.0),
-        p("baptistery", "Баптистерий", "βαπτιστήριον", Baptistery, flat(bp.baptistery.x0 + 1.2, bp.baptistery.cz()), 4.0),
-        p("xenon", "Ксенон (больница)", "ξενών", Hospital, public::xenon_ward(), 8.0),
-        p("xenon_garden", "Аптекарский огород ксенона", "κῆπος", HerbGarden, flat(xc.x0 + 1.7, xc.cz()), 6.0),
-        p("iatreion", "Ятрейон (кабинет врача)", "ἰατρεῖον", Hospital, flat(xr.x0 + 4.35, xc.z0 + xc.d() / 4.0 + 1.3), 3.0),
-        p("didaskaleion", "Дидаскалион (школа)", "διδασκαλεῖον", School, dc.center(0.0), 8.0),
-        p("library", "Книгохранилище дидаскалиона", "βιβλιοθήκη", Library, flat(dr.x0 + 3.75, dc.z0 + dc.d() / 4.0 + 1.3), 3.0),
-        p("bookseller", "Лавка книжника", "βιβλιοπωλεῖον", Bookseller, houses::shop_point(16, -2, Side::S), 2.5),
-        p("apothecary_agora", "Аптека у агоры", "μυροπωλεῖον", Apothecary, houses::shop_point(17, -2, Side::S), 2.5),
-        p("apothecary_port", "Аптека у порта", "πιγμεντάριον", Apothecary, houses::shop_point(17, 1, Side::N), 2.5),
-        p("tavern", "Корчма у главной улицы", "καπηλεῖον", Tavern, houses::shop_point(7, 1, Side::N), 3.0),
-        p("tavern_port", "Корчма портового торга", "καπηλεῖον", Tavern, port::tavern_port_point(), 3.0),
-        p("exiles_house", "Дом знатных ссыльных", "οἶκος", ExilesHouse, flat(er.cx(), er.z0 + 3.0), 10.0),
-        p("thermae", "Термы", "βαλανεῖον", Thermae, flat(tr.x0 + 3.0, tr.z0 + 3.0), 20.0),
-        p("theatre", "Заброшенный театр", "θέατρον", Theatre, public::theatre_center(), 25.0),
-        p("reservoir", "Резервуар водопровода", "δεξαμενή", Cistern, flat(rr.cx(), rr.z0 - 2.5), 15.0),
-        p("garrison", "Цитадель, плац гарнизона", "κάστρον", Garrison, public::garrison_point(), 15.0),
-        p("praetorium", "Претория", "πραιτώριον", Praetorium, flat(cit.x0 + 15.0, cit.z0 + 13.0), 8.0),
-        p("main_gate", "Главные ворота", "πύλη", Gate, flat(gx + 3.0, 157.0), 6.0),
-        p("south_gate", "Южные ворота", "πύλη", Gate, flat(sx, 157.0), 6.0),
-        p("port_gate", "Портовые ворота", "πύλη", Gate, flat(276.0, -6.0), 5.0),
-        p("port_market", "Портовый торг (эмпорий)", "ἐμπόριον", PortMarket, port::market_point(), 10.0),
-        p("customs", "Таможня (коммеркиарий)", "κομμερκιάριον", Customs, port::customs_point(), 6.0),
-        p("horrea", "Склады (горреи)", "ὅρρεα", Warehouse, flat(hr.cx(), hr.z0 - 2.0), 20.0),
-        p("fish_salting", "Рыбозасолочные цистерны у базилики", "ταριχεία", FishSalting, crafts::fish_salting_point(), 15.0),
-        p("fish_salting_west", "Рыбозасолочные цистерны у стены", "ταριχεία", FishSalting, flat(fw.cx(), fw.z0 + 5.0), 10.0),
-        p("glassworks", "Стекольная мастерская", "ὑελουργεῖον", Glassworks, flat(gw.cx(), gw.z1 - 3.0), 10.0),
-        p("pottery", "Гончарная мастерская", "κεραμεῖον", Pottery, flat(pt.cx(), pt.z0 + 3.0), 10.0),
-        p("smithy", "Кузница", "χαλκεῖον", Smithy, flat(sm.cx() + 1.5, sm.z0 + 3.0), 8.0),
-        p("armoury", "Оружейная мастерская гарнизона", "φαβρίκα", Smithy, flat(ar.x0 + 7.0, ar.z0 + 6.5), 8.0),
-        p("winery", "Винодельня (тарапан)", "ληνός", Winery, flat(wn.cx(), wn.z0 + 3.0), 10.0),
-        p("church_west", "Западная церковь", "ἐκκλησία", Church, flat(wc.x0 + 4.0, wc.cz()), 8.0),
-        p("quay", "Набережная Карантинной бухты", "λιμήν", Quay, flat(293.0, 60.0), 30.0),
-        p("necropolis", "Некрополь", "νεκρόπολις", Necropolis, on_ground(NECROPOLIS.x, NECROPOLIS.z), 45.0),
-        p("kleros", "Клер (усадьба с виноградником)", "κλῆρος", Vineyard, Vec3::new(KLEROS_FARM.x + 7.0, city::outside::kleros_floor(), KLEROS_FARM.z + 7.5), 60.0),
-        p("spring", "Родник в балке", "κρήνη", Spring, on_ground(sp.x + 3.0, sp.z), 6.0),
-        p("steppe_camp", "Стан кочевников", "—", SteppeCamp, on_ground(STEPPE_CAMP.x, STEPPE_CAMP.z + 3.0), 25.0),
-        p("goth_village", "Готское селение", "—", GothVillage, on_ground(GOTH_VILLAGE.x, GOTH_VILLAGE.z), 30.0),
-        p("alan_camp", "Аланский стан", "—", AlanCamp, on_ground(ALAN_CAMP.x, ALAN_CAMP.z + 3.0), 25.0),
-        p("goth_smithy", "Кузница готов", "—", Smithy, smith_point(gs, 1.6, 1.4), 6.0),
-        p("goth_bloomery", "Сыродутный горн готов", "—", Smithy, smith_point(gb, 1.6, -1.6), 4.0),
-        p("steppe_forge", "Горн кочевого кузнеца", "—", Smithy, smith_point(sf, 1.6, 1.4), 4.0),
-        p("alan_forge", "Горн аланского кузнеца", "—", Smithy, smith_point(af, 1.4, 1.3), 4.0),
-        p("mine", "Рудник на рудной горке", "μέταλλον", Mine, mines::mine_yard() + Vec3::new(-4.5, 0.0, -2.0), 20.0),
-        p("bog_ore", "Рыжая мочажина (болотная руда)", "—", BogOre, on_ground(mines::west_ravine_x(458.0) + 6.0, 458.0), 20.0),
-        p("charcoal_camp", "Стан углежогов", "—", CharcoalCamp, on_ground(mines::CHARCOAL_CAMP.x - 1.0, mines::CHARCOAL_CAMP.y - 1.0), 18.0),
-        p("clay_pit", "Глиняный карьер", "—", ClayPit, on_ground(mines::CLAY_PIT.x, mines::CLAY_PIT.y - 6.5), 8.0),
-        p("sand_beach", "Песок у Песочной бухты", "—", Beach, on_ground(mines::SAND_BEACH.x + 2.0, mines::SAND_BEACH.y + 3.0), 10.0),
-        p("quarry", "Каменоломня за бухтой", "λατομεῖον", Quarry, on_ground(mines::QUARRY.x, mines::QUARRY.y - 9.0), 14.0),
+        p(
+            "agora",
+            "Агора",
+            "ἀγορά",
+            Agora,
+            flat(a.cx() - 6.0, a.cz() + 2.0),
+            22.0,
+        ),
+        p(
+            "basilica",
+            "Епископская базилика",
+            "βασιλική",
+            Basilica,
+            flat(bp.naos.x0 + 3.0, bp.naos.cz()),
+            14.0,
+        ),
+        p(
+            "baptistery",
+            "Баптистерий",
+            "βαπτιστήριον",
+            Baptistery,
+            flat(bp.baptistery.x0 + 1.2, bp.baptistery.cz()),
+            4.0,
+        ),
+        p(
+            "xenon",
+            "Ксенон (больница)",
+            "ξενών",
+            Hospital,
+            public::xenon_ward(),
+            8.0,
+        ),
+        p(
+            "xenon_garden",
+            "Аптекарский огород ксенона",
+            "κῆπος",
+            HerbGarden,
+            flat(xc.x0 + 1.7, xc.cz()),
+            6.0,
+        ),
+        p(
+            "iatreion",
+            "Ятрейон (кабинет врача)",
+            "ἰατρεῖον",
+            Hospital,
+            flat(xr.x0 + 4.35, xc.z0 + xc.d() / 4.0 + 1.3),
+            3.0,
+        ),
+        p(
+            "didaskaleion",
+            "Дидаскалион (школа)",
+            "διδασκαλεῖον",
+            School,
+            dc.center(0.0),
+            8.0,
+        ),
+        p(
+            "library",
+            "Книгохранилище дидаскалиона",
+            "βιβλιοθήκη",
+            Library,
+            flat(dr.x0 + 3.75, dc.z0 + dc.d() / 4.0 + 1.3),
+            3.0,
+        ),
+        p(
+            "bookseller",
+            "Лавка книжника",
+            "βιβλιοπωλεῖον",
+            Bookseller,
+            houses::shop_point(16, -2, Side::S),
+            2.5,
+        ),
+        p(
+            "apothecary_agora",
+            "Аптека у агоры",
+            "μυροπωλεῖον",
+            Apothecary,
+            houses::shop_point(17, -2, Side::S),
+            2.5,
+        ),
+        p(
+            "apothecary_port",
+            "Аптека у порта",
+            "πιγμεντάριον",
+            Apothecary,
+            houses::shop_point(17, 1, Side::N),
+            2.5,
+        ),
+        p(
+            "tavern",
+            "Корчма у главной улицы",
+            "καπηλεῖον",
+            Tavern,
+            houses::shop_point(7, 1, Side::N),
+            3.0,
+        ),
+        p(
+            "tavern_port",
+            "Корчма портового торга",
+            "καπηλεῖον",
+            Tavern,
+            port::tavern_port_point(),
+            3.0,
+        ),
+        p(
+            "exiles_house",
+            "Дом знатных ссыльных",
+            "οἶκος",
+            ExilesHouse,
+            flat(er.cx(), er.z0 + 3.0),
+            10.0,
+        ),
+        p(
+            "thermae",
+            "Термы",
+            "βαλανεῖον",
+            Thermae,
+            flat(tr.x0 + 3.0, tr.z0 + 3.0),
+            20.0,
+        ),
+        p(
+            "theatre",
+            "Заброшенный театр",
+            "θέατρον",
+            Theatre,
+            public::theatre_center(),
+            25.0,
+        ),
+        p(
+            "reservoir",
+            "Резервуар водопровода",
+            "δεξαμενή",
+            Cistern,
+            flat(rr.cx(), rr.z0 - 2.5),
+            15.0,
+        ),
+        p(
+            "garrison",
+            "Цитадель, плац гарнизона",
+            "κάστρον",
+            Garrison,
+            public::garrison_point(),
+            15.0,
+        ),
+        p(
+            "praetorium",
+            "Претория",
+            "πραιτώριον",
+            Praetorium,
+            flat(cit.x0 + 15.0, cit.z0 + 13.0),
+            8.0,
+        ),
+        p(
+            "main_gate",
+            "Главные ворота",
+            "πύλη",
+            Gate,
+            flat(gx + 3.0, 157.0),
+            6.0,
+        ),
+        p(
+            "south_gate",
+            "Южные ворота",
+            "πύλη",
+            Gate,
+            flat(sx, 157.0),
+            6.0,
+        ),
+        p(
+            "port_gate",
+            "Портовые ворота",
+            "πύλη",
+            Gate,
+            flat(276.0, -6.0),
+            5.0,
+        ),
+        p(
+            "port_market",
+            "Портовый торг (эмпорий)",
+            "ἐμπόριον",
+            PortMarket,
+            port::market_point(),
+            10.0,
+        ),
+        p(
+            "customs",
+            "Таможня (коммеркиарий)",
+            "κομμερκιάριον",
+            Customs,
+            port::customs_point(),
+            6.0,
+        ),
+        p(
+            "horrea",
+            "Склады (горреи)",
+            "ὅρρεα",
+            Warehouse,
+            flat(hr.cx(), hr.z0 - 2.0),
+            20.0,
+        ),
+        p(
+            "fish_salting",
+            "Рыбозасолочные цистерны у базилики",
+            "ταριχεία",
+            FishSalting,
+            crafts::fish_salting_point(),
+            15.0,
+        ),
+        p(
+            "fish_salting_west",
+            "Рыбозасолочные цистерны у стены",
+            "ταριχεία",
+            FishSalting,
+            flat(fw.cx(), fw.z0 + 5.0),
+            10.0,
+        ),
+        p(
+            "glassworks",
+            "Стекольная мастерская",
+            "ὑελουργεῖον",
+            Glassworks,
+            flat(gw.cx(), gw.z1 - 3.0),
+            10.0,
+        ),
+        p(
+            "pottery",
+            "Гончарная мастерская",
+            "κεραμεῖον",
+            Pottery,
+            flat(pt.cx(), pt.z0 + 3.0),
+            10.0,
+        ),
+        p(
+            "smithy",
+            "Кузница",
+            "χαλκεῖον",
+            Smithy,
+            flat(sm.cx() + 1.5, sm.z0 + 3.0),
+            8.0,
+        ),
+        p(
+            "armoury",
+            "Оружейная мастерская гарнизона",
+            "φαβρίκα",
+            Smithy,
+            flat(ar.x0 + 7.0, ar.z0 + 6.5),
+            8.0,
+        ),
+        p(
+            "winery",
+            "Винодельня (тарапан)",
+            "ληνός",
+            Winery,
+            flat(wn.cx(), wn.z0 + 3.0),
+            10.0,
+        ),
+        p(
+            "church_west",
+            "Западная церковь",
+            "ἐκκλησία",
+            Church,
+            flat(wc.x0 + 4.0, wc.cz()),
+            8.0,
+        ),
+        p(
+            "quay",
+            "Набережная Карантинной бухты",
+            "λιμήν",
+            Quay,
+            flat(293.0, 60.0),
+            30.0,
+        ),
+        p(
+            "necropolis",
+            "Некрополь",
+            "νεκρόπολις",
+            Necropolis,
+            on_ground(NECROPOLIS.x, NECROPOLIS.z),
+            45.0,
+        ),
+        p(
+            "kleros",
+            "Клер (усадьба с виноградником)",
+            "κλῆρος",
+            Vineyard,
+            Vec3::new(
+                KLEROS_FARM.x + 7.0,
+                city::outside::kleros_floor(),
+                KLEROS_FARM.z + 7.5,
+            ),
+            60.0,
+        ),
+        p(
+            "spring",
+            "Родник в балке",
+            "κρήνη",
+            Spring,
+            on_ground(sp.x + 3.0, sp.z),
+            6.0,
+        ),
+        p(
+            "steppe_camp",
+            "Стан кочевников",
+            "—",
+            SteppeCamp,
+            on_ground(STEPPE_CAMP.x, STEPPE_CAMP.z + 3.0),
+            25.0,
+        ),
+        p(
+            "goth_village",
+            "Готское селение",
+            "—",
+            GothVillage,
+            on_ground(GOTH_VILLAGE.x, GOTH_VILLAGE.z),
+            30.0,
+        ),
+        p(
+            "alan_camp",
+            "Аланский стан",
+            "—",
+            AlanCamp,
+            on_ground(ALAN_CAMP.x, ALAN_CAMP.z + 3.0),
+            25.0,
+        ),
+        p(
+            "goth_smithy",
+            "Кузница готов",
+            "—",
+            Smithy,
+            smith_point(gs, 1.6, 1.4),
+            6.0,
+        ),
+        p(
+            "goth_bloomery",
+            "Сыродутный горн готов",
+            "—",
+            Smithy,
+            smith_point(gb, 1.6, -1.6),
+            4.0,
+        ),
+        p(
+            "steppe_forge",
+            "Горн кочевого кузнеца",
+            "—",
+            Smithy,
+            smith_point(sf, 1.6, 1.4),
+            4.0,
+        ),
+        p(
+            "alan_forge",
+            "Горн аланского кузнеца",
+            "—",
+            Smithy,
+            smith_point(af, 1.4, 1.3),
+            4.0,
+        ),
+        p(
+            "mine",
+            "Рудник на рудной горке",
+            "μέταλλον",
+            Mine,
+            mines::mine_yard() + Vec3::new(-4.5, 0.0, -2.0),
+            20.0,
+        ),
+        p(
+            "bog_ore",
+            "Рыжая мочажина (болотная руда)",
+            "—",
+            BogOre,
+            on_ground(mines::west_ravine_x(458.0) + 6.0, 458.0),
+            20.0,
+        ),
+        p(
+            "charcoal_camp",
+            "Стан углежогов",
+            "—",
+            CharcoalCamp,
+            on_ground(mines::CHARCOAL_CAMP.x - 1.0, mines::CHARCOAL_CAMP.y - 1.0),
+            18.0,
+        ),
+        p(
+            "clay_pit",
+            "Глиняный карьер",
+            "—",
+            ClayPit,
+            on_ground(mines::CLAY_PIT.x, mines::CLAY_PIT.y - 6.5),
+            8.0,
+        ),
+        p(
+            "sand_beach",
+            "Песок у Песочной бухты",
+            "—",
+            Beach,
+            on_ground(mines::SAND_BEACH.x + 2.0, mines::SAND_BEACH.y + 3.0),
+            10.0,
+        ),
+        p(
+            "quarry",
+            "Каменоломня за бухтой",
+            "λατομεῖον",
+            Quarry,
+            on_ground(mines::QUARRY.x, mines::QUARRY.y - 9.0),
+            14.0,
+        ),
     ]
 }
 
@@ -215,7 +578,10 @@ pub fn stall_slots(id: &str) -> Vec<StallSlot> {
     if active() != LevelKind::Chersonesus {
         return Vec::new();
     }
-    let behind = |(table, facing): (Vec3, Vec3)| StallSlot { pos: table - facing * SELLER_BEHIND, facing };
+    let behind = |(table, facing): (Vec3, Vec3)| StallSlot {
+        pos: table - facing * SELLER_BEHIND,
+        facing,
+    };
     match id {
         "agora" => public::agora_stalls().into_iter().map(behind).collect(),
         "port_market" => port::market_stalls().into_iter().map(behind).collect(),
@@ -227,7 +593,11 @@ pub fn stall_slots(id: &str) -> Vec<StallSlot> {
 
 /// Сколько лотков места `id` занято торговцами (их столы и навесы ставит торговля).
 pub fn staffed_stalls(id: &str) -> usize {
-    crate::trade::MERCHANTS.iter().filter(|m| m.place == id).count().min(stall_slots(id).len())
+    crate::trade::MERCHANTS
+        .iter()
+        .filter(|m| m.place == id)
+        .count()
+        .min(stall_slots(id).len())
 }
 
 /// Кузнечные и сыродутные горны активного уровня.
@@ -250,7 +620,10 @@ pub fn houses() -> &'static [super::HouseSpec] {
 
 /// В чьём доме точка (номер в [`houses`]): для «залез в чужой дом» и краж.
 pub fn house_at(p: Vec3) -> Option<u32> {
-    houses().iter().position(|h| h.contains(p)).map(|i| i as u32)
+    houses()
+        .iter()
+        .position(|h| h.contains(p))
+        .map(|i| i as u32)
 }
 
 // ---------------- горное дело ----------------
@@ -334,7 +707,13 @@ pub fn herb_patches() -> &'static [HerbPatch] {
             ("inula", wet(560.0, 3.0), 4.0),
             ("inula", wet(545.0, -4.0), 3.0),
         ];
-        list.iter().map(|&(herb, (x, z), radius)| HerbPatch { herb, pos: on_ground(x, z), radius }).collect()
+        list.iter()
+            .map(|&(herb, (x, z), radius)| HerbPatch {
+                herb,
+                pos: on_ground(x, z),
+                radius,
+            })
+            .collect()
     })
 }
 
@@ -386,26 +765,57 @@ pub fn npc_posts() -> Vec<NpcPost> {
     let gx = city::main_gate_x();
     let sx = city::south_gate_x();
     let flat = |x: f32, z: f32| Vec3::new(x, 0.0, z);
-    let post = |pos: Vec3, group, yaw, wander| NpcPost { pos, group, yaw, wander };
+    let post = |pos: Vec3, group, yaw, wander| NpcPost {
+        pos,
+        group,
+        yaw,
+        wander,
+    };
     let mut v = vec![
         // Стража у ворот смотрит наружу (на +Z), у портовых — на бухту (+X).
         post(flat(gx - 3.0, 157.5), Garrison, PI, 2.0),
         post(flat(gx + 3.0, 157.5), Garrison, PI, 2.0),
         post(flat(sx - 3.0, 157.5), Garrison, PI, 2.0),
         post(flat(276.0, 3.0), Garrison, -PI / 2.0, 2.0),
-        post(public::garrison_point() + Vec3::new(4.0, 0.0, 0.0), Garrison, 0.0, 10.0),
+        post(
+            public::garrison_point() + Vec3::new(4.0, 0.0, 0.0),
+            Garrison,
+            0.0,
+            10.0,
+        ),
         post(flat(city::cross_x(19), 98.0), Garrison, 0.0, 2.0),
-        post(flat(public::agora_rect().x1 - 4.0, -20.0), Garrison, PI / 2.0, 15.0),
+        post(
+            flat(public::agora_rect().x1 - 4.0, -20.0),
+            Garrison,
+            PI / 2.0,
+            15.0,
+        ),
         post(flat(gx + 20.0, 174.0), Garrison, 0.0, 30.0),
     ];
-    for (x, z) in [(232.0, 330.0), (140.0, 312.0), (terrain::balka_x(452.0), 452.0), (-90.0, 362.0), (-20.0, 525.0), (300.0, 470.0)] {
+    for (x, z) in [
+        (232.0, 330.0),
+        (140.0, 312.0),
+        (terrain::balka_x(452.0), 452.0),
+        (-90.0, 362.0),
+        (-20.0, 525.0),
+        (300.0, 470.0),
+    ] {
         v.push(post(on_ground(x, z), Brigands, 0.0, 20.0));
     }
-    for (c, group, n) in [(STEPPE_CAMP, Nomads, 4), (GOTH_VILLAGE, Goths, 4), (ALAN_CAMP, Alans, 4)] {
+    for (c, group, n) in [
+        (STEPPE_CAMP, Nomads, 4),
+        (GOTH_VILLAGE, Goths, 4),
+        (ALAN_CAMP, Alans, 4),
+    ] {
         for k in 0..n {
             let a = k as f32 / n as f32 * 2.0 * PI + 0.4;
             let (x, z) = (c.x + a.cos() * 6.0, c.z + a.sin() * 6.0);
-            v.push(post(on_ground(x, z), group, (-a.cos()).atan2(-a.sin()), 12.0));
+            v.push(post(
+                on_ground(x, z),
+                group,
+                (-a.cos()).atan2(-a.sin()),
+                12.0,
+            ));
         }
     }
     v

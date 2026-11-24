@@ -12,7 +12,8 @@
 
 mod alchemy_fx;
 mod appearance;
-mod start_kit;
+mod archery;
+mod arsenal;
 mod audio;
 mod bot;
 mod brewing;
@@ -27,17 +28,20 @@ mod console;
 mod console_net;
 mod console_server;
 mod consumables;
+mod daily_life;
+mod daylight;
 mod doors;
 mod economy;
 mod estates;
 mod factions;
 mod fight;
-mod guide;
-mod hints;
 mod gear_look;
+mod graphics;
+mod guide;
+mod health_ui;
+mod hints;
 mod home_items;
 mod hotbar;
-mod graphics;
 mod hud;
 mod icons;
 mod inventory;
@@ -45,29 +49,27 @@ mod inventory_ui;
 mod items;
 mod knowledge;
 mod launcher;
+mod letters;
 mod level;
-mod menu;
-mod mining;
-mod mining_client;
-mod mining_net;
-mod mining_server;
+mod life_client;
 mod loot_client;
 mod loot_net;
 mod loot_server;
-mod letters;
-mod school;
-mod school_client;
-mod tablet_view;
 mod lore;
 mod lore_client;
 mod lore_net;
 mod map;
-mod minimap;
 mod map_render;
 mod medicine;
-mod medicine_server;
 mod medicine_client;
-mod health_ui;
+mod medicine_server;
+mod menu;
+mod minimap;
+mod mining;
+mod mining_client;
+mod mining_net;
+mod mining_server;
+mod night_lights;
 mod npc;
 mod player;
 mod props;
@@ -76,21 +78,24 @@ mod props_server;
 mod protocol;
 mod residents;
 mod rig;
+mod school;
+mod school_client;
+mod self_body;
 mod server;
 mod settings;
 mod skill_book;
 mod skill_tree;
 mod skills_server;
-mod archery;
-mod arsenal;
+mod sky;
 mod smithing;
 mod smithing_client;
 mod smithing_fx;
 mod smithing_net;
 mod smithing_server;
-mod sky;
 mod smoke;
+mod start_kit;
 mod surface_layers;
+mod tablet_view;
 mod textures;
 mod towns;
 mod towns_client;
@@ -105,12 +110,8 @@ mod vegetation;
 mod weight;
 mod work;
 mod work_client;
-mod worn;
 mod world_clock;
-mod daily_life;
-mod daylight;
-mod life_client;
-mod night_lights;
+mod worn;
 
 use protocol::DEFAULT_PORT;
 use std::net::SocketAddr;
@@ -133,19 +134,29 @@ fn main() {
     }
     match args.first().map(String::as_str) {
         Some("server") => {
-            let port = args.get(1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
+            let port = args
+                .get(1)
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(DEFAULT_PORT);
             let socket = server::bind_socket(port).expect("порт занят");
             server::run(socket, true);
         }
         Some("bot") => {
             let addr = parse_addr(args.get(1).map(String::as_str).unwrap_or("127.0.0.1"));
-            bot::run(addr, args.get(2).cloned().unwrap_or_else(|| "Бот".to_string()));
+            bot::run(
+                addr,
+                args.get(2).cloned().unwrap_or_else(|| "Бот".to_string()),
+            );
         }
         Some("join") => {
             let addr = parse_addr(args.get(1).map(String::as_str).unwrap_or("127.0.0.1"));
             client::run(menu::Start::Join(addr));
         }
-        Some("host") => client::run(menu::Start::Host(args.get(1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT))),
+        Some("host") => client::run(menu::Start::Host(
+            args.get(1)
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(DEFAULT_PORT),
+        )),
         None => client::run(menu::Start::Menu),
         Some(other) => {
             eprintln!("Неизвестная команда «{other}». Используйте: host | join <адрес> | server");

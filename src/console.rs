@@ -34,7 +34,19 @@ impl Plugin for ConsolePlugin {
             .insert_resource(DevMove::default())
             .insert_resource(DevView::default())
             .add_systems(PreUpdate, console_input.after(bevy::input::InputSystems))
-            .add_systems(Update, (spawn_console_ui, autoexec, execute_commands, receive_replies, take_shots, redraw_console, update_stats).chain());
+            .add_systems(
+                Update,
+                (
+                    spawn_console_ui,
+                    autoexec,
+                    execute_commands,
+                    receive_replies,
+                    take_shots,
+                    redraw_console,
+                    update_stats,
+                )
+                    .chain(),
+            );
     }
 }
 
@@ -115,31 +127,58 @@ impl Console {
 /// Все команды с короткой подсказкой (для help и Tab).
 const COMMANDS: &[(&str, &str)] = &[
     ("help", "этот список"),
-    ("fly", "[вкл|выкл] полёт: WASD по взгляду, Пробел вверх, Ctrl вниз, Shift быстрее"),
+    (
+        "fly",
+        "[вкл|выкл] полёт: WASD по взгляду, Пробел вверх, Ctrl вниз, Shift быстрее",
+    ),
     ("noclip", "[вкл|выкл] полёт сквозь стены"),
-    ("speed", "<множитель> скорость ходьбы и полёта (1 — обычная)"),
+    (
+        "speed",
+        "<множитель> скорость ходьбы и полёта (1 — обычная)",
+    ),
     ("god", "[вкл|выкл] бессмертие и бесконечные силы"),
     ("notarget", "[вкл|выкл] враги вас не замечают"),
     ("tp", "x y z [yaw pitch] | <место> | <id игрока> — телепорт"),
     ("places", "[часть] список мест для tp"),
     ("pos", "координаты; копирует в буфер готовую команду tp"),
-    ("bug", "[описание] снимок экрана + координаты в screenshots/bugs.txt (то же — F12)"),
+    (
+        "bug",
+        "[описание] снимок экрана + координаты в screenshots/bugs.txt (то же — F12)",
+    ),
     ("screenshot", "снимок экрана с координатами в имени файла"),
     ("give", "<название> [кол-во] [качество] выдать предмет"),
     ("items", "<часть названия> найти предметы"),
     ("heal", "вылечить раны, восстановить здоровье"),
     ("kill", "умереть (проверить смерть и возрождение)"),
-    ("killall", "[радиус] убить всех людей рядом (по умолчанию 30 м)"),
-    ("spawn", "<stratiot|bucellarius|goth|alan|hun> [сколько] враг перед вами"),
+    (
+        "killall",
+        "[радиус] убить всех людей рядом (по умолчанию 30 м)",
+    ),
+    (
+        "spawn",
+        "<stratiot|bucellarius|goth|alan|hun> [сколько] враг перед вами",
+    ),
     ("stats", "FPS, координаты, читы в углу экрана (fps — то же)"),
     ("wireframe", "каркас всех моделей"),
-    ("time", "[ЧЧ[:ММ]] который час; с числом — перевести часы мира (ночь, рассвет…)"),
-    ("weather", "[дождь|туман|ясно|ветер] погода сейчас; со словом — промотать до неё"),
+    (
+        "time",
+        "[ЧЧ[:ММ]] который час; с числом — перевести часы мира (ночь, рассвет…)",
+    ),
+    (
+        "weather",
+        "[дождь|туман|ясно|ветер] погода сейчас; со словом — промотать до неё",
+    ),
     ("who", "игроки на сервере"),
-    ("sv_cheats", "0|1 (только хозяин) разрешить читы всем игрокам"),
+    (
+        "sv_cheats",
+        "0|1 (только хозяин) разрешить читы всем игрокам",
+    ),
     ("clear", "очистить консоль"),
     ("quit", "выйти из игры"),
-    ("autoexec.cfg", "файл рядом с игрой: команды по строке, выполняются при входе"),
+    (
+        "autoexec.cfg",
+        "файл рядом с игрой: команды по строке, выполняются при входе",
+    ),
 ];
 
 #[derive(Component)]
@@ -151,13 +190,21 @@ struct ConsoleInputText;
 #[derive(Component)]
 struct StatsText;
 
-fn spawn_console_ui(mut commands: Commands, fonts: Option<Res<crate::inventory_ui::UiFonts>>, mut done: Local<bool>) {
+fn spawn_console_ui(
+    mut commands: Commands,
+    fonts: Option<Res<crate::inventory_ui::UiFonts>>,
+    mut done: Local<bool>,
+) {
     if *done {
         return;
     }
     let Some(fonts) = fonts else { return };
     *done = true;
-    let font = |size: f32| TextFont { font: fonts.regular.clone().into(), font_size: FontSize::Px(size), ..default() };
+    let font = |size: f32| TextFont {
+        font: fonts.regular.clone().into(),
+        font_size: FontSize::Px(size),
+        ..default()
+    };
     commands
         .spawn((
             ConsoleRoot,
@@ -177,8 +224,25 @@ fn spawn_console_ui(mut commands: Commands, fonts: Option<Res<crate::inventory_u
             Visibility::Hidden,
         ))
         .with_children(|p| {
-            p.spawn((ConsoleLog, Node { flex_direction: FlexDirection::Column, min_height: px(VISIBLE_LINES as f32 * 19.0), justify_content: JustifyContent::FlexEnd, ..default() }));
-            p.spawn((ConsoleInputText, Text::new("> "), font(17.0), TextColor(COLOR_ECHO), Node { margin: UiRect::top(px(6)), ..default() }));
+            p.spawn((
+                ConsoleLog,
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    min_height: px(VISIBLE_LINES as f32 * 19.0),
+                    justify_content: JustifyContent::FlexEnd,
+                    ..default()
+                },
+            ));
+            p.spawn((
+                ConsoleInputText,
+                Text::new("> "),
+                font(17.0),
+                TextColor(COLOR_ECHO),
+                Node {
+                    margin: UiRect::top(px(6)),
+                    ..default()
+                },
+            ));
         });
     commands.spawn((
         StatsText,
@@ -186,7 +250,12 @@ fn spawn_console_ui(mut commands: Commands, fonts: Option<Res<crate::inventory_u
         font(15.0),
         TextColor(Color::srgb(0.9, 0.95, 0.8)),
         TextShadow::default(),
-        Node { position_type: PositionType::Absolute, right: px(12), top: px(60), ..default() },
+        Node {
+            position_type: PositionType::Absolute,
+            right: px(12),
+            top: px(60),
+            ..default()
+        },
         GlobalZIndex(99),
         Visibility::Hidden,
     ));
@@ -247,7 +316,9 @@ fn console_input(
                 if console.history.is_empty() {
                     continue;
                 }
-                let i = console.hist_pos.map_or(console.history.len() - 1, |i| i.saturating_sub(1));
+                let i = console
+                    .hist_pos
+                    .map_or(console.history.len() - 1, |i| i.saturating_sub(1));
                 console.hist_pos = Some(i);
                 console.input = console.history[i].clone();
             }
@@ -262,7 +333,8 @@ fn console_input(
                 }
             },
             KeyCode::PageUp => {
-                console.scroll = (console.scroll + VISIBLE_LINES / 2).min(console.lines.len().saturating_sub(VISIBLE_LINES));
+                console.scroll = (console.scroll + VISIBLE_LINES / 2)
+                    .min(console.lines.len().saturating_sub(VISIBLE_LINES));
             }
             KeyCode::PageDown => console.scroll = console.scroll.saturating_sub(VISIBLE_LINES / 2),
             KeyCode::Tab => complete(&mut console),
@@ -270,7 +342,10 @@ fn console_input(
                 if let Some(cb) = clipboard.as_deref_mut()
                     && let Some(Ok(text)) = cb.fetch_text().poll_result()
                 {
-                    let text: String = text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+                    let text: String = text
+                        .chars()
+                        .map(|c| if c.is_control() { ' ' } else { c })
+                        .collect();
                     console.input.push_str(text.trim());
                 }
             }
@@ -280,7 +355,9 @@ fn console_input(
             _ if console.ctrl => {}
             _ => {
                 if let Some(text) = &ev.text {
-                    console.input.extend(text.chars().filter(|c| !c.is_control()));
+                    console
+                        .input
+                        .extend(text.chars().filter(|c| !c.is_control()));
                 } else if let Key::Character(s) = &ev.logical_key {
                     console.input.push_str(s);
                 } else if ev.logical_key == Key::Space {
@@ -298,13 +375,19 @@ fn console_input(
     }
 }
 
-fn set_open(console: &mut Console, cursor: &mut Query<&mut CursorOptions, With<PrimaryWindow>>, open: bool) {
+fn set_open(
+    console: &mut Console,
+    cursor: &mut Query<&mut CursorOptions, With<PrimaryWindow>>,
+    open: bool,
+) {
     if console.open == open {
         return;
     }
     console.open = open;
     console.dirty = true;
-    let Ok(mut cursor) = cursor.single_mut() else { return };
+    let Ok(mut cursor) = cursor.single_mut() else {
+        return;
+    };
     if open {
         console.was_locked = cursor.grab_mode != CursorGrabMode::None;
         cursor.grab_mode = CursorGrabMode::None;
@@ -325,14 +408,30 @@ fn complete(console: &mut Console) {
     let first = input.split_whitespace().next().unwrap_or("").to_lowercase();
     let low = last.to_lowercase();
     let options: Vec<String> = if head.is_empty() {
-        COMMANDS.iter().map(|(c, _)| c.to_string()).filter(|c| c.starts_with(&low) && !c.contains('.')).collect()
+        COMMANDS
+            .iter()
+            .map(|(c, _)| c.to_string())
+            .filter(|c| c.starts_with(&low) && !c.contains('.'))
+            .collect()
     } else if first == "tp" && head.split_whitespace().count() == 1 {
-        crate::level::places().iter().map(|p| p.id.to_string()).filter(|id| id.starts_with(&low)).collect()
+        crate::level::places()
+            .iter()
+            .map(|p| p.id.to_string())
+            .filter(|id| id.starts_with(&low))
+            .collect()
     } else if first == "spawn" && head.split_whitespace().count() == 1 {
-        ["stratiot", "bucellarius", "goth", "alan", "hun"].iter().map(|s| s.to_string()).filter(|s| s.starts_with(&low)).collect()
+        ["stratiot", "bucellarius", "goth", "alan", "hun"]
+            .iter()
+            .map(|s| s.to_string())
+            .filter(|s| s.starts_with(&low))
+            .collect()
     } else if first == "give" {
         let q = input[4..].trim_start().to_lowercase();
-        let found: Vec<String> = crate::items::ITEM_BASES.iter().map(|b| b.name.to_string()).filter(|n| n.to_lowercase().starts_with(&q)).collect();
+        let found: Vec<String> = crate::items::ITEM_BASES
+            .iter()
+            .map(|b| b.name.to_string())
+            .filter(|n| n.to_lowercase().starts_with(&q))
+            .collect();
         if found.len() == 1 {
             console.input = format!("give «{}» ", found[0]);
             return;
@@ -348,14 +447,22 @@ fn complete(console: &mut Console) {
             // Общее начало всех вариантов.
             let mut common: String = options[0].clone();
             for o in &options[1..] {
-                let n = common.chars().zip(o.chars()).take_while(|(a, b)| a == b).count();
+                let n = common
+                    .chars()
+                    .zip(o.chars())
+                    .take_while(|(a, b)| a == b)
+                    .count();
                 common = common.chars().take(n).collect();
             }
             if common.chars().count() > last.chars().count() && first != "give" {
                 console.input = format!("{head}{common}");
             }
             let shown: Vec<_> = options.iter().take(40).cloned().collect();
-            let more = if options.len() > 40 { format!(" … ещё {}", options.len() - 40) } else { String::new() };
+            let more = if options.len() > 40 {
+                format!(" … ещё {}", options.len() - 40)
+            } else {
+                String::new()
+            };
             console.ok(format!("  {}{more}", shown.join("  ")));
         }
     }
@@ -375,11 +482,16 @@ fn execute_commands(
     let queue = std::mem::take(&mut console.queue);
     for line in queue {
         let args = split_args(&line);
-        let Some(cmd) = args.first().map(|s| s.to_lowercase()) else { continue };
+        let Some(cmd) = args.first().map(|s| s.to_lowercase()) else {
+            continue;
+        };
         if cmd != "bug" || console.open {
             console.print(format!("> {line}"), COLOR_ECHO);
         }
-        let me = player.single().ok().map(|(p, t)| (t.translation, p.yaw, p.pitch));
+        let me = player
+            .single()
+            .ok()
+            .map(|(p, t)| (t.translation, p.yaw, p.pitch));
         match cmd.as_str() {
             "help" | "?" | "помощь" => {
                 for (c, h) in COMMANDS {
@@ -421,22 +533,40 @@ fn execute_commands(
             }
             "items" => {
                 let q = args[1..].join(" ").to_lowercase();
-                let found: Vec<&str> = crate::items::ITEM_BASES.iter().map(|b| b.name).filter(|n| n.to_lowercase().contains(&q)).collect();
+                let found: Vec<&str> = crate::items::ITEM_BASES
+                    .iter()
+                    .map(|b| b.name)
+                    .filter(|n| n.to_lowercase().contains(&q))
+                    .collect();
                 if found.is_empty() {
                     console.err("Ничего не нашлось.");
                 } else {
-                    let shown = found.iter().take(60).copied().collect::<Vec<_>>().join(", ");
-                    let more = if found.len() > 60 { format!(" … ещё {}", found.len() - 60) } else { String::new() };
+                    let shown = found
+                        .iter()
+                        .take(60)
+                        .copied()
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let more = if found.len() > 60 {
+                        format!(" … ещё {}", found.len() - 60)
+                    } else {
+                        String::new()
+                    };
                     console.ok(format!("Предметов: {}. {shown}{more}", found.len()));
                 }
             }
             "stats" | "fps" | "net_graph" => {
-                view.stats = parse_toggle(args.get(1).map(String::as_str), view.stats).unwrap_or(!view.stats);
-                console.ok(format!("Статистика: {}", if view.stats { "вкл" } else { "выкл" }));
+                view.stats = parse_toggle(args.get(1).map(String::as_str), view.stats)
+                    .unwrap_or(!view.stats);
+                console.ok(format!(
+                    "Статистика: {}",
+                    if view.stats { "вкл" } else { "выкл" }
+                ));
             }
             "wireframe" | "wire" => match wireframe.as_deref_mut() {
                 Some(w) => {
-                    w.global = parse_toggle(args.get(1).map(String::as_str), w.global).unwrap_or(!w.global);
+                    w.global = parse_toggle(args.get(1).map(String::as_str), w.global)
+                        .unwrap_or(!w.global);
                     console.ok(format!("Каркас: {}", if w.global { "вкл" } else { "выкл" }));
                 }
                 None => console.err("Видеокарта не умеет рисовать каркас."),
@@ -449,18 +579,24 @@ fn execute_commands(
                 let note = args[1..].join(" ");
                 let stamp = timestamp();
                 let prefix = if cmd == "bug" { "bug" } else { "shot" };
-                let name = format!("{prefix}_{stamp}_x{:.0}_y{:.0}_z{:.0}.png", pos.x, pos.y, pos.z);
+                let name = format!(
+                    "{prefix}_{stamp}_x{:.0}_y{:.0}_z{:.0}.png",
+                    pos.x, pos.y, pos.z
+                );
                 let path = PathBuf::from("screenshots").join(&name);
                 if let Err(e) = std::fs::create_dir_all("screenshots") {
                     console.err(format!("Не создать папку screenshots: {e}"));
                     continue;
                 }
                 let tp = tp_line(pos, yaw, pitch);
-                let record = (cmd == "bug").then(|| format!("{stamp}\t{name}\t{tp}\t{}\t{note}", nearest_place(pos)));
+                let record = (cmd == "bug")
+                    .then(|| format!("{stamp}\t{name}\t{tp}\t{}\t{note}", nearest_place(pos)));
                 if cmd == "bug" {
                     copy(clipboard.as_deref_mut(), &tp);
                 }
-                let dir = std::env::current_dir().map(|d| d.join("screenshots").display().to_string()).unwrap_or_else(|_| "screenshots".into());
+                let dir = std::env::current_dir()
+                    .map(|d| d.join("screenshots").display().to_string())
+                    .unwrap_or_else(|_| "screenshots".into());
                 console.ok(format!("Снимок: {dir}{}{name}", std::path::MAIN_SEPARATOR));
                 if cmd == "bug" {
                     console.ok(format!("Записано в bugs.txt, в буфере: {tp}"));
@@ -473,7 +609,10 @@ fn execute_commands(
                     console.err("Нет связи с сервером.");
                     continue;
                 };
-                let msg = ConsoleClientMessage::Command { line: line.clone(), token: host_token() };
+                let msg = ConsoleClientMessage::Command {
+                    line: line.clone(),
+                    token: host_token(),
+                };
                 client.send_message(CH_CONSOLE, encode(&msg));
             }
         }
@@ -502,10 +641,20 @@ fn autoexec(
     *done = true;
     let mut lines: Vec<String> = Vec::new();
     if let Ok(text) = std::fs::read_to_string("autoexec.cfg") {
-        lines.extend(text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("//")).map(String::from));
+        lines.extend(
+            text.lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("//"))
+                .map(String::from),
+        );
     }
     if let Ok(env) = std::env::var("MRPG_CONSOLE") {
-        lines.extend(env.split(';').map(str::trim).filter(|l| !l.is_empty()).map(String::from));
+        lines.extend(
+            env.split(';')
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(String::from),
+        );
     }
     console.queue.extend(lines);
     if std::env::var("MRPG_CONSOLE_OPEN").is_ok() {
@@ -518,7 +667,10 @@ fn copy(clipboard: Option<&mut Clipboard>, text: &str) -> bool {
 }
 
 fn tp_line(pos: Vec3, yaw: f32, pitch: f32) -> String {
-    format!("tp {:.2} {:.2} {:.2} {:.2} {:.2}", pos.x, pos.y, pos.z, yaw, pitch)
+    format!(
+        "tp {:.2} {:.2} {:.2} {:.2} {:.2}",
+        pos.x, pos.y, pos.z, yaw, pitch
+    )
 }
 
 /// Ближайшее место уровня (для записи о баге).
@@ -533,7 +685,10 @@ fn nearest_place(pos: Vec3) -> String {
 
 /// Дата и время (UTC) для имени файла: 2026-11-23_18-40-05.
 fn timestamp() -> String {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     // Алгоритм Хиннанта: дни от 1970-01-01 -> гражданская дата.
     let z = days + 719_468;
@@ -545,7 +700,12 @@ fn timestamp() -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
-    format!("{y:04}-{m:02}-{d:02}_{:02}-{:02}-{:02}", rem / 3600, rem / 60 % 60, rem % 60)
+    format!(
+        "{y:04}-{m:02}-{d:02}_{:02}-{:02}-{:02}",
+        rem / 3600,
+        rem / 60 % 60,
+        rem % 60
+    )
 }
 
 fn receive_replies(
@@ -554,11 +714,17 @@ fn receive_replies(
     mut dev: ResMut<DevMove>,
     mut player: Query<(&mut LocalPlayer, &mut Transform)>,
 ) {
-    let Some(client) = client.as_deref_mut() else { return };
+    let Some(client) = client.as_deref_mut() else {
+        return;
+    };
     while let Some(bytes) = client.receive_message(CH_CONSOLE) {
-        let Some(msg) = decode::<ConsoleServerMessage>(&bytes) else { continue };
+        let Some(msg) = decode::<ConsoleServerMessage>(&bytes) else {
+            continue;
+        };
         match msg {
-            ConsoleServerMessage::Reply { text, error } => console.print(text, if error { COLOR_ERROR } else { COLOR_SERVER }),
+            ConsoleServerMessage::Reply { text, error } => {
+                console.print(text, if error { COLOR_ERROR } else { COLOR_SERVER })
+            }
             ConsoleServerMessage::Cheats(c) => dev.cheats = c,
             ConsoleServerMessage::Look { yaw, pitch } => {
                 for (mut p, mut t) in &mut player {
@@ -572,15 +738,22 @@ fn receive_replies(
 }
 
 fn take_shots(mut commands: Commands, mut view: ResMut<DevView>, mut console: ResMut<Console>) {
-    let Some((path, frames, record)) = view.shot.as_mut() else { return };
+    let Some((path, frames, record)) = view.shot.as_mut() else {
+        return;
+    };
     if *frames > 0 {
         *frames -= 1;
         if *frames == 0 {
             use bevy::render::view::screenshot::{Screenshot, save_to_disk};
-            commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path.clone()));
+            commands
+                .spawn(Screenshot::primary_window())
+                .observe(save_to_disk(path.clone()));
             if let Some(record) = record.take() {
                 use std::io::Write;
-                let file = std::fs::OpenOptions::new().create(true).append(true).open("screenshots/bugs.txt");
+                let file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("screenshots/bugs.txt");
                 if let Err(e) = file.and_then(|mut f| writeln!(f, "{record}")) {
                     console.err(format!("Не записать bugs.txt: {e}"));
                 }
@@ -601,9 +774,15 @@ fn redraw_console(
     log: Query<Entity, With<ConsoleLog>>,
     mut input: Query<&mut Text, With<ConsoleInputText>>,
 ) {
-    let Ok(mut vis) = root.single_mut() else { return };
+    let Ok(mut vis) = root.single_mut() else {
+        return;
+    };
     // Мигающий курсор.
-    let caret = if console.open && (time.elapsed_secs() * 2.0) as u32 % 2 == 0 { "_" } else { " " };
+    let caret = if console.open && (time.elapsed_secs() * 2.0) as u32 % 2 == 0 {
+        "_"
+    } else {
+        " "
+    };
     if let Ok(mut t) = input.single_mut() {
         let s = format!("> {}{caret}", console.input);
         if t.0 != s {
@@ -611,19 +790,33 @@ fn redraw_console(
         }
     }
     let shown = console.open && view.shot.is_none();
-    vis.set_if_neq(if shown { Visibility::Visible } else { Visibility::Hidden });
+    vis.set_if_neq(if shown {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    });
     if !console.dirty {
         return;
     }
     console.dirty = false;
-    let (Ok(log), Some(fonts)) = (log.single(), fonts) else { return };
+    let (Ok(log), Some(fonts)) = (log.single(), fonts) else {
+        return;
+    };
     let end = console.lines.len().saturating_sub(console.scroll);
     let start = end.saturating_sub(VISIBLE_LINES);
     commands.entity(log).despawn_children();
     let lines: Vec<(String, Color)> = console.lines.range(start..end).cloned().collect();
     commands.entity(log).with_children(|p| {
         for (text, color) in lines {
-            p.spawn((Text::new(text), TextFont { font: fonts.regular.clone().into(), font_size: FontSize::Px(15.0), ..default() }, TextColor(color)));
+            p.spawn((
+                Text::new(text),
+                TextFont {
+                    font: fonts.regular.clone().into(),
+                    font_size: FontSize::Px(15.0),
+                    ..default()
+                },
+                TextColor(color),
+            ));
         }
     });
 }
@@ -636,17 +829,40 @@ fn update_stats(
     entities: Query<Entity>,
     mut text: Query<(&mut Text, &mut Visibility), With<StatsText>>,
 ) {
-    let Ok((mut text, mut vis)) = text.single_mut() else { return };
-    vis.set_if_neq(if view.stats { Visibility::Visible } else { Visibility::Hidden });
+    let Ok((mut text, mut vis)) = text.single_mut() else {
+        return;
+    };
+    vis.set_if_neq(if view.stats {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    });
     if !view.stats {
         return;
     }
-    let fps = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS).and_then(|d| d.smoothed()).unwrap_or(0.0);
-    let ms = diagnostics.get(&FrameTimeDiagnosticsPlugin::FRAME_TIME).and_then(|d| d.smoothed()).unwrap_or(0.0);
-    let mut s = format!("FPS {fps:.0}  ({ms:.1} мс)\nОбъектов: {}", entities.iter().count());
+    let fps = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FPS)
+        .and_then(|d| d.smoothed())
+        .unwrap_or(0.0);
+    let ms = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
+        .and_then(|d| d.smoothed())
+        .unwrap_or(0.0);
+    let mut s = format!(
+        "FPS {fps:.0}  ({ms:.1} мс)\nОбъектов: {}",
+        entities.iter().count()
+    );
     if let Ok((p, t)) = player.single() {
         let v = t.translation;
-        s += &format!("\n{:.1} {:.1} {:.1}  взгляд {:.2} {:.2}\n{}", v.x, v.y, v.z, p.yaw, p.pitch, nearest_place(v));
+        s += &format!(
+            "\n{:.1} {:.1} {:.1}  взгляд {:.2} {:.2}\n{}",
+            v.x,
+            v.y,
+            v.z,
+            p.yaw,
+            p.pitch,
+            nearest_place(v)
+        );
     }
     let c = dev.cheats;
     let mut on = Vec::new();

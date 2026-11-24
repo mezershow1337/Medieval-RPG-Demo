@@ -63,17 +63,29 @@ fn oriented_solid(b: &mut Builder, a: Vec2, c: Vec2, d0: f32, d1: f32, y0: f32, 
     let len = a.distance(c);
     let mid = (a + c) / 2.0 + nrm * (d0 + d1) / 2.0;
     let yaw = dir.y.atan2(dir.x);
-    b.mesh(mat).obox(Vec3::new(mid.x, (y0 + y1) / 2.0, mid.y), Vec3::new(len / 2.0, (y1 - y0) / 2.0, (d1 - d0) / 2.0), yaw);
+    b.mesh(mat).obox(
+        Vec3::new(mid.x, (y0 + y1) / 2.0, mid.y),
+        Vec3::new(len / 2.0, (y1 - y0) / 2.0, (d1 - d0) / 2.0),
+        yaw,
+    );
     let pieces = (len / 2.0).ceil() as usize;
     for k in 0..pieces {
         let t0 = k as f32 / pieces as f32 * len;
         let t1 = (k + 1) as f32 / pieces as f32 * len;
-        let corners = [a + dir * t0 + nrm * d0, a + dir * t1 + nrm * d0, a + dir * t0 + nrm * d1, a + dir * t1 + nrm * d1];
+        let corners = [
+            a + dir * t0 + nrm * d0,
+            a + dir * t1 + nrm * d0,
+            a + dir * t0 + nrm * d1,
+            a + dir * t1 + nrm * d1,
+        ];
         let mn = corners.iter().fold(Vec2::splat(f32::MAX), |m, p| m.min(*p));
         let mx = corners.iter().fold(Vec2::splat(f32::MIN), |m, p| m.max(*p));
         // Чуть сжимаем по диагонали, чтобы «ступеньки» не торчали за кладку.
         let shrink = ((mx - mn) - Vec2::splat((t1 - t0).min(d1 - d0))).max(Vec2::ZERO) * 0.15;
-        b.invisible.push(Aabb::new(Vec3::new(mn.x + shrink.x, y0, mn.y + shrink.y), Vec3::new(mx.x - shrink.x, y1, mx.y - shrink.y)));
+        b.invisible.push(Aabb::new(
+            Vec3::new(mn.x + shrink.x, y0, mn.y + shrink.y),
+            Vec3::new(mx.x - shrink.x, y1, mx.y - shrink.y),
+        ));
     }
 }
 
@@ -89,13 +101,25 @@ fn battlements(b: &mut Builder, a: Vec2, c: Vec2, top: f32, half_t: f32) {
     for k in 0..n {
         let t = (k as f32 + 0.5) / n as f32 * len;
         let p = a + dir * t + nrm * (half_t - 0.3);
-        b.mesh(Mat::Limestone).obox(Vec3::new(p.x, top + 0.75, p.y), Vec3::new(0.65, 0.75, 0.3), yaw);
+        b.mesh(Mat::Limestone).obox(
+            Vec3::new(p.x, top + 0.75, p.y),
+            Vec3::new(0.65, 0.75, 0.3),
+            yaw,
+        );
     }
     // Низкий бруствер между зубцами.
     let p = (a + c) / 2.0 + nrm * (half_t - 0.3);
-    b.mesh(Mat::Limestone).obox(Vec3::new(p.x, top + 0.35, p.y), Vec3::new(len / 2.0, 0.35, 0.3), yaw);
+    b.mesh(Mat::Limestone).obox(
+        Vec3::new(p.x, top + 0.35, p.y),
+        Vec3::new(len / 2.0, 0.35, 0.3),
+        yaw,
+    );
     let p = (a + c) / 2.0 + nrm * (half_t + 0.05);
-    b.mesh(Mat::Limestone).obox(Vec3::new(p.x, top - 0.25, p.y), Vec3::new(len / 2.0, 0.18, 0.12), yaw);
+    b.mesh(Mat::Limestone).obox(
+        Vec3::new(p.x, top - 0.25, p.y),
+        Vec3::new(len / 2.0, 0.18, 0.12),
+        yaw,
+    );
 }
 
 fn oriented_solid_invisible(b: &mut Builder, a: Vec2, c: Vec2, d0: f32, d1: f32, y0: f32, y1: f32) {
@@ -125,43 +149,89 @@ fn rect_tower(b: &mut Builder, p: Vec2, _dir: Vec2, out: Vec2) {
     let dir = Vec2::new(-out.y, out.x);
     let a = p - dir * TOWER_ALONG / 2.0;
     let c = p + dir * TOWER_ALONG / 2.0;
-    oriented_solid(b, a, c, -WALL_T / 2.0, WALL_T / 2.0 + TOWER_OUT, 0.0, TOWER_H, Mat::Limestone);
+    oriented_solid(
+        b,
+        a,
+        c,
+        -WALL_T / 2.0,
+        WALL_T / 2.0 + TOWER_OUT,
+        0.0,
+        TOWER_H,
+        Mat::Limestone,
+    );
     let yaw = dir.y.atan2(dir.x);
     let center = p + out * (TOWER_OUT / 2.0 + WALL_T / 4.0);
     let half_d = (TOWER_OUT + WALL_T) / 2.0;
     // Карниз и зубцы по трём наружным сторонам.
-    b.mesh(Mat::Limestone).obox(Vec3::new(center.x, TOWER_H - 0.25, center.y), Vec3::new(TOWER_ALONG / 2.0 + 0.15, 0.2, half_d + 0.15), yaw);
+    b.mesh(Mat::Limestone).obox(
+        Vec3::new(center.x, TOWER_H - 0.25, center.y),
+        Vec3::new(TOWER_ALONG / 2.0 + 0.15, 0.2, half_d + 0.15),
+        yaw,
+    );
     for k in 0..4 {
         let t = (k as f32 + 0.5) / 4.0 - 0.5;
         let q = p + dir * t * TOWER_ALONG + out * (WALL_T / 2.0 + TOWER_OUT - 0.3);
-        b.mesh(Mat::Limestone).obox(Vec3::new(q.x, TOWER_H + 0.7, q.y), Vec3::new(0.7, 0.7, 0.3), yaw);
+        b.mesh(Mat::Limestone).obox(
+            Vec3::new(q.x, TOWER_H + 0.7, q.y),
+            Vec3::new(0.7, 0.7, 0.3),
+            yaw,
+        );
     }
     for s in [-1.0f32, 1.0] {
         for k in 0..2 {
-            let q = p + dir * s * (TOWER_ALONG / 2.0 - 0.3) + out * (WALL_T / 2.0 + 1.0 + k as f32 * 2.6);
-            b.mesh(Mat::Limestone).obox(Vec3::new(q.x, TOWER_H + 0.7, q.y), Vec3::new(0.3, 0.7, 0.7), yaw);
+            let q = p
+                + dir * s * (TOWER_ALONG / 2.0 - 0.3)
+                + out * (WALL_T / 2.0 + 1.0 + k as f32 * 2.6);
+            b.mesh(Mat::Limestone).obox(
+                Vec3::new(q.x, TOWER_H + 0.7, q.y),
+                Vec3::new(0.3, 0.7, 0.7),
+                yaw,
+            );
         }
     }
     // Бойницы — тёмные щели.
     for y in [4.0, 7.5] {
         let q = p + out * (WALL_T / 2.0 + TOWER_OUT + 0.01);
-        b.mesh(Mat::Coals).obox(Vec3::new(q.x, y, q.y), Vec3::new(0.12, 0.7, 0.02), yaw);
+        b.mesh(Mat::Coals)
+            .obox(Vec3::new(q.x, y, q.y), Vec3::new(0.12, 0.7, 0.02), yaw);
     }
 }
 
 fn round_tower(b: &mut Builder, p: Vec2, r: f32, h: f32) {
     let base = Vec3::new(p.x, 0.0, p.y);
-    b.mesh(Mat::Limestone).lathe(base, &[(r + 0.4, 0.0), (r + 0.2, 1.2), (r, 1.4), (r, h - 0.4), (r + 0.2, h - 0.3), (r + 0.2, h), (0.0, h)], 20);
+    b.mesh(Mat::Limestone).lathe(
+        base,
+        &[
+            (r + 0.4, 0.0),
+            (r + 0.2, 1.2),
+            (r, 1.4),
+            (r, h - 0.4),
+            (r + 0.2, h - 0.3),
+            (r + 0.2, h),
+            (0.0, h),
+        ],
+        20,
+    );
     for k in 0..10 {
         let a = k as f32 / 10.0 * TAU;
         let q = base + Vec3::new(a.cos() * (r - 0.1), h + 0.7, a.sin() * (r - 0.1));
-        b.mesh(Mat::Limestone).obox(q, Vec3::new(0.3, 0.7, 0.75), a + std::f32::consts::FRAC_PI_2);
+        b.mesh(Mat::Limestone).obox(
+            q,
+            Vec3::new(0.3, 0.7, 0.75),
+            a + std::f32::consts::FRAC_PI_2,
+        );
     }
     // Коллизия: крест из двух коробок.
     let k = r * 0.86;
     let w = r * 0.5;
-    b.invisible.push(Aabb::new(base - Vec3::new(k, 0.0, w), base + Vec3::new(k, h, w)));
-    b.invisible.push(Aabb::new(base - Vec3::new(w, 0.0, k), base + Vec3::new(w, h, k)));
+    b.invisible.push(Aabb::new(
+        base - Vec3::new(k, 0.0, w),
+        base + Vec3::new(k, h, w),
+    ));
+    b.invisible.push(Aabb::new(
+        base - Vec3::new(w, 0.0, k),
+        base + Vec3::new(w, h, k),
+    ));
 }
 
 /// Башня Зенона: при Зеноне облицована вторым кольцом кладки и стала мощнейшей башней Таврики.
@@ -171,32 +241,78 @@ fn zeno_tower(b: &mut Builder, p: Vec2) {
     round_tower(b, p, r, h);
     // Шов между старым ядром и облицовкой Зенона и надпись (плита) с внутренней стороны.
     let base = Vec3::new(p.x, 0.0, p.y);
-    b.mesh(Mat::Limestone).lathe(base, &[(r + 0.05, 6.0), (r + 0.05, 6.25)], 24);
+    b.mesh(Mat::Limestone)
+        .lathe(base, &[(r + 0.05, 6.0), (r + 0.05, 6.25)], 24);
     let plate = base + Vec3::new(-r * 0.71 - 0.05, 3.2, -r * 0.71 - 0.05);
-    b.mesh(Mat::Marble).obox(plate, Vec3::new(0.9, 0.55, 0.08), std::f32::consts::FRAC_PI_4);
-    b.torch(plate.x - 1.2, 3.4, plate.z - 0.2, Vec3::new(-0.7, 0.0, -0.7).normalize());
+    b.mesh(Mat::Marble).obox(
+        plate,
+        Vec3::new(0.9, 0.55, 0.08),
+        std::f32::consts::FRAC_PI_4,
+    );
+    b.torch(
+        plate.x - 1.2,
+        3.4,
+        plate.z - 0.2,
+        Vec3::new(-0.7, 0.0, -0.7).normalize(),
+    );
 }
 
 /// Прямая стена вдоль X или Z с воротами и башнями.
 fn straight_wall(b: &mut Builder, a: Vec2, c: Vec2, gates: &[f32], towers: &[f32]) {
     let along_x = (c.y - a.y).abs() < 0.01;
     let out = outward(a, c);
-    let (s0, s1) = if along_x { (a.x.min(c.x), a.x.max(c.x)) } else { (a.y.min(c.y), a.y.max(c.y)) };
+    let (s0, s1) = if along_x {
+        (a.x.min(c.x), a.x.max(c.x))
+    } else {
+        (a.y.min(c.y), a.y.max(c.y))
+    };
     let line = if along_x { a.y } else { a.x };
     let f = if along_x { kit::fx() } else { kit::fz() };
-    let ops: Vec<Op> = gates.iter().map(|&s| Op::Arch { s, w: GATE_W, spring: 3.6 }).collect();
-    kit::wall(b, f, s0, s1, line - WALL_T / 2.0, line + WALL_T / 2.0, 0.0, WALL_H, &ops, Mat::Limestone, Mat::Limestone);
+    let ops: Vec<Op> = gates
+        .iter()
+        .map(|&s| Op::Arch {
+            s,
+            w: GATE_W,
+            spring: 3.6,
+        })
+        .collect();
+    kit::wall(
+        b,
+        f,
+        s0,
+        s1,
+        line - WALL_T / 2.0,
+        line + WALL_T / 2.0,
+        0.0,
+        WALL_H,
+        &ops,
+        Mat::Limestone,
+        Mat::Limestone,
+    );
     let o = if along_x { out.y } else { out.x };
-    let p2 = |s: f32| if along_x { Vec2::new(s, line) } else { Vec2::new(line, s) };
+    let p2 = |s: f32| {
+        if along_x {
+            Vec2::new(s, line)
+        } else {
+            Vec2::new(line, s)
+        }
+    };
     // Зубцы участками между башнями ворот.
-    let mut cuts: Vec<(f32, f32)> = gates.iter().map(|&g| (g - GATE_W / 2.0 - 0.2, g + GATE_W / 2.0 + 0.2)).collect();
+    let mut cuts: Vec<(f32, f32)> = gates
+        .iter()
+        .map(|&g| (g - GATE_W / 2.0 - 0.2, g + GATE_W / 2.0 + 0.2))
+        .collect();
     cuts.sort_by(|x, y| x.0.total_cmp(&y.0));
     let mut cur = s0;
     for (l, r) in cuts.iter().copied().chain(std::iter::once((s1, s1))) {
         if l > cur + 1.0 {
             let (pa, pc) = (p2(cur), p2(l));
             // Порядок концов такой, чтобы «наружу» указывало туда же, куда `out`.
-            let (pa, pc) = if outward(pa, pc).dot(out) > 0.0 { (pa, pc) } else { (pc, pa) };
+            let (pa, pc) = if outward(pa, pc).dot(out) > 0.0 {
+                (pa, pc)
+            } else {
+                (pc, pa)
+            };
             battlements(b, pa, pc, WALL_H, WALL_T / 2.0);
         }
         cur = r;
@@ -206,14 +322,31 @@ fn straight_wall(b: &mut Builder, a: Vec2, c: Vec2, gates: &[f32], towers: &[f32
         let d_in = -o;
         for s in [-1.0f32, 1.0] {
             let hinge = p2(g + s * (GATE_W / 2.0 - 0.1));
-            let hinge = Vec3::new(hinge.x, 0.0, hinge.y) + Vec3::new(out.x, 0.0, out.y) * (-WALL_T / 2.0 + 0.1);
-            let leaf_dir = if along_x { Vec3::new(0.0, 0.0, d_in) } else { Vec3::new(d_in, 0.0, 0.0) };
-            let leaf_side = if along_x { Vec3::new(s, 0.0, 0.0) } else { Vec3::new(0.0, 0.0, s) };
+            let hinge = Vec3::new(hinge.x, 0.0, hinge.y)
+                + Vec3::new(out.x, 0.0, out.y) * (-WALL_T / 2.0 + 0.1);
+            let leaf_dir = if along_x {
+                Vec3::new(0.0, 0.0, d_in)
+            } else {
+                Vec3::new(d_in, 0.0, 0.0)
+            };
+            let leaf_side = if along_x {
+                Vec3::new(s, 0.0, 0.0)
+            } else {
+                Vec3::new(0.0, 0.0, s)
+            };
             let c = hinge + leaf_dir * 1.1 - leaf_side * 0.06 + Vec3::Y * 2.3;
-            let yaw = if along_x { std::f32::consts::FRAC_PI_2 } else { 0.0 };
+            let yaw = if along_x {
+                std::f32::consts::FRAC_PI_2
+            } else {
+                0.0
+            };
             b.mesh(Mat::Wood).obox(c, Vec3::new(1.1, 2.3, 0.07), yaw);
             for y in [0.6, 2.3, 4.0] {
-                b.mesh(Mat::Iron).obox(c + Vec3::new(0.0, y - 2.3, 0.0) - leaf_side * 0.02, Vec3::new(1.05, 0.06, 0.08), yaw);
+                b.mesh(Mat::Iron).obox(
+                    c + Vec3::new(0.0, y - 2.3, 0.0) - leaf_side * 0.02,
+                    Vec3::new(1.05, 0.06, 0.08),
+                    yaw,
+                );
             }
         }
         // Факелы снаружи и внутри.
@@ -259,33 +392,89 @@ fn proteichisma(b: &mut Builder) {
     let z = PROTEICHISMA_Z;
     let gates = [main_gate_x(), south_gate_x()];
     b.at(0.0, z);
-    let ops: Vec<Op> = gates.iter().map(|&s| Op::Arch { s, w: GATE_W, spring: 2.6 }).collect();
-    kit::wall(b, kit::fx(), PROT_X.0, PROT_X.1, z - PROT_T / 2.0, z + PROT_T / 2.0, 0.0, PROT_H, &ops, Mat::Limestone, Mat::Limestone);
+    let ops: Vec<Op> = gates
+        .iter()
+        .map(|&s| Op::Arch {
+            s,
+            w: GATE_W,
+            spring: 2.6,
+        })
+        .collect();
+    kit::wall(
+        b,
+        kit::fx(),
+        PROT_X.0,
+        PROT_X.1,
+        z - PROT_T / 2.0,
+        z + PROT_T / 2.0,
+        0.0,
+        PROT_H,
+        &ops,
+        Mat::Limestone,
+        Mat::Limestone,
+    );
     let mut cur = PROT_X.0;
     for &g in &gates {
-        battlements(b, Vec2::new(g - GATE_W / 2.0 - 0.3, z), Vec2::new(cur, z), PROT_H, PROT_T / 2.0);
+        battlements(
+            b,
+            Vec2::new(g - GATE_W / 2.0 - 0.3, z),
+            Vec2::new(cur, z),
+            PROT_H,
+            PROT_T / 2.0,
+        );
         cur = g + GATE_W / 2.0 + 0.3;
     }
-    battlements(b, Vec2::new(PROT_X.1, z), Vec2::new(cur, z), PROT_H, PROT_T / 2.0);
+    battlements(
+        b,
+        Vec2::new(PROT_X.1, z),
+        Vec2::new(cur, z),
+        PROT_H,
+        PROT_T / 2.0,
+    );
     // Поперечные стенки, замыкающие перибол.
     for x in [PROT_X.0, PROT_X.1] {
         b.at(x, z);
-        b.solid([x - PROT_T / 2.0, 0.0, SOUTH_WALL_Z + WALL_T / 2.0], [x + PROT_T / 2.0, PROT_H, z - PROT_T / 2.0], Mat::Limestone);
+        b.solid(
+            [x - PROT_T / 2.0, 0.0, SOUTH_WALL_Z + WALL_T / 2.0],
+            [x + PROT_T / 2.0, PROT_H, z - PROT_T / 2.0],
+            Mat::Limestone,
+        );
     }
 }
 
 fn stairs_to_walls(b: &mut Builder) {
     let (s, _) = gate_stairs_start();
     b.at(s.x, s.z);
-    kit::stairs(b, Vec3::new(s.x - 0.3 + 0.3, 0.0, s.z), Vec3::X, 1.6, WALL_H, Mat::Limestone);
+    kit::stairs(
+        b,
+        Vec3::new(s.x - 0.3 + 0.3, 0.0, s.z),
+        Vec3::X,
+        1.6,
+        WALL_H,
+        Mat::Limestone,
+    );
     // У портовых ворот — вдоль восточной стены.
     let x = EAST_WALL_X - WALL_T / 2.0 - 0.8;
     b.at(x, 12.0);
-    kit::stairs(b, Vec3::new(x, 0.0, 12.0), Vec3::Z, 1.6, WALL_H, Mat::Limestone);
+    kit::stairs(
+        b,
+        Vec3::new(x, 0.0, 12.0),
+        Vec3::Z,
+        1.6,
+        WALL_H,
+        Mat::Limestone,
+    );
     // У северной стены, за стекольной мастерской.
     let r = block(11, -3);
     // Внутренняя грань северной стены здесь ≈ −163,6 (ось кладки идёт от (0, −166) к (120, −164)).
     let z = -162.75;
     b.at(r.cx(), z);
-    kit::stairs(b, Vec3::new(r.x0, 0.0, z), Vec3::X, 1.6, WALL_H, Mat::Limestone);
+    kit::stairs(
+        b,
+        Vec3::new(r.x0, 0.0, z),
+        Vec3::X,
+        1.6,
+        WALL_H,
+        Mat::Limestone,
+    );
 }

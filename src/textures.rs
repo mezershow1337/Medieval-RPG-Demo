@@ -23,7 +23,11 @@ impl Plugin for TexturesPlugin {
 
 /// Сэмплер с трилинейной и анизотропной фильтрацией.
 pub fn quality_sampler(repeat: bool) -> ImageSampler {
-    let address = if repeat { ImageAddressMode::Repeat } else { ImageAddressMode::ClampToEdge };
+    let address = if repeat {
+        ImageAddressMode::Repeat
+    } else {
+        ImageAddressMode::ClampToEdge
+    };
     ImageSampler::Descriptor(ImageSamplerDescriptor {
         address_mode_u: address,
         address_mode_v: address,
@@ -37,10 +41,18 @@ pub fn quality_sampler(repeat: bool) -> ImageSampler {
 }
 
 /// Картинки моделей (assets/models/**) получают мип-уровни и анизотропию сразу после загрузки.
-fn mip_model_images(mut events: MessageReader<AssetEvent<Image>>, server: Res<AssetServer>, mut images: ResMut<Assets<Image>>) {
+fn mip_model_images(
+    mut events: MessageReader<AssetEvent<Image>>,
+    server: Res<AssetServer>,
+    mut images: ResMut<Assets<Image>>,
+) {
     for ev in events.read() {
-        let AssetEvent::Added { id } = ev else { continue };
-        let from_models = server.get_path(*id).is_some_and(|p| p.path().starts_with("models"));
+        let AssetEvent::Added { id } = ev else {
+            continue;
+        };
+        let from_models = server
+            .get_path(*id)
+            .is_some_and(|p| p.path().starts_with("models"));
         if !from_models {
             continue;
         }
@@ -48,7 +60,9 @@ fn mip_model_images(mut events: MessageReader<AssetEvent<Image>>, server: Res<As
         if img.texture_descriptor.mip_level_count > 1 || img.data.is_none() {
             continue;
         }
-        let Some(mut img) = images.get_mut(*id) else { continue };
+        let Some(mut img) = images.get_mut(*id) else {
+            continue;
+        };
         let repeat = !matches!(&img.sampler, ImageSampler::Descriptor(d) if d.address_mode_u == ImageAddressMode::ClampToEdge);
         // Карты нормалей и шероховатости из glTF не отличить по имени (метки вида «Texture3»),
         // поэтому линейные картинки просто усредняются: нормали вдали чуть сглаживаются — это и нужно.
@@ -103,14 +117,22 @@ fn srgb_to_lin_table() -> &'static [f32; 256] {
         let mut t = [0.0; 256];
         for (i, v) in t.iter_mut().enumerate() {
             let c = i as f32 / 255.0;
-            *v = if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+            *v = if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            };
         }
         t
     })
 }
 
 fn lin_to_srgb(l: f32) -> u8 {
-    let c = if l <= 0.003_130_8 { l * 12.92 } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
+    let c = if l <= 0.003_130_8 {
+        l * 12.92
+    } else {
+        1.055 * l.powf(1.0 / 2.4) - 0.055
+    };
     (c.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
 }
 
@@ -169,7 +191,11 @@ fn downsample(src: &[u8], w: u32, h: u32, srgb: bool, normal: bool) -> Vec<u8> {
                 let i = ((sy * w + sx) * 4) as usize;
                 for c in 0..4 {
                     let v = src[i + c];
-                    acc[c] += if srgb && c < 3 { lut[v as usize] } else { v as f32 / 255.0 };
+                    acc[c] += if srgb && c < 3 {
+                        lut[v as usize]
+                    } else {
+                        v as f32 / 255.0
+                    };
                 }
             }
             let o = ((y * nw + x) * 4) as usize;
@@ -188,7 +214,11 @@ fn downsample(src: &[u8], w: u32, h: u32, srgb: bool, normal: bool) -> Vec<u8> {
                 acc[2] = nz / l * 0.5 + 0.5;
             }
             for c in 0..4 {
-                dst[o + c] = if srgb && c < 3 { lin_to_srgb(acc[c]) } else { (acc[c].clamp(0.0, 1.0) * 255.0 + 0.5) as u8 };
+                dst[o + c] = if srgb && c < 3 {
+                    lin_to_srgb(acc[c])
+                } else {
+                    (acc[c].clamp(0.0, 1.0) * 255.0 + 0.5) as u8
+                };
             }
         }
     }
@@ -202,8 +232,18 @@ mod tests {
 
     #[test]
     fn mips_cover_every_layer() {
-        let size = Extent3d { width: 8, height: 4, depth_or_array_layers: 3 };
-        let mut img = Image::new(size, TextureDimension::D2, vec![200u8; 8 * 4 * 4 * 3], TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default());
+        let size = Extent3d {
+            width: 8,
+            height: 4,
+            depth_or_array_layers: 3,
+        };
+        let mut img = Image::new(
+            size,
+            TextureDimension::D2,
+            vec![200u8; 8 * 4 * 4 * 3],
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::default(),
+        );
         generate_mips(&mut img, false);
         assert_eq!(img.texture_descriptor.mip_level_count, 4);
         // 8x4 + 4x2 + 2x1 + 1x1 пикселей на слой.
@@ -214,10 +254,20 @@ mod tests {
 
     #[test]
     fn cap_drops_top_levels_of_every_layer() {
-        let size = Extent3d { width: 8, height: 8, depth_or_array_layers: 2 };
+        let size = Extent3d {
+            width: 8,
+            height: 8,
+            depth_or_array_layers: 2,
+        };
         let mut data = vec![10u8; 8 * 8 * 4 * 2];
         data[8 * 8 * 4..].fill(90);
-        let mut img = Image::new(size, TextureDimension::D2, data, TextureFormat::Rgba8Unorm, RenderAssetUsages::default());
+        let mut img = Image::new(
+            size,
+            TextureDimension::D2,
+            data,
+            TextureFormat::Rgba8Unorm,
+            RenderAssetUsages::default(),
+        );
         generate_mips(&mut img, false);
         cap_size(&mut img, 2);
         assert_eq!(img.texture_descriptor.size.width, 2);

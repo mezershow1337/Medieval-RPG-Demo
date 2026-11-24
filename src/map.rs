@@ -71,11 +71,18 @@ impl MapWorld {
             s if s.is_empty() => "Странник".to_string(),
             s => s,
         };
-        let taken = |n: &str| self.names.iter().any(|(other, name)| *other != id && name == n);
+        let taken = |n: &str| {
+            self.names
+                .iter()
+                .any(|(other, name)| *other != id && name == n)
+        };
         if !taken(&base) {
             return base;
         }
-        (2..).map(|k| format!("{base} {k}")).find(|n| !taken(n)).unwrap()
+        (2..)
+            .map(|k| format!("{base} {k}"))
+            .find(|n| !taken(n))
+            .unwrap()
     }
 }
 
@@ -83,11 +90,17 @@ pub struct MapServerPlugin;
 
 impl Plugin for MapServerPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(MapWorld::default()).add_observer(on_connection).add_systems(Update, receive_map_messages);
+        app.insert_resource(MapWorld::default())
+            .add_observer(on_connection)
+            .add_systems(Update, receive_map_messages);
     }
 }
 
-fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, mut world: ResMut<MapWorld>) {
+fn on_connection(
+    event: On<RenetServerEvent>,
+    mut server: ResMut<RenetServer>,
+    mut world: ResMut<MapWorld>,
+) {
     match &event.0 {
         ServerEvent::ClientConnected { client_id } => {
             server.send_message(*client_id, CH_MAP, encode(&world.roster()));
@@ -149,11 +162,18 @@ pub struct Party {
 
 impl Party {
     pub fn name(&self, id: u64) -> String {
-        self.names.get(&id).cloned().unwrap_or_else(|| "Странник".to_string())
+        self.names
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| "Странник".to_string())
     }
     /// Цвет игрока одинаков у всех: по порядку в списке сервера.
     pub fn color(&self, id: u64) -> Color {
-        let k = self.names.keys().position(|k| *k == id).unwrap_or((id % PIGMENTS.len() as u64) as usize);
+        let k = self
+            .names
+            .keys()
+            .position(|k| *k == id)
+            .unwrap_or((id % PIGMENTS.len() as u64) as usize);
         let (r, g, b) = PIGMENTS[k % PIGMENTS.len()];
         Color::srgb(r, g, b)
     }
@@ -185,7 +205,15 @@ pub struct MapView {
 
 impl Default for MapView {
     fn default() -> Self {
-        Self { open: false, zoom: 2.4, center: Vec2::splat(0.5), drag: None, side: 600.0, occupied: Vec::new(), screen_center: Vec2::ZERO }
+        Self {
+            open: false,
+            zoom: 2.4,
+            center: Vec2::splat(0.5),
+            drag: None,
+            side: 600.0,
+            occupied: Vec::new(),
+            screen_center: Vec2::ZERO,
+        }
     }
 }
 
@@ -202,10 +230,31 @@ impl Plugin for MapClientPlugin {
         app.insert_resource(Party::default())
             .insert_resource(MapView::default())
             .insert_resource(MarkerPool::default())
-            .add_systems(Startup, (start_drawing_map, (setup_marker_art, setup_map_ui).chain().after(crate::inventory_ui::setup_fonts)))
-            .add_systems(Update, (say_hello, receive_map).run_if(bevy_renet::client_connected))
+            .add_systems(
+                Startup,
+                (
+                    start_drawing_map,
+                    (setup_marker_art, setup_map_ui)
+                        .chain()
+                        .after(crate::inventory_ui::setup_fonts),
+                ),
+            )
+            .add_systems(
+                Update,
+                (say_hello, receive_map).run_if(bevy_renet::client_connected),
+            )
             .add_systems(Update, finish_map_sheet)
-            .add_systems(Update, (toggle_map, free_cursor_while_open, map_input, update_map_markers, layout_map).chain())
+            .add_systems(
+                Update,
+                (
+                    toggle_map,
+                    free_cursor_while_open,
+                    map_input,
+                    update_map_markers,
+                    layout_map,
+                )
+                    .chain(),
+            )
             .add_systems(Update, update_name_tags);
     }
 }
@@ -224,7 +273,11 @@ fn start_drawing_map(mut commands: Commands) {
             *out.lock().unwrap() = Some(raster);
         })
         .expect("поток карты");
-    commands.insert_resource(MapSheet { pending, image: None, bounds: None });
+    commands.insert_resource(MapSheet {
+        pending,
+        image: None,
+        bounds: None,
+    });
 }
 
 /// Места, которые обязательно должны попасть на лист.
@@ -232,18 +285,37 @@ fn map_points() -> Vec<Vec3> {
     crate::level::places().iter().map(|p| p.pos).collect()
 }
 
-fn finish_map_sheet(mut sheet: ResMut<MapSheet>, mut images: ResMut<Assets<Image>>, mut view: ResMut<MapView>) {
+fn finish_map_sheet(
+    mut sheet: ResMut<MapSheet>,
+    mut images: ResMut<Assets<Image>>,
+    mut view: ResMut<MapView>,
+) {
     if sheet.image.is_some() {
         return;
     }
-    let Some(raster) = sheet.pending.lock().unwrap().take() else { return };
+    let Some(raster) = sheet.pending.lock().unwrap().take() else {
+        return;
+    };
     let n = raster.size as u32;
-    let mut img = Image::new(Extent3d { width: n, height: n, depth_or_array_layers: 1 }, TextureDimension::D2, raster.rgba, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
+    let mut img = Image::new(
+        Extent3d {
+            width: n,
+            height: n,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        raster.rgba,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
     crate::textures::generate_mips(&mut img, false);
     img.sampler = crate::textures::quality_sampler(false);
     sheet.image = Some(images.add(img));
     sheet.bounds = Some(raster.bounds);
-    view.center = raster.bounds.to_uv(crate::level::spawn_point(0).x, crate::level::spawn_point(0).z);
+    view.center = raster.bounds.to_uv(
+        crate::level::spawn_point(0).x,
+        crate::level::spawn_point(0).z,
+    );
 }
 
 fn say_hello(mut client: ResMut<RenetClient>, mut sent: Local<bool>) {
@@ -252,10 +324,16 @@ fn say_hello(mut client: ResMut<RenetClient>, mut sent: Local<bool>) {
         let name = crate::launcher::player_name();
         client.send_message(CH_MAP, encode(&MapClientMessage::Hello { name }));
         // Для снимков: `MRPG_MARK="x,z"` сразу ставит метку.
-        if let Some(v) = std::env::var("MRPG_MARK").ok().map(|s| s.split(',').filter_map(|t| t.trim().parse::<f32>().ok()).collect::<Vec<_>>())
-            && v.len() == 2
+        if let Some(v) = std::env::var("MRPG_MARK").ok().map(|s| {
+            s.split(',')
+                .filter_map(|t| t.trim().parse::<f32>().ok())
+                .collect::<Vec<_>>()
+        }) && v.len() == 2
         {
-            client.send_message(CH_MAP, encode(&MapClientMessage::SetMark(Some([v[0], v[1]]))));
+            client.send_message(
+                CH_MAP,
+                encode(&MapClientMessage::SetMark(Some([v[0], v[1]]))),
+            );
         }
     }
 }
@@ -264,7 +342,12 @@ fn receive_map(mut client: ResMut<RenetClient>, mut party: ResMut<Party>) {
     while let Some(bytes) = client.receive_message(CH_MAP) {
         match decode::<MapServerMessage>(&bytes) {
             Some(MapServerMessage::Roster(list)) => party.names = list.into_iter().collect(),
-            Some(MapServerMessage::Marks(list)) => party.marks = list.into_iter().map(|(id, p)| (id, Vec2::from_array(p))).collect(),
+            Some(MapServerMessage::Marks(list)) => {
+                party.marks = list
+                    .into_iter()
+                    .map(|(id, p)| (id, Vec2::from_array(p)))
+                    .collect()
+            }
             None => {}
         }
     }
@@ -303,7 +386,17 @@ fn stamp(n: u32, inside: impl Fn(f32, f32) -> f32) -> Image {
             data[o + 3] = (a * 255.0) as u8;
         }
     }
-    let mut img = Image::new(Extent3d { width: n, height: n, depth_or_array_layers: 1 }, TextureDimension::D2, data, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
+    let mut img = Image::new(
+        Extent3d {
+            width: n,
+            height: n,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
     crate::textures::generate_mips(&mut img, false);
     img.sampler = crate::textures::quality_sampler(false);
     img
@@ -328,7 +421,13 @@ fn polygon_depth(pts: &[(f32, f32)], u: f32, v: f32) -> f32 {
 
 pub(crate) fn setup_marker_art(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     // Наконечник стрелы остриём вверх, с вырезом сзади.
-    let arrow = stamp(64, |u, v| polygon_depth(&[(0.0, -0.95), (0.72, 0.85), (0.0, 0.42), (-0.72, 0.85)], u, v));
+    let arrow = stamp(64, |u, v| {
+        polygon_depth(
+            &[(0.0, -0.95), (0.72, 0.85), (0.0, 0.42), (-0.72, 0.85)],
+            u,
+            v,
+        )
+    });
     // Метка: равноконечный крест с расширенными концами (как на печатях и надгробиях того времени).
     let pin = stamp(64, |u, v| {
         let arm = |a: f32, b: f32| {
@@ -338,7 +437,10 @@ pub(crate) fn setup_marker_art(mut commands: Commands, mut images: ResMut<Assets
         };
         arm(u, v).max(arm(v, u)).max(0.3 - (u * u + v * v).sqrt())
     });
-    commands.insert_resource(MarkerArt { arrow: images.add(arrow), pin: images.add(pin) });
+    commands.insert_resource(MarkerArt {
+        arrow: images.add(arrow),
+        pin: images.add(pin),
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -373,21 +475,53 @@ struct MapLabel {
 fn label_tier(kind: crate::level::PlaceKind) -> f32 {
     use crate::level::PlaceKind::*;
     match kind {
-        SteppeCamp | GothVillage | AlanCamp | Necropolis | Vineyard | Spring | Mine | CharcoalCamp | Quarry => 0.0,
-        Agora | Basilica | Gate | PortMarket | Theatre | Garrison | Praetorium | Thermae | Quay | Cistern => 1.8,
+        SteppeCamp | GothVillage | AlanCamp | Necropolis | Vineyard | Spring | Mine
+        | CharcoalCamp | Quarry => 0.0,
+        Agora | Basilica | Gate | PortMarket | Theatre | Garrison | Praetorium | Thermae | Quay
+        | Cistern => 1.8,
         _ => 3.0,
     }
 }
 
-pub(crate) fn text(fonts: &crate::inventory_ui::UiFonts, s: &str, size: f32, color: Color, bold: bool) -> (Text, TextFont, TextColor) {
-    (Text::new(s), TextFont { font: if bold { fonts.bold.clone() } else { fonts.regular.clone() }.into(), font_size: FontSize::Px(size), ..default() }, TextColor(color))
+pub(crate) fn text(
+    fonts: &crate::inventory_ui::UiFonts,
+    s: &str,
+    size: f32,
+    color: Color,
+    bold: bool,
+) -> (Text, TextFont, TextColor) {
+    (
+        Text::new(s),
+        TextFont {
+            font: if bold {
+                fonts.bold.clone()
+            } else {
+                fonts.regular.clone()
+            }
+            .into(),
+            font_size: FontSize::Px(size),
+            ..default()
+        },
+        TextColor(color),
+    )
 }
 
-fn setup_map_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>, theme: Res<UiTheme>) {
+fn setup_map_ui(
+    mut commands: Commands,
+    fonts: Res<crate::inventory_ui::UiFonts>,
+    theme: Res<UiTheme>,
+) {
     let root = commands
         .spawn((
             MapRoot,
-            Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                height: percent(100),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
             theme.backdrop(),
             GlobalZIndex(40),
             Visibility::Hidden,
@@ -396,7 +530,13 @@ fn setup_map_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
     // Рама — тёмная доска в бронзе (общая тема окон), внутри — сам лист карты.
     let frame = commands
         .spawn((
-            Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, padding: Skin::Wood.padding(), row_gap: px(8), ..default() },
+            Node {
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                padding: Skin::Wood.padding(),
+                row_gap: px(8),
+                ..default()
+            },
             theme.skin(Skin::Wood),
             ChildOf(root),
         ))
@@ -405,17 +545,37 @@ fn setup_map_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
     let viewport = commands
         .spawn((
             MapViewport,
-            Node { width: px(600), height: px(600), overflow: Overflow::clip(), border: UiRect::all(px(MAP_BORDER)), ..default() },
+            Node {
+                width: px(600),
+                height: px(600),
+                overflow: Overflow::clip(),
+                border: UiRect::all(px(MAP_BORDER)),
+                ..default()
+            },
             BorderColor::all(WOOD_DARK),
             BackgroundColor(Color::srgb(0.80, 0.71, 0.53)),
             ChildOf(frame),
         ))
         .id();
-    commands.spawn((MapImage, ImageNode::default(), Node { position_type: PositionType::Absolute, ..default() }, Visibility::Hidden, ChildOf(viewport)));
+    commands.spawn((
+        MapImage,
+        ImageNode::default(),
+        Node {
+            position_type: PositionType::Absolute,
+            ..default()
+        },
+        Visibility::Hidden,
+        ChildOf(viewport),
+    ));
     commands.spawn((
         MapLoading,
         text(&fonts, "Писец ещё дорисовывает карту…", 20.0, INK, false),
-        Node { position_type: PositionType::Absolute, left: px(150), top: px(280), ..default() },
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(150),
+            top: px(280),
+            ..default()
+        },
         ChildOf(viewport),
     ));
     // Подписи: места, город, море.
@@ -427,9 +587,27 @@ fn setup_map_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
         labels.push((p.name.to_string(), p.pos, label_tier(p.kind), 15.0, false));
     }
     if crate::level::active() == crate::level::LevelKind::Chersonesus {
-        labels.push(("Х Е Р С О Н".into(), Vec3::new(0.0, 0.0, 30.0), 0.0, 26.0, true));
-        labels.push(("П о н т   Э в к с и н с к и й".into(), Vec3::new(60.0, 0.0, -330.0), 0.0, 24.0, true));
-        labels.push(("Гераклейский полуостров".into(), Vec3::new(-40.0, 0.0, 420.0), 0.0, 18.0, true));
+        labels.push((
+            "Х Е Р С О Н".into(),
+            Vec3::new(0.0, 0.0, 30.0),
+            0.0,
+            26.0,
+            true,
+        ));
+        labels.push((
+            "П о н т   Э в к с и н с к и й".into(),
+            Vec3::new(60.0, 0.0, -330.0),
+            0.0,
+            24.0,
+            true,
+        ));
+        labels.push((
+            "Гераклейский полуостров".into(),
+            Vec3::new(-40.0, 0.0, 420.0),
+            0.0,
+            18.0,
+            true,
+        ));
     }
     // Крупные надписи — первыми, затем по важности места.
     labels.sort_by(|a, b| (!a.4).cmp(&!b.4).then(a.2.total_cmp(&b.2)));
@@ -437,11 +615,34 @@ fn setup_map_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
         let half_w = 160.0;
         let est = Vec2::new(name.chars().count() as f32 * size * 0.5, size * 1.2);
         commands.spawn((
-            MapLabel { uv: Vec2::new(pos.x, pos.z), min_zoom, half_w, est, rank: rank as u32 },
-            text(&fonts, &name, size, if big { Color::srgba(0.24, 0.15, 0.08, 0.75) } else { INK }, true),
+            MapLabel {
+                uv: Vec2::new(pos.x, pos.z),
+                min_zoom,
+                half_w,
+                est,
+                rank: rank as u32,
+            },
+            text(
+                &fonts,
+                &name,
+                size,
+                if big {
+                    Color::srgba(0.24, 0.15, 0.08, 0.75)
+                } else {
+                    INK
+                },
+                true,
+            ),
             TextLayout::justify(Justify::Center),
-            TextShadow { offset: Vec2::splat(1.0), color: Color::srgba(0.95, 0.89, 0.74, 0.8) },
-            Node { position_type: PositionType::Absolute, width: px(half_w * 2.0), ..default() },
+            TextShadow {
+                offset: Vec2::splat(1.0),
+                color: Color::srgba(0.95, 0.89, 0.74, 0.8),
+            },
+            Node {
+                position_type: PositionType::Absolute,
+                width: px(half_w * 2.0),
+                ..default()
+            },
             Visibility::Hidden,
             ChildOf(viewport),
         ));
@@ -452,7 +653,10 @@ fn setup_map_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
     ));
 }
 
-fn any_other_window_open(loot: &Option<Res<crate::loot_client::LootState>>, trade: &Option<Res<crate::trade_client::TradeState>>) -> bool {
+fn any_other_window_open(
+    loot: &Option<Res<crate::loot_client::LootState>>,
+    trade: &Option<Res<crate::trade_client::TradeState>>,
+) -> bool {
     loot.as_ref().is_some_and(|l| l.ui_open) || trade.as_ref().is_some_and(|t| t.window_open())
 }
 
@@ -471,10 +675,17 @@ fn toggle_map(
     let mut m = keys.just_pressed(KeyCode::KeyM);
     // Снимки для проверки: `MRPG_SHOT_UI=map` открывает карту, как только она нарисована и игрок появился
     // (`MRPG_MAP_ZOOM` — приближение).
-    if !*shot_opened && sheet.image.is_some() && player.single().is_ok() && std::env::var("MRPG_SHOT_UI").as_deref() == Ok("map") {
+    if !*shot_opened
+        && sheet.image.is_some()
+        && player.single().is_ok()
+        && std::env::var("MRPG_SHOT_UI").as_deref() == Ok("map")
+    {
         *shot_opened = true;
         m = !view.open;
-        if let Some(z) = std::env::var("MRPG_MAP_ZOOM").ok().and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(z) = std::env::var("MRPG_MAP_ZOOM")
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             view.zoom = z.clamp(1.0, MAX_ZOOM);
         }
     }
@@ -497,7 +708,10 @@ fn toggle_map(
     }
 }
 
-fn free_cursor_while_open(view: Res<MapView>, mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>) {
+fn free_cursor_while_open(
+    view: Res<MapView>,
+    mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
+) {
     if view.open && (cursor.grab_mode != CursorGrabMode::None || !cursor.visible) {
         cursor.grab_mode = CursorGrabMode::None;
         cursor.visible = true;
@@ -513,7 +727,6 @@ fn cursor_uv(window: &Window, view: &MapView) -> Option<Vec2> {
     }
     Some(view.center + local / (view.side * view.zoom))
 }
-
 
 #[allow(clippy::too_many_arguments)]
 fn map_input(
@@ -566,13 +779,20 @@ fn map_input(
     {
         let world = bounds.from_uv(p);
         let mine = net.my_id.and_then(|id| party.marks.get(&id).copied());
-        let near_mine = mine.is_some_and(|m| (bounds.to_uv(m.x, m.y) - p).length() * view.side * view.zoom < 14.0);
-        let msg = if near_mine { MapClientMessage::SetMark(None) } else { MapClientMessage::SetMark(Some(world.to_array())) };
+        let near_mine = mine
+            .is_some_and(|m| (bounds.to_uv(m.x, m.y) - p).length() * view.side * view.zoom < 14.0);
+        let msg = if near_mine {
+            MapClientMessage::SetMark(None)
+        } else {
+            MapClientMessage::SetMark(Some(world.to_array()))
+        };
         c.send_message(CH_MAP, encode(&msg));
     }
     // Не даём уехать за край листа.
     let half = 0.5 / view.zoom;
-    view.center = view.center.clamp(Vec2::splat(half), Vec2::splat(1.0 - half));
+    view.center = view
+        .center
+        .clamp(Vec2::splat(half), Vec2::splat(1.0 - half));
 }
 
 #[allow(clippy::type_complexity)]
@@ -580,18 +800,65 @@ fn layout_map(
     mut view: ResMut<MapView>,
     window: Single<&Window, With<PrimaryWindow>>,
     sheet: Res<MapSheet>,
-    mut root: Single<&mut Visibility, (With<MapRoot>, Without<MapImage>, Without<MapLabel>, Without<MapLoading>)>,
-    mut viewport: Single<(&mut Node, &ComputedNode, &UiGlobalTransform), (With<MapViewport>, Without<MapImage>, Without<MapLabel>, Without<MapLoading>)>,
-    mut image: Single<(&mut Node, &mut ImageNode, &mut Visibility), (With<MapImage>, Without<MapViewport>, Without<MapLabel>, Without<MapLoading>)>,
-    mut loading: Single<&mut Visibility, (With<MapLoading>, Without<MapRoot>, Without<MapImage>, Without<MapLabel>)>,
-    mut labels: Query<(&MapLabel, &mut Node, &mut Visibility), (Without<MapViewport>, Without<MapImage>, Without<MapRoot>, Without<MapLoading>)>,
+    mut root: Single<
+        &mut Visibility,
+        (
+            With<MapRoot>,
+            Without<MapImage>,
+            Without<MapLabel>,
+            Without<MapLoading>,
+        ),
+    >,
+    mut viewport: Single<
+        (&mut Node, &ComputedNode, &UiGlobalTransform),
+        (
+            With<MapViewport>,
+            Without<MapImage>,
+            Without<MapLabel>,
+            Without<MapLoading>,
+        ),
+    >,
+    mut image: Single<
+        (&mut Node, &mut ImageNode, &mut Visibility),
+        (
+            With<MapImage>,
+            Without<MapViewport>,
+            Without<MapLabel>,
+            Without<MapLoading>,
+        ),
+    >,
+    mut loading: Single<
+        &mut Visibility,
+        (
+            With<MapLoading>,
+            Without<MapRoot>,
+            Without<MapImage>,
+            Without<MapLabel>,
+        ),
+    >,
+    mut labels: Query<
+        (&MapLabel, &mut Node, &mut Visibility),
+        (
+            Without<MapViewport>,
+            Without<MapImage>,
+            Without<MapRoot>,
+            Without<MapLoading>,
+        ),
+    >,
 ) {
-    **root = if view.open { Visibility::Inherited } else { Visibility::Hidden };
+    **root = if view.open {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
     if !view.open {
         return;
     }
     // Окно карты — квадрат, сколько позволяет экран (место под заголовок и подсказку).
-    let side = (window.width() * 0.9 - 70.0).min(window.height() - 190.0).max(240.0).floor();
+    let side = (window.width() * 0.9 - 70.0)
+        .min(window.height() - 190.0)
+        .max(240.0)
+        .floor();
     view.side = side;
     let (vp_node, vp_computed, vp_tf) = &mut *viewport;
     vp_node.width = px(side + 2.0 * MAP_BORDER);
@@ -619,15 +886,25 @@ fn layout_map(
     for (label, mut node, mut vis) in sorted {
         let uv = bounds.to_uv(label.uv.x, label.uv.y);
         let p = (uv - view.center) * full + side / 2.0;
-        let rect = Rect::from_center_size(p + Vec2::new(0.0, 6.0 + label.est.y / 2.0), label.est + Vec2::new(8.0, 0.0));
+        let rect = Rect::from_center_size(
+            p + Vec2::new(0.0, 6.0 + label.est.y / 2.0),
+            label.est + Vec2::new(8.0, 0.0),
+        );
         let free = !placed.iter().any(|r| !r.intersect(rect).is_empty());
         // Обрезанных краем листа подписей не показываем.
-        let inside = rect.min.x > 2.0 && rect.min.y > 2.0 && rect.max.x < side - 2.0 && rect.max.y < side - 2.0;
+        let inside = rect.min.x > 2.0
+            && rect.min.y > 2.0
+            && rect.max.x < side - 2.0
+            && rect.max.y < side - 2.0;
         let show = free && inside && view.zoom >= label.min_zoom;
         if show {
             placed.push(rect);
         }
-        *vis = if show { Visibility::Inherited } else { Visibility::Hidden };
+        *vis = if show {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
         node.left = px(p.x - label.half_w);
         node.top = px(p.y + 6.0);
     }
@@ -662,36 +939,100 @@ pub(crate) fn yaw_of(t: &Transform) -> f32 {
     (-f.x).atan2(-f.z)
 }
 
-pub(crate) fn gather(net: &NetState, party: &Party, local: &Query<(&LocalPlayer, &Transform)>, remotes: &Query<(&RemoteActor, &Transform)>, ground: &crate::collision::LevelColliders) -> Vec<Mate> {
+pub(crate) fn gather(
+    net: &NetState,
+    party: &Party,
+    local: &Query<(&LocalPlayer, &Transform)>,
+    remotes: &Query<(&RemoteActor, &Transform)>,
+    ground: &crate::collision::LevelColliders,
+) -> Vec<Mate> {
     let mut out = Vec::new();
     let my_id = net.my_id.unwrap_or(0);
     if let Ok((p, t)) = local.single() {
-        out.push(Mate { key: MarkerKey::Player(my_id), pos: t.translation, yaw: Some(p.yaw), label: "Вы".into(), color: party.color(my_id), me: true });
+        out.push(Mate {
+            key: MarkerKey::Player(my_id),
+            pos: t.translation,
+            yaw: Some(p.yaw),
+            label: "Вы".into(),
+            color: party.color(my_id),
+            me: true,
+        });
     }
     for (r, t) in remotes {
         if r.kind == ActorKind::Player {
-            out.push(Mate { key: MarkerKey::Player(r.id), pos: t.translation, yaw: Some(yaw_of(t)), label: party.name(r.id), color: party.color(r.id), me: false });
+            out.push(Mate {
+                key: MarkerKey::Player(r.id),
+                pos: t.translation,
+                yaw: Some(yaw_of(t)),
+                label: party.name(r.id),
+                color: party.color(r.id),
+                me: false,
+            });
         }
     }
     for (id, p) in &party.marks {
         let y = ground.ground_height(p.x, p.y);
         let y = if y.is_finite() { y } else { 0.0 };
-        let label = if *id == my_id { "Ваша метка".to_string() } else { format!("Метка: {}", party.name(*id)) };
-        out.push(Mate { key: MarkerKey::Mark(*id), pos: Vec3::new(p.x, y, p.y), yaw: None, label, color: party.color(*id), me: *id == my_id });
+        let label = if *id == my_id {
+            "Ваша метка".to_string()
+        } else {
+            format!("Метка: {}", party.name(*id))
+        };
+        out.push(Mate {
+            key: MarkerKey::Mark(*id),
+            pos: Vec3::new(p.x, y, p.y),
+            yaw: None,
+            label,
+            color: party.color(*id),
+            me: *id == my_id,
+        });
     }
     out
 }
 
 /// Значок с подписью: картинка в центре, текст справа.
-fn spawn_marker(commands: &mut Commands, fonts: &crate::inventory_ui::UiFonts, parent: Entity, art: Handle<Image>, size: f32, font: f32) -> Entity {
+fn spawn_marker(
+    commands: &mut Commands,
+    fonts: &crate::inventory_ui::UiFonts,
+    parent: Entity,
+    art: Handle<Image>,
+    size: f32,
+    font: f32,
+) -> Entity {
     let e = commands
-        .spawn((Node { position_type: PositionType::Absolute, width: px(size), height: px(size), ..default() }, ChildOf(parent)))
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                width: px(size),
+                height: px(size),
+                ..default()
+            },
+            ChildOf(parent),
+        ))
         .id();
-    commands.spawn((ImageNode::new(art), Node { width: percent(100), height: percent(100), ..default() }, UiTransform::default(), ChildOf(e)));
+    commands.spawn((
+        ImageNode::new(art),
+        Node {
+            width: percent(100),
+            height: percent(100),
+            ..default()
+        },
+        UiTransform::default(),
+        ChildOf(e),
+    ));
     commands.spawn((
         text(fonts, "", font, INK, true),
-        TextShadow { offset: Vec2::splat(1.0), color: Color::srgba(0.96, 0.9, 0.76, 0.9) },
-        Node { position_type: PositionType::Absolute, left: px(size + 2.0), top: px(size / 2.0 - font * 0.7), width: px(220), ..default() },
+        TextShadow {
+            offset: Vec2::splat(1.0),
+            color: Color::srgba(0.96, 0.9, 0.76, 0.9),
+        },
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(size + 2.0),
+            top: px(size / 2.0 - font * 0.7),
+            width: px(220),
+            ..default()
+        },
         ChildOf(e),
     ));
     e
@@ -738,11 +1079,17 @@ fn update_map_markers(
     for m in order {
         let size = if m.yaw.is_some() { 26.0 } else { 22.0 };
         let entity = *pool.map.entry(m.key).or_insert_with(|| {
-            let img = if m.yaw.is_some() { art.arrow.clone() } else { art.pin.clone() };
+            let img = if m.yaw.is_some() {
+                art.arrow.clone()
+            } else {
+                art.pin.clone()
+            };
             spawn_marker(&mut commands, &fonts, *viewport, img, size, 15.0)
         });
         // Только что созданный значок обновим в следующем кадре.
-        let Ok(kids) = children.get(entity) else { continue };
+        let Ok(kids) = children.get(entity) else {
+            continue;
+        };
         let uv = bounds.to_uv(m.pos.x, m.pos.z);
         let p = (uv - view.center) * full + view.side / 2.0;
         if let Ok(mut node) = nodes.get_mut(entity) {
@@ -759,8 +1106,17 @@ fn update_map_markers(
         // Подпись справа от значка; если налезает на подпись соседа (стоят рядом) — ниже.
         let est = Vec2::new(m.label.chars().count() as f32 * 15.0 * 0.55, 18.0);
         let mut dy = 0.0;
-        let label_rect = |dy: f32| Rect::from_corners(p + Vec2::new(size / 2.0 + 2.0, -10.0 + dy), p + Vec2::new(size / 2.0 + 2.0 + est.x, -10.0 + dy + est.y));
-        while dy < 72.0 && occupied.iter().any(|r| !r.intersect(label_rect(dy)).is_empty()) {
+        let label_rect = |dy: f32| {
+            Rect::from_corners(
+                p + Vec2::new(size / 2.0 + 2.0, -10.0 + dy),
+                p + Vec2::new(size / 2.0 + 2.0 + est.x, -10.0 + dy + est.y),
+            )
+        };
+        while dy < 72.0
+            && occupied
+                .iter()
+                .any(|r| !r.intersect(label_rect(dy)).is_empty())
+        {
             dy += 17.0;
         }
         occupied.push(Rect::from_center_size(p, Vec2::splat(size)));
@@ -803,9 +1159,14 @@ fn update_name_tags(
     remotes: Query<(&RemoteActor, &Transform)>,
     mut tags: Query<(&mut Node, &mut Text, &mut TextColor, &mut Visibility), With<NameTag>>,
 ) {
-    let Ok((cam, cam_t)) = camera.single() else { return };
+    let Ok((cam, cam_t)) = camera.single() else {
+        return;
+    };
     let eye = cam_t.translation();
-    let mates: Vec<Mate> = gather(&net, &party, &local, &remotes, &level).into_iter().filter(|m| !(m.me && m.yaw.is_some())).collect();
+    let mates: Vec<Mate> = gather(&net, &party, &local, &remotes, &level)
+        .into_iter()
+        .filter(|m| !(m.me && m.yaw.is_some()))
+        .collect();
     pool.tags.retain(|k, e| {
         let keep = mates.iter().any(|m| m.key == *k);
         if !keep {
@@ -820,14 +1181,23 @@ fn update_name_tags(
                     NameTag,
                     text(&fonts, "", 16.0, Color::WHITE, true),
                     TextLayout::justify(Justify::Center),
-                    TextShadow { offset: Vec2::splat(1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
-                    Node { position_type: PositionType::Absolute, width: px(240), ..default() },
+                    TextShadow {
+                        offset: Vec2::splat(1.5),
+                        color: Color::srgba(0.0, 0.0, 0.0, 0.85),
+                    },
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: px(240),
+                        ..default()
+                    },
                     Visibility::Hidden,
                     GlobalZIndex(5),
                 ))
                 .id()
         });
-        let Ok((mut node, mut t, mut c, mut vis)) = tags.get_mut(entity) else { continue };
+        let Ok((mut node, mut t, mut c, mut vis)) = tags.get_mut(entity) else {
+            continue;
+        };
         let is_mark = m.yaw.is_none();
         let head = m.pos + Vec3::Y * if is_mark { 2.5 } else { 2.05 };
         let dist = eye.distance(m.pos);
@@ -837,7 +1207,11 @@ fn update_name_tags(
                 *vis = Visibility::Inherited;
                 node.left = px(p.x - 120.0);
                 node.top = px(p.y - 22.0);
-                let s = if is_mark || dist > 25.0 { format!("{}  ·  {:.0} м", m.label, dist) } else { m.label.clone() };
+                let s = if is_mark || dist > 25.0 {
+                    format!("{}  ·  {:.0} м", m.label, dist)
+                } else {
+                    m.label.clone()
+                };
                 if t.0 != s {
                     t.0 = s;
                 }
@@ -860,7 +1234,11 @@ mod tests {
         assert_eq!(a, "Иван");
         w.names.insert(1, a);
         assert_eq!(w.unique_name(2, "Иван"), "Иван 2");
-        assert_eq!(w.unique_name(1, "Иван"), "Иван", "своё имя не считается занятым");
+        assert_eq!(
+            w.unique_name(1, "Иван"),
+            "Иван",
+            "своё имя не считается занятым"
+        );
         assert_eq!(w.unique_name(3, "\u{7}"), "Странник");
         assert_eq!(w.unique_name(4, &"я".repeat(50)).chars().count(), 20);
     }
@@ -868,7 +1246,9 @@ mod tests {
     #[test]
     fn yaw_of_matches_player_yaw() {
         for yaw in [0.0f32, 0.7, -2.0, 3.0] {
-            assert!((yaw_of(&Transform::from_rotation(Quat::from_rotation_y(yaw))) - yaw).abs() < 1e-4);
+            assert!(
+                (yaw_of(&Transform::from_rotation(Quat::from_rotation_y(yaw))) - yaw).abs() < 1e-4
+            );
         }
     }
 

@@ -29,7 +29,10 @@ pub enum DoorClientMessage {
 pub enum DoorServerMessage {
     /// Все двери при подключении: бит на дверь (1 — открыта).
     All(Vec<u8>),
-    Set { id: u32, open: bool },
+    Set {
+        id: u32,
+        open: bool,
+    },
 }
 
 pub fn pack(level: &LevelColliders) -> Vec<u8> {
@@ -52,7 +55,9 @@ pub fn unpack(level: &LevelColliders, bits: &[u8]) {
 
 /// Расстояние от точки до проёма двери (до коробки закрытой створки).
 pub fn distance_to_door(level: &LevelColliders, id: usize, p: Vec3) -> f32 {
-    let Some(b) = level.door_box(id) else { return f32::MAX };
+    let Some(b) = level.door_box(id) else {
+        return f32::MAX;
+    };
     let q = p.clamp(b.min, b.max);
     p.distance(q)
 }
@@ -65,22 +70,40 @@ pub struct DoorServerPlugin;
 
 impl Plugin for DoorServerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_connection).add_systems(Update, receive_door_messages);
+        app.add_observer(on_connection)
+            .add_systems(Update, receive_door_messages);
     }
 }
 
-fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, level: Res<LevelColliders>) {
+fn on_connection(
+    event: On<RenetServerEvent>,
+    mut server: ResMut<RenetServer>,
+    level: Res<LevelColliders>,
+) {
     if let ServerEvent::ClientConnected { client_id } = &event.0 {
-        server.send_message(*client_id, CH_DOOR, encode(&DoorServerMessage::All(pack(&level))));
+        server.send_message(
+            *client_id,
+            CH_DOOR,
+            encode(&DoorServerMessage::All(pack(&level))),
+        );
     }
 }
 
-fn receive_door_messages(mut server: ResMut<RenetServer>, game: Res<crate::server::GameWorld>, level: Res<LevelColliders>, mut locks: Option<ResMut<crate::towns_server::Locks>>) {
+fn receive_door_messages(
+    mut server: ResMut<RenetServer>,
+    game: Res<crate::server::GameWorld>,
+    level: Res<LevelColliders>,
+    mut locks: Option<ResMut<crate::towns_server::Locks>>,
+) {
     for pid in server.clients_id() {
         while let Some(bytes) = server.receive_message(pid, CH_DOOR) {
-            let Some(DoorClientMessage::Toggle { id }) = decode::<DoorClientMessage>(&bytes) else { continue };
+            let Some(DoorClientMessage::Toggle { id }) = decode::<DoorClientMessage>(&bytes) else {
+                continue;
+            };
             let id = id as usize;
-            let Some(actor) = game.actors.get(&pid).filter(|a| a.alive) else { continue };
+            let Some(actor) = game.actors.get(&pid).filter(|a| a.alive) else {
+                continue;
+            };
             if id >= level.door_count() {
                 continue;
             }
@@ -93,21 +116,44 @@ fn receive_door_messages(mut server: ResMut<RenetServer>, game: Res<crate::serve
             if let Some(locks) = locks.as_mut()
                 && !locks.door(id as u32, pid)
             {
-                server.send_message(pid, CH_DOOR, encode(&DoorServerMessage::Set { id: id as u32, open: level.door_open(id) }));
+                server.send_message(
+                    pid,
+                    CH_DOOR,
+                    encode(&DoorServerMessage::Set {
+                        id: id as u32,
+                        open: level.door_open(id),
+                    }),
+                );
                 continue;
             }
             let open = !level.door_open(id);
             if !open {
                 // Не захлопываем дверь на ком-то, кто стоит в проёме.
                 let b = level.door_box(id).unwrap();
-                let blocked = game.actors.values().any(|a| a.alive && Body::STANDING.aabb_at(a.pose.feet).overlaps(&b));
+                let blocked = game
+                    .actors
+                    .values()
+                    .any(|a| a.alive && Body::STANDING.aabb_at(a.pose.feet).overlaps(&b));
                 if blocked {
-                    server.send_message(pid, CH_DOOR, encode(&DoorServerMessage::Set { id: id as u32, open: true }));
+                    server.send_message(
+                        pid,
+                        CH_DOOR,
+                        encode(&DoorServerMessage::Set {
+                            id: id as u32,
+                            open: true,
+                        }),
+                    );
                     continue;
                 }
             }
             level.set_door_open(id, open);
-            server.broadcast_message(CH_DOOR, encode(&DoorServerMessage::Set { id: id as u32, open }));
+            server.broadcast_message(
+                CH_DOOR,
+                encode(&DoorServerMessage::Set {
+                    id: id as u32,
+                    open,
+                }),
+            );
         }
     }
 }
@@ -121,9 +167,22 @@ pub struct DoorClientPlugin;
 impl Plugin for DoorClientPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(DoorAim::default())
-            .add_systems(Startup, setup_door_prompt.after(crate::inventory_ui::setup_fonts))
-            .add_systems(Update, (receive_doors, door_input).chain().run_if(bevy_renet::client_connected))
-            .add_systems(Update, (aim_door, swing_doors, update_door_prompt).chain().in_set(DoorSystems));
+            .add_systems(
+                Startup,
+                setup_door_prompt.after(crate::inventory_ui::setup_fonts),
+            )
+            .add_systems(
+                Update,
+                (receive_doors, door_input)
+                    .chain()
+                    .run_if(bevy_renet::client_connected),
+            )
+            .add_systems(
+                Update,
+                (aim_door, swing_doors, update_door_prompt)
+                    .chain()
+                    .in_set(DoorSystems),
+            );
     }
 }
 
@@ -148,7 +207,13 @@ pub struct DoorLeaf {
 const OPEN_ANGLE: f32 = 1.75;
 
 /// Клиент: ставит створки во все проёмы (вызывается при постройке уровня).
-pub fn spawn_door_leaves(commands: &mut Commands, meshes: &mut Assets<Mesh>, wood: Handle<crate::graphics::SurfaceMaterial>, iron: Handle<crate::graphics::SurfaceMaterial>, doors: &[DoorSpec]) {
+pub fn spawn_door_leaves(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    wood: Handle<crate::graphics::SurfaceMaterial>,
+    iron: Handle<crate::graphics::SurfaceMaterial>,
+    doors: &[DoorSpec],
+) {
     // Одна створка 1 × 1 м (масштабом растягивается под проём): доски, две оковки, кольцо.
     let mut planks = crate::level::MeshBuilder::default();
     let mut metal = crate::level::MeshBuilder::default();
@@ -161,16 +226,27 @@ pub fn spawn_door_leaves(commands: &mut Commands, meshes: &mut Assets<Mesh>, woo
     // Поперечные планки с обеих сторон.
     for y in [0.15, 0.82] {
         planks.cuboid(Vec3::new(0.04, y, 0.035), Vec3::new(0.96, y + 0.07, 0.06));
-        metal.cuboid(Vec3::new(0.0, y + 0.02, -0.05), Vec3::new(0.75, y + 0.05, -0.035));
+        metal.cuboid(
+            Vec3::new(0.0, y + 0.02, -0.05),
+            Vec3::new(0.75, y + 0.05, -0.035),
+        );
     }
     metal.cuboid(Vec3::new(0.86, 0.46, -0.07), Vec3::new(0.9, 0.52, 0.07));
     let leaf_mesh = meshes.add(planks.build());
     let metal_mesh = meshes.add(metal.build());
     for (id, d) in doors.iter().enumerate() {
-        let leaves: &[(f32, f32)] = if d.double { &[(-1.0, 0.5), (1.0, 0.5)] } else { &[(-1.0, 1.0)] };
+        let leaves: &[(f32, f32)] = if d.double {
+            &[(-1.0, 0.5), (1.0, 0.5)]
+        } else {
+            &[(-1.0, 1.0)]
+        };
         for &(side, frac) in leaves {
             // Ось вдоль стены и поперёк неё.
-            let (along, across) = if d.along_x { (Vec3::X, Vec3::Z) } else { (Vec3::Z, Vec3::X) };
+            let (along, across) = if d.along_x {
+                (Vec3::X, Vec3::Z)
+            } else {
+                (Vec3::Z, Vec3::X)
+            };
             let hinge = d.center + along * side * d.width / 2.0;
             let leaf_w = d.width * frac - 0.02;
             // Створка лежит от петли к середине проёма: локальный +X — от петли.
@@ -178,18 +254,35 @@ pub fn spawn_door_leaves(commands: &mut Commands, meshes: &mut Assets<Mesh>, woo
             let base_yaw = (-dir.z).atan2(dir.x);
             let base = Quat::from_rotation_y(base_yaw);
             // Открывается внутрь той стороны, куда смотрит `across` (одинаково у всех дверей уровня).
-            let sign = if (base * Vec3::Z).dot(across) > 0.0 { -1.0 } else { 1.0 };
+            let sign = if (base * Vec3::Z).dot(across) > 0.0 {
+                -1.0
+            } else {
+                1.0
+            };
             let angle = if d.open { OPEN_ANGLE } else { 0.0 };
             commands
                 .spawn((
-                    DoorLeaf { id: id as u32, sign, angle },
-                    Transform::from_translation(hinge).with_rotation(base * Quat::from_rotation_y(sign * angle)),
+                    DoorLeaf {
+                        id: id as u32,
+                        sign,
+                        angle,
+                    },
+                    Transform::from_translation(hinge)
+                        .with_rotation(base * Quat::from_rotation_y(sign * angle)),
                     Visibility::default(),
                 ))
                 .with_children(|p| {
                     let scale = Vec3::new(leaf_w, d.height - 0.03, 1.0);
-                    p.spawn((Mesh3d(leaf_mesh.clone()), MeshMaterial3d(wood.clone()), Transform::from_scale(scale)));
-                    p.spawn((Mesh3d(metal_mesh.clone()), MeshMaterial3d(iron.clone()), Transform::from_scale(scale)));
+                    p.spawn((
+                        Mesh3d(leaf_mesh.clone()),
+                        MeshMaterial3d(wood.clone()),
+                        Transform::from_scale(scale),
+                    ));
+                    p.spawn((
+                        Mesh3d(metal_mesh.clone()),
+                        MeshMaterial3d(iron.clone()),
+                        Transform::from_scale(scale),
+                    ));
                 });
         }
     }
@@ -205,10 +298,18 @@ fn receive_doors(mut client: ResMut<RenetClient>, level: Res<LevelColliders>) {
     }
 }
 
-fn swing_doors(time: Res<Time>, level: Res<LevelColliders>, mut leaves: Query<(&mut DoorLeaf, &mut Transform)>) {
+fn swing_doors(
+    time: Res<Time>,
+    level: Res<LevelColliders>,
+    mut leaves: Query<(&mut DoorLeaf, &mut Transform)>,
+) {
     let step = time.delta_secs() * 2.6;
     for (mut leaf, mut t) in &mut leaves {
-        let target = if level.door_open(leaf.id as usize) { OPEN_ANGLE } else { 0.0 };
+        let target = if level.door_open(leaf.id as usize) {
+            OPEN_ANGLE
+        } else {
+            0.0
+        };
         if (leaf.angle - target).abs() < 1e-4 {
             continue;
         }
@@ -230,7 +331,13 @@ fn aim_door(
 ) {
     aim.0 = None;
     // Тела, вещи, торговцы и травы важнее: у них своё «E».
-    if loot.ui_open || loot.target.is_some() || trade.window_open() || trade.aim.is_some() || lore.target.is_some() || resident.0.is_some() {
+    if loot.ui_open
+        || loot.target.is_some()
+        || trade.window_open()
+        || trade.aim.is_some()
+        || lore.target.is_some()
+        || resident.0.is_some()
+    {
         return;
     }
     let Ok(cam) = camera.single() else { return };
@@ -238,7 +345,9 @@ fn aim_door(
     let dir = cam.forward().as_vec3();
     let mut best: Option<(f32, u32)> = None;
     for id in 0..level.door_count() {
-        let Some(b) = level.door_box(id) else { continue };
+        let Some(b) = level.door_box(id) else {
+            continue;
+        };
         // Быстрый отсев по расстоянию.
         let c = (b.min + b.max) / 2.0;
         if Vec2::new(c.x - origin.x, c.z - origin.z).length_squared() > 36.0 {
@@ -266,7 +375,12 @@ fn ray_box(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
     (far >= near.max(0.0)).then_some(near.max(0.0))
 }
 
-fn door_input(keys: Res<ButtonInput<KeyCode>>, aim: Res<DoorAim>, mut client: ResMut<RenetClient>, loot: Res<crate::loot_client::LootState>) {
+fn door_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    aim: Res<DoorAim>,
+    mut client: ResMut<RenetClient>,
+    loot: Res<crate::loot_client::LootState>,
+) {
     if loot.ui_open {
         return;
     }
@@ -282,7 +396,13 @@ struct DoorPrompt;
 
 fn setup_door_prompt(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>) {
     commands
-        .spawn(Node { position_type: PositionType::Absolute, width: percent(100), top: percent(56), justify_content: JustifyContent::Center, ..default() })
+        .spawn(Node {
+            position_type: PositionType::Absolute,
+            width: percent(100),
+            top: percent(56),
+            justify_content: JustifyContent::Center,
+            ..default()
+        })
         .with_children(|p| {
             crate::ui_theme::theme().plaque(p).with_children(|p| {
                 p.spawn((
@@ -301,7 +421,11 @@ fn setup_door_prompt(mut commands: Commands, fonts: Res<crate::inventory_ui::UiF
         });
 }
 
-fn update_door_prompt(aim: Res<DoorAim>, level: Res<LevelColliders>, mut text: Single<&mut Text, With<DoorPrompt>>) {
+fn update_door_prompt(
+    aim: Res<DoorAim>,
+    level: Res<LevelColliders>,
+    mut text: Single<&mut Text, With<DoorPrompt>>,
+) {
     let line = match aim.0 {
         Some(id) if level.door_open(id as usize) => "[E] Закрыть дверь",
         Some(_) => "[E] Открыть дверь",
@@ -319,7 +443,11 @@ mod tests {
     #[test]
     fn bits_round_trip() {
         let layout = crate::level::layout();
-        assert!(layout.doors.len() > 300, "мало дверей: {}", layout.doors.len());
+        assert!(
+            layout.doors.len() > 300,
+            "мало дверей: {}",
+            layout.doors.len()
+        );
         let level = crate::level::colliders(layout);
         for id in (0..level.door_count()).step_by(3) {
             level.set_door_open(id, !level.door_open(id));
@@ -334,7 +462,23 @@ mod tests {
 
     #[test]
     fn ray_hits_box() {
-        assert!(ray_box(Vec3::ZERO, Vec3::X, Vec3::new(1.0, -1.0, -1.0), Vec3::new(2.0, 1.0, 1.0)).is_some_and(|t| (t - 1.0).abs() < 1e-4));
-        assert!(ray_box(Vec3::ZERO, -Vec3::X, Vec3::new(1.0, -1.0, -1.0), Vec3::new(2.0, 1.0, 1.0)).is_none());
+        assert!(
+            ray_box(
+                Vec3::ZERO,
+                Vec3::X,
+                Vec3::new(1.0, -1.0, -1.0),
+                Vec3::new(2.0, 1.0, 1.0)
+            )
+            .is_some_and(|t| (t - 1.0).abs() < 1e-4)
+        );
+        assert!(
+            ray_box(
+                Vec3::ZERO,
+                -Vec3::X,
+                Vec3::new(1.0, -1.0, -1.0),
+                Vec3::new(2.0, 1.0, 1.0)
+            )
+            .is_none()
+        );
     }
 }

@@ -16,7 +16,10 @@ static HOST_TOKEN: OnceLock<u64> = OnceLock::new();
 
 /// Запомнить, что этот процесс — хост (вызывать до запуска сервера и окна).
 pub fn make_host_token() {
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(1);
     let addr = &nanos as *const u64 as u64;
     // Перемешиваем, чтобы секрет нельзя было угадать по времени запуска.
     let mut x = nanos ^ addr.rotate_left(29) ^ 0x9E37_79B9_7F4A_7C15;
@@ -46,7 +49,13 @@ pub struct Cheats {
 
 impl Default for Cheats {
     fn default() -> Self {
-        Self { fly: false, noclip: false, god: false, notarget: false, speed: 1.0 }
+        Self {
+            fly: false,
+            noclip: false,
+            god: false,
+            notarget: false,
+            speed: 1.0,
+        }
     }
 }
 
@@ -120,7 +129,10 @@ mod tests {
 
     #[test]
     fn splits_quoted_names() {
-        assert_eq!(split_args("give «Целебное зелье» 3"), vec!["give", "Целебное зелье", "3"]);
+        assert_eq!(
+            split_args("give «Целебное зелье» 3"),
+            vec!["give", "Целебное зелье", "3"]
+        );
         assert_eq!(split_args("  tp  1 2   3 "), vec!["tp", "1", "2", "3"]);
         assert_eq!(split_args("give \"a b\""), vec!["give", "a b"]);
     }
@@ -136,8 +148,20 @@ mod tests {
     #[test]
     fn speed_needs_free_move() {
         assert!(!Cheats::default().free_move());
-        assert!(Cheats { speed: 3.0, ..default() }.free_move());
-        assert!(Cheats { fly: true, ..default() }.free_move());
+        assert!(
+            Cheats {
+                speed: 3.0,
+                ..default()
+            }
+            .free_move()
+        );
+        assert!(
+            Cheats {
+                fly: true,
+                ..default()
+            }
+            .free_move()
+        );
     }
 
     fn default() -> Cheats {

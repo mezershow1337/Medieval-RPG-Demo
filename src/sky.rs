@@ -13,7 +13,10 @@ use bevy::asset::RenderAssetUsages;
 use bevy::light::EnvironmentMapLight;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
-use bevy::render::render_resource::{AsBindGroup, Extent3d, ShaderType, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension};
+use bevy::render::render_resource::{
+    AsBindGroup, Extent3d, ShaderType, TextureDimension, TextureFormat, TextureViewDescriptor,
+    TextureViewDimension,
+};
 use bevy::shader::ShaderRef;
 
 /// Параметры неба (как `SkyParams` в sky_common.wesl).
@@ -139,7 +142,9 @@ fn fbm(p: Vec2) -> f32 {
 }
 
 fn fbm3(p: Vec2) -> f32 {
-    vnoise(p) * 0.57 + vnoise(p * 2.03 + Vec2::splat(3.1)) * 0.29 + vnoise(p * 4.1 + Vec2::splat(7.7)) * 0.14
+    vnoise(p) * 0.57
+        + vnoise(p * 2.03 + Vec2::splat(3.1)) * 0.29
+        + vnoise(p * 4.1 + Vec2::splat(7.7)) * 0.14
 }
 
 fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
@@ -163,18 +168,22 @@ pub fn sky_radiance(dir: Vec3, s: &SkyUniform) -> Vec3 {
     let h = e.clamp(0.0, 1.0);
     let sd = dir.dot(sun).max(0.0);
     let flat = Vec3::new(dir.x, 0.0, dir.z) + Vec3::new(1e-5, 0.0, 0.0);
-    let hor = s.horizon.truncate() + s.horizon_sun.truncate() * flat.normalize().dot(sun).max(0.0).powf(s.horizon_sun.w);
+    let hor = s.horizon.truncate()
+        + s.horizon_sun.truncate() * flat.normalize().dot(sun).max(0.0).powf(s.horizon_sun.w);
     let s2 = norm2(Vec2::new(sun.x, sun.z));
     let d2 = norm2(Vec2::new(dir.x, dir.z));
     let toward = (d2.dot(s2) * 0.5 + 0.5).clamp(0.0, 1.0);
     let zen = s.zenith.truncate();
-    let mut mid = Vec3::new(0.34, 0.40, 0.66).lerp(Vec3::new(1.0, 0.66, 0.46), toward.powi(3)).lerp(Vec3::new(0.26, 0.46, 0.86), d);
+    let mut mid = Vec3::new(0.34, 0.40, 0.66)
+        .lerp(Vec3::new(1.0, 0.66, 0.46), toward.powi(3))
+        .lerp(Vec3::new(0.26, 0.46, 0.86), d);
     mid = mid.lerp(hor.lerp(zen, 0.5), n);
     mid = mid.lerp(hor * 1.04, oc * 0.7);
     let mut col = hor.lerp(mid, smoothstep(0.0, 0.22 + (0.16 - 0.22) * d, h));
     col = col.lerp(zen.lerp(hor * 1.02, oc * 0.6), smoothstep(0.12, 0.85, h));
     let veil = (1.0 - n) * (1.0 - 0.8 * oc);
-    let halo_gold = Vec3::new(2.2, 1.15, 0.45) * sd.powf(7.0) * 0.55 + Vec3::new(3.5, 2.0, 0.9) * sd.powf(90.0) * 0.9;
+    let halo_gold = Vec3::new(2.2, 1.15, 0.45) * sd.powf(7.0) * 0.55
+        + Vec3::new(3.5, 2.0, 0.9) * sd.powf(90.0) * 0.9;
     let halo_day = Vec3::new(1.0, 0.9, 0.7) * sd.powf(8.0) * 0.5;
     col += halo_gold.lerp(halo_day, d) * veil;
     let moon = s.moon.truncate().normalize_or_zero();
@@ -184,7 +193,10 @@ pub fn sky_radiance(dir: Vec3, s: &SkyUniform) -> Vec3 {
     // Облака (упрощённо: без перистых и без кромки).
     if e > 0.0 {
         let p = Vec2::new(dir.x, dir.z) / (e + 0.07) * 0.75;
-        let w = Vec2::new(fbm3(p * 0.6 + Vec2::splat(3.1)), fbm3(p * 0.6 + Vec2::splat(7.7)));
+        let w = Vec2::new(
+            fbm3(p * 0.6 + Vec2::splat(3.1)),
+            fbm3(p * 0.6 + Vec2::splat(7.7)),
+        );
         let q = p + (w - Vec2::splat(0.5)) * 1.1;
         let dn = fbm(q * 1.3);
         let k = s.horizon.w;
@@ -193,15 +205,19 @@ pub fn sky_radiance(dir: Vec3, s: &SkyUniform) -> Vec3 {
         let d_sun = fbm((q + s2 * 0.16) * 1.3);
         let lit = ((dn - d_sun) * 5.0 + 0.45).clamp(0.0, 1.0);
         let thin = 1.0 - smoothstep(thr + 0.05, thr + 0.3, dn);
-        let day_c = Vec3::new(0.62, 0.66, 0.76).lerp(Vec3::new(1.32, 1.3, 1.26), lit * 0.7 + thin * 0.3);
+        let day_c =
+            Vec3::new(0.62, 0.66, 0.76).lerp(Vec3::new(1.32, 1.3, 1.26), lit * 0.7 + thin * 0.3);
         let gold = Vec3::new(1.25, 0.62, 0.55).lerp(Vec3::new(2.9, 1.45, 0.55), toward * toward);
         let shadow = Vec3::new(0.26, 0.27, 0.40).lerp(Vec3::new(0.42, 0.26, 0.26), toward);
         let gold_c = shadow.lerp(gold, lit * (0.35 + 0.65 * thin));
         let mut c = gold_c.lerp(day_c, d);
-        let grey = Vec3::new(0.34, 0.35, 0.38).lerp(Vec3::new(0.62, 0.64, 0.68), lit * 0.6 + thin * 0.4) * (0.55 + 0.45 * d);
+        let grey = Vec3::new(0.34, 0.35, 0.38)
+            .lerp(Vec3::new(0.62, 0.64, 0.68), lit * 0.6 + thin * 0.4)
+            * (0.55 + 0.45 * d);
         c = c.lerp(grey, oc * 0.8);
         let moon_lit = smoothstep(-0.02, 0.1, moon.y) * s.moon.w;
-        let night_c = Vec3::new(0.010, 0.012, 0.020).lerp(Vec3::new(0.045, 0.052, 0.075), lit) * (0.6 + 0.8 * moon_lit);
+        let night_c = Vec3::new(0.010, 0.012, 0.020).lerp(Vec3::new(0.045, 0.052, 0.075), lit)
+            * (0.6 + 0.8 * moon_lit);
         c = c.lerp(night_c, n);
         c = c.lerp(hor, (1.0 - smoothstep(0.0, 0.22, e)) * 0.55);
         col = col.lerp(c, cover);
@@ -242,7 +258,10 @@ fn cube_dir(face: usize, u: f32, v: f32) -> Vec3 {
 }
 
 fn hammersley(i: u32, n: u32) -> Vec2 {
-    Vec2::new(i as f32 / n as f32, i.reverse_bits() as f32 * 2.328_306_4e-10)
+    Vec2::new(
+        i as f32 / n as f32,
+        i.reverse_bits() as f32 * 2.328_306_4e-10,
+    )
 }
 
 /// Базис касательной плоскости к `n`.
@@ -338,10 +357,22 @@ fn cubemap(size: u32, mips: u32, texel: impl Fn(Vec3, u32) -> Vec3 + Sync) -> Im
             .collect();
         jobs.into_iter().map(|j| j.join().unwrap()).collect()
     });
-    let mut img = Image::new_uninit(Extent3d { width: size, height: size, depth_or_array_layers: 6 }, TextureDimension::D2, TextureFormat::Rgba16Float, RenderAssetUsages::RENDER_WORLD);
+    let mut img = Image::new_uninit(
+        Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 6,
+        },
+        TextureDimension::D2,
+        TextureFormat::Rgba16Float,
+        RenderAssetUsages::RENDER_WORLD,
+    );
     img.data = Some(faces.concat());
     img.texture_descriptor.mip_level_count = mips;
-    img.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::Cube), ..default() });
+    img.texture_view_descriptor = Some(TextureViewDescriptor {
+        dimension: Some(TextureViewDimension::Cube),
+        ..default()
+    });
     img
 }
 
@@ -362,9 +393,13 @@ pub fn sky_environment_sized(s: &SkyUniform, spec: u32, quality: f32) -> (Image,
     let stone = Vec3::new(0.62, 0.56, 0.46) * prefilter_diffuse(Vec3::Y, s, q(128)) * 1.5;
     let specular = cubemap(spec, mips, |d, mip| {
         let rough = mip as f32 / (mips - 1) as f32;
-        prefilter_with(d, rough, if mip == 0 { 1 } else { q(24 + mip * 8) }, |l| surround_radiance(l, s, stone))
+        prefilter_with(d, rough, if mip == 0 { 1 } else { q(24 + mip * 8) }, |l| {
+            surround_radiance(l, s, stone)
+        })
     });
-    let diffuse = cubemap(if spec >= 128 { 32 } else { 16 }, 1, |d, _| prefilter_diffuse(d, s, q(96)));
+    let diffuse = cubemap(if spec >= 128 { 32 } else { 16 }, 1, |d, _| {
+        prefilter_diffuse(d, s, q(96))
+    });
     (diffuse, specular)
 }
 
@@ -376,7 +411,12 @@ pub struct SkyEnvironment {
 }
 
 pub fn sky_environment_light(env: &SkyEnvironment, m: &Mood) -> EnvironmentMapLight {
-    EnvironmentMapLight { diffuse_map: env.diffuse.clone(), specular_map: env.specular.clone(), intensity: m.sky_light, ..default() }
+    EnvironmentMapLight {
+        diffuse_map: env.diffuse.clone(),
+        specular_map: env.specular.clone(),
+        intensity: m.sky_light,
+        ..default()
+    }
 }
 
 #[cfg(test)]
@@ -406,7 +446,10 @@ mod tests {
         let toward = sky_radiance(Vec3::new(-0.8, 0.02, -0.42), &s);
         let away = sky_radiance(Vec3::new(0.8, 0.02, 0.42), &s);
         let up = sky_radiance(Vec3::Y, &s);
-        assert!(toward.x > away.x * 1.5 && toward.x > toward.z * 2.0, "{toward} {away}");
+        assert!(
+            toward.x > away.x * 1.5 && toward.x > toward.z * 2.0,
+            "{toward} {away}"
+        );
         assert!(up.z > up.x, "{up}");
     }
 
@@ -438,4 +481,3 @@ mod env_tests {
         assert!(blurry.max_element() < sky_radiance(toward_sun, &s).max_element() * 1.5);
     }
 }
-

@@ -47,16 +47,29 @@ impl Fam {
         }
     }
 
-    pub const ALL: [Fam; 6] = [Fam::Sword, Fam::Seax, Fam::Axe, Fam::Mace, Fam::Spear, Fam::Head];
+    pub const ALL: [Fam; 6] = [
+        Fam::Sword,
+        Fam::Seax,
+        Fam::Axe,
+        Fam::Mace,
+        Fam::Spear,
+        Fam::Head,
+    ];
 }
 
 /// Номер в [`ARMS`] по виду предмета.
 pub fn of_base(base: ItemBaseId) -> Option<&'static Arm> {
     static MAP: OnceLock<Vec<Option<u16>>> = OnceLock::new();
     let map = MAP.get_or_init(|| {
-        crate::items::ITEM_BASES.iter().map(|b| ARMS.iter().position(|a| a.name == b.name).map(|i| i as u16)).collect()
+        crate::items::ITEM_BASES
+            .iter()
+            .map(|b| ARMS.iter().position(|a| a.name == b.name).map(|i| i as u16))
+            .collect()
     });
-    map.get(base.0 as usize).copied().flatten().map(|i| &ARMS[i as usize])
+    map.get(base.0 as usize)
+        .copied()
+        .flatten()
+        .map(|i| &ARMS[i as usize])
 }
 
 pub fn find(name: &str) -> Option<&'static Arm> {
@@ -71,23 +84,41 @@ mod tests {
     fn every_arm_is_an_item_with_matching_size_and_price() {
         assert!(ARMS.len() >= 74, "{}", ARMS.len());
         for a in ARMS {
-            let base = ItemBaseId::find(a.name).unwrap_or_else(|| panic!("нет предмета {}", a.name));
+            let base =
+                ItemBaseId::find(a.name).unwrap_or_else(|| panic!("нет предмета {}", a.name));
             assert!(of_base(base).is_some_and(|x| x.name == a.name));
             assert!(a.price > 0 && a.kg > 0.0, "{}", a.name);
             assert!(a.metal >= 1, "{}", a.name);
             if a.fam != Fam::Head {
-                assert_eq!(base.base().slot, Some(crate::items::EquipSlot::MainHand), "{}", a.name);
-                assert_eq!(WeaponKind::from_item_name(a.name), a.fam.kind(), "{}", a.name);
+                assert_eq!(
+                    base.base().slot,
+                    Some(crate::items::EquipSlot::MainHand),
+                    "{}",
+                    a.name
+                );
+                assert_eq!(
+                    WeaponKind::from_item_name(a.name),
+                    a.fam.kind(),
+                    "{}",
+                    a.name
+                );
             }
             for (part, _) in a.parts {
-                assert!(ItemBaseId::find(part).is_some(), "{}: нет детали {part}", a.name);
+                assert!(
+                    ItemBaseId::find(part).is_some(),
+                    "{}: нет детали {part}",
+                    a.name
+                );
             }
         }
     }
 
     #[test]
     fn eighty_weapons_in_total() {
-        let weapons = crate::items::ITEM_BASES.iter().filter(|b| b.slot == Some(crate::items::EquipSlot::MainHand)).count();
+        let weapons = crate::items::ITEM_BASES
+            .iter()
+            .filter(|b| b.slot == Some(crate::items::EquipSlot::MainHand))
+            .count();
         assert!(weapons >= 80, "{weapons}");
     }
 }

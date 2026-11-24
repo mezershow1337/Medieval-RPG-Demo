@@ -15,26 +15,49 @@ pub const MINE_REACH: f32 = 3.2;
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum MineAct {
     /// Копать, бить, колоть, крутить ворот (работа руками).
-    Dig { site: u32 },
+    Dig {
+        site: u32,
+    },
     /// Сложить поленья из сумки (работа руками).
-    StackWood { pile: u32 },
+    StackWood {
+        pile: u32,
+    },
     /// Насыпать руду на кострище (сначала обожжённую не берёт).
-    LoadOre { pile: u32 },
+    LoadOre {
+        pile: u32,
+    },
     /// Укрыть угольную кучу листвой, дёрном и землёй (заступ, работа руками).
-    Cover { pile: u32 },
-    Light { pile: u32 },
+    Cover {
+        pile: u32,
+    },
+    Light {
+        pile: u32,
+    },
     /// Открыть или закрыть отдушину.
-    Vent { pile: u32, open: bool },
+    Vent {
+        pile: u32,
+        open: bool,
+    },
     /// Засыпать прогар землёй (работа руками).
-    Patch { pile: u32 },
+    Patch {
+        pile: u32,
+    },
     /// Заглушить угольную кучу.
-    Smother { pile: u32 },
+    Smother {
+        pile: u32,
+    },
     /// Ворошить руду на кострище (работа руками).
-    Stir { pile: u32 },
+    Stir {
+        pile: u32,
+    },
     /// Подбросить дров в кострище.
-    Feed { pile: u32 },
+    Feed {
+        pile: u32,
+    },
     /// Разобрать остывшую кучу (работа руками).
-    Rake { pile: u32 },
+    Rake {
+        pile: u32,
+    },
 }
 
 /// Куча для всех: где, какая, что видно со стороны.
@@ -61,7 +84,10 @@ pub struct PileView {
 pub enum MineServerMessage {
     /// Сколько осталось в каждом месте добычи (по номеру места).
     Sites(Vec<(u32, u8)>),
-    SiteCharges { id: u32, charges: u8 },
+    SiteCharges {
+        id: u32,
+        charges: u8,
+    },
     Piles(Vec<PileView>),
     Pile(PileView),
 }

@@ -57,7 +57,12 @@ impl Plugin for TradeServerPlugin {
                 )
                     .chain(),
             )
-            .add_systems(Update, shelves::tick_shelves.after(crate::props_server::tick_props).after(receive_trade_messages));
+            .add_systems(
+                Update,
+                shelves::tick_shelves
+                    .after(crate::props_server::tick_props)
+                    .after(receive_trade_messages),
+            );
     }
 }
 
@@ -138,7 +143,11 @@ impl MerchantState {
 
 /// Цена с поправкой на рынок поселения (неурожай, мор, корабли).
 fn with_market(price: u32, mult: f32) -> u32 {
-    if (mult - 1.0).abs() < 0.005 { price } else { round_price(price as f32 * mult).max(crate::economy::SMALLEST_COIN) }
+    if (mult - 1.0).abs() < 0.005 {
+        price
+    } else {
+        round_price(price as f32 * mult).max(crate::economy::SMALLEST_COIN)
+    }
 }
 
 struct Order {
@@ -164,7 +173,9 @@ struct ActiveLesson {
 fn lesson_drill(l: &crate::trade::LessonDef) -> crate::work::Drill {
     match l.mode {
         LessonMode::Paid => crate::work::Drill::Mimic,
-        LessonMode::Apprentice => crate::work::chore_drill(crate::knowledge::teacher_from_trade(l.teacher)),
+        LessonMode::Apprentice => {
+            crate::work::chore_drill(crate::knowledge::teacher_from_trade(l.teacher))
+        }
     }
 }
 
@@ -312,13 +323,20 @@ fn fallback_pos(place_index: usize, places: usize) -> Vec3 {
 /// и улиц), от самой просторной к самой тесной; второе число — сколько метров свободно впереди.
 /// При равенстве — к точке появления.
 fn open_yaws(level: &LevelColliders, pos: Vec3) -> Vec<(f32, f32)> {
-    let to_spawn = (crate::level::spawn_point(0) - pos).with_y(0.0).normalize_or_zero();
+    let to_spawn = (crate::level::spawn_point(0) - pos)
+        .with_y(0.0)
+        .normalize_or_zero();
     let mut v: Vec<(f32, f32, f32)> = [Vec3::NEG_Z, Vec3::X, Vec3::Z, Vec3::NEG_X]
         .into_iter()
         .map(|dir| {
             let mut free = 0.0;
             let mut d = 0.5;
-            while d <= 6.0 && level.body_is_free(&crate::collision::Body::STANDING, pos + dir * d + Vec3::Y * 0.1) {
+            while d <= 6.0
+                && level.body_is_free(
+                    &crate::collision::Body::STANDING,
+                    pos + dir * d + Vec3::Y * 0.1,
+                )
+            {
                 free = d;
                 d += 0.5;
             }
@@ -336,12 +354,18 @@ fn yaw_towards(dir: Vec3) -> f32 {
 
 /// Свободны ли столешницы прилавка, поставленного у торговца в `pos` с поворотом `yaw`.
 fn stall_fits(level: &LevelColliders, pos: Vec3, yaw: f32, boxes: &[StallBox]) -> bool {
-    let probe = crate::collision::Body { half_width: 0.12, height: 0.8 };
+    let probe = crate::collision::Body {
+        half_width: 0.12,
+        height: 0.8,
+    };
     stall_obbs(pos, yaw, boxes).iter().all(|t| {
-        [-1.0f32, 0.0, 1.0].iter().flat_map(|&u| [-1.0f32, 1.0].map(move |v| (u, v))).all(|(u, v)| {
-            let p = t.center + t.rot * Vec3::new(t.half.x * u * 0.9, 0.0, t.half.z * v * 0.8);
-            level.body_is_free(&probe, p.with_y(pos.y + 0.1))
-        })
+        [-1.0f32, 0.0, 1.0]
+            .iter()
+            .flat_map(|&u| [-1.0f32, 1.0].map(move |v| (u, v)))
+            .all(|(u, v)| {
+                let p = t.center + t.rot * Vec3::new(t.half.x * u * 0.9, 0.0, t.half.z * v * 0.8);
+                level.body_is_free(&probe, p.with_y(pos.y + 0.1))
+            })
     })
 }
 
@@ -395,13 +419,21 @@ pub fn merchant_spots(level: &LevelColliders) -> Vec<(Vec3, f32, Vec<StallBox>)>
             *slot += 1;
             let outside = def.faction.outside_walls();
             if let Some(s) = crate::level::stall_slots(def.place).get(k) {
-                return (s.pos + Vec3::Y * 0.1, yaw_towards(s.facing), stall_layout(outside, false));
+                return (
+                    s.pos + Vec3::Y * 0.1,
+                    yaw_towards(s.facing),
+                    stall_layout(outside, false),
+                );
             }
             let place_index = places.iter().position(|p| *p == def.place).unwrap();
             let anchor =
                 place_pos(def.place).unwrap_or_else(|| fallback_pos(place_index, places.len()));
             // Несколько торговцев на одном месте — рядом друг с другом.
-            let side = Vec3::new((k as f32 * 2.8) * if k % 2 == 0 { 1.0 } else { -1.0 }, 0.0, 0.0);
+            let side = Vec3::new(
+                (k as f32 * 2.8) * if k % 2 == 0 { 1.0 } else { -1.0 },
+                0.0,
+                0.0,
+            );
             let one = stall_layout(outside, false);
             let (pos, yaw) = ground_spot(level, anchor + side, &one)
                 .or_else(|| ground_spot(level, anchor, &one))
@@ -424,7 +456,9 @@ pub fn merchant_spots(level: &LevelColliders) -> Vec<(Vec3, f32, Vec<StallBox>)>
         let crowded = spots.iter().enumerate().any(|(j, o)| {
             j != i
                 && (side.overlaps(&crate::collision::Body::STANDING.aabb_at(o.0))
-                    || stall_obbs(o.0, o.1, &o.2).iter().any(|t| t.aabb().overlaps(&side)))
+                    || stall_obbs(o.0, o.1, &o.2)
+                        .iter()
+                        .any(|t| t.aabb().overlaps(&side)))
         });
         if crowded {
             spots[i].2.truncate(1);
@@ -461,7 +495,10 @@ fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
             m
         })
         .collect::<Vec<MerchantState>>();
-    let statics = merchants.iter().flat_map(|m| stall_obbs(m.pos, m.yaw, &m.stall)).collect();
+    let statics = merchants
+        .iter()
+        .flat_map(|m| stall_obbs(m.pos, m.yaw, &m.stall))
+        .collect();
     commands.insert_resource(crate::props_server::PropStatics(statics));
     commands.insert_resource(TradeWorld {
         merchants,
@@ -646,15 +683,15 @@ fn build_view(
                 item: item.clone(),
                 price: haggled(
                     with_market(
-                    ask_price(
-                        def,
-                        item.base,
-                        item.quality,
-                        standing,
-                        count_of(item.base),
-                        normal(item.base),
-                    ),
-                    m.market_for(item.base),
+                        ask_price(
+                            def,
+                            item.base,
+                            item.quality,
+                            standing,
+                            count_of(item.base),
+                            normal(item.base),
+                        ),
+                        m.market_for(item.base),
                     ),
                     buy_k,
                 ),
@@ -681,7 +718,13 @@ fn build_view(
                             count_of(p.item.base),
                             stolen,
                         )
-                        .map(|b| if crate::economy::coin_value(p.item.base).is_some() { b } else { with_market(b, m.market_for(p.item.base)) })
+                        .map(|b| {
+                            if crate::economy::coin_value(p.item.base).is_some() {
+                                b
+                            } else {
+                                with_market(b, m.market_for(p.item.base))
+                            }
+                        })
                         .map(|p| haggled(p, sell_k)),
                         contraband: is_contraband_for(def, p.item.base),
                     }
@@ -760,12 +803,19 @@ fn repair_offers(def: &MerchantDef, loot: &LootWorld, player: u64) -> Vec<Repair
     if !def.has(Service::Repair) {
         return Vec::new();
     }
-    let Some(inv) = loot.inventories.get(&player) else { return Vec::new() };
+    let Some(inv) = loot.inventories.get(&player) else {
+        return Vec::new();
+    };
     inv.all_items()
         .filter_map(|i| {
             let m = i.make.as_ref()?;
             let c = m.condition();
-            (m.dur_max > 0.0 && c < 0.98).then(|| RepairOffer { uid: i.uid, name: i.info().name.to_string(), condition: c, price: crate::smithing::repair_price(m, i.value()) })
+            (m.dur_max > 0.0 && c < 0.98).then(|| RepairOffer {
+                uid: i.uid,
+                name: i.info().name.to_string(),
+                condition: c,
+                price: crate::smithing::repair_price(m, i.value()),
+            })
         })
         .collect()
 }
@@ -934,15 +984,15 @@ fn deal(
         };
         let price = haggled(
             with_market(
-            ask_price(
-                def,
-                item.base,
-                item.quality,
-                standing,
-                count_of(&shelf, item.base),
-                normal(item.base),
-            ),
-            market_for(item.base),
+                ask_price(
+                    def,
+                    item.base,
+                    item.quality,
+                    standing,
+                    count_of(&shelf, item.base),
+                    normal(item.base),
+                ),
+                market_for(item.base),
             ),
             buy_k,
         );
@@ -967,7 +1017,13 @@ fn deal(
             count_of(&shelf, p.item.base),
             stolen,
         )
-        .map(|b| if crate::economy::coin_value(p.item.base).is_some() { b } else { with_market(b, market_for(p.item.base)) })
+        .map(|b| {
+            if crate::economy::coin_value(p.item.base).is_some() {
+                b
+            } else {
+                with_market(b, market_for(p.item.base))
+            }
+        })
         .map(|p| haggled(p, sell_k)) else {
             return DealOutcome::Failed(format!("«{}» ему не нужно", p.item.info().name));
         };
@@ -1146,7 +1202,15 @@ fn steal(
     let chance = theft_detection(&attempt);
     m.thefts.push(now);
     if tw.rng.f32() < chance {
-        return Ok(caught_stealing(tw, player, id, &item, actor.pose.feet, now, crimes));
+        return Ok(caught_stealing(
+            tw,
+            player,
+            id,
+            &item,
+            actor.pose.feet,
+            now,
+            crimes,
+        ));
     }
     let mut uids = loot.uids.clone();
     let part = split_from(&mut tw.merchant(id).shelf, uid, 1, &mut uids).unwrap();
@@ -1167,7 +1231,15 @@ fn steal(
 
 /// Вора поймали за руку: торговец запомнит, штраф (в городе) или вражда (за стенами).
 #[allow(clippy::too_many_arguments)]
-fn caught_stealing(tw: &mut TradeWorld, player: u64, id: MerchantId, item: &Item, at: Vec3, now: f64, crimes: &mut Vec<CrimeCommitted>) -> String {
+fn caught_stealing(
+    tw: &mut TradeWorld,
+    player: u64,
+    id: MerchantId,
+    item: &Item,
+    at: Vec3,
+    now: f64,
+    crimes: &mut Vec<CrimeCommitted>,
+) -> String {
     let def = id.def();
     // Попался с поличным.
     let m = tw.merchant(id);
@@ -1657,7 +1729,12 @@ fn receive_trade_messages(
                     if !id.def().has(Service::Repair) {
                         continue;
                     }
-                    let Some(offer) = repair_offers(id.def(), &loot, pid).into_iter().find(|o| o.uid == uid) else { continue };
+                    let Some(offer) = repair_offers(id.def(), &loot, pid)
+                        .into_iter()
+                        .find(|o| o.uid == uid)
+                    else {
+                        continue;
+                    };
                     let mut uids = loot.uids.clone();
                     let inv = loot.inventories.get_mut(&pid).unwrap();
                     let reply = match take_money(inv, offer.price, &mut uids) {
@@ -1667,9 +1744,17 @@ fn receive_trade_messages(
                                 crate::smithing::repair(m, MASTER_REPAIR_SKILL);
                             }
                             loot.uids = uids;
-                            format!("«Готово: выправил и навёл кромку». {} — {}", offer.name, format_money(offer.price))
+                            format!(
+                                "«Готово: выправил и навёл кромку». {} — {}",
+                                offer.name,
+                                format_money(offer.price)
+                            )
                         }
-                        Err(e) => format!("{}: правка стоит {}", e.message(), format_money(offer.price)),
+                        Err(e) => format!(
+                            "{}: правка стоит {}",
+                            e.message(),
+                            format_money(offer.price)
+                        ),
                     };
                     send(&mut server, pid, &TradeServerMessage::Say(reply));
                     send_inventory(&mut server, &loot, pid);
@@ -1970,7 +2055,11 @@ fn tick_lessons(
             notice(
                 &mut server,
                 pid,
-                format!("Урок у {} окончен: повторяли {}", def.name, crate::work::quality_word(q)),
+                format!(
+                    "Урок у {} окончен: повторяли {}",
+                    def.name,
+                    crate::work::quality_word(q)
+                ),
             );
         }
         tw.change_rep(pid, def.faction, 1.0);
@@ -2073,8 +2162,24 @@ mod tests {
         let level = crate::level::city_colliders();
         for (i, (p, yaw, st)) in merchant_spots(&level).iter().enumerate() {
             let d = &MERCHANTS[i];
-            let a = crate::level::place(d.place).map(|x| x.pos).unwrap_or(Vec3::ZERO);
-            println!("{:12} {:16} anchor ({:7.1},{:5.1},{:7.1}) pos ({:7.1},{:5.2},{:7.1}) moved {:4.1} yaw {:5.2} tables {} ground {:.2}", d.key, d.place, a.x, a.y, a.z, p.x, p.y, p.z, p.xz().distance(a.xz()), yaw, st.len(), level.ground_height(p.x, p.z));
+            let a = crate::level::place(d.place)
+                .map(|x| x.pos)
+                .unwrap_or(Vec3::ZERO);
+            println!(
+                "{:12} {:16} anchor ({:7.1},{:5.1},{:7.1}) pos ({:7.1},{:5.2},{:7.1}) moved {:4.1} yaw {:5.2} tables {} ground {:.2}",
+                d.key,
+                d.place,
+                a.x,
+                a.y,
+                a.z,
+                p.x,
+                p.y,
+                p.z,
+                p.xz().distance(a.xz()),
+                yaw,
+                st.len(),
+                level.ground_height(p.x, p.z)
+            );
         }
     }
 
@@ -2086,18 +2191,48 @@ mod tests {
         let mut slot_used: HashMap<&str, usize> = HashMap::new();
         for (i, (p, yaw, st)) in spots.iter().enumerate() {
             let d = &MERCHANTS[i];
-            let place = crate::level::place(d.place).unwrap_or_else(|| panic!("{}: нет места {}", d.key, d.place));
+            let place = crate::level::place(d.place)
+                .unwrap_or_else(|| panic!("{}: нет места {}", d.key, d.place));
             let k = slot_used.entry(d.place).or_default();
             if let Some(s) = crate::level::stall_slots(d.place).get(*k) {
-                assert!(p.xz().distance(s.pos.xz()) < 0.01, "{} не за своим лотком", d.key);
+                assert!(
+                    p.xz().distance(s.pos.xz()) < 0.01,
+                    "{} не за своим лотком",
+                    d.key
+                );
             } else {
-                assert!(p.xz().distance(place.pos.xz()) < 6.0, "{} ушёл от {} на {:.1} м", d.key, d.place, p.xz().distance(place.pos.xz()));
+                assert!(
+                    p.xz().distance(place.pos.xz()) < 6.0,
+                    "{} ушёл от {} на {:.1} м",
+                    d.key,
+                    d.place,
+                    p.xz().distance(place.pos.xz())
+                );
             }
             *k += 1;
-            assert!((p.y - place.pos.y).abs() < 0.3, "{} стоит не на полу: y {:.2} при полу {:.2}", d.key, p.y, place.pos.y);
-            assert!(level.body_is_free(&crate::collision::Body::STANDING, *p), "{} в стене или предмете", d.key);
-            assert!(level.ground_height(p.x, p.z) > f32::NEG_INFINITY || level.ground_height(place.pos.x, place.pos.z) == f32::NEG_INFINITY, "{} над ямой", d.key);
-            assert!(stall_fits(&level, *p, *yaw, st), "прилавок {} упирается в стену", d.key);
+            assert!(
+                (p.y - place.pos.y).abs() < 0.3,
+                "{} стоит не на полу: y {:.2} при полу {:.2}",
+                d.key,
+                p.y,
+                place.pos.y
+            );
+            assert!(
+                level.body_is_free(&crate::collision::Body::STANDING, *p),
+                "{} в стене или предмете",
+                d.key
+            );
+            assert!(
+                level.ground_height(p.x, p.z) > f32::NEG_INFINITY
+                    || level.ground_height(place.pos.x, place.pos.z) == f32::NEG_INFINITY,
+                "{} над ямой",
+                d.key
+            );
+            assert!(
+                stall_fits(&level, *p, *yaw, st),
+                "прилавок {} упирается в стену",
+                d.key
+            );
             for (j, (q, qyaw, qst)) in spots.iter().enumerate() {
                 if i == j {
                     continue;
@@ -2106,7 +2241,8 @@ mod tests {
                 let other = stall_obbs(*q, *qyaw, qst);
                 let body = crate::collision::Body::STANDING.aabb_at(*q);
                 assert!(
-                    me.iter().all(|t| !t.aabb().overlaps(&body) && other.iter().all(|o| !o.aabb().overlaps(&t.aabb()))),
+                    me.iter().all(|t| !t.aabb().overlaps(&body)
+                        && other.iter().all(|o| !o.aabb().overlaps(&t.aabb()))),
                     "прилавок {} налезает на {}",
                     d.key,
                     MERCHANTS[j].key

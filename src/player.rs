@@ -32,7 +32,15 @@ pub struct LocalPlayer {
 
 impl Default for LocalPlayer {
     fn default() -> Self {
-        Self { yaw: 0.0, pitch: 0.0, velocity: Vec3::ZERO, grounded: false, crouching: false, sprinting: false, speed_mult: 1.0 }
+        Self {
+            yaw: 0.0,
+            pitch: 0.0,
+            velocity: Vec3::ZERO,
+            grounded: false,
+            crouching: false,
+            sprinting: false,
+            speed_mult: 1.0,
+        }
     }
 }
 
@@ -42,17 +50,36 @@ pub struct PlayerCamera;
 
 pub struct PlayerPlugin;
 
+/// Ходьба и поворот своего персонажа (после них ставится поза своего тела).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PlayerMoveSet;
+
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (grab_cursor, (mouse_look, movement, update_camera).chain()));
+        app.add_systems(
+            Update,
+            (
+                grab_cursor,
+                (mouse_look, movement, update_camera)
+                    .chain()
+                    .in_set(PlayerMoveSet),
+            ),
+        );
     }
 }
 
-pub fn spawn_local_player(commands: &mut Commands, pos: Vec3, yaw: f32, assets: &crate::client::CharacterAssets) {
+pub fn spawn_local_player(
+    commands: &mut Commands,
+    pos: Vec3,
+    yaw: f32,
+    assets: &crate::client::CharacterAssets,
+) {
     commands
         .spawn((
             LocalPlayer { yaw, ..default() },
-            crate::fight::LocalFighter::new(crate::npc::fighter_for(crate::protocol::ActorKind::Player)),
+            crate::fight::LocalFighter::new(crate::npc::fighter_for(
+                crate::protocol::ActorKind::Player,
+            )),
             Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)),
             Visibility::default(),
         ))
@@ -60,7 +87,10 @@ pub fn spawn_local_player(commands: &mut Commands, pos: Vec3, yaw: f32, assets: 
             p.spawn((
                 PlayerCamera,
                 Camera3d::default(),
-                Projection::Perspective(PerspectiveProjection { fov: 80f32.to_radians(), ..default() }),
+                Projection::Perspective(PerspectiveProjection {
+                    fov: 80f32.to_radians(),
+                    ..default()
+                }),
                 Transform::from_xyz(0.0, EYE_STANDING, 0.0),
                 DistanceFog {
                     color: Color::srgb(0.55, 0.5, 0.48),
@@ -91,7 +121,15 @@ pub fn grab_cursor(
     school: Option<Res<crate::school_client::SchoolUi>>,
 ) {
     // Пока открыт инвентарь, окно торговли, книга навыков, разговор со стражей, карта, окно дома или меню, клики принадлежат окну, а не бою.
-    if loot.is_some_and(|l| l.ui_open) || trade.is_some_and(|t| t.window_open()) || law.is_some_and(|l| l.open()) || book.is_some_and(|b| b.open) || map.is_some_and(|m| m.open) || towns.is_some_and(|t| t.open()) || school.is_some_and(|s| s.open()) || menu.is_some_and(|m| m.is_open()) {
+    if loot.is_some_and(|l| l.ui_open)
+        || trade.is_some_and(|t| t.window_open())
+        || law.is_some_and(|l| l.open())
+        || book.is_some_and(|b| b.open)
+        || map.is_some_and(|m| m.open)
+        || towns.is_some_and(|t| t.open())
+        || school.is_some_and(|s| s.open())
+        || menu.is_some_and(|m| m.is_open())
+    {
         return;
     }
     if mouse.just_pressed(MouseButton::Left) {
@@ -109,7 +147,11 @@ fn mouse_look(
     motion: Res<AccumulatedMouseMotion>,
     settings: Option<Res<crate::settings::Settings>>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
-    mut player: Query<(&mut LocalPlayer, &mut Transform, Option<&crate::fight::LocalFighter>)>,
+    mut player: Query<(
+        &mut LocalPlayer,
+        &mut Transform,
+        Option<&crate::fight::LocalFighter>,
+    )>,
     work: Option<Res<crate::work_client::MyWork>>,
 ) {
     // Руки заняты работой: мышь водит пестик, а не голову.
@@ -138,7 +180,11 @@ fn movement(
     keys: Res<ButtonInput<KeyCode>>,
     level: Res<LevelColliders>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
-    mut player: Query<(&mut LocalPlayer, &mut Transform, Option<&mut crate::fight::LocalFighter>)>,
+    mut player: Query<(
+        &mut LocalPlayer,
+        &mut Transform,
+        Option<&mut crate::fight::LocalFighter>,
+    )>,
     others: Query<&Transform, (With<crate::client::RemoteActor>, Without<LocalPlayer>)>,
     dev: Option<Res<crate::console::DevMove>>,
 ) {
@@ -173,11 +219,20 @@ fn movement(
         } else if p.crouching && level.body_is_free(&Body::STANDING, transform.translation) {
             p.crouching = false;
         }
-        let body = if p.crouching { Body::CROUCHING } else { Body::STANDING };
+        let body = if p.crouching {
+            Body::CROUCHING
+        } else {
+            Body::STANDING
+        };
 
         // Бег тратит выносливость; без сил не побежишь.
-        let has_stamina = fighter.as_ref().is_none_or(|f| f.fighter.can_sprint() || (p.sprinting && f.fighter.stamina > 0.0));
-        let sprinting = pressed(KeyCode::ShiftLeft) && !p.crouching && has_stamina && wish.dot(Quat::from_rotation_y(p.yaw) * Vec3::NEG_Z) > 0.5;
+        let has_stamina = fighter
+            .as_ref()
+            .is_none_or(|f| f.fighter.can_sprint() || (p.sprinting && f.fighter.stamina > 0.0));
+        let sprinting = pressed(KeyCode::ShiftLeft)
+            && !p.crouching
+            && has_stamina
+            && wish.dot(Quat::from_rotation_y(p.yaw) * Vec3::NEG_Z) > 0.5;
         p.sprinting = sprinting;
         let gear_mult = fighter.as_ref().map_or(1.0, |f| f.move_mult);
         if let Some(f) = fighter.as_mut() {
@@ -248,7 +303,14 @@ fn movement(
 
 /// Полёт из консоли разработчика: WASD по направлению взгляда, Пробел вверх, Ctrl/C вниз,
 /// Shift быстрее. С `noclip` — сквозь стены.
-fn fly(p: &mut LocalPlayer, transform: &mut Transform, level: &LevelColliders, cheats: crate::console_net::Cheats, dt: f32, pressed: impl Fn(KeyCode) -> bool) {
+fn fly(
+    p: &mut LocalPlayer,
+    transform: &mut Transform,
+    level: &LevelColliders,
+    cheats: crate::console_net::Cheats,
+    dt: f32,
+    pressed: impl Fn(KeyCode) -> bool,
+) {
     const FLY_SPEED: f32 = 9.0;
     let look = Quat::from_rotation_y(p.yaw) * Quat::from_rotation_x(p.pitch);
     let mut wish = Vec3::ZERO;
@@ -270,7 +332,11 @@ fn fly(p: &mut LocalPlayer, transform: &mut Transform, level: &LevelColliders, c
     if pressed(KeyCode::ControlLeft) || pressed(KeyCode::KeyC) {
         wish -= Vec3::Y;
     }
-    let boost = if pressed(KeyCode::ShiftLeft) { 4.0 } else { 1.0 };
+    let boost = if pressed(KeyCode::ShiftLeft) {
+        4.0
+    } else {
+        1.0
+    };
     let target = wish.normalize_or_zero() * FLY_SPEED * boost * cheats.speed;
     // Плавный разгон и торможение.
     let t = 1.0 - (-10.0 * dt).exp();
@@ -288,10 +354,20 @@ fn fly(p: &mut LocalPlayer, transform: &mut Transform, level: &LevelColliders, c
     }
 }
 
-fn update_camera(time: Res<Time>, player: Query<&LocalPlayer>, mut camera: Query<&mut Transform, With<PlayerCamera>>) {
+fn update_camera(
+    time: Res<Time>,
+    player: Query<&LocalPlayer>,
+    mut camera: Query<&mut Transform, With<PlayerCamera>>,
+) {
     let Ok(p) = player.single() else { return };
-    let Ok(mut cam) = camera.single_mut() else { return };
-    let eye = if p.crouching { EYE_CROUCHING } else { EYE_STANDING };
+    let Ok(mut cam) = camera.single_mut() else {
+        return;
+    };
+    let eye = if p.crouching {
+        EYE_CROUCHING
+    } else {
+        EYE_STANDING
+    };
     // Плавно меняем высоту глаз (приседание, ступеньки).
     let t = 1.0 - (-14.0 * time.delta_secs()).exp();
     cam.translation.y += (eye - cam.translation.y) * t;
