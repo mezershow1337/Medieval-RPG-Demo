@@ -209,6 +209,7 @@ fn update_minimap(
     mut icons: Query<(&mut ImageNode, &mut UiTransform)>,
     mut place: Query<&mut Text, With<MiniPlace>>,
     children: Query<&Children>,
+    mut caption_at: Local<Option<Vec3>>,
 ) {
     let me = local.single().ok();
     let shown = settings.as_ref().is_none_or(|s| s.minimap) && !view.open && me.is_some();
@@ -228,14 +229,15 @@ fn update_minimap(
     let c = me_t.translation.xz();
     let to_screen = |p: Vec2| (p - c) * s + Vec2::splat(DIAM / 2.0);
 
-    // Подложка: кусок листа вокруг игрока (шейдер обрезает кругом).
-    if let Some(mut m) = materials.get_mut(&ui.material) {
-        let window = sheet.bounds.map_or(Vec4::ZERO, |b| sheet_window(c, radius, b));
-        let window = if sheet.image.is_some() { window } else { Vec4::ZERO };
-        if m.window != window || m.sheet != sheet.image {
-            m.window = window;
-            m.sheet = sheet.image.clone();
-        }
+    // Подложка: кусок листа вокруг игрока (шейдер обрезает кругом). `get_mut` помечает
+    // материал изменённым (и он заново уходит в видеокарту), поэтому сначала сравниваем.
+    let window = sheet.bounds.map_or(Vec4::ZERO, |b| sheet_window(c, radius, b));
+    let window = if sheet.image.is_some() { window } else { Vec4::ZERO };
+    if materials.get(&ui.material).is_some_and(|m| m.window != window || m.sheet != sheet.image)
+        && let Some(mut m) = materials.get_mut(&ui.material)
+    {
+        m.window = window;
+        m.sheet = sheet.image.clone();
     }
 
     // Люди города: точки внутри круга.
@@ -275,10 +277,14 @@ fn update_minimap(
         };
         let q = to_screen(p);
         if let Ok(mut n) = nodes.get_mut(e) {
-            n.left = px((q.x - size / 2.0).round());
-            n.top = px((q.y - size / 2.0).round());
-            n.width = px(size);
-            n.height = px(size);
+            // Стоим на месте — точки не двигаются, и узлы не трогаем (иначе раскладка каждый кадр).
+            let (left, top) = (px((q.x - size / 2.0).round()), px((q.y - size / 2.0).round()));
+            if n.left != left || n.top != top || n.width != px(size) {
+                n.left = left;
+                n.top = top;
+                n.width = px(size);
+                n.height = px(size);
+            }
         }
         if let Ok((mut bg, mut border)) = colors.get_mut(e) {
             bg.set_if_neq(BackgroundColor(color));
@@ -317,23 +323,35 @@ fn update_minimap(
         let q = to_screen(m.pos.xz()) - Vec2::splat(DIAM / 2.0);
         let q = q.clamp_length_max(edge) + Vec2::splat(DIAM / 2.0);
         if let Ok(mut n) = nodes.get_mut(entity) {
-            n.left = px(q.x - size / 2.0);
-            n.top = px(q.y - size / 2.0);
+            let (left, top) = (px(q.x - size / 2.0), px(q.y - size / 2.0));
+            if n.left != left || n.top != top {
+                n.left = left;
+                n.top = top;
+            }
         }
         if let Ok(kids) = children.get(entity)
             && let Some(&icon) = kids.first()
             && let Ok((mut img, mut tf)) = icons.get_mut(icon)
         {
-            img.color = m.color;
-            tf.rotation = Rot2::radians(-m.yaw.unwrap_or(0.0));
+            if img.color != m.color {
+                img.color = m.color;
+            }
+            let rot = Rot2::radians(-m.yaw.unwrap_or(0.0));
+            if tf.rotation != rot {
+                tf.rotation = rot;
+            }
         }
     }
 
-    let caption = place_caption(me_t.translation);
-    if let Ok(mut t) = place.single_mut()
-        && t.0 != caption
-    {
-        t.0 = caption;
+    // Название места: перебор всех мест города — только когда отошли хоть на полметра.
+    if caption_at.is_none_or(|p| p.distance_squared(me_t.translation) > 0.25) {
+        *caption_at = Some(me_t.translation);
+        let caption = place_caption(me_t.translation);
+        if let Ok(mut t) = place.single_mut()
+            && t.0 != caption
+        {
+            t.0 = caption;
+        }
     }
 }
 

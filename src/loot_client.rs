@@ -329,11 +329,26 @@ fn aim_target(
     level: Res<LevelColliders>,
     grab: Res<crate::props_client::PropGrab>,
 ) {
-    state.target = None;
-    if state.ui_open {
-        return;
+    // Цель пишем, только когда она сменилась: иначе `LootState` «меняется» каждый кадр
+    // и всё, что ждёт перемен в сумке (звук кошеля, подсказки огня), пересчитывается зря.
+    let target = find_target(&state, &camera, &corpses, &ground, &level, &grab);
+    if state.target != target {
+        state.target = target;
     }
-    let Ok(cam) = camera.single() else { return };
+}
+
+fn find_target(
+    state: &LootState,
+    camera: &Query<&GlobalTransform, With<PlayerCamera>>,
+    corpses: &Query<(&CorpseView, &Transform)>,
+    ground: &Query<(&GroundView, &Transform)>,
+    level: &LevelColliders,
+    grab: &crate::props_client::PropGrab,
+) -> Option<LootId> {
+    if state.ui_open {
+        return None;
+    }
+    let Ok(cam) = camera.single() else { return None };
     let origin = cam.translation();
     let dir = cam.forward().as_vec3();
     let mut best: Option<(f32, LootId)> = None;
@@ -354,7 +369,7 @@ fn aim_target(
     };
     // Предметы: точный луч по их коробке (чуть больше, чтобы мелочь было легко поймать).
     let mut item: Option<(f32, LootId)> = None;
-    for (g, t) in &ground {
+    for (g, t) in ground {
         if grab.holding == Some(g.id) {
             continue;
         }
@@ -366,23 +381,22 @@ fn aim_target(
         }
     }
     if let Some((d, id)) = item
-        && crate::combat::line_of_sight(&level, origin, origin + dir * (d - 0.05).max(0.0))
+        && crate::combat::line_of_sight(level, origin, origin + dir * (d - 0.05).max(0.0))
     {
-        state.target = Some(id);
-        return;
+        return Some(id);
     }
-    for (c, t) in &corpses {
+    for (c, t) in corpses {
         if c.id >= CONTAINER_ID_BASE {
             // Сундук уровня: точка — над крышкой; сквозь стены и закрытые двери не открыть.
             let close = (t.translation - origin).length_squared() < (INTERACT_RANGE + 1.0).powi(2);
-            if close && crate::combat::line_of_sight(&level, origin, t.translation) {
+            if close && crate::combat::line_of_sight(level, origin, t.translation) {
                 test(t.translation, 0.5, c.id);
             }
         } else {
             test(t.translation + Vec3::Y * 0.3, 0.9, c.id);
         }
     }
-    state.target = best.map(|(_, id)| id);
+    best.map(|(_, id)| id)
 }
 
 fn interact_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClient>, state: Res<LootState>, ground: Query<&GroundView>) {
@@ -462,22 +476,34 @@ fn update_use_bar(
     mut text: Single<&mut Text, With<UseBarText>>,
     work: Option<Res<crate::work_client::MyWork>>,
 ) {
-    // Работу руками показывает своя шкала (work_client), полоска не нужна.
+    // Работу руками показывает своя шкала (work_client), полоска не нужна. Почти всё время
+    // полоска спрятана: узел не трогаем зря, иначе интерфейс раскладывается каждый кадр.
     if crate::work_client::hands_busy(work.as_deref()) {
-        bar.display = Display::None;
+        if bar.display != Display::None {
+            bar.display = Display::None;
+        }
         return;
     }
     match &state.using {
         Some((verb, start, duration)) => {
             let t = ((time.elapsed_secs() - start) / duration.max(0.01)).clamp(0.0, 1.0);
-            bar.display = Display::Flex;
-            fill.width = percent(t * 100.0);
+            if bar.display != Display::Flex {
+                bar.display = Display::Flex;
+            }
+            let w = percent((t * 400.0).round() / 4.0);
+            if fill.width != w {
+                fill.width = w;
+            }
             let line = format!("{verb}… (удар или парирование прервут)");
             if text.0 != line {
                 text.0 = line;
             }
         }
-        None => bar.display = Display::None,
+        None => {
+            if bar.display != Display::None {
+                bar.display = Display::None;
+            }
+        }
     }
 }
 
