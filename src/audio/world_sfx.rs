@@ -106,9 +106,9 @@ struct GroundMemory {
 /// Брошенная или упавшая вещь легла на землю — стук по её материалу.
 fn ground_items(time: Res<Time>, ears: Res<Ears>, q: Query<(Entity, &GroundView, &PropMotion)>, mut mem: Local<GroundMemory>, mut out: MessageWriter<Sfx>) {
     let now = time.elapsed_secs();
-    let mut alive = Vec::with_capacity(mem.asleep.len());
+    let mut count = 0;
     for (e, g, m) in &q {
-        alive.push(e);
+        count += 1;
         let speed = m.vel.length();
         let peak = speed.max(mem.asleep.get(&e).map(|p| p.2).unwrap_or(0.0));
         let prev = mem.asleep.insert(e, (m.asleep, m.pos, peak));
@@ -127,11 +127,15 @@ fn ground_items(time: Res<Time>, ears: Res<Ears>, q: Query<(Entity, &GroundView,
             }
         }
     }
-    mem.asleep.retain(|e, _| alive.contains(e));
+    // Чистим память только когда вещей стало меньше. Раньше здесь был поиск по Vec для каждой
+    // записи — O(n²) от числа вещей на земле, до 5 мс на кадр в городе.
+    if mem.asleep.len() > count {
+        mem.asleep.retain(|e, _| q.contains(*e));
+    }
 }
 
 /// Вещь с земли исчезла рядом с нами — подобрали (шорох сумки).
-fn picked_up(ears: Res<Ears>, q: Query<(Entity, &Transform), With<GroundView>>, mut gone: RemovedComponents<GroundView>, mut last: Local<HashMap<Entity, Vec3>>, mut out: MessageWriter<Sfx>) {
+fn picked_up(ears: Res<Ears>, q: Query<(Entity, &Transform), (With<GroundView>, Changed<Transform>)>, mut gone: RemovedComponents<GroundView>, mut last: Local<HashMap<Entity, Vec3>>, mut out: MessageWriter<Sfx>) {
     for (e, t) in &q {
         last.insert(e, t.translation);
     }

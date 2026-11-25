@@ -67,7 +67,7 @@ impl MeshBuilder {
             self.pos.push(p.to_array());
             self.nrm.push(n.to_array());
         }
-        self.uv.extend_from_slice(&[[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]);
+        self.uv.extend_from_slice(&tri_uv(a, b, c));
         if flip {
             self.idx.extend_from_slice(&[base, base + 2, base + 1]);
         } else {
@@ -419,6 +419,16 @@ impl MeshBuilder {
             })
             .collect();
         let crease = 40f32.to_radians().cos();
+        // Развёртка без разрывов между кольцами: u — угол, умноженный на самый большой радиус
+        // профиля (у основания купола это длина дуги, к макушке столбцы черепицы сходятся, как
+        // у настоящего купола), v — длина профиля от его верхнего конца (растёт вниз, как у скатов
+        // крыш). Раньше u бралось по радиусу каждого кольца, а v — по высоте его начала: на
+        // каждом стыке колец черепица купола съезжала рядом и столбцом. Радиус вершины в u
+        // тоже не годится: трапеции колец, разрезанные на треугольники, закручивали столбцы.
+        let seg_len = |w: &[(f32, f32)]| Vec2::new(w[1].0 - w[0].0, w[1].1 - w[0].1).length();
+        let total: f32 = profile.windows(2).map(seg_len).sum();
+        let r_ref = profile.iter().fold(0.05f32, |m, p| m.max(p.0.abs()));
+        let mut walked = 0.0;
         for (k, w) in profile.windows(2).enumerate() {
             let n_here = seg_n[k];
             let end_normal = |other: Option<&Vec2>| match other {
@@ -428,17 +438,17 @@ impl MeshBuilder {
             let na = end_normal(if k > 0 { seg_n.get(k - 1) } else { None });
             let nb = end_normal(seg_n.get(k + 1));
             let ((ra, ya), (rb, yb)) = (w[0], w[1]);
-            let len = Vec2::new(rb - ra, yb - ya).length();
+            let (va, vb) = (total - walked, total - walked - seg_len(w));
+            walked += seg_len(w);
             let mut ring = Vec::with_capacity((segs + 1) * 2);
             for i in 0..=segs {
                 let a = a0 + (a1 - a0) * i as f32 / segs as f32;
                 let dir = Vec3::new(a.cos(), 0.0, a.sin());
-                let u = a * ra.max(rb).max(0.05);
                 let sign = if inward { -1.0 } else { 1.0 };
                 let nva = (dir * na.x + Vec3::Y * na.y) * sign;
                 let nvb = (dir * nb.x + Vec3::Y * nb.y) * sign;
-                ring.push(self.vert(base + dir * ra + Vec3::Y * ya, nva, Vec2::new(u, ya)));
-                ring.push(self.vert(base + dir * rb + Vec3::Y * yb, nvb, Vec2::new(u, ya + len)));
+                ring.push(self.vert(base + dir * ra + Vec3::Y * ya, nva, Vec2::new(a * r_ref, va)));
+                ring.push(self.vert(base + dir * rb + Vec3::Y * yb, nvb, Vec2::new(a * r_ref, vb)));
             }
             for i in 0..segs {
                 let (a, b, c, d) = (ring[i * 2], ring[i * 2 + 2], ring[i * 2 + 3], ring[i * 2 + 1]);
@@ -530,6 +540,22 @@ impl MeshBuilder {
             .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, self.uv)
             .with_inserted_indices(Indices::U32(self.idx))
     }
+}
+
+/// UV треугольника в метрах, как у [`MeshBuilder::quad`]: u — вдоль ребра a→b, v — расстояние
+/// от вершины c к этому ребру (0 у вершины). У ската шпиля и фронтона c — верх, поэтому v растёт
+/// вниз по скату, как у развёртки крыш: черепица на шпиле не растянута и не перевёрнута.
+fn tri_uv(a: Vec3, b: Vec3, c: Vec3) -> [[f32; 2]; 3] {
+    let ab = b - a;
+    let len = ab.length();
+    if len < 1e-6 {
+        return [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]];
+    }
+    let t = ab / len;
+    let ac = c - a;
+    let along = ac.dot(t);
+    let h = (ac - t * along).length();
+    [[0.0, h], [len, h], [along, 0.0]]
 }
 
 /// Профиль стрельчатой арки: высота над пятой арки в точке `s` (от центра пролёта).
@@ -678,5 +704,51 @@ pub fn flying_buttress(mb: &mut MeshBuilder, pier: Vec3, wall: Vec3, half_w: f32
     // Стойки между аркой и брусом.
     for i in (2..N).step_by(3) {
         mb.beam(arc[i], top[i], half_w * 0.6, 0.08, (wall - pier).normalize());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// UV треугольника — в метрах: черепица на шпиле не тянется, вершина сверху (v = 0).
+    #[test]
+    fn tri_uv_is_metric_and_apex_is_up() {
+        let mut mb = MeshBuilder::default();
+        mb.tri(Vec3::new(0.0, 0.0, 0.0), Vec3::new(4.0, 0.0, 0.0), Vec3::new(1.0, 3.0, 0.0), Vec3::Z);
+        let uv: Vec<Vec2> = mb.uv.iter().map(|u| Vec2::from(*u)).collect();
+        assert!(uv[0].distance(Vec2::new(0.0, 3.0)) < 1e-5);
+        assert!(uv[1].distance(Vec2::new(4.0, 3.0)) < 1e-5);
+        assert!(uv[2].distance(Vec2::new(1.0, 0.0)) < 1e-5);
+        // Длины рёбер в UV совпадают с длинами в мире.
+        for (i, j) in [(0, 1), (1, 2), (2, 0)] {
+            let world = Vec3::from(mb.pos[i]).distance(Vec3::from(mb.pos[j]));
+            assert!((uv[i].distance(uv[j]) - world).abs() < 1e-4);
+        }
+    }
+
+    /// У купола одна и та же вершина на стыке колец получает одни и те же UV (без шва),
+    /// а v растёт вниз от макушки, как на скатах крыш.
+    #[test]
+    fn dome_uv_has_no_seams_between_rings() {
+        let mut mb = MeshBuilder::default();
+        mb.dome(Vec3::ZERO, 3.0, 0.0, std::f32::consts::TAU, 16, 0.0);
+        let mut seen: Vec<(Vec3, Vec3, Vec2)> = Vec::new();
+        for i in 0..mb.pos.len() {
+            let (p, n, uv) = (Vec3::from(mb.pos[i]), Vec3::from(mb.nrm[i]), Vec2::from(mb.uv[i]));
+            // Шов по кругу (угол 0 = 2π) и вырожденная макушка — законные разрывы u.
+            if p.xz().length() < 1e-3 {
+                assert!(uv.y.abs() < 1e-4, "на макушке v = 0, а не {}", uv.y);
+                continue;
+            }
+            for (q, m, w) in &seen {
+                if q.distance(p) < 1e-4 && m.dot(n) > 0.0 && (w.x - uv.x).abs() < 1.0 {
+                    assert!(w.distance(uv) < 1e-4, "шов развёртки в {p}: {w} и {uv}");
+                }
+            }
+            seen.push((p, n, uv));
+        }
+        let base = mb.uv.iter().map(|u| u[1]).fold(0.0f32, f32::max);
+        assert!((base - 3.0 * std::f32::consts::FRAC_PI_2).abs() < 0.05, "у основания v — длина дуги профиля: {base}");
     }
 }

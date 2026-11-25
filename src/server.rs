@@ -363,16 +363,14 @@ fn receive_client_messages(mut server: ResMut<RenetServer>, mut world: ResMut<Ga
             }
             match msg {
                 ClientMessage::Attack { yaw, pitch, swing } => {
-                    actor.pose.yaw = yaw;
-                    actor.pose.pitch = pitch.clamp(-1.6, 1.6);
+                    aim(&mut actor.pose, yaw, pitch);
                     actor.fighter.try_attack(swing);
                 }
                 ClientMessage::Feint => {
                     actor.fighter.feint();
                 }
                 ClientMessage::Guard { on, yaw, pitch } => {
-                    actor.pose.yaw = yaw;
-                    actor.pose.pitch = pitch.clamp(-1.6, 1.6);
+                    aim(&mut actor.pose, yaw, pitch);
                     actor.fighter.set_guard(on);
                 }
                 ClientMessage::Holster { on } => actor.holstered = on,
@@ -397,7 +395,8 @@ fn receive_client_messages(mut server: ResMut<RenetServer>, mut world: ResMut<Ga
             let in_wall = !level.body_is_free(&body, new_pos);
             // Полёт и ускорение из консоли разработчика: не проверяем скорость и стены.
             let free = player.cheats.free_move();
-            if !new_pos.is_finite() || (!free && (too_fast || in_wall)) {
+            // NaN или бесконечность в повороте испортили бы удары, ИИ и снимки для всех игроков.
+            if !new_pos.is_finite() || !yaw.is_finite() || !pitch.is_finite() || (!free && (too_fast || in_wall)) {
                 server.send_message(id, CH_RELIABLE, encode(&ServerMessage::Correction { pos: player.pose.feet.into() }));
                 player.last_update = now;
                 continue;
@@ -406,6 +405,16 @@ fn receive_client_messages(mut server: ResMut<RenetServer>, mut world: ResMut<Ga
             player.fighter.sprinting = sprinting && player.fighter.can_sprint();
             player.last_update = now;
         }
+    }
+}
+
+/// Поворот из сообщения клиента; NaN и бесконечность отбрасываем (clamp их не убирает).
+fn aim(pose: &mut Pose, yaw: f32, pitch: f32) {
+    if yaw.is_finite() {
+        pose.yaw = yaw;
+    }
+    if pitch.is_finite() {
+        pose.pitch = pitch.clamp(-1.6, 1.6);
     }
 }
 

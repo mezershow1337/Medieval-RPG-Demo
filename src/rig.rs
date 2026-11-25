@@ -10,7 +10,7 @@
 use crate::appearance::{Folk, Look, Shape};
 use crate::combat::WeaponKind;
 use crate::protocol::ActorKind;
-use bevy::camera::visibility::NoFrustumCulling;
+use bevy::camera::visibility::{DynamicSkinnedMeshBounds, NoFrustumCulling};
 use bevy::gltf::{Gltf, GltfMaterial, GltfMesh, GltfSkin};
 use bevy::mesh::morph::MeshMorphWeights;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
@@ -443,6 +443,25 @@ fn apply_look_tints(
     }
 }
 
+/// Рука от первого лица всегда перед камерой, а лишние кости у неё сжаты в точку (нулевой
+/// масштаб): и рамка по суставам, и затухание по дальности (оно берёт положение из матрицы
+/// скина) у такой руки негодные — рука пропадала. Её детали рисуем всегда, как раньше.
+#[allow(clippy::type_complexity)]
+fn keep_view_arm_drawn(
+    mut commands: Commands,
+    parts: Query<(Entity, &ChildOf), (With<SkinnedMesh>, Without<NoFrustumCulling>)>,
+    arms: Query<(), Or<(With<ViewArm>, With<NeedsViewArm>)>>,
+) {
+    for (e, parent) in &parts {
+        if arms.contains(parent.parent()) {
+            commands
+                .entity(e)
+                .remove::<(DynamicSkinnedMeshBounds, bevy::camera::visibility::VisibilityRange)>()
+                .insert((NoFrustumCulling, crate::settings::NoDetailRange));
+        }
+    }
+}
+
 /// Лезвие оружия: хранит свой обычный материал (на время ответного удара его подменяют).
 #[derive(Component, Clone)]
 pub struct Blade(pub Handle<StandardMaterial>);
@@ -466,7 +485,10 @@ impl CharacterModels {
                 e.insert(MeshMorphWeights::Value { weights: targets.iter().map(|t| shape.weight(t)).collect() });
             }
             if let Some(joints) = skin {
-                e.insert((SkinnedMesh { inverse_bindposes: self.bindposes.clone(), joints: joints.to_vec() }, NoFrustumCulling));
+                // Рамка для отсечения считается по суставам каждый кадр. Раньше здесь стояло
+                // NoFrustumCulling, и все люди города рисовались всегда — и за спиной, и в каждом
+                // каскаде теней.
+                e.insert((SkinnedMesh { inverse_bindposes: self.bindposes.clone(), joints: joints.to_vec() }, DynamicSkinnedMeshBounds));
             }
             if blade {
                 e.insert(Blade(mat));
@@ -1103,7 +1125,7 @@ impl Plugin for RigPlugin {
         app.init_resource::<BladeTints>()
             .add_systems(Startup, load_models)
             .add_systems(Update, finish_models.run_if(resource_exists::<ModelsHandle>))
-            .add_systems(PostUpdate, apply_look_tints)
+            .add_systems(PostUpdate, (apply_look_tints, keep_view_arm_drawn.before(crate::settings::SettingsSet)))
             .add_systems(Update, attach_rigs.run_if(resource_exists::<CharacterModels>).before(PoseSet))
             .add_systems(Update, apply_poses.after(PoseSet));
     }
