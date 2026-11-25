@@ -805,7 +805,7 @@ fn combat_tick(
             && !is_god(&world, tid)
         {
             let part = world.actors.get(&tid).map_or(crate::medicine::BodyPart::Chest, |t| crate::medicine::BodyPart::from_hit(&t.pose, point, head));
-            world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon: combat::WeaponKind::Bow, amount, head, part });
+            world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon: combat::WeaponKind::Bow, amount, part });
         }
         server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: arrow.owner, target: tid, outcome, at: point.into() }));
         if let Some(q) = practice.as_mut() {
@@ -867,7 +867,7 @@ fn combat_tick(
                 {
                     let weapon = world.actors.get(&aid).map_or(combat::WeaponKind::Spatha, |a| a.fighter.weapon);
                     let part = world.actors.get(&tid).map_or(crate::medicine::BodyPart::Chest, |t| crate::medicine::BodyPart::from_hit(&t.pose, point, head));
-                    world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon, amount, head, part });
+                    world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon, amount, part });
                 }
                 server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: aid, target: tid, outcome, at: point.into() }));
                 if let Some(q) = practice.as_mut() {
