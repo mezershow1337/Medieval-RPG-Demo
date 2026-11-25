@@ -191,6 +191,8 @@ fn item_row(
                     height: px(h as f32 * k),
                     ..default()
                 },
+                // Длинные копья и мечи в такой клетке пропадают: подменяем миниатюрой.
+                crate::trade_thumbs::RowIcon { base: item.base, side: 26.0 },
             ));
         });
         let name = if count > 1 {

@@ -26,7 +26,7 @@ pub struct TradeClientPlugin;
 impl Plugin for TradeClientPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(TradeState::default())
-            .add_plugins(crate::trade_ui::TradeUiPlugin)
+            .add_plugins((crate::trade_ui::TradeUiPlugin, crate::trade_thumbs::TradeThumbsPlugin))
             .add_systems(
                 Startup,
                 setup_trade_hud.after(crate::inventory_ui::setup_fonts),
@@ -189,17 +189,13 @@ fn spawn_stall(
         let _ = clay;
         return;
     }
-    // Навес.
-    for (x, z) in [
-        (-1.05f32, -1.35f32),
-        (1.05, -1.35),
-        (-1.05, 0.45),
-        (1.05, 0.45),
-    ] {
+    // Навес (жерди — те же, в которые упирается игрок: `trade::stall_solids`).
+    let h = crate::trade::STALL_POST_HEIGHT;
+    for (x, z) in crate::trade::STALL_POSTS {
         p.spawn((
-            Mesh3d(meshes.add(Cylinder::new(0.05, 2.4))),
+            Mesh3d(meshes.add(Cylinder::new(0.05, h))),
             MeshMaterial3d(wood.clone()),
-            Transform::from_xyz(x, 1.2, z),
+            Transform::from_xyz(x, h * 0.5, z),
         ));
     }
     p.spawn((
@@ -221,8 +217,10 @@ fn receive_trade(
     mut materials: ResMut<Assets<StandardMaterial>>,
     npcs: Query<Entity, With<MerchantNpc>>,
     mut work: ResMut<crate::work_client::MyWork>,
+    level: Option<ResMut<crate::collision::LevelColliders>>,
 ) {
     let now = time.elapsed_secs();
+    let mut level = level;
     while let Some(bytes) = client.receive_message(CH_TRADE) {
         let Some(msg) = decode::<TradeServerMessage>(&bytes) else {
             continue;
@@ -235,6 +233,10 @@ fn receive_trade(
                 // Прилавки для физики своего предмета в руках.
                 let statics = list.iter().flat_map(|i| crate::trade::stall_obbs(i.pos.into(), i.yaw, &i.stall)).collect();
                 commands.insert_resource(crate::props_server::PropStatics(statics));
+                // Те же коробки, что у сервера: сквозь прилавок и навес не пройти.
+                if let Some(level) = level.as_mut() {
+                    level.set_extra(list.iter().flat_map(|i| crate::trade::stall_solids(i.pos.into(), i.yaw, &i.stall)).collect());
+                }
                 for (i, info) in list.iter().enumerate() {
                     let pos: Vec3 = info.pos.into();
                     commands

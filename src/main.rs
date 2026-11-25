@@ -101,6 +101,7 @@ mod trade;
 mod trade_client;
 mod trade_net;
 mod trade_server;
+mod trade_thumbs;
 mod trade_ui;
 mod ui_theme;
 mod vegetation;
