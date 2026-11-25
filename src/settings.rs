@@ -172,6 +172,12 @@ impl Settings {
         (self.draw_distance * 0.3).clamp(45.0, 160.0)
     }
 
+    /// Люди (скинованные тела) дальше этого не рисуются и не дают теней: на таком расстоянии
+    /// человек — несколько пикселей, а каждое тело — десяток деталей с костями.
+    pub fn people_distance(&self) -> f32 {
+        (self.draw_distance * 0.4).clamp(90.0, 220.0)
+    }
+
     /// Факелы и лампы гаснут для видеокарты дальше этого расстояния (плюс радиус света).
     pub fn light_distance(&self) -> f32 {
         match self.effects {
@@ -382,7 +388,9 @@ fn apply_sun(settings: Res<Settings>, mut map: ResMut<DirectionalLightShadowMap>
         0 => (1024, 1, 10.0f32, 30.0f32),
         1 => (1024, 2, 10.0, 45.0),
         2 => (2048, 3, 12.0, 90.0),
-        _ => (4096, 4, 12.0, full),
+        // Высокие: четыре каскада по 2048 — у ближнего каскада и так ~1 см на тексель, а карта
+        // 4096 стоила вчетверо больше заливки и 256 МБ видеопамяти почти без видимой разницы.
+        _ => (2048, 4, 12.0, full),
     };
     let dist = dist.min(settings.draw_distance);
     if map.size != size {
@@ -560,15 +568,23 @@ fn apply_water(settings: Res<Settings>, mut mats: ResMut<Assets<crate::sky::Wate
 #[derive(Component)]
 struct DetailRanged;
 
-/// Мелкие предметы дальше `detail_distance` не рисуются вовсе (и не дают теней).
+/// Тело человека, которому назначена дальность видимости ([`Settings::people_distance`]).
+#[derive(Component)]
+struct PeopleRanged;
+
+/// Мелкие предметы дальше `detail_distance` не рисуются вовсе (и не дают теней);
+/// люди — дальше `people_distance`.
 #[allow(clippy::type_complexity)]
 fn detail_ranges(
     mut commands: Commands,
     settings: Res<Settings>,
     fresh: Query<(Entity, &Aabb, &GlobalTransform), (With<Mesh3d>, Without<DetailRanged>, Without<SkinnedMesh>, Without<NoDetailRange>)>,
-    mut ranged: Query<&mut VisibilityRange, With<DetailRanged>>,
+    fresh_people: Query<Entity, (With<SkinnedMesh>, Without<PeopleRanged>, Without<NoDetailRange>)>,
+    mut ranged: Query<&mut VisibilityRange, (With<DetailRanged>, Without<PeopleRanged>)>,
+    mut people: Query<&mut VisibilityRange, (With<PeopleRanged>, Without<DetailRanged>)>,
 ) {
     let end = settings.detail_distance();
+    let far = settings.people_distance();
     let range = |end: f32| VisibilityRange { start_margin: 0.0..0.0, end_margin: end..end + 8.0, use_aabb: false };
     for (e, aabb, gt) in &fresh {
         let size = Vec3::from(aabb.half_extents) * 2.0 * gt.scale().abs();
@@ -578,9 +594,15 @@ fn detail_ranges(
             commands.entity(e).insert((DetailRanged,));
         }
     }
+    for e in &fresh_people {
+        commands.entity(e).insert((PeopleRanged, range(far)));
+    }
     if settings.is_changed() {
         for mut r in &mut ranged {
             *r = range(end);
+        }
+        for mut r in &mut people {
+            *r = range(far);
         }
     }
 }
@@ -670,3 +692,9 @@ mod tests {
     }
 }
 
+/// Условие для `run_if`: задана ли переменная окружения (режимы снимков и отладки).
+/// Переменную читаем один раз при сборке приложения, а не каждый кадр.
+pub fn env_flag(name: &str) -> impl Fn() -> bool + Clone + Send + Sync + 'static {
+    let on = std::env::var_os(name).is_some();
+    move || on
+}

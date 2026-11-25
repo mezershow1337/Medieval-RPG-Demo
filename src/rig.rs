@@ -10,7 +10,7 @@
 use crate::appearance::{Folk, Look, Shape};
 use crate::combat::WeaponKind;
 use crate::protocol::ActorKind;
-use bevy::camera::visibility::NoFrustumCulling;
+use bevy::camera::visibility::DynamicSkinnedMeshBounds;
 use bevy::gltf::{Gltf, GltfMaterial, GltfMesh, GltfSkin};
 use bevy::mesh::morph::MeshMorphWeights;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
@@ -466,7 +466,10 @@ impl CharacterModels {
                 e.insert(MeshMorphWeights::Value { weights: targets.iter().map(|t| shape.weight(t)).collect() });
             }
             if let Some(joints) = skin {
-                e.insert((SkinnedMesh { inverse_bindposes: self.bindposes.clone(), joints: joints.to_vec() }, NoFrustumCulling));
+                // Рамка для отсечения считается по суставам каждый кадр. Раньше здесь стояло
+                // NoFrustumCulling, и все люди города рисовались всегда — и за спиной, и в каждом
+                // каскаде теней.
+                e.insert((SkinnedMesh { inverse_bindposes: self.bindposes.clone(), joints: joints.to_vec() }, DynamicSkinnedMeshBounds));
             }
             if blade {
                 e.insert(Blade(mat));
