@@ -2,8 +2,8 @@
 """Фотоматериалы уровня: камень, дерево, земля, черепица, ткань, металл.
 
 Источники — ambientCG (https://ambientcg.com) и Poly Haven (https://polyhaven.com, id в нижнем
-регистре), все материалы там под лицензией CC0 (общественное достояние); слой roof — свой
-(Blender). Скрипт:
+регистре), все материалы там под лицензией CC0 (общественное достояние); слои roof и thatch —
+свои (Blender). Скрипт:
   1. берёт (или скачивает) архивы <Id>_1K-JPG.zip, либо карты <id>_Color/NormalGL/Roughness/
      AmbientOcclusion.(jpg|png) из папки;
   2. для каждого слоя собирает две картинки 1024×1024:
@@ -47,6 +47,7 @@ LAYERS = [
     ("bronze", "Metal047B", 1.2, "бронза/медь с патиной"),
     ("gold", "Metal048C", 1.0, "золото"),
     ("gravel", "Gravel041", 2.0, "береговая галька"),
+    ("thatch", "MrpgThatch", 1.5, "солома и камыш: ряды пучков стеблей внахлёст (своя, Blender: tools/textures/blender_thatch.py)"),
 ]
 
 
@@ -164,7 +165,7 @@ def main():
 
     with open(RS, "w", encoding="utf-8") as f:
         f.write("//! Сгенерировано tools/textures/build_surface_textures.py — не править руками.\n")
-        f.write("//! Фотоматериалы ambientCG и Poly Haven (CC0), своя черепица из Blender: assets/textures/surface/<слой>_albedo.jpg и _nrm.jpg.\n\n")
+        f.write("//! Фотоматериалы ambientCG и Poly Haven (CC0), своя черепица и солома из Blender: assets/textures/surface/<слой>_albedo.jpg и _nrm.jpg.\n\n")
         f.write("/// Слой фотоматериала: имя файла, id на ambientCG или Poly Haven, метров на тайл, средний линейный цвет.\n")
         f.write("pub struct Layer {\n    pub name: &'static str,\n    pub source: &'static str,\n    pub meters: f32,\n    pub mean: [f32; 3],\n}\n\n")
         f.write("pub const LAYERS: &[Layer] = &[\n")

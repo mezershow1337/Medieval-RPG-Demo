@@ -671,7 +671,27 @@ fn fragment(
                 N = perturb(N, (tt * hu + bb * hv) / e, bump);
             }
             case 20: {
-                // Соломенная (камышовая) кровля: стебли вниз по скату, ряды внахлёст.
+                let fr = uv_frame(n, dp_x, dp_y, duv_x, duv_y);
+                if surface.photo.x >= 0.0 {
+                    // Своя солома из Blender (tools/textures/blender_thatch.py): ряды по 0.3 м,
+                    // пучки стеблей с рваными комлями, верх картинки — конёк. Развёртка та же,
+                    // что у черепицы: u — вдоль карниза, v — вниз по скату.
+                    let ph = photo_plane(i32(surface.photo.x + 0.5), uv * surface.photo.y, fr.t, fr.b, n, surface.photo_mean_b.w);
+                    color = retint(ph.albedo, surface.photo_mean.rgb, base_a, surface.photo_mean.w);
+                    // Тайл 1.5 м повторяется вдоль карниза — полосы по скату своей ширины и
+                    // оттенка (не кратные тайлу) прячут повтор.
+                    let streak = fbm(vec2<f32>(uv.x * 2.3, uv.y * 0.45) + wp.xz * 0.05);
+                    color *= 0.84 + 0.32 * streak;
+                    // Старая солома сереет и темнеет пятнами, свежие заплаты светлее и желтее.
+                    let age = smoothstep(0.35, 0.75, fbm(wp.xz * 0.18 + vec2<f32>(wp.y * 0.1, 2.3)));
+                    color = mix(color * vec3<f32>(1.08, 1.04, 0.9), color * vec3<f32>(0.72, 0.71, 0.72), age);
+                    let moss = smoothstep(0.62, 0.8, fbm(uv * 0.9 + wp.xz * 0.04)) * moss_amount * (0.4 + age);
+                    color = mix(color, vec3<f32>(0.17, 0.19, 0.08), moss * 0.7);
+                    rough = clamp(ph.rough + moss * 0.1, 0.6, 1.0);
+                    N = normalize(ph.n);
+                    break;
+                }
+                // Без фото — процедурная солома: стебли вниз по скату, ряды внахлёст.
                 // Мелкие стебли гасим, когда на пиксель их приходится больше пары, — иначе рябь.
                 let fw = max(length(duv_x), length(duv_y));
                 let fine = 1.0 - smoothstep(0.004, 0.012, fw);
@@ -687,7 +707,6 @@ fn fragment(
                 let e = 0.004;
                 let hu = thatch(uv + vec2<f32>(e, 0.0), fine).x - th.x;
                 let hv = thatch(uv + vec2<f32>(0.0, e), fine).x - th.x;
-                let fr = uv_frame(n, dp_x, dp_y, duv_x, duv_y);
                 // v растёт вниз, `fr.b` смотрит вверх — отсюда минус у второй производной.
                 N = perturb(N, (fr.t * hu - fr.b * hv) / e, bump * (0.35 + 0.65 * fine));
             }

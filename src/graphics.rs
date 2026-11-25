@@ -587,6 +587,8 @@ fn photo_layers(mat: Mat) -> Option<(u32, u32, f32, f32)> {
         Mat::Wood => (L_WOOD, L_WOOD, 0.85, 0.9),
         // Своя черепица (запечена в Blender) уже нужного тона — перекрашиваем слегка.
         Mat::Tile => (L_ROOF, L_ROOF, 0.15, 1.0),
+        // Своя солома (тоже из Blender): пучки разного оттенка, перекрашиваем умеренно.
+        Mat::Thatch => (L_THATCH, L_THATCH, 0.35, 1.0),
         Mat::Iron => (L_IRON, L_IRON, 0.9, 0.6),
         Mat::Bronze => (L_BRONZE, L_BRONZE, 0.5, 0.6),
         Mat::Gold => (L_GOLD, L_GOLD, 0.4, 0.5),
