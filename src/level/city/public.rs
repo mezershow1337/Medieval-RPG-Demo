@@ -130,6 +130,14 @@ pub fn peristyle(b: &mut Builder, outer: Rect, depth: f32, h: f32, mat: Mat, ent
             Side::E => Rect::new(court.x1, court.z0, outer.x1, court.z1),
         };
         kit::lean_roof(b, roof_r, side, h + 1.2, h + 0.05, 0.3);
+        // Наружная стена и торцы — до черепицы. Торцы северного и южного корпусов стоят на
+        // наружных стенах, западного и восточного — над низким краем соседнего ската.
+        let ends = if along_x {
+            [(outer.x0, outer.x0 + ot, h), (outer.x1 - ot, outer.x1, h)]
+        } else {
+            [(court.z0 - 0.25, court.z0 + 0.2, h), (court.z1 - 0.2, court.z1 + 0.25, h)]
+        };
+        kit::lean_fill(b, roof_r, side, h + 1.2, h + 0.05, ot, h, &ends, mat);
     }
     if portico {
         let inset = 2.6;
@@ -212,6 +220,7 @@ pub fn agora(b: &mut Builder) {
     }
     b.mesh(Mat::Limestone).cuboid(Vec3::new(a.x0 + 0.5, 5.0, col_z - 0.45), Vec3::new(a.x1 - 0.5, 5.6, col_z + 0.45));
     kit::lean_roof(b, Rect::new(a.x0, a.z0, a.x1, col_z + 0.4), Side::N, 7.0, 5.6, 0.6);
+    kit::lean_fill(b, Rect::new(a.x0, a.z0, a.x1, col_z + 0.4), Side::N, 7.0, 5.6, 0.7, 6.0, &[], Mat::Limestone);
     // Западная стоя.
     let back_x = a.x0 + 0.35;
     let col_x = a.x0 + 6.5;
@@ -222,6 +231,8 @@ pub fn agora(b: &mut Builder) {
     }
     b.mesh(Mat::Limestone).cuboid(Vec3::new(col_x - 0.45, 5.0, col_z + 0.5), Vec3::new(col_x + 0.45, 5.6, a.z1 - 0.5));
     kit::lean_roof(b, Rect::new(a.x0, col_z + 0.5, col_x + 0.4, a.z1), Side::W, 7.0, 5.6, 0.6);
+    // Торец западной стои над скатом северной — иначе в углу видно под крышу.
+    kit::lean_fill(b, Rect::new(a.x0, col_z + 0.5, col_x + 0.4, a.z1), Side::W, 7.0, 5.6, 0.7, 6.0, &[(col_z + 0.25, col_z + 0.7, 5.6)], Mat::Limestone);
     // Скамьи в стое, светильники.
     for k in 0..5 {
         let x = a.x0 + 8.0 + k as f32 * 8.0;
@@ -490,6 +501,8 @@ pub fn basilica(b: &mut Builder) {
     }
     kit::lean_roof(b, Rect::new(at.x0, at.z0, nar.x0, at.z0 + 3.9), Side::N, 5.4, 3.9, 0.4);
     kit::lean_roof(b, Rect::new(at.x0, at.z1 - 3.9, nar.x0, at.z1), Side::S, 5.4, 3.9, 0.4);
+    kit::lean_fill(b, Rect::new(at.x0, at.z0, nar.x0, at.z0 + 3.9), Side::N, 5.4, 3.9, 0.7, 5.0, &[(at.x0, at.x0 + 0.7, 5.0)], Mat::Limestone);
+    kit::lean_fill(b, Rect::new(at.x0, at.z1 - 3.9, nar.x0, at.z1), Side::S, 5.4, 3.9, 0.7, 5.0, &[(at.x0, at.x0 + 0.7, 5.0)], Mat::Limestone);
     let ph = Vec3::new(at.cx() + 1.0, 0.0, at.cz());
     b.mesh(Mat::Marble).lathe(ph, &[(0.0, 0.0), (1.1, 0.0), (1.1, 0.7), (1.25, 0.75), (1.25, 0.85), (0.95, 0.85), (0.95, 0.3)], 18);
     b.mesh(Mat::Water).disc(ph + Vec3::Y * 0.65, 0.95, 16, true);
@@ -917,6 +930,7 @@ pub fn thermae(b: &mut Builder) {
         column(b, Vec3::new(pal.x0 + 4.0 + k as f32 * 5.8, 0.0, pal.z1 - 3.5), 3.4, 0.2, Mat::Limestone);
     }
     kit::lean_roof(b, Rect::new(pal.x0, pal.z1 - 3.9, pal.x1, pal.z1), Side::S, 4.4, 3.5, 0.3);
+    kit::lean_fill(b, Rect::new(pal.x0, pal.z1 - 3.9, pal.x1, pal.z1), Side::S, 4.4, 3.5, 0.6, 3.2, &[(pal.x0, pal.x0 + 0.6, 3.2), (pal.x1 - 0.6, pal.x1, 3.2)], Mat::Rubble);
     kit::cistern_mouth(b, pal.center(0.0));
 }
 
@@ -1220,6 +1234,8 @@ pub fn citadel(b: &mut Builder) {
         extras(b, room, L::Barracks, &["Сундук стратиота", "Сундук стратиота"], &soldiers, &mut rng);
     }
     kit::lean_roof(b, ba, Side::S, 5.0, 3.85, 0.5);
+    // Высокий край — у стены цитадели; западный торец — до черепицы.
+    kit::lean_fill(b, ba, Side::S, 5.0, 3.85, 0.0, 0.0, &[(ba.x0, ba.x0 + 0.6, 3.8)], Mat::Rubble);
     // Горреум — зернохранилище на подпорных стенках (пол приподнят от сырости).
     let ho = Rect::new(c.x0 + 34.0, c.z0 + 3.0, c.x0 + 58.0, c.z0 + 15.0);
     kit::wall_x(b, ho.x0, ho.x1, ho.z0 + 0.4, 0.8, 5.0, &[], Mat::Limestone);
@@ -1252,13 +1268,15 @@ pub fn citadel(b: &mut Builder) {
     let ar = armoury_rect();
     b.at(ar.cx(), ar.cz());
     kit::wall_x(b, ar.x0, ar.x1, ar.z0 + 0.3, 0.6, 4.2, &[], Mat::Rubble);
-    kit::wall_z(b, ar.z0 + 0.6, ar.z1, ar.x0 + 0.3, 0.6, 4.2, &[], Mat::Rubble);
-    kit::wall_z(b, ar.z0 + 0.6, ar.z1, ar.x1 - 0.3, 0.6, 4.2, &[], Mat::Rubble);
+    // Боковые стены — ниже низкого края ската (иначе прорезают черепицу), выше — кладка по скату.
+    kit::wall_z(b, ar.z0 + 0.6, ar.z1, ar.x0 + 0.3, 0.6, 3.75, &[], Mat::Rubble);
+    kit::wall_z(b, ar.z0 + 0.6, ar.z1, ar.x1 - 0.3, 0.6, 3.75, &[], Mat::Rubble);
     for x in [ar.x0 + 5.5, ar.x1 - 5.5] {
         b.solid([x - 0.2, 0.0, ar.z1 - 0.5], [x + 0.2, 3.6, ar.z1 - 0.1], Mat::Wood);
     }
     b.mesh(Mat::Wood).cuboid(Vec3::new(ar.x0, 3.6, ar.z1 - 0.5), Vec3::new(ar.x1, 3.9, ar.z1 - 0.1));
     kit::lean_roof(b, ar, Side::N, 5.0, 3.9, 0.5);
+    kit::lean_fill(b, ar, Side::N, 5.0, 3.9, 0.6, 4.2, &[(ar.x0, ar.x0 + 0.6, 3.75), (ar.x1 - 0.6, ar.x1, 3.75)], Mat::Rubble);
     kit::forge_set(b, "Оружейная гарнизона", Vec3::new(ar.x0 + 2.4, 0.0, ar.z0 + 3.0), Vec3::X, false);
     // Кольчуги на крестовинах и связки копий у стены.
     for k in 0..3 {

@@ -124,13 +124,15 @@ pub fn glassworks(b: &mut Builder) {
     let shed = Rect::new(r.x0 + 2.0, r.z0 + 6.0, r.x1 - 2.0, r.z0 + 20.0);
     // Мастерская открыта с юга (жар): навес на столбах, задняя стена.
     kit::wall_x(b, shed.x0, shed.x1, shed.z0 + 0.3, 0.6, 4.0, &[], Mat::Rubble);
-    kit::wall_z(b, shed.z0 + 0.6, shed.z1, shed.x0 + 0.3, 0.6, 4.0, &[], Mat::Rubble);
-    kit::wall_z(b, shed.z0 + 0.6, shed.z1, shed.x1 - 0.3, 0.6, 4.0, &[], Mat::Rubble);
+    // Боковые стены — ниже низкого края ската (иначе прорезают черепицу), выше — кладка по скату.
+    kit::wall_z(b, shed.z0 + 0.6, shed.z1, shed.x0 + 0.3, 0.6, 3.55, &[], Mat::Rubble);
+    kit::wall_z(b, shed.z0 + 0.6, shed.z1, shed.x1 - 0.3, 0.6, 3.55, &[], Mat::Rubble);
     for k in 0..4 {
         let x = shed.x0 + 1.0 + k as f32 * (shed.w() - 2.0) / 3.0;
         column(b, Vec3::new(x, 0.0, shed.z1 - 0.3), 3.6, 0.2, Mat::Limestone);
     }
     kit::lean_roof(b, shed, Side::N, 5.0, 3.7, 0.5);
+    kit::lean_fill(b, shed, Side::N, 5.0, 3.7, 0.6, 4.0, &[(shed.x0, shed.x0 + 0.6, 3.55), (shed.x1 - 0.6, shed.x1, 3.55)], Mat::Rubble);
     // Главная печь: купол из плинфы с тремя светящимися рабочими окнами.
     let f = Vec3::new(shed.cx() - 2.5, 0.0, shed.cz() - 1.0);
     let prof: Vec<(f32, f32)> = (0..=8).map(|k| {
