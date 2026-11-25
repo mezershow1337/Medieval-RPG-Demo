@@ -6,7 +6,7 @@ use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendTyp
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_0024;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_0025;
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -216,12 +216,17 @@ pub fn clean_name(s: &str) -> String {
     s.chars().filter(|c| !c.is_control()).take(24).collect::<String>().trim().to_string()
 }
 
+/// Строка снимка про одного бойца. Снимок у каждого клиента свой (см. `server::send_snapshots`):
+/// в нём игроки и те, кто рядом, а облик и свои силы — только когда они нужны.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ActorSnapshot {
     pub id: u64,
     pub kind: ActorKind,
     pub pos: NetPos,
+    /// Поворот и наклон взгляда: по сети 2 байта вместо 4 (см. `angle16`).
+    #[serde(with = "angle16")]
     pub yaw: f32,
+    #[serde(with = "angle16")]
     pub pitch: f32,
     pub crouching: bool,
     pub weapon: WeaponKind,
@@ -230,16 +235,51 @@ pub struct ActorSnapshot {
     pub max_hp: f32,
     /// Защищается щитом (а не оружием).
     pub shield: bool,
-    pub stamina: f32,
-    pub max_stamina: f32,
     /// Множитель скорости ударов (экипировка).
     pub action_speed: f32,
-    /// Множитель скорости ходьбы (экипировка и вес доспеха), нужен своему клиенту.
-    pub move_mult: f32,
     /// Вид клинка в руке: 0 — ржавый и грубый, 255 — полированный (см. `Item::look`).
     pub finish: u8,
     /// Видимые доспехи и щит (у игроков), чтобы модель была одета как в инвентаре.
-    pub gear: crate::gear_look::Gear,
+    /// Приходят, когда боец только что попал в снимок, когда вещи сменились и раз в 2 с
+    /// (на случай потери пакетов); `None` — облик прежний.
+    pub gear: Option<crate::gear_look::Gear>,
+    /// Только в своей строке: силы и скорость ходьбы своего персонажа.
+    pub own: Option<OwnState>,
+}
+
+/// То, что нужно только самому игроку (полоска сил, скорость ходьбы).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct OwnState {
+    pub stamina: f32,
+    pub max_stamina: f32,
+    /// Множитель скорости ходьбы (экипировка и вес доспеха).
+    pub move_mult: f32,
+}
+
+/// Угол в 2 байтах (шаг около 0,0001 рад). Поворот заворачивается в −π..π
+/// (модели поворачиваются через кватернион, им всё равно), наклон и так в пределах ±1,6.
+mod angle16 {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::f32::consts::{PI, TAU};
+
+    const SCALE: f32 = 32767.0 / PI;
+
+    pub fn to_bits(a: f32) -> [u8; 2] {
+        let wrapped = if a.is_finite() { (a + PI).rem_euclid(TAU) - PI } else { 0.0 };
+        ((wrapped * SCALE).round().clamp(-32767.0, 32767.0) as i16).to_le_bytes()
+    }
+
+    pub fn from_bits(b: [u8; 2]) -> f32 {
+        i16::from_le_bytes(b) as f32 / SCALE
+    }
+
+    pub fn serialize<S: Serializer>(a: &f32, s: S) -> Result<S::Ok, S::Error> {
+        to_bits(*a).serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+        Ok(from_bits(<[u8; 2]>::deserialize(d)?))
+    }
 }
 
 /// Летящая стрела.
@@ -251,6 +291,7 @@ pub struct ArrowSnapshot {
 }
 
 /// Сервер -> клиент (ненадёжный канал), рассылается SNAPSHOT_RATE_HZ раз в секунду.
+/// У каждого клиента свой: все игроки, а враги и стрелы — только поблизости.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Snapshot {
     pub tick: u32,
@@ -275,5 +316,50 @@ mod name_tests {
         assert_eq!(clean_name("  Феодор Херсонит "), "Феодор Херсонит");
         assert_eq!(clean_name(&"Ж".repeat(100)).chars().count(), 24);
         assert_eq!(clean_name("a\nb\tc"), "abc");
+    }
+}
+
+#[cfg(test)]
+mod snapshot_format_tests {
+    use super::*;
+
+    #[test]
+    fn angles_survive_two_bytes() {
+        use std::f32::consts::{PI, TAU};
+        for a in [0.0f32, 0.5, -1.6, 1.6, 3.1, -3.1, PI - 1e-4, 10.0, -25.0] {
+            let back = angle16::from_bits(angle16::to_bits(a));
+            let diff = (back - a).rem_euclid(TAU);
+            let diff = diff.min(TAU - diff);
+            assert!(diff < 2e-4, "{a} -> {back}");
+        }
+        assert_eq!(angle16::from_bits(angle16::to_bits(f32::NAN)), 0.0);
+        assert_eq!(angle16::from_bits(angle16::to_bits(f32::INFINITY)), 0.0);
+    }
+
+    #[test]
+    fn enemy_line_is_small() {
+        let a = ActorSnapshot {
+            id: 1 << 62,
+            kind: ActorKind::GothWarrior,
+            pos: NetPos([120.5, 3.2, -310.0]),
+            yaw: 2.0,
+            pitch: -0.3,
+            crouching: false,
+            weapon: WeaponKind::Axe,
+            action: Action::Idle,
+            hp: 80.0,
+            max_hp: 100.0,
+            shield: true,
+            action_speed: 1.0,
+            finish: 120,
+            gear: None,
+            own: None,
+        };
+        let bytes = encode(&a);
+        // Было 77 байт (облик и силы в каждой строке, углы по 4 байта).
+        assert!(bytes.len() <= 46, "{} байт", bytes.len());
+        let back: ActorSnapshot = decode(&bytes).unwrap();
+        assert!((back.yaw - 2.0).abs() < 1e-3 && (back.pitch + 0.3).abs() < 1e-3);
+        assert!(back.gear.is_none() && back.own.is_none());
     }
 }

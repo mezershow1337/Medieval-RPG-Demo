@@ -110,9 +110,6 @@ impl Default for SmithState {
 }
 
 impl SmithState {
-    pub fn window_open(&self) -> bool {
-        self.open
-    }
     pub(crate) fn station(&self, id: u32) -> Option<&StationView> {
         self.stations.iter().find(|s| s.id == id)
     }

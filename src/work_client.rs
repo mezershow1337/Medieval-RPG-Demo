@@ -432,11 +432,6 @@ fn update_work_hud(
                         .collect::<Vec<_>>()
                         .join(" "),
                 };
-                let c = if m.showing {
-                    Color::srgb(0.95, 0.85, 0.55)
-                } else {
-                    Color::srgb(0.8, 0.9, 1.0)
-                };
                 let c = if m.showing { Color::srgb(0.95, 0.85, 0.55) } else { Color::srgb(0.8, 0.9, 1.0) };
                 set_text(line, Some(c));
             }

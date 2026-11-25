@@ -407,6 +407,8 @@ const SHIELD_GRIP: Vec3 = Vec3::new(0.0, -0.02, 0.07);
 
 fn spawn_remote(commands: &mut Commands, index: &mut RemoteIndex, snap: &ActorSnapshot) {
     let pos: Vec3 = snap.pos.into();
+    // Облик приходит в первых снимках бойца. Если они потерялись — пока без вещей, оденется со следующим.
+    let gear = snap.gear.unwrap_or_default();
     let mut fighter = Fighter::new(snap.weapon, snap.max_hp, snap.shield);
     fighter.action = snap.action;
     fighter.hp = snap.hp;
@@ -426,17 +428,17 @@ fn spawn_remote(commands: &mut Commands, index: &mut RemoteIndex, snap: &ActorSn
                 crouch: if snap.crouching { 1.0 } else { 0.0 },
                 last_pos: pos,
                 finish: snap.finish,
-                gear: snap.gear,
-                shown_gear: snap.gear,
+                gear,
+                shown_gear: gear,
                 weapon_smooth: None,
             },
             Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(snap.yaw)),
             Visibility::default(),
         ))
         .with_children(|p| {
-            p.spawn((BodyRig, worn::Worn::new(worn::Extras::of(&snap.gear)), NeedsRig(outfit_of(snap.kind, snap.id, &snap.gear)), Transform::default(), Visibility::default()));
+            p.spawn((BodyRig, worn::Worn::new(worn::Extras::of(&gear)), NeedsRig(outfit_of(snap.kind, snap.id, &gear)), Transform::default(), Visibility::default()));
             p.spawn((RemoteSword, ShownWeapon(snap.weapon, None), NeedsWeapon(snap.weapon), Transform::from_xyz(0.3, 1.0, -0.4), Visibility::default()));
-            if let Some(kind) = shield_of(snap.kind, snap.shield, &snap.gear) {
+            if let Some(kind) = shield_of(snap.kind, snap.shield, &gear) {
                 spawn_remote_shield(p, kind);
             }
         })
@@ -666,11 +668,12 @@ fn receive_snapshots(
                 r.fighter.max_hp = a.max_hp;
                 r.fighter.has_shield = a.shield;
                 r.fighter.weapon = a.weapon;
-                r.fighter.stamina = a.stamina;
-                r.fighter.max_stamina = a.max_stamina;
                 r.fighter.action_speed = a.action_speed;
                 r.finish = a.finish;
-                r.gear = a.gear;
+                // Облик приходит не в каждом снимке: нет его — прежний.
+                if let Some(gear) = a.gear {
+                    r.gear = gear;
+                }
             }
             None if !index.0.contains_key(&a.id) => spawn_remote(&mut commands, &mut index, a),
             None => {}
@@ -990,12 +993,10 @@ fn duel_showcase(mut commands: Commands, mut index: ResMut<RemoteIndex>, mut cam
             hp: 100.0,
             max_hp: 100.0,
             shield,
-            stamina: 100.0,
-            max_stamina: 100.0,
             action_speed: 1.0,
-            move_mult: 1.0,
             finish: 230,
-            gear: if kind == ActorKind::Player { gear(shield) } else { Gear::default() },
+            gear: Some(if kind == ActorKind::Player { gear(shield) } else { Gear::default() }),
+            own: None,
         };
         spawn_remote(&mut commands, &mut index, &snap);
         if let Some(e) = index.0.get(&id) {

@@ -416,7 +416,7 @@ fn interact_input(keys: Res<ButtonInput<KeyCode>>, mut client: ResMut<RenetClien
         send(&mut client, &LootClientMessage::ShelfSteal { id });
     }
     if keys.just_pressed(KeyCode::F8) {
-        send(&mut client, &LootClientMessage::DebugSpawnCorpse);
+        send(&mut client, &LootClientMessage::DebugSpawnCorpse { token: crate::console_net::host_token() });
     }
 }
 
