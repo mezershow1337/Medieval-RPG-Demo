@@ -180,8 +180,20 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .add_plugins(crate::towns_server::TownServerPlugin)
         .add_plugins(crate::console_server::ConsoleServerPlugin)
         .add_systems(Update, (receive_client_messages, run_npcs, combat_tick, respawns, send_snapshots).chain());
+    run_in_one_thread(&mut app);
     info!("Сервер слушает {addr}");
     app.run();
+}
+
+/// Все расписания сервера выполняются в его собственном потоке, система за системой.
+/// Системы сервера короткие, и будить ради каждой потоки пула дороже, чем выполнить их подряд.
+/// А у хозяина игры сервер живёт в одном процессе с игрой и делит с ней пул задач Bevy:
+/// многопоточный сервер занимал потоки, которых ждали системы кадра.
+fn run_in_one_thread(app: &mut App) {
+    let mut schedules = app.world_mut().resource_mut::<Schedules>();
+    for (_, schedule) in schedules.iter_mut() {
+        schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
+    }
 }
 
 impl GameWorld {
@@ -805,7 +817,7 @@ fn combat_tick(
             && !is_god(&world, tid)
         {
             let part = world.actors.get(&tid).map_or(crate::medicine::BodyPart::Chest, |t| crate::medicine::BodyPart::from_hit(&t.pose, point, head));
-            world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon: combat::WeaponKind::Bow, amount, head, part });
+            world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon: combat::WeaponKind::Bow, amount, part });
         }
         server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: arrow.owner, target: tid, outcome, at: point.into() }));
         if let Some(q) = practice.as_mut() {
@@ -867,7 +879,7 @@ fn combat_tick(
                 {
                     let weapon = world.actors.get(&aid).map_or(combat::WeaponKind::Spatha, |a| a.fighter.weapon);
                     let part = world.actors.get(&tid).map_or(crate::medicine::BodyPart::Chest, |t| crate::medicine::BodyPart::from_hit(&t.pose, point, head));
-                    world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon, amount, head, part });
+                    world.hits_taken.push(crate::medicine::HitTaken { target: tid, weapon, amount, part });
                 }
                 server.broadcast_message(CH_RELIABLE, encode(&ServerMessage::Hit { attacker: aid, target: tid, outcome, at: point.into() }));
                 if let Some(q) = practice.as_mut() {
@@ -1000,18 +1012,91 @@ fn respawns(mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, level
     }
 }
 
-fn send_snapshots(mut server: ResMut<RenetServer>, world: Res<GameWorld>, mut timer: ResMut<SnapshotTimer>, time: Res<Time>) {
+fn send_snapshots(mut server: ResMut<RenetServer>, world: Res<GameWorld>, mut timer: ResMut<SnapshotTimer>, time: Res<Time>, mut interest: Local<SnapshotInterest>) {
     if !timer.timer.tick(time.delta()).just_finished() {
         return;
     }
     timer.tick = timer.tick.wrapping_add(1);
-    let snapshot = Snapshot {
-        tick: timer.tick,
-        actors: world
-            .actors
-            .iter()
-            .filter(|(_, a)| a.alive)
-            .map(|(id, a)| ActorSnapshot {
+    let tick = timer.tick;
+    let clients = server.clients_id();
+    interest.forget_gone(&world, &clients);
+    interest.note_gear(&world, tick);
+    let everyone = snapshot_everyone();
+    for client in clients {
+        let snapshot = interest.snapshot_for(&world, client, tick, everyone);
+        server.send_message(client, CH_UNRELIABLE, encode(&snapshot));
+    }
+}
+
+/// Враги и стрелы ближе этого попадают в снимок игрока...
+const SNAPSHOT_RADIUS: f32 = 120.0;
+/// ...и остаются в нём, пока не уйдут дальше этого: на границе модель не пропадает и не появляется то и дело.
+const SNAPSHOT_KEEP_RADIUS: f32 = 140.0;
+/// Облик (вещи) шлём столько снимков подряд (⅓ с): после появления бойца в снимке и после смены вещей.
+const GEAR_BURST_TICKS: u32 = 10;
+/// И раз в столько снимков (2 с) каждому бойцу — если вся пачка потерялась в сети.
+const GEAR_KEYFRAME_TICKS: u32 = 60;
+
+/// Снимки со всеми бойцами мира, без отбора по расстоянию: камера для снимков экрана
+/// (`MRPG_CAM`, `MRPG_TOUR`) смотрит не оттуда, где стоит игрок. Или `MRPG_SNAPSHOT_ALL=1`.
+pub(crate) fn snapshot_everyone() -> bool {
+    static EVERYONE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *EVERYONE.get_or_init(|| ["MRPG_SNAPSHOT_ALL", "MRPG_CAM", "MRPG_TOUR"].iter().any(|v| std::env::var_os(v).is_some()))
+}
+
+/// Что каждый клиент уже видит: из этого собирается его снимок.
+#[derive(Default)]
+struct SnapshotInterest {
+    /// Клиент → кто сейчас в его снимке и с какого снимка.
+    shown: HashMap<u64, HashMap<u64, u32>>,
+    /// Последние вещи каждого бойца и номер снимка, когда они сменились.
+    gear: HashMap<u64, (crate::gear_look::Gear, u32)>,
+}
+
+impl SnapshotInterest {
+    /// Забыть отключившихся клиентов и пропавших бойцов.
+    fn forget_gone(&mut self, world: &GameWorld, clients: &[u64]) {
+        self.shown.retain(|c, _| clients.contains(c));
+        self.gear.retain(|id, _| world.actors.contains_key(id));
+    }
+
+    /// Запомнить, у кого сменились вещи.
+    fn note_gear(&mut self, world: &GameWorld, tick: u32) {
+        for (id, a) in &world.actors {
+            match self.gear.get_mut(id) {
+                Some((g, _)) if *g == a.gear => {}
+                Some(e) => *e = (a.gear, tick),
+                None => {
+                    self.gear.insert(*id, (a.gear, tick));
+                }
+            }
+        }
+    }
+
+    /// Снимок для одного клиента: он сам, все игроки (они на карте), враги и стрелы поблизости.
+    fn snapshot_for(&mut self, world: &GameWorld, client: u64, tick: u32, everyone: bool) -> Snapshot {
+        let me = world.actors.get(&client);
+        let center = me.map(|a| a.pose.feet).filter(|_| !everyone);
+        let shown = self.shown.entry(client).or_default();
+        let mut still = HashMap::with_capacity(shown.len());
+        let mut actors = Vec::with_capacity(shown.len() + 4);
+        for (id, a) in world.actors.iter().filter(|(_, a)| a.alive) {
+            let was = shown.get(id).copied();
+            let near = center.is_none_or(|c| {
+                let d = c.distance_squared(a.pose.feet);
+                d < SNAPSHOT_RADIUS * SNAPSHOT_RADIUS || (was.is_some() && d < SNAPSHOT_KEEP_RADIUS * SNAPSHOT_KEEP_RADIUS)
+            });
+            if !(*id == client || a.kind == ActorKind::Player || near) {
+                continue;
+            }
+            let since = was.unwrap_or(tick);
+            still.insert(*id, since);
+            let changed = self.gear.get(id).map_or(tick, |g| g.1);
+            let send_gear = *id == client
+                || tick.wrapping_sub(since) < GEAR_BURST_TICKS
+                || tick.wrapping_sub(changed) < GEAR_BURST_TICKS
+                || tick.wrapping_add(*id as u32) % GEAR_KEYFRAME_TICKS == 0;
+            actors.push(ActorSnapshot {
                 id: *id,
                 kind: a.kind,
                 pos: a.pose.feet.into(),
@@ -1023,16 +1108,194 @@ fn send_snapshots(mut server: ResMut<RenetServer>, world: Res<GameWorld>, mut ti
                 hp: a.fighter.hp,
                 max_hp: a.fighter.max_hp,
                 shield: a.fighter.has_shield,
-                stamina: a.fighter.stamina,
-                max_stamina: a.fighter.max_stamina,
                 action_speed: a.fighter.action_speed,
-                move_mult: a.move_mult,
                 finish: a.finish,
-                gear: a.gear,
-            })
-            .collect(),
-        arrows: world.arrows.iter().map(|a| ArrowSnapshot { id: a.id, pos: a.pos.into(), vel: a.vel.into() }).collect(),
-    };
-    let bytes = encode(&snapshot);
-    server.broadcast_message(CH_UNRELIABLE, bytes);
+                gear: send_gear.then_some(a.gear),
+                own: (*id == client).then_some(OwnState { stamina: a.fighter.stamina, max_stamina: a.fighter.max_stamina, move_mult: a.move_mult }),
+            });
+        }
+        *shown = still;
+        let arrows = world
+            .arrows
+            .iter()
+            .filter(|ar| center.is_none_or(|c| c.distance_squared(ar.pos) < SNAPSHOT_KEEP_RADIUS * SNAPSHOT_KEEP_RADIUS))
+            .map(|ar| ArrowSnapshot { id: ar.id, pos: ar.pos.into(), vel: ar.vel.into() })
+            .collect();
+        Snapshot { tick, actors, arrows }
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+
+    fn actor(kind: ActorKind, x: f32) -> Actor {
+        Actor {
+            kind,
+            pose: Pose { feet: Vec3::new(x, 0.0, 0.0), yaw: 0.0, pitch: 0.0, crouching: false },
+            fighter: npc::fighter_for(kind),
+            alive: true,
+            last_update: 0.0,
+            respawn_at: None,
+            protected_until: 0.0,
+            brain: None,
+            spawn: None,
+            sweep: None,
+            move_mult: 0.8,
+            finish: 200,
+            shoot: false,
+            body_mods: Default::default(),
+            skill_mods: Default::default(),
+            cheats: Default::default(),
+            holstered: false,
+            gear: Default::default(),
+        }
+    }
+
+    fn world() -> GameWorld {
+        GameWorld {
+            actors: HashMap::new(),
+            corpses: Vec::new(),
+            joined_count: 0,
+            next_corpse_id: CORPSE_ID_BASE,
+            npc_respawns: Vec::new(),
+            next_npc_id: NPC_ID_BASE,
+            rng: Rng::new(1),
+            arrows: Vec::new(),
+            next_arrow_id: 1,
+            hits_taken: Vec::new(),
+            gear_wear: Vec::new(),
+        }
+    }
+
+    const ME: u64 = 7;
+    const FRIEND: u64 = 8;
+    const NEAR: u64 = NPC_ID_BASE;
+    const FAR: u64 = NPC_ID_BASE + 1;
+    const EDGE: u64 = NPC_ID_BASE + 2;
+
+    /// Я у начала координат, друг за 500 м, враги в 50, 300 и 130 м.
+    fn town() -> GameWorld {
+        let mut w = world();
+        w.actors.insert(ME, actor(ActorKind::Player, 0.0));
+        w.actors.insert(FRIEND, actor(ActorKind::Player, 500.0));
+        w.actors.insert(NEAR, actor(ActorKind::GothWarrior, 50.0));
+        w.actors.insert(FAR, actor(ActorKind::HunArcher, 300.0));
+        w.actors.insert(EDGE, actor(ActorKind::Stratiotes, 130.0));
+        w
+    }
+
+    fn ids(s: &Snapshot) -> Vec<u64> {
+        let mut v: Vec<u64> = s.actors.iter().map(|a| a.id).collect();
+        v.sort();
+        v
+    }
+
+    fn entry(s: &Snapshot, id: u64) -> &ActorSnapshot {
+        s.actors.iter().find(|a| a.id == id).expect("боец есть в снимке")
+    }
+
+    #[test]
+    fn players_always_enemies_only_nearby() {
+        let w = town();
+        let mut interest = SnapshotInterest::default();
+        interest.note_gear(&w, 1);
+        let s = interest.snapshot_for(&w, ME, 1, false);
+        assert_eq!(ids(&s), vec![ME, FRIEND, NEAR], "друг всегда (он на карте), дальние враги — нет");
+        // Свои силы — только в своей строке.
+        assert_eq!(entry(&s, ME).own.map(|o| o.move_mult), Some(0.8));
+        assert!(entry(&s, FRIEND).own.is_none() && entry(&s, NEAR).own.is_none());
+        // Для снимков экрана — весь мир.
+        let all = SnapshotInterest::default().snapshot_for(&w, ME, 1, true);
+        assert_eq!(all.actors.len(), 5);
+    }
+
+    #[test]
+    fn enemy_at_the_edge_does_not_blink() {
+        let mut w = town();
+        let mut interest = SnapshotInterest::default();
+        interest.note_gear(&w, 1);
+        assert!(ids(&interest.snapshot_for(&w, ME, 1, false)).contains(&NEAR));
+        // Отошёл за 120 м, но ближе 140 — ещё виден.
+        w.actors.get_mut(&NEAR).unwrap().pose.feet.x = 135.0;
+        assert!(ids(&interest.snapshot_for(&w, ME, 2, false)).contains(&NEAR));
+        // Дальше 140 — пропал; вернулся на 130 — снова не виден, пока не подойдёт ближе 120.
+        w.actors.get_mut(&NEAR).unwrap().pose.feet.x = 150.0;
+        assert!(!ids(&interest.snapshot_for(&w, ME, 3, false)).contains(&NEAR));
+        w.actors.get_mut(&NEAR).unwrap().pose.feet.x = 130.0;
+        assert!(!ids(&interest.snapshot_for(&w, ME, 4, false)).contains(&NEAR));
+        w.actors.get_mut(&NEAR).unwrap().pose.feet.x = 110.0;
+        assert!(ids(&interest.snapshot_for(&w, ME, 5, false)).contains(&NEAR));
+        // Погибшие в снимок не попадают.
+        w.actors.get_mut(&NEAR).unwrap().alive = false;
+        assert!(!ids(&interest.snapshot_for(&w, ME, 6, false)).contains(&NEAR));
+    }
+
+    #[test]
+    fn gear_is_sent_when_needed() {
+        let mut w = town();
+        let mut interest = SnapshotInterest::default();
+        // Первые снимки — с обликом у всех.
+        for tick in 1..=GEAR_BURST_TICKS {
+            interest.note_gear(&w, tick);
+            let s = interest.snapshot_for(&w, ME, tick, false);
+            assert!(s.actors.iter().all(|a| a.gear.is_some()), "снимок {tick}");
+        }
+        // Потом — только свой и раз в 2 с.
+        let mut friend_keyframes = 0;
+        for tick in GEAR_BURST_TICKS + 1..=GEAR_BURST_TICKS + GEAR_KEYFRAME_TICKS {
+            interest.note_gear(&w, tick);
+            let s = interest.snapshot_for(&w, ME, tick, false);
+            assert!(entry(&s, ME).gear.is_some());
+            friend_keyframes += entry(&s, FRIEND).gear.is_some() as u32;
+        }
+        assert_eq!(friend_keyframes, 1);
+        // Друг надел шлем — облик идёт пачкой сразу.
+        let tick = GEAR_BURST_TICKS + GEAR_KEYFRAME_TICKS + 1;
+        w.actors.get_mut(&FRIEND).unwrap().gear.head = Some(3);
+        for t in tick..tick + GEAR_BURST_TICKS {
+            interest.note_gear(&w, t);
+            let s = interest.snapshot_for(&w, ME, t, false);
+            assert_eq!(entry(&s, FRIEND).gear.and_then(|g| g.head), Some(3), "снимок {t}");
+        }
+    }
+
+    #[test]
+    fn arrows_only_nearby_and_clients_forgotten() {
+        let mut w = town();
+        for (id, x) in [(1, 20.0), (2, 400.0)] {
+            w.arrows.push(Arrow { id, owner: FAR, pos: Vec3::new(x, 2.0, 0.0), vel: Vec3::X, damage: 10.0, life: 1.0, pierce: 0.0 });
+        }
+        let mut interest = SnapshotInterest::default();
+        let s = interest.snapshot_for(&w, ME, 1, false);
+        assert_eq!(s.arrows.iter().map(|a| a.id).collect::<Vec<_>>(), vec![1]);
+        // Друг ушёл: его клиента и его облик забываем.
+        interest.snapshot_for(&w, FRIEND, 1, false);
+        interest.note_gear(&w, 1);
+        w.actors.remove(&FRIEND);
+        interest.forget_gone(&w, &[ME]);
+        assert!(!interest.shown.contains_key(&FRIEND) && !interest.gear.contains_key(&FRIEND));
+    }
+
+    #[test]
+    fn snapshot_fits_one_packet_in_a_busy_street() {
+        // 16 игроков в вещах и 20 врагов рядом: снимок после первой пачки облика.
+        let mut w = world();
+        for i in 0..16u64 {
+            let mut a = actor(ActorKind::Player, i as f32);
+            a.gear = crate::gear_look::Gear { head: Some(1), chest: Some(2), hands: Some(3), legs: Some(4), feet: Some(5), main_hand: Some(6), ..Default::default() };
+            w.actors.insert(1_000_000 + i, a);
+        }
+        for i in 0..20u64 {
+            w.actors.insert(NPC_ID_BASE + i, actor(ActorKind::Stratiotes, 10.0 + i as f32));
+        }
+        let mut interest = SnapshotInterest::default();
+        let mut bytes = 0;
+        for tick in 1..=GEAR_BURST_TICKS + 5 {
+            interest.note_gear(&w, tick);
+            bytes = encode(&interest.snapshot_for(&w, 1_000_000, tick, false)).len();
+        }
+        eprintln!("36 бойцов рядом: {bytes} байт");
+        assert!(bytes <= 1800, "{bytes} байт");
+    }
 }

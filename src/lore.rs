@@ -973,6 +973,7 @@ impl LessonMode {
 }
 
 impl Teacher {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub const ALL: [Teacher; 22] = [
         Teacher::Iatros,
         Teacher::Rhizotomos,

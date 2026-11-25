@@ -464,6 +464,26 @@ pub struct ContainerTaken {
     pub what: String,
 }
 
+/// Вещь уходит из сундука уровня (дом, церковь, казарма, склад) к игроку или на пол:
+/// номер сундука, где он стоит, цена и название — для `ContainerTaken`.
+fn container_taking(world: &LootWorld, from: Owner, uid: ItemUid) -> Option<(LootId, Vec3, u32, String)> {
+    let Owner::Container(id) = from else { return None };
+    if !world.fixed.contains_key(&id) {
+        return None;
+    }
+    let c = world.corpses.get(&id)?;
+    let (_, item) = c.inv.find(uid)?;
+    Some((id, c.pos, item.value(), item.info().name.to_string()))
+}
+
+/// Вещь из сундука взята: пусть стража решит, кража ли это.
+fn report_taking(commands: &mut Commands, world: &LootWorld, player: u64, taking: Option<(LootId, Vec3, u32, String)>) {
+    if let Some((id, at, value, what)) = taking {
+        let table = world.fixed[&id].0;
+        commands.trigger(ContainerTaken { player, container: (id - CONTAINER_ID_BASE) as u32, table, at, value, what });
+    }
+}
+
 /// Через сколько секунд опустевший сундук снова наполняется (хозяева докупают, воры приходят снова).
 const REFILL_AFTER: f32 = 20.0 * 60.0;
 
@@ -540,6 +560,7 @@ fn receive_loot_messages(
     mut world: ResMut<LootWorld>,
     mut healing: ResMut<crate::consumables::Healing>,
     mut locks: Option<ResMut<crate::towns_server::Locks>>,
+    rules: Option<Res<crate::console_server::ConsoleRules>>,
 ) {
     for pid in server.clients_id() {
         while let Some(bytes) = server.receive_message(pid, CH_LOOT) {
@@ -625,13 +646,7 @@ fn receive_loot_messages(
                     }
                     let was_empty = empty_flags(&world, &[from, to]);
                     // Из сундука уровня к себе — может оказаться кражей.
-                    let taking = match (from, to) {
-                        (Owner::Container(id), Owner::Me) if world.fixed.contains_key(&id) => world.corpses.get(&id).and_then(|c| {
-                            let (_, item) = c.inv.find(uid)?;
-                            Some((id, c.pos, item.value(), item.info().name.to_string()))
-                        }),
-                        _ => None,
-                    };
+                    let taking = if to == Owner::Me { container_taking(&world, from, uid) } else { None };
                     let src_inv = world.take_inv(pid, from);
                     let Some(src_inv) = src_inv else { continue };
                     let result = if from == to {
@@ -654,12 +669,7 @@ fn receive_loot_messages(
                     };
                     match result {
                         Err(e) => notice(&mut server, pid, e.message()),
-                        Ok(_) => {
-                            if let Some((id, at, value, what)) = taking {
-                                let table = world.fixed[&id].0;
-                                commands.trigger(ContainerTaken { player: pid, container: (id - CONTAINER_ID_BASE) as u32, table, at, value, what });
-                            }
-                        }
+                        Ok(_) => report_taking(&mut commands, &world, pid, taking),
                     }
                     // Даже при ошибке шлём состояние: клиент вернёт предмет на место.
                     let owners: Vec<Owner> = if from == to { vec![from] } else { vec![from, to] };
@@ -670,10 +680,13 @@ fn receive_loot_messages(
                         continue;
                     }
                     let was_empty = empty_flags(&world, &[from]);
+                    // Выбросить вещь из чужого сундука на пол и поднять — та же кража, что взять в сумку.
+                    let taking = container_taking(&world, from, uid);
                     let Some(mut inv) = world.take_inv(pid, from) else { continue };
                     let taken = inv.take(uid);
                     world.put_inv(pid, from, inv);
                     let Some((item, _)) = taken else { continue };
+                    report_taking(&mut commands, &world, pid, taking);
                     let dir = forward(yaw, pitch);
                     let mut start = feet + Vec3::Y * 1.3 + Vec3::new(dir.x, 0.0, dir.z).normalize_or_zero() * 0.35;
                     if !level.body_is_free(&DROP_BODY, start) {
@@ -688,7 +701,12 @@ fn receive_loot_messages(
                 }
                 LootClientMessage::Use { uid } => healing.requests.push((pid, Some(uid))),
                 LootClientMessage::CancelUse => healing.requests.push((pid, None)),
-                LootClientMessage::DebugSpawnCorpse => {
+                LootClientMessage::DebugSpawnCorpse { token } => {
+                    // Тело с добычей из воздуха — чит: иначе любой гость набивал сумку рыцарскими вещами.
+                    if !crate::console_server::cheats_allowed(token, rules.as_deref()) {
+                        notice(&mut server, pid, "F8 — отладка: только у хозяина игры (или после sv_cheats 1)");
+                        continue;
+                    }
                     let dir = forward(yaw, 0.0);
                     let table = [LootTableId::Footman, LootTableId::Knight, LootTableId::KnightCaptain][world.rng.range_u32(0, 2) as usize];
                     let name = match table {
@@ -848,6 +866,30 @@ fn sync_combat_corpses(mut server: ResMut<RenetServer>, game: Res<GameWorld>, mu
 mod tests {
     use super::*;
     use crate::start_kit::{KitField, StartKit};
+
+    #[test]
+    fn taking_from_a_level_chest_is_noticed_also_when_dropped() {
+        let mut world = LootWorld::default();
+        let chest = CONTAINER_ID_BASE + 3;
+        let body = 1 << 40;
+        for id in [chest, body] {
+            let mut inv = Inventory::new(CORPSE_GRID);
+            let items = world.roll(LootTableId::Knight, 0.0);
+            inv.fill(items, false);
+            world.corpses.insert(id, Corpse { pos: Vec3::new(1.0, 0.0, 2.0), yaw: 0.0, name: "Сундук".into(), inv, created: 0, own_model: false });
+        }
+        world.fixed.insert(chest, (LootTableId::Knight, None));
+        let uid_in = |id: LootId| world.corpses[&id].inv.all_items().next().expect("в сундуке есть вещь").uid;
+        let (from_chest, from_body) = (uid_in(chest), uid_in(body));
+        // Из сундука уровня (и в сумку, и на пол — оба пути зовут это) — может быть кражей.
+        let t = container_taking(&world, Owner::Container(chest), from_chest).expect("кража из сундука");
+        assert_eq!((t.0, t.1), (chest, Vec3::new(1.0, 0.0, 2.0)));
+        assert!(t.2 > 0 && !t.3.is_empty());
+        // Тело в бою, своя сумка или чужой номер вещи — нет.
+        assert!(container_taking(&world, Owner::Container(body), from_body).is_none());
+        assert!(container_taking(&world, Owner::Me, from_chest).is_none());
+        assert!(container_taking(&world, Owner::Container(chest), from_body).is_none());
+    }
 
     #[test]
     fn starter_inventory_follows_the_chosen_kit() {

@@ -3,8 +3,8 @@
 //!
 //! Каждый кадр (60 Гц): руки тянут свои предметы к точке перед глазами, люди расталкивают
 //! лежащее, `props::step_bodies` двигает и сталкивает тела. Движущиеся тела рассылаются
-//! ~30 раз в секунду по ненадёжному каналу [`CH_PROPS`], улёгшиеся — один раз надёжно
-//! (`PropRest`), так что лежащие предметы сеть не нагружают.
+//! ~30 раз в секунду по ненадёжному каналу [`CH_PROPS`] — каждому игроку только те, что рядом с ним;
+//! улёгшиеся — один раз надёжно и всем (`PropRest`), так что лежащие предметы сеть не нагружают.
 
 use crate::collision::Body;
 use crate::items::Stat;
@@ -24,12 +24,17 @@ pub struct PropStatics(pub Vec<Obb>);
 const SNAPSHOT_SECS: f32 = 1.0 / 30.0;
 /// Сколько тел в одном пакете снимка.
 const SNAPSHOT_CHUNK: usize = 40;
+/// Движение предмета шлём игрокам не дальше этого: мелочь дальше не рисуется даже на самой
+/// большой дальности деталей (`Settings::detail_distance`). Где он улёгся, узнают все (`PropRest`).
+const PROP_RADIUS: f32 = 160.0;
 
 #[derive(Default)]
 pub struct PropClock {
     acc: f32,
     snap: f32,
     last_feet: HashMap<u64, Vec3>,
+    /// О ком с последнего «улёгся» уже слали движение: им `PropRest` нужен, даже если вещь вернулась на место.
+    sent: std::collections::HashSet<LootId>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -64,7 +69,7 @@ pub fn tick_props(
     while clock.acc >= TICK && steps < 3 {
         clock.acc -= TICK;
         steps += 1;
-        step_world(&mut server, &game, &level, &statics.0, &movers, &mut world);
+        step_world(&mut server, &game, &level, &statics.0, &movers, &mut world, &mut clock.sent);
     }
     if steps == 3 {
         clock.acc = 0.0;
@@ -73,14 +78,23 @@ pub fn tick_props(
     clock.snap += dt;
     if clock.snap >= SNAPSHOT_SECS {
         clock.snap = 0.0;
+        // Разбуженное прохожим, но не сдвинутое (так почти всегда с вещами в домах) — не шлём.
         let moving: Vec<PropState> = world
             .ground
             .iter()
-            .filter(|(_, g)| !g.body.asleep || g.holder.is_some())
+            .filter(|(_, g)| g.holder.is_some() || (!g.body.asleep && g.body.moved_since_rest()))
             .map(|(id, g)| PropState::new(*id, g.body.pos, g.body.rot, g.body.vel))
             .collect();
-        for chunk in moving.chunks(SNAPSHOT_CHUNK) {
-            server.broadcast_message(CH_PROPS, encode(&PropsSnapshot(chunk.to_vec())));
+        clock.sent.extend(moving.iter().map(|p| p.id));
+        if !moving.is_empty() {
+            let everyone = crate::server::snapshot_everyone();
+            for client in server.clients_id() {
+                let center = game.actors.get(&client).map(|a| a.pose.feet).filter(|_| !everyone);
+                let near: Vec<PropState> = moving.iter().filter(|p| center.is_none_or(|c| c.distance_squared(Vec3::from_array(p.pos)) < PROP_RADIUS * PROP_RADIUS)).copied().collect();
+                for chunk in near.chunks(SNAPSHOT_CHUNK) {
+                    server.send_message(client, CH_PROPS, encode(&PropsSnapshot(chunk.to_vec())));
+                }
+            }
         }
     }
 }
@@ -90,7 +104,8 @@ fn wake_cell(p: Vec3) -> (i32, i32) {
     ((p.x / 2.0).floor() as i32, (p.z / 2.0).floor() as i32)
 }
 
-fn step_world(server: &mut RenetServer, game: &GameWorld, level: &crate::collision::LevelColliders, statics: &[Obb], movers: &[Mover], world: &mut LootWorld) {
+#[allow(clippy::too_many_arguments)]
+fn step_world(server: &mut RenetServer, game: &GameWorld, level: &crate::collision::LevelColliders, statics: &[Obb], movers: &[Mover], world: &mut LootWorld, sent: &mut std::collections::HashSet<LootId>) {
     // Руки: куда тянуть каждый предмет.
     let mut holds: HashMap<LootId, Hold> = HashMap::new();
     let mut drop: Vec<(u64, &'static str)> = Vec::new();
@@ -154,6 +169,11 @@ fn step_world(server: &mut RenetServer, game: &GameWorld, level: &crate::collisi
         }
     }
 
+    // Всё спит и никто ничего не держит (обычное дело): шагать нечего. Иначе на каждом шаге
+    // собирали бы списки из тысяч спящих вещей домов.
+    if holds.is_empty() && world.ground.values().all(|g| g.body.asleep) {
+        return;
+    }
     let env = Env { level, statics, movers };
     let mut ids = Vec::with_capacity(world.ground.len());
     let mut list = Vec::with_capacity(world.ground.len());
@@ -165,13 +185,19 @@ fn step_world(server: &mut RenetServer, game: &GameWorld, level: &crate::collisi
     let slept = step_bodies(&mut list, &env, TICK);
     for i in slept {
         let id = ids[i];
-        let g = &world.ground[&id];
-        server.broadcast_message(CH_LOOT, encode(&LootServerMessage::PropRest { id, pos: g.body.pos.into(), rot: g.body.rot.to_array() }));
+        let Some(g) = world.ground.get_mut(&id) else { continue };
+        // Не сдвинулось и движения никому не слали — клиенты и так видят его на месте. Место покоя
+        // при этом прежнее (о нём клиенты и знают): мелкое ёрзанье не копится незаметно для них.
+        if sent.remove(&id) || g.body.moved_since_rest() {
+            server.broadcast_message(CH_LOOT, encode(&LootServerMessage::PropRest { id, pos: g.body.pos.into(), rot: g.body.rot.to_array() }));
+            g.body.rest = Some((g.body.pos, g.body.rot));
+        }
     }
+    sent.retain(|id| world.ground.contains_key(id));
 
-    // Упавшее сквозь мир (не должно быть, но мало ли): кладём обратно на землю.
+    // Упавшее сквозь мир (не должно быть, но мало ли): кладём обратно на землю. Спящее не двигается.
     for (id, g) in world.ground.iter_mut() {
-        if g.body.pos.y < -40.0 || !g.body.pos.is_finite() {
+        if !g.body.asleep && (g.body.pos.y < -40.0 || !g.body.pos.is_finite()) {
             let p = if g.body.pos.is_finite() { g.body.pos } else { crate::level::spawn_point(0) };
             let ground = level.ground_height(p.x, p.z);
             let y = if ground.is_finite() { ground } else { crate::level::spawn_point(0).y };

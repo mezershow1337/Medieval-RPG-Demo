@@ -167,6 +167,9 @@ pub struct PropBody {
     /// Касается чего-нибудь (стоит, лежит, упирается).
     pub touching: bool,
     points: Vec<Vec3>,
+    /// Место покоя, о котором знают клиенты (куда положили или где улеглось и об этом разослали):
+    /// прохожий будит вещи в домах, но если вещь не сдвинулась, сообщать о ней незачем (см. `moved_since_rest`).
+    pub rest: Option<(Vec3, Quat)>,
 }
 
 /// Точки на поверхности коробки: углы, рёбра и грани через ~12 см.
@@ -210,6 +213,7 @@ impl PropBody {
             still: 0.0,
             touching: false,
             points: surface_points(half),
+            rest: None,
         }
     }
 
@@ -234,6 +238,13 @@ impl PropBody {
         self.still = 0.0;
     }
 
+    /// Сдвинулось ли тело с места покоя, о котором знают клиенты, заметно для глаза (на 3 мм или ~0,6°).
+    /// Разбуженная вещь, пока не уснёт, сама «поёрзывает» примерно на миллиметр — это не в счёт.
+    /// Без места покоя (только что брошено или выпало) — считается сдвинутым.
+    pub fn moved_since_rest(&self) -> bool {
+        self.rest.is_none_or(|(p, r)| p.distance_squared(self.pos) > 3e-3 * 3e-3 || r.angle_between(self.rot) > 0.01)
+    }
+
     /// Положить и усыпить (на полке, после «поставил на место»).
     pub fn place(&mut self, pos: Vec3, rot: Quat) {
         self.pos = pos;
@@ -242,6 +253,7 @@ impl PropBody {
         self.ang = Vec3::ZERO;
         self.asleep = true;
         self.still = 0.0;
+        self.rest = Some((pos, rot));
     }
 
     fn inv_inertia_world(&self) -> Mat3 {
@@ -585,6 +597,25 @@ mod tests {
         run(&mut b, &level, &[counter], 4.0);
         assert!(b.asleep);
         assert!((b.pos.y - 0.96).abs() < 0.02, "на прилавке: {}", b.pos.y);
+    }
+
+    #[test]
+    fn woken_but_not_moved_needs_no_message() {
+        let level = floor();
+        // Вещь в доме: положена на место. Прохожий будит её — она лишь чуть оседает и снова засыпает.
+        let mut b = PropBody::new(Vec3::splat(0.06), 0.8, Vec3::new(0.0, 0.06, 0.0), Quat::IDENTITY);
+        b.place(b.pos, b.rot);
+        b.wake();
+        run(&mut b, &level, &[], 1.0);
+        assert!(b.asleep);
+        assert!(!b.moved_since_rest(), "сдвинулась на {}", b.pos - b.rest.unwrap().0);
+        // Толкнули — сдвинулась.
+        b.wake();
+        b.vel = Vec3::new(1.0, 0.0, 0.0);
+        run(&mut b, &level, &[], 2.0);
+        assert!(b.moved_since_rest());
+        // Брошенная (места покоя ещё нет) — всегда «сдвинута».
+        assert!(PropBody::new(Vec3::splat(0.06), 0.8, Vec3::Y, Quat::IDENTITY).moved_since_rest());
     }
 
     #[test]
