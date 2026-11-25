@@ -170,7 +170,7 @@ impl CharacterAssets {
 pub fn run(start: crate::menu::Start) {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window { title: "Херсонес, 510 — Medieval RPG".into(), present_mode: bevy::window::PresentMode::AutoVsync, ..default() }),
+            primary_window: Some(Window { title: "Херсонес, 510 — Medieval RPG".into(), present_mode: bevy::window::PresentMode::AutoVsync, focused: !crate::settings::background_run(), ..default() }),
             ..default()
         }))
         .add_plugins((RenetClientPlugin, NetcodeClientPlugin, PlayerPlugin, fight::FightPlugin, crate::self_body::SelfBodyPlugin, hud::HudPlugin, graphics::GraphicsPlugin, crate::textures::TexturesPlugin))
@@ -196,8 +196,8 @@ pub fn run(start: crate::menu::Start) {
         .add_plugins((crate::skill_book::SkillBookPlugin, crate::hints::HintsPlugin, crate::school_client::SchoolClientPlugin, crate::tablet_view::TabletViewPlugin))
         .add_plugins(crate::work_client::WorkClientPlugin)
         .add_plugins(crate::console::ConsolePlugin)
-        .add_systems(Update, (hide_ui_for_shots, mute_player_camera_for_shots).run_if(|| std::env::var("MRPG_CAM").is_ok()))
-        .add_systems(Update, shot_tour.run_if(|| std::env::var("MRPG_TOUR").is_ok()))
+        .add_systems(Update, (hide_ui_for_shots, mute_player_camera_for_shots).run_if(crate::settings::env_flag("MRPG_CAM")))
+        .add_systems(Update, shot_tour.run_if(crate::settings::env_flag("MRPG_TOUR")))
         // Клиент без соединения: транспорт появится, когда игрок выберет в меню «Создать» или «Подключиться».
         .insert_resource(RenetClient::new(connection_config()))
         .insert_resource(NetState::default())
@@ -219,15 +219,15 @@ pub fn run(start: crate::menu::Start) {
         )
         .add_systems(Update, animate_corpses.in_set(rig::PoseSet))
         .add_systems(Update, (fly_arrows, refresh_remote_weapons, refresh_remote_gear, worn::attach_worn, attach_riposte_glow))
-        .add_systems(Update, gear_showcase.run_if(|| std::env::var("MRPG_GEAR_SHOWCASE").is_ok()))
-        .add_systems(Update, pose_showcase.in_set(rig::PoseSet).run_if(|| std::env::var("MRPG_GEAR_SHOWCASE").is_ok()))
-        .add_systems(Update, (people_showcase, pose_people).chain().in_set(rig::PoseSet).run_if(|| std::env::var("MRPG_PEOPLE_SHOWCASE").is_ok()))
-        .add_systems(Update, duel_showcase.run_if(|| std::env::var("MRPG_DUEL_SHOWCASE").is_ok()))
+        .add_systems(Update, gear_showcase.run_if(crate::settings::env_flag("MRPG_GEAR_SHOWCASE")))
+        .add_systems(Update, pose_showcase.in_set(rig::PoseSet).run_if(crate::settings::env_flag("MRPG_GEAR_SHOWCASE")))
+        .add_systems(Update, (people_showcase, pose_people).chain().in_set(rig::PoseSet).run_if(crate::settings::env_flag("MRPG_PEOPLE_SHOWCASE")))
+        .add_systems(Update, duel_showcase.run_if(crate::settings::env_flag("MRPG_DUEL_SHOWCASE")))
         .add_systems(
             Update,
-            (freeze_showcase, animate_remote).chain().in_set(rig::PoseSet).run_if(|| std::env::var("MRPG_DUEL_SHOWCASE").is_ok()).run_if(not(client_connected)),
+            (freeze_showcase, animate_remote).chain().in_set(rig::PoseSet).run_if(crate::settings::env_flag("MRPG_DUEL_SHOWCASE")).run_if(not(client_connected)),
         )
-        .add_systems(Update, hide_ui_for_shots.run_if(|| std::env::var("MRPG_DUEL_SHOWCASE").is_ok() && std::env::var("MRPG_CAM").is_err()))
+        .add_systems(Update, hide_ui_for_shots.run_if(crate::settings::env_flag("MRPG_DUEL_SHOWCASE")).run_if(not(crate::settings::env_flag("MRPG_CAM"))))
         .run();
 }
 
@@ -632,6 +632,7 @@ fn receive_snapshots(
     mut arrow_index: ResMut<ArrowIndex>,
     mut arrows: Query<(&mut ArrowVisual, &mut Transform)>,
     arrow_assets: Res<ArrowAssets>,
+    mut applied: Local<Option<(u64, u32)>>,
 ) {
     let mut latest: Option<Snapshot> = None;
     while let Some(bytes) = client.receive_message(CH_UNRELIABLE) {
@@ -644,6 +645,16 @@ fn receive_snapshots(
     }
     let Some(snapshot) = latest else { return };
     let Some(my_id) = state.my_id else { return };
+    // Запоздавший снимок, пришедший один в следующем кадре, старше уже показанного — он
+    // откатил бы врагов и стрелы назад. Большой разрыв (сервер перезапустился) принимаем.
+    if let Some((id, tick)) = *applied
+        && id == my_id
+        && snapshot.tick != tick
+        && tick.wrapping_sub(snapshot.tick) < 600
+    {
+        return;
+    }
+    *applied = Some((my_id, snapshot.tick));
     let mut seen = Vec::new();
     for a in &snapshot.actors {
         if a.id == my_id {

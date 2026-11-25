@@ -21,6 +21,8 @@ from mathutils import Matrix, Quaternion, Vector
 
 ATLAS_DIR = os.environ.get("MRPG_VEG_ATLAS", r"E:\Downloads\mrpg_veg\atlas")
 BARK_DIR = os.environ.get("MRPG_VEG_BARK", r"E:\Downloads\mrpg_veg\bark")
+# Размер картинки импостора: по правилу проекта текстуры 1024×1024.
+IMP_SIZE = 1024
 
 
 # Множитель цвета коры (линейный); тот же стоит в src/vegetation.rs (BARK_TINT).
@@ -389,8 +391,8 @@ def impostor(tid, meshes, mats, sp, out_dir, scene):
     scene.render.engine = "CYCLES"
     scene.cycles.samples = 32
     scene.render.film_transparent = True
-    scene.render.resolution_x = 512
-    scene.render.resolution_y = 512
+    scene.render.resolution_x = IMP_SIZE
+    scene.render.resolution_y = IMP_SIZE
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGBA"
     scene.view_settings.view_transform = "Standard"

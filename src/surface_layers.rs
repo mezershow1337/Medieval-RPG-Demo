@@ -1,5 +1,5 @@
 //! Сгенерировано tools/textures/build_surface_textures.py — не править руками.
-//! Фотоматериалы ambientCG и Poly Haven (CC0), своя черепица из Blender: assets/textures/surface/<слой>_albedo.jpg и _nrm.jpg.
+//! Фотоматериалы ambientCG и Poly Haven (CC0), своя черепица и солома из Blender: assets/textures/surface/<слой>_albedo.jpg и _nrm.jpg.
 
 /// Слой фотоматериала: имя файла, id на ambientCG или Poly Haven, метров на тайл, средний линейный цвет.
 pub struct Layer {
@@ -48,6 +48,8 @@ pub const LAYERS: &[Layer] = &[
     Layer { name: "gold", source: "Metal048C", meters: 1.00, mean: [0.9468, 0.7365, 0.3171] },
     // 18 — береговая галька
     Layer { name: "gravel", source: "Gravel041", meters: 2.00, mean: [0.2675, 0.2581, 0.1830] },
+    // 19 — солома и камыш: ряды пучков стеблей внахлёст (своя, Blender: tools/textures/blender_thatch.py)
+    Layer { name: "thatch", source: "MrpgThatch", meters: 1.50, mean: [0.2185, 0.1518, 0.0633] },
 ];
 
 pub const L_ASHLAR: u32 = 0;
@@ -69,3 +71,4 @@ pub const L_IRON: u32 = 15;
 pub const L_BRONZE: u32 = 16;
 pub const L_GOLD: u32 = 17;
 pub const L_GRAVEL: u32 = 18;
+pub const L_THATCH: u32 = 19;

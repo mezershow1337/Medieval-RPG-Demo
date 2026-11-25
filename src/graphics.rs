@@ -420,6 +420,7 @@ const P_MARBLE: f32 = 16.0;
 const P_MOSAIC: f32 = 17.0;
 const P_EARTH: f32 = 18.0;
 const P_TERRAIN: f32 = 19.0;
+const P_THATCH: f32 = 20.0;
 const P_PLAIN: f32 = 30.0;
 
 fn lin(c: Color) -> Vec4 {
@@ -462,7 +463,8 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         // Шерсть, крашенная мареной (ковры, покрывала) и вайдой (покрывала, занавеси).
         Mat::Rug => (Color::srgb(0.5, 0.17, 0.12), Color::srgb(0.32, 0.1, 0.07), P_PLAIN, 1.0, 0.3, 0.4, 1.0, 0.0, 0.0, 0.3, 0.0),
         Mat::Cloth => (Color::srgb(0.24, 0.3, 0.46), Color::srgb(0.14, 0.18, 0.3), P_PLAIN, 1.0, 0.25, 0.3, 1.0, 0.0, 0.0, 0.2, 0.0),
-        Mat::Thatch => (Color::srgb(0.55, 0.45, 0.28), Color::srgb(0.33, 0.27, 0.16), P_WOOD, 0.5, 0.4, 1.0, 1.0, 0.0, 0.3, 0.0, 0.0),
+        // Солома и камыш: стебли по развёртке вниз по скату (раньше — узор досок, кровли выглядели дощатыми).
+        Mat::Thatch => (Color::srgb(0.6, 0.5, 0.31), Color::srgb(0.3, 0.24, 0.14), P_THATCH, 1.0, 0.4, 1.0, 1.0, 0.0, 0.3, 0.0, 0.0),
         Mat::Ceramic => (Color::srgb(0.66, 0.40, 0.26), Color::srgb(0.5, 0.3, 0.2), P_PLAIN, 1.0, 0.2, 0.15, 0.75, 0.0, 0.0, 0.3, 0.0),
         Mat::Bronze => (Color::srgb(0.55, 0.40, 0.22), Color::srgb(0.25, 0.42, 0.33), P_METAL, 1.0, 0.25, 0.3, 0.4, 0.9, 0.0, 0.0, 0.0),
         Mat::Conifer => (Color::srgb(0.08, 0.15, 0.10), Color::srgb(0.12, 0.2, 0.12), P_LEAVES, 1.6, 0.35, 1.0, 0.9, 0.0, 0.0, 0.0, 0.0),
@@ -585,6 +587,8 @@ fn photo_layers(mat: Mat) -> Option<(u32, u32, f32, f32)> {
         Mat::Wood => (L_WOOD, L_WOOD, 0.85, 0.9),
         // Своя черепица (запечена в Blender) уже нужного тона — перекрашиваем слегка.
         Mat::Tile => (L_ROOF, L_ROOF, 0.15, 1.0),
+        // Своя солома (тоже из Blender): пучки разного оттенка, перекрашиваем умеренно.
+        Mat::Thatch => (L_THATCH, L_THATCH, 0.35, 1.0),
         Mat::Iron => (L_IRON, L_IRON, 0.9, 0.6),
         Mat::Bronze => (L_BRONZE, L_BRONZE, 0.5, 0.6),
         Mat::Gold => (L_GOLD, L_GOLD, 0.4, 0.5),
