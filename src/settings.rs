@@ -323,7 +323,7 @@ impl Plugin for SettingsPlugin {
             .insert_resource(SceneTarget::default())
             .add_systems(
                 PostUpdate,
-                (apply_window, apply_audio, apply_sun, apply_cameras, apply_render_scale, apply_smoke, apply_water, detail_ranges, toggle_effects_f9, toggle_fullscreen_f11)
+                (apply_window, apply_audio, apply_sun, apply_cameras, apply_render_scale, apply_smoke, apply_water, detail_ranges, toggle_effects_f9, toggle_fullscreen_f11, free_cursor_in_background)
                     .before(bevy::camera::CameraUpdateSystems),
             );
     }
@@ -698,4 +698,24 @@ mod tests {
 pub fn env_flag(name: &str) -> impl Fn() -> bool + Clone + Send + Sync + 'static {
     let on = std::env::var_os(name).is_some();
     move || on
+}
+
+/// Запуск для снимков и замеров (`MRPG_SHOT`, `MRPG_TOUR` или `MRPG_BACKGROUND`): окно не
+/// забирает фокус при открытии и не захватывает мышь — за компьютером можно спокойно работать.
+pub fn background_run() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| ["MRPG_SHOT", "MRPG_TOUR", "MRPG_BACKGROUND"].iter().any(|v| std::env::var_os(v).is_some()))
+}
+
+/// В фоновом запуске мышь всегда свободна, что бы ни включило захват (вход в игру, клик).
+fn free_cursor_in_background(cursor: Option<Single<&mut bevy::window::CursorOptions, With<PrimaryWindow>>>) {
+    if !background_run() {
+        return;
+    }
+    if let Some(mut cursor) = cursor
+        && (cursor.grab_mode != bevy::window::CursorGrabMode::None || !cursor.visible)
+    {
+        cursor.grab_mode = bevy::window::CursorGrabMode::None;
+        cursor.visible = true;
+    }
 }

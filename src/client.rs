@@ -170,7 +170,7 @@ impl CharacterAssets {
 pub fn run(start: crate::menu::Start) {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window { title: "Херсонес, 510 — Medieval RPG".into(), present_mode: bevy::window::PresentMode::AutoVsync, ..default() }),
+            primary_window: Some(Window { title: "Херсонес, 510 — Medieval RPG".into(), present_mode: bevy::window::PresentMode::AutoVsync, focused: !crate::settings::background_run(), ..default() }),
             ..default()
         }))
         .add_plugins((RenetClientPlugin, NetcodeClientPlugin, PlayerPlugin, fight::FightPlugin, crate::self_body::SelfBodyPlugin, hud::HudPlugin, graphics::GraphicsPlugin, crate::textures::TexturesPlugin))
