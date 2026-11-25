@@ -41,6 +41,9 @@ pub fn sky_time(clock: &crate::world_clock::WorldClock) -> f64 {
     crate::graphics::frozen_time().unwrap_or(clock.game)
 }
 
+/// Шаг поворота солнца, рад.
+const SUN_STEP: f32 = 0.25 * std::f32::consts::PI / 180.0;
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn drive_daylight(
     mut commands: Commands,
@@ -81,7 +84,12 @@ fn drive_daylight(
         if light.shadow_maps_enabled != shadows {
             light.shadow_maps_enabled = shadows;
         }
-        *tf = Transform::from_translation(m.sun * 100.0).looking_at(Vec3::ZERO, Vec3::Y);
+        // Солнце поворачиваем ступеньками по ~0,25° (при 20-кратном времени — раз в 3 с), а не
+        // пять раз в секунду: каждый поворот сдвигает сетку карты теней, и края теней дрожали.
+        let want = Transform::from_translation(m.sun * 100.0).looking_at(Vec3::ZERO, Vec3::Y);
+        if tf.forward().angle_between(*want.forward()) > SUN_STEP {
+            *tf = want;
+        }
     }
     for mut f in &mut haze {
         f.density_factor = m.haze;
