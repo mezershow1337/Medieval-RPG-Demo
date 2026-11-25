@@ -187,8 +187,12 @@ fn sky_change(a: &SkyUniform, b: &SkyUniform) -> f32 {
         + (a.extra.x - b.extra.x).abs()
         + (a.extra.y - b.extra.y).abs()
         + (a.horizon.w - b.horizon.w).abs() * 0.5
+        + (a.glow.w - b.glow.w).abs() * 0.5
+        // Сиреневый оттенок и подсветка облаков меняют карту окружения слабее, чем горизонт и зенит.
+        + (a.tint.w - b.tint.w).abs() * 0.05
         + col(a.horizon, b.horizon)
         + col(a.zenith, b.zenith)
+        + col(a.tint, b.tint) * 0.5
 }
 
 fn rebake_environment(
@@ -287,3 +291,4 @@ mod mood_dump {
         }
     }
 }
+

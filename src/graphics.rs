@@ -40,6 +40,14 @@ pub struct Mood {
     pub zenith: Vec3,
     /// Облачность 0..1.
     pub clouds: f32,
+    /// Пелена высококучевых облаков 0..1 (на закате и рассвете она горит розовым).
+    pub deck: f32,
+    /// Сумерки: коралловое небо над зарёй со стороны солнца (линейный, единицы экрана).
+    pub glow: Vec3,
+    /// Сумерки: сиреневое небо выше и в стороне от солнца (им же освещены тени облаков).
+    pub tint: Vec3,
+    /// Сила подсветки облаков снизу низким солнцем.
+    pub cloud_glow: f32,
     /// Цвета поглощения и рассеяния дымки (см. `FogFalloff::from_visibility_colors`).
     pub fog_far: (Color, Color),
     pub visibility: f32,
@@ -80,6 +88,8 @@ impl Mood {
             zenith: self.zenith.extend(0.0),
             moon: self.moon.normalize_or_zero().extend(self.moon_light),
             extra: Vec4::new(self.night, self.overcast, self.wind.x, self.wind.y),
+            glow: self.glow.extend(self.deck),
+            tint: self.tint.extend(self.cloud_glow),
         }
     }
 }
@@ -133,6 +143,10 @@ fn castle_mood() -> Mood {
         horizon_sun: (Vec3::new(0.8, 0.22, 0.0), 6.0),
         zenith: Vec3::new(0.09, 0.11, 0.27),
         clouds: 0.5,
+        deck: 0.3,
+        glow: Vec3::new(1.0, 0.66, 0.46),
+        tint: Vec3::new(0.34, 0.40, 0.66),
+        cloud_glow: 1.5,
         fog_far: (Color::srgb(0.36, 0.36, 0.46), Color::srgb(0.62, 0.56, 0.60)),
         visibility: 380.0,
         shadow_distance: 160.0,
@@ -161,6 +175,9 @@ struct Key {
     horizon: Vec3,
     horizon_sun: (Vec3, f32),
     zenith: Vec3,
+    glow: Vec3,
+    tint: Vec3,
+    cloud_glow: f32,
     fog_far: (Vec3, Vec3),
     visibility: f32,
     sky_light: f32,
@@ -179,6 +196,9 @@ impl Key {
             horizon: v(self.horizon, o.horizon),
             horizon_sun: (v(self.horizon_sun.0, o.horizon_sun.0), f(self.horizon_sun.1, o.horizon_sun.1)),
             zenith: v(self.zenith, o.zenith),
+            glow: v(self.glow, o.glow),
+            tint: v(self.tint, o.tint),
+            cloud_glow: f(self.cloud_glow, o.cloud_glow),
             fog_far: (v(self.fog_far.0, o.fog_far.0), v(self.fog_far.1, o.fog_far.1)),
             visibility: f(self.visibility, o.visibility),
             sky_light: f(self.sky_light, o.sky_light),
@@ -196,6 +216,9 @@ const DAY: Key = Key {
     horizon: Vec3::new(0.62, 0.72, 0.86),
     horizon_sun: (Vec3::new(0.35, 0.28, 0.15), 8.0),
     zenith: Vec3::new(0.07, 0.2, 0.62),
+    glow: Vec3::new(1.0, 0.66, 0.46),
+    tint: Vec3::new(0.34, 0.40, 0.66),
+    cloud_glow: 1.5,
     fog_far: (Vec3::new(0.55, 0.64, 0.78), Vec3::new(0.80, 0.78, 0.72)),
     visibility: 1100.0,
     sky_light: 900.0,
@@ -203,8 +226,8 @@ const DAY: Key = Key {
     exposure: 0.3,
 };
 
-/// Золотой час (солнце ≈10° над горизонтом): длинные тёплые тени, золотая дорожка на
-/// воде, облака подсвечены снизу; тени холодные от синего неба, вдали — тёплая дымка.
+/// Золотой час (солнце ≈7° над горизонтом): длинные тёплые тени, золотая дорожка на
+/// воде, облака с золотыми краями; тени холодные от синего неба, вдали — тёплая дымка.
 const GOLD: Key = Key {
     sun_color: Vec3::new(1.0, 0.8, 0.6),
     lux: 9_500.0,
@@ -212,6 +235,9 @@ const GOLD: Key = Key {
     horizon: Vec3::new(0.56, 0.48, 0.54),
     horizon_sun: (Vec3::new(1.5, 0.78, 0.24), 5.0),
     zenith: Vec3::new(0.11, 0.2, 0.46),
+    glow: Vec3::new(1.0, 0.66, 0.46),
+    tint: Vec3::new(0.34, 0.40, 0.66),
+    cloud_glow: 1.5,
     fog_far: (Vec3::new(0.5, 0.5, 0.56), Vec3::new(0.8, 0.77, 0.74)),
     visibility: 1600.0,
     sky_light: 950.0,
@@ -219,15 +245,39 @@ const GOLD: Key = Key {
     exposure: 0.2,
 };
 
-/// Сумерки: солнце только что село, над морем — алая полоса, над головой густая синева.
+/// Закат (солнце только что скрылось, ≈1,5° под горизонтом; так же и рассвет): облака
+/// снизу горят малиновым и ярко-розовым, у горизонта под солнцем — оранжево-жёлтая заря,
+/// выше — сиренево-серое небо; земля уже в тени, её освещает розовое небо, в лужах и на
+/// мокром камне — розовые отблески. Цвета подобраны по фотографиям настоящего заката.
+const SET: Key = Key {
+    sun_color: Vec3::new(1.0, 0.48, 0.27),
+    lux: 3_000.0,
+    ambient: (Vec3::new(0.62, 0.46, 0.7), 30.0),
+    horizon: Vec3::new(0.24, 0.14, 0.19),
+    horizon_sun: (Vec3::new(0.6, 0.05, 0.0), 6.0),
+    zenith: Vec3::new(0.32, 0.28, 0.46),
+    glow: Vec3::new(0.55, 0.1, 0.14),
+    tint: Vec3::new(0.38, 0.32, 0.49),
+    cloud_glow: 5.2,
+    fog_far: (Vec3::new(0.25, 0.2, 0.3), Vec3::new(0.48, 0.27, 0.33)),
+    visibility: 1500.0,
+    sky_light: 550.0,
+    haze: 0.0013,
+    exposure: 0.2,
+};
+
+/// Сумерки: розовое гаснет, у горизонта над морем — тёмно-алая полоса, над головой густая синева.
 const DUSK: Key = Key {
-    sun_color: Vec3::new(1.0, 0.5, 0.32),
+    sun_color: Vec3::new(1.0, 0.4, 0.28),
     lux: 900.0,
-    ambient: (Vec3::new(0.42, 0.46, 0.78), 40.0),
-    horizon: Vec3::new(0.25, 0.18, 0.26),
-    horizon_sun: (Vec3::new(1.05, 0.38, 0.10), 4.0),
-    zenith: Vec3::new(0.035, 0.06, 0.17),
-    fog_far: (Vec3::new(0.16, 0.16, 0.24), Vec3::new(0.34, 0.26, 0.3)),
+    ambient: (Vec3::new(0.42, 0.42, 0.78), 35.0),
+    horizon: Vec3::new(0.13, 0.08, 0.13),
+    horizon_sun: (Vec3::new(0.55, 0.1, 0.03), 4.0),
+    zenith: Vec3::new(0.05, 0.06, 0.16),
+    glow: Vec3::new(0.24, 0.05, 0.07),
+    tint: Vec3::new(0.10, 0.09, 0.19),
+    cloud_glow: 1.6,
+    fog_far: (Vec3::new(0.14, 0.13, 0.22), Vec3::new(0.28, 0.2, 0.26)),
     visibility: 1300.0,
     sky_light: 900.0,
     haze: 0.0016,
@@ -242,6 +292,9 @@ const NIGHT: Key = Key {
     horizon: Vec3::new(0.026, 0.034, 0.062),
     horizon_sun: (Vec3::new(0.012, 0.012, 0.02), 4.0),
     zenith: Vec3::new(0.005, 0.009, 0.03),
+    glow: Vec3::new(0.02, 0.022, 0.04),
+    tint: Vec3::new(0.012, 0.016, 0.035),
+    cloud_glow: 0.0,
     fog_far: (Vec3::new(0.025, 0.032, 0.06), Vec3::new(0.04, 0.05, 0.08)),
     visibility: 900.0,
     sky_light: 900.0,
@@ -252,6 +305,22 @@ const NIGHT: Key = Key {
 fn smooth01(x: f32) -> f32 {
     let t = x.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// Высота солнца (синус), при которой небо как на снимках заката: солнце ≈1,5° под горизонтом.
+pub const SET_ELEVATION: f32 = -0.025;
+
+/// Пелена высококучевых облаков 0..1: по погоде (меняется плавно, ключи через 6 часов), а к
+/// закату и рассвету она гуще почти всегда — тогда она и горит розовым.
+fn deck_at(game: f64, sun_e: f32) -> f32 {
+    use crate::world_clock::unit;
+    const STEP: f64 = 6.0 * 3600.0;
+    let k = (game / STEP).floor().max(0.0);
+    let t = smooth01(((game / STEP) - k) as f32);
+    let at = |k: f64| 0.55 * unit(k as u64, 0xE1).powf(1.5);
+    let weather = at(k) + (at(k + 1.0) - at(k)) * t;
+    let twilight = 1.0 - smooth01((sun_e.abs() - 0.1) / 0.15);
+    (weather + 0.45 * twilight).min(0.85)
 }
 
 /// Свет Херсонеса в момент `game` (секунды игровых часов): солнце и луна по небу,
@@ -267,10 +336,12 @@ pub fn mood_at(game: f64) -> Mood {
         DAY
     } else if e >= 0.12 {
         GOLD.lerp(&DAY, smooth01((e - 0.12) / 0.33))
-    } else if e >= -0.06 {
-        DUSK.lerp(&GOLD, smooth01((e + 0.06) / 0.18))
+    } else if e >= SET_ELEVATION {
+        SET.lerp(&GOLD, smooth01((e - SET_ELEVATION) / (0.12 - SET_ELEVATION)))
+    } else if e >= -0.08 {
+        DUSK.lerp(&SET, smooth01((e + 0.08) / (SET_ELEVATION + 0.08)))
     } else {
-        NIGHT.lerp(&DUSK, smooth01((e + 0.22) / 0.16))
+        NIGHT.lerp(&DUSK, smooth01((e + 0.22) / 0.14))
     };
     let dayness = smooth01((e - 0.12) / 0.33);
     let night = 1.0 - smooth01((e + 0.22) / 0.16);
@@ -307,6 +378,10 @@ pub fn mood_at(game: f64) -> Mood {
         horizon_sun,
         zenith,
         clouds: 0.22 + 0.78 * w.clouds,
+        deck: deck_at(game, e),
+        glow: grey(key.glow, 0.8 * overcast) * dim,
+        tint: grey(key.tint, 0.6 * overcast) * dim,
+        cloud_glow: key.cloud_glow * (1.0 - 0.8 * overcast),
         fog_far: (c(fog_tint(key.fog_far.0)), c(fog_tint(key.fog_far.1))),
         visibility,
         shadow_distance: 240.0,

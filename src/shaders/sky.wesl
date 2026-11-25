@@ -5,7 +5,7 @@ import bevy_pbr::render::{
     forward_io::VertexOutput,
     mesh_view_bindings::{globals, view},
 };
-import medieval_rpg::shaders::sky_common::{SkyParams, sky_radiance, hash21, cloud_layer, horizon_color};
+import medieval_rpg::shaders::sky_common::{SkyParams, sky_radiance_cover, hash21};
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(0)
 var<uniform> sky: SkyParams;
@@ -15,7 +15,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let dir = normalize(in.world_position.xyz - view.world_position);
     var s = sky;
     s.zenith.w = globals.time;
-    var col = sky_radiance(dir, s, globals.time, true);
+    var cloud = 0.0;
+    var col = sky_radiance_cover(dir, s, globals.time, true, &cloud);
     // Звёзды: первые — в вечернем зените, ночью — всё небо (за облаками не видно).
     let e = dir.y;
     let n = clamp(s.extra.x, 0.0, 1.0);
@@ -33,7 +34,6 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         var stars = vec3<f32>(0.9, 0.92, 1.0) * (mag * 1.6 + dust) * smoothstep(0.34, 0.04, length(fp)) * tw;
         stars += vec3<f32>(0.010, 0.011, 0.016) * band * n;
         // За облаками звёзд не видно.
-        let cloud = cloud_layer(dir, s, s.zenith.w, horizon_color(dir, s)).x;
         col += stars * smoothstep(0.04, 0.5, e) * star_vis * 0.5 * (1.0 - cloud);
     }
     // Лёгкий шум против полос в плавном градиенте.
