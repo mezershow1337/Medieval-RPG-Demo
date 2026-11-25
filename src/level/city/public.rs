@@ -1092,6 +1092,8 @@ pub fn west_church(b: &mut Builder) {
     let ac = Vec3::new(r.x1, 0.0, r.cz());
     b.mesh(mat).lathe_arc(ac, &[(2.4, 0.0), (2.4, 4.5)], -FRAC_PI_2, FRAC_PI_2, 10, false);
     b.mesh(Mat::Plaster).lathe_arc(ac, &[(1.8, 0.0), (1.8, 4.5)], -FRAC_PI_2, FRAC_PI_2, 10, true);
+    // Конха изнутри оштукатурена (как в базилике): иначе из апсиды видна изнанка черепицы.
+    b.mesh(Mat::Plaster).dome(ac + Vec3::Y * 4.5, 2.4, -FRAC_PI_2, FRAC_PI_2, 10, 0.0);
     b.mesh(Mat::Tile).dome(ac + Vec3::Y * 4.5, 2.5, -FRAC_PI_2, FRAC_PI_2, 10, 0.0);
     for k in 0..5 {
         let a = -FRAC_PI_2 + PI * (k as f32 + 0.5) / 5.0;

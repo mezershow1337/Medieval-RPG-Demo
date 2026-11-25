@@ -8,6 +8,9 @@ import bevy_pbr::render::{
     mesh_functions,
     view_transformations::position_world_to_clip,
 };
+import bevy_render::globals::Globals;
+@if(!PREPASS_PIPELINE)
+import bevy_pbr::render::mesh_view_bindings::globals;
 
 @if(PREPASS_PIPELINE)
 import bevy_pbr::prepass::io::{Vertex, VertexOutput, decompress_vertex};
@@ -15,7 +18,9 @@ import bevy_pbr::prepass::io::{Vertex, VertexOutput, decompress_vertex};
 import bevy_pbr::render::forward_io::{Vertex, VertexOutput, decompress_vertex};
 
 struct Foliage {
-    // x — время (с), y — сила ветра, z — порывистость, w — время прошлого кадра.
+    // x — не используется, y — сила ветра, z — порывистость, w — не используется.
+    // Время берём из `globals` вида: материал меняется только при смене погоды, а не каждый
+    // кадр (изменённый материал заставляет Bevy заново готовить все ~12 тыс. мешей листвы).
     wind: vec4<f32>,
     // xy — направление ветра (мир, XZ), z — жёсткость (1 — дерево, 0.3 — трава), w — запас.
     dir: vec4<f32>,
@@ -23,6 +28,20 @@ struct Foliage {
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100)
 var<uniform> foliage: Foliage;
+
+// Время кадра. В основном проходе `globals` берём из привязок вида, а в предпроходе (глубина,
+// тени, векторы движения) он лежит в другой привязке — объявляем его сами.
+@if(PREPASS_PIPELINE)
+@group(0) @binding(1) var<uniform> prepass_globals: Globals;
+
+/// (время, длительность кадра), с.
+fn frame_time() -> vec2<f32> {
+@if(PREPASS_PIPELINE) {
+    return vec2(prepass_globals.time, prepass_globals.delta_time);
+} @else {
+    return vec2(globals.time, globals.delta_time);
+}
+}
 
 /// Сдвиг вершины ветром (в мировых координатах).
 fn wind_offset(world: vec3<f32>, base: vec3<f32>, flex: f32, phase: f32, t: f32) -> vec3<f32> {
@@ -54,7 +73,7 @@ fn vertex(vertex_in: Vertex) -> VertexOutput {
 }
     // Масштаб дерева: большие деревья гнутся сильнее в метрах.
     let scale = length(world_from_local[1].xyz);
-    let off = wind_offset(world.xyz, base, flex, phase, foliage.wind.x) * scale;
+    let off = wind_offset(world.xyz, base, flex, phase, frame_time().x) * scale;
     out.world_position = vec4(world.xyz + off, 1.0);
     out.position = position_world_to_clip(out.world_position.xyz);
 
@@ -75,7 +94,7 @@ fn vertex(vertex_in: Vertex) -> VertexOutput {
 @if(MOTION_VECTOR_PREPASS) {
     let prev_model = mesh_functions::get_previous_world_from_local(vertex_in.instance_index);
     let prev_world = mesh_functions::mesh_position_local_to_world(prev_model, vec4<f32>(vertex.position, 1.0));
-    let prev_off = wind_offset(prev_world.xyz, prev_model[3].xyz, flex, phase, foliage.wind.w) * scale;
+    let prev_off = wind_offset(prev_world.xyz, prev_model[3].xyz, flex, phase, frame_time().x - frame_time().y) * scale;
     out.previous_world_position = vec4(prev_world.xyz + prev_off, 1.0);
 }
 } @else {

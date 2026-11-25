@@ -56,7 +56,7 @@ pub type FoliageMaterial = ExtendedMaterial<StandardMaterial, FoliageExt>;
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
 pub struct FoliageExt {
-    /// x — время, y — сила ветра, z — дрожь листвы, w — время прошлого кадра.
+    /// x — не используется (время шейдер берёт из `globals`), y — сила ветра, z — дрожь листвы, w — запас.
     #[uniform(100)]
     pub wind: Vec4,
     /// xy — направление ветра, z — гибкость (1 — листва, 0.3 — кора), w — запас.
@@ -101,7 +101,7 @@ struct VegetationAssets {
     impostors: HashMap<String, Handle<Image>>,
 }
 
-/// Материалы с ветром — им каждый кадр обновляется время.
+/// Материалы с ветром — им обновляются сила и направление ветра (см. [`update_wind`]).
 #[derive(Resource, Default)]
 struct WindMaterials(Vec<(Handle<FoliageMaterial>, WindKind)>);
 
@@ -430,25 +430,32 @@ fn spawn_plants(
     commands.remove_resource::<PendingPlants>();
 }
 
-fn update_wind(time: Res<Time>, clock: Option<Res<crate::world_clock::WorldClock>>, wind: Option<Res<WindMaterials>>, mut mats: ResMut<Assets<FoliageMaterial>>, mut prev: Local<f32>) {
+/// Сила и направление ветра в материалах листвы — только когда погода заметно изменилась
+/// (или появились новые материалы). Время кадра шейдер берёт сам из `globals`: правка
+/// материала заставляет Bevy заново готовить к отрисовке все меши с ним (~12 тыс.), и
+/// раньше это случалось каждый кадр.
+fn update_wind(clock: Option<Res<crate::world_clock::WorldClock>>, wind: Option<Res<WindMaterials>>, mut mats: ResMut<Assets<FoliageMaterial>>, mut shown: Local<Option<(f32, Vec2)>>) {
     let Some(wind) = wind else { return };
-    let t = time.elapsed_secs_wrapped();
     // Сила и направление ветра — по погоде (в тихую погоду листва едва шевелится,
     // в ненастье деревья гнёт и треплет).
     let w = clock.map(|c| crate::world_clock::weather_at(crate::graphics::frozen_time().unwrap_or(c.game)).wind).unwrap_or(Vec2::new(3.0, 1.7));
     let speed = w.length();
     let gain = (0.35 + 0.16 * speed).clamp(0.3, 2.2);
     let dir = if speed > 0.1 { w / speed } else { Vec2::new(0.87, 0.49) };
+    // Пороги грубые нарочно: ветер плавно меняется за игровые часы, а скачок силы на 5 % или
+    // направления на ~4° глазу не виден — зато правка материалов случается раз в десятки секунд.
+    let same = shown.is_some_and(|(g, d)| (g - gain).abs() < 0.05 && d.distance(dir) < 0.08);
+    if same && !wind.is_changed() {
+        return;
+    }
+    *shown = Some((gain, dir));
     for (h, kind) in &wind.0 {
         if let Some(mut m) = mats.get_mut(h) {
-            m.extension.wind.x = t;
-            m.extension.wind.w = *prev;
             m.extension.wind.y = wind_of(*kind).0 * gain;
             m.extension.dir.x = dir.x;
             m.extension.dir.y = dir.y;
         }
     }
-    *prev = t;
 }
 
 // ---------------------------------------------------------------------------------------------

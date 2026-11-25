@@ -734,12 +734,18 @@ fn update_piles(
         }
         let smoke = p.smoke();
         show(m.smoke, smoke != Smoke::None, &mut vis);
-        if let Some(mut mat) = smokes.get_mut(&m.smoke_mat) {
-            mat.smoke.tint = smoke_tint(smoke);
+        // Материал дыма меняем, только когда сменился цвет: иначе он считался бы изменённым каждый кадр.
+        let tint = smoke_tint(smoke);
+        if smokes.get(&m.smoke_mat).is_some_and(|mat| mat.smoke.tint != tint)
+            && let Some(mut mat) = smokes.get_mut(&m.smoke_mat)
+        {
+            mat.smoke.tint = tint;
         }
         if let Ok(mut tf) = tfs.get_mut(m.smoke) {
             let y = if m.kind == PileKind::Clamp { 0.9 + 0.6 * p.cover } else { 0.6 };
-            tf.translation.y = y;
+            if tf.translation.y != y {
+                tf.translation.y = y;
+            }
         }
     }
 }
