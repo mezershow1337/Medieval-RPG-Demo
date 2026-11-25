@@ -5,7 +5,8 @@
 //!
 //! Производительность: положение берётся из плана за пару сравнений, позу считаем
 //! каждый кадр только вблизи (дальше 22 м — через кадр, дальше 38 м — раз в 4 кадра), дальше
-//! 60 м жителей не рисуем.
+//! 60 м жителей не рисуем. Не рисуем и тех, кто вне кадра (за спиной, сбоку) вместе со своей
+//! тенью, кроме ближних (12 м: их голос рядом); место жителя меняем, только когда он сдвинулся.
 
 use crate::daily_life::{self, Act, Fright, NpcState};
 use crate::level::Role;
@@ -465,10 +466,11 @@ fn drive_residents(
     mut acts: ResMut<LiveActs>,
     mut spots: ResMut<ResidentSpots>,
     level: Res<crate::collision::LevelColliders>,
-    camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    camera: Query<(&Camera, &GlobalTransform, &Projection), With<Camera3d>>,
     mut people: Query<(&ResidentView, &mut Transform, &mut Visibility, &Children, &mut Gait, Has<crate::civil_client::Fallen>)>,
     mut poses: Query<&mut RigPose>,
     mut slots: Query<(&mut Transform, &mut Visibility), (With<PropSlot>, Without<ResidentView>)>,
+    mood: Option<Res<crate::daylight::CurrentMood>>,
     mut frame: Local<u32>,
 ) {
     *frame = frame.wrapping_add(1);
@@ -490,7 +492,8 @@ fn drive_residents(
     } else {
         alarms.clear();
     }
-    let cam = camera.iter().find(|(c, _)| c.is_active).map(|(_, t)| t.translation());
+    let view = camera.iter().find(|(c, _, _)| c.is_active).map(|(_, t, p)| ViewCone::new(t, p, shadow_light(mood.as_deref())));
+    let town = daily_life::town();
     let n = people.iter().len();
     if acts.0.len() != n {
         acts.0 = vec![Act::Idle; n];
@@ -501,7 +504,7 @@ fn drive_residents(
     for (r, mut tf, mut vis, children, mut gait, fallen) in &mut people {
         let i = r.index;
         let scale = tf.scale.y;
-        let anchor = daily_life::town().map(|t| t.residents.get(i).map(|x| (x.pos, x.yaw))).flatten();
+        let anchor = town.and_then(|t| t.residents.get(i)).map(|x| (x.pos, x.yaw));
         let s = plans
             .as_ref()
             .and_then(|p| p.people.get(i))
@@ -524,15 +527,18 @@ fn drive_residents(
         if fallen {
             continue;
         }
-        let dist = cam.map_or(0.0, |c| c.distance(s.pos));
-        let want = if dist > VIEW_DIST || s.act == Act::Away { Visibility::Hidden } else { Visibility::Inherited };
-        if *vis != want {
-            *vis = want;
-        }
-        if want == Visibility::Hidden {
+        let dist = view.map_or(0.0, |v| v.eye.distance(s.pos));
+        // Вне кадра (за спиной, сбоку) не рисуем и не считаем позу, если и тень его не в кадре;
+        // факел виден по свету дальше — что у жителя в руках, смотрим, только если он рядом с кадром.
+        let in_view = |reach: f32| view.is_none_or(|v| dist < ALWAYS_NEAR || v.sees_person(s.pos, dist, reach));
+        let look = (dist <= VIEW_DIST && s.act != Act::Away && in_view(TORCH_REACH)).then(|| look_for(i, r.role, &s, t, r_phase(i), night, rain));
+        let seen = look.as_ref().is_some_and(|l| l.props.contains(&Some(Prop::Torch)) || in_view(BODY_REACH));
+        let want = if seen { Visibility::Inherited } else { Visibility::Hidden };
+        vis.set_if_neq(want);
+        let Some(look) = look.filter(|_| seen) else {
             gait.fresh = true;
             continue;
-        }
+        };
         // Поворот: плавно, кроме первого кадра и скачков.
         let jump = tf.translation.distance(s.pos) > 3.0;
         if gait.fresh || jump {
@@ -541,7 +547,8 @@ fn drive_residents(
             let d = angle_diff(gait.yaw, s.yaw);
             gait.yaw += d.clamp(-5.0 * dt, 5.0 * dt);
         }
-        // Дальних обновляем реже (поза и предметы), но место — каждый кадр.
+        // Дальних обновляем реже (поза и предметы), но место — каждый кадр. Спящие дышат
+        // медленно — им хватает и реже.
         let every = if dist < 22.0 {
             1
         } else if dist < 38.0 {
@@ -549,14 +556,12 @@ fn drive_residents(
         } else {
             4
         };
+        let every = if look.lying && dist > 6.0 { every.max(4) } else { every };
         let pose_now = gait.fresh || (*frame + i as u32).is_multiple_of(every);
-        let look = look_for(i, r.role, &s, t, r_phase(i), night, rain);
-        if look.lying {
-            *tf = lying_transform(&s, scale);
-        } else {
-            tf.translation = s.pos;
-            tf.rotation = Quat::from_rotation_y(gait.yaw);
-        }
+        // Пишем, только если сдвинулся: иначе Bevy каждый кадр пересчитывал бы все кости
+        // и одежду под ним, даже в кадры, когда поза не менялась.
+        let placed = if look.lying { lying_transform(&s, scale) } else { Transform { translation: s.pos, rotation: Quat::from_rotation_y(gait.yaw), scale: tf.scale } };
+        tf.set_if_neq(placed);
         gait.fresh = false;
         if !pose_now {
             continue;
@@ -564,7 +569,7 @@ fn drive_residents(
         let solved = crate::rig::solve_pose(&look.input);
         for c in children.iter() {
             if let Ok(mut pose) = poses.get_mut(c) {
-                *pose = solved.pose.clone();
+                *pose = solved.pose;
             }
         }
         // Предметы в руках: точка хвата — кулак, ось — заданная или вдоль предплечья.
@@ -572,17 +577,85 @@ fn drive_residents(
         for (k, (slot, at, axis)) in grips.into_iter().enumerate() {
             let Ok((mut st, mut sv)) = slots.get_mut(slot) else { continue };
             let kind = look.props[k];
-            gait.kinds[k] = kind;
-            let v = if kind.is_some() { Visibility::Inherited } else { Visibility::Hidden };
-            if *sv != v {
-                *sv = v;
+            if gait.kinds[k] != kind {
+                gait.kinds[k] = kind;
             }
+            sv.set_if_neq(if kind.is_some() { Visibility::Inherited } else { Visibility::Hidden });
             if kind.is_some() {
                 let axis = axis.unwrap_or(Vec3::Y);
                 st.translation = at;
                 st.rotation = Quat::from_rotation_arc(Vec3::Y, axis.normalize_or(Vec3::Y));
             }
         }
+    }
+}
+
+/// Ближе этого житель виден всегда, куда бы ни смотрела камера: его голос рядом.
+pub(crate) const ALWAYS_NEAR: f32 = 12.0;
+/// Радиус «шара» тела жителя для проверки кадра.
+pub(crate) const BODY_REACH: f32 = 2.5;
+/// С факелом — до края его света (`night_lights::TORCH_RANGE`).
+const TORCH_REACH: f32 = 10.0;
+/// Запас угла кадра: камера успевает повернуться за кадр, а поза считается до поворота.
+const CULL_MARGIN: f32 = 0.2;
+/// Дальше тень человека в расчёт не берём: её дальний конец при низком солнце бледен.
+const SHADOW_MAX: f32 = 12.0;
+
+/// Откуда падает свет, дающий тени (солнце или луна), если тени сейчас есть.
+pub(crate) fn shadow_light(mood: Option<&crate::daylight::CurrentMood>) -> Option<Vec3> {
+    // Под сплошными тучами солнце теней не даёт (`daylight::drive_daylight`).
+    mood.map(|m| m.0).filter(|m| m.overcast < 0.6).map(|m| m.sun)
+}
+
+/// Что видит камера (конус вокруг взгляда). Жителю вне конуса не считаем позу, и он не
+/// рисуется: иначе каждый из сотен жителей в 60 м каждый кадр получал бы новую позу, кости
+/// и кожу, даже за спиной камеры.
+#[derive(Clone, Copy)]
+pub(crate) struct ViewCone {
+    pub eye: Vec3,
+    fwd: Vec3,
+    /// Косинус и синус половины угла конуса (по диагонали кадра, с запасом).
+    cos: f32,
+    sin: f32,
+    /// Куда и как далеко от ног ложится тень человека.
+    shadow: Vec3,
+}
+
+impl ViewCone {
+    pub fn new(tf: &GlobalTransform, proj: &Projection, light: Option<Vec3>) -> Self {
+        let half = match proj {
+            Projection::Perspective(p) => ((p.fov * 0.5).tan() * (1.0 + p.aspect_ratio * p.aspect_ratio).sqrt()).atan(),
+            _ => PI,
+        };
+        let a = (half + CULL_MARGIN).min(PI);
+        // Тень ложится от ног прочь от света: чем ниже солнце, тем она длиннее.
+        let shadow = light.map_or(Vec3::ZERO, |l| {
+            let flat = Vec3::new(l.x, 0.0, l.z);
+            let len = (1.8 * flat.length() / l.y.max(0.05)).min(SHADOW_MAX);
+            -flat.normalize_or_zero() * len
+        });
+        ViewCone { eye: tf.translation(), fwd: tf.forward().as_vec3(), cos: a.cos(), sin: a.sin(), shadow }
+    }
+
+    /// Виден ли человек, стоящий в `feet` (`dist` — до него от камеры), или его тень.
+    pub fn sees_person(&self, feet: Vec3, dist: f32, reach: f32) -> bool {
+        if self.sees(feet + Vec3::Y, dist, reach) {
+            return true;
+        }
+        let half = self.shadow * 0.5;
+        half != Vec3::ZERO && self.sees(feet + half, self.eye.distance(feet + half), reach + half.length())
+    }
+
+    /// Задевает ли конус шар радиуса `r` вокруг `p` (`dist` — от камеры до `p`, примерно).
+    pub fn sees(&self, p: Vec3, dist: f32, r: f32) -> bool {
+        if self.cos <= -0.999 || dist <= r {
+            return true;
+        }
+        let d = p - self.eye;
+        let along = d.dot(self.fwd);
+        let side = (d.length_squared() - along * along).max(0.0).sqrt();
+        // Расстояние от центра шара до боковой поверхности конуса (со знаком: внутри — меньше нуля).
+        side * self.cos - along * self.sin < r
     }
 }
 
@@ -768,9 +841,15 @@ fn chatter(
         let size = computed.size() * computed.inverse_scale_factor();
         // Реплика того, кто у края кадра, не обрезается краем экрана.
         let screen = cam.logical_viewport_size().unwrap_or(Vec2::splat(f32::MAX));
-        node.left = Val::Px((px.x - size.x * 0.5).clamp(8.0, (screen.x - size.x - 8.0).max(8.0)));
-        node.top = Val::Px((px.y - size.y).clamp(8.0, (screen.y - size.y - 8.0).max(8.0)));
-        *vis = Visibility::Inherited;
+        // Меняем узел, только если реплика сдвинулась: любое изменение `Node` — пересчёт
+        // раскладки всего интерфейса в этом кадре.
+        let left = Val::Px((px.x - size.x * 0.5).clamp(8.0, (screen.x - size.x - 8.0).max(8.0)).round());
+        let top = Val::Px((px.y - size.y).clamp(8.0, (screen.y - size.y - 8.0).max(8.0)).round());
+        if node.left != left || node.top != top {
+            node.left = left;
+            node.top = top;
+        }
+        vis.set_if_neq(Visibility::Inherited);
         shown += 1;
     }
     let _ = shown;
@@ -893,6 +972,36 @@ fn rain(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Камера в начале координат смотрит вдоль −Z (обычный кадр 16:9).
+    fn cone(light: Option<Vec3>) -> ViewCone {
+        let tf = GlobalTransform::from(Transform::from_xyz(0.0, 1.7, 0.0).looking_to(Vec3::NEG_Z, Vec3::Y));
+        let proj = Projection::Perspective(PerspectiveProjection { aspect_ratio: 16.0 / 9.0, ..default() });
+        ViewCone::new(&tf, &proj, light)
+    }
+
+    fn sees(v: &ViewCone, feet: Vec3) -> bool {
+        v.sees_person(feet, v.eye.distance(feet), BODY_REACH)
+    }
+
+    #[test]
+    fn view_cone_keeps_frame_and_drops_back() {
+        let v = cone(None);
+        assert!(sees(&v, Vec3::new(0.0, 0.0, -30.0)), "прямо впереди");
+        assert!(sees(&v, Vec3::new(-25.0, 0.0, -30.0)), "у края кадра");
+        assert!(!sees(&v, Vec3::new(0.0, 0.0, 30.0)), "за спиной");
+        assert!(!sees(&v, Vec3::new(40.0, 0.0, 5.0)), "сбоку и чуть позади");
+    }
+
+    #[test]
+    fn view_cone_keeps_those_whose_shadow_is_in_frame() {
+        // Низкое солнце светит из-за спины камеры справа: тень человека сбоку ложится в кадр.
+        let feet = Vec3::new(22.0, 0.0, -10.0);
+        assert!(!sees(&cone(None), feet));
+        assert!(sees(&cone(Some(Vec3::new(1.0, 0.15, 0.4).normalize())), feet), "тень тянется в кадр");
+        // Высокое солнце: тень короткая, в кадр не попадает.
+        assert!(!sees(&cone(Some(Vec3::new(0.2, 1.0, 0.1).normalize())), feet));
+    }
 
     #[test]
     fn every_act_has_a_pose() {
