@@ -190,8 +190,11 @@ pub struct WorkSpots {
     pub outcrops: [Vec3; 2],
     pub windlass: Vec3,
     pub sorting: Vec3,
+    /// Отвал и место у сыродутного горна размечены, но работников туда пока не ставят.
+    #[allow(dead_code)]
     pub spoil: Vec3,
     pub roast: Vec3,
+    #[allow(dead_code)]
     pub bloomery: Vec3,
     pub mine_fire: Vec3,
     pub mine_hut: Vec3,

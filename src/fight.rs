@@ -324,12 +324,16 @@ pub fn reconcile(local: &mut LocalFighter, snap: &ActorSnapshot) {
     local.fighter.hp = snap.hp;
     local.fighter.max_hp = snap.max_hp;
     local.fighter.has_shield = snap.shield;
-    local.fighter.stamina = snap.stamina;
-    local.fighter.max_stamina = snap.max_stamina;
+    if let Some(own) = snap.own {
+        local.fighter.stamina = own.stamina;
+        local.fighter.max_stamina = own.max_stamina;
+        local.move_mult = own.move_mult;
+    }
     local.fighter.action_speed = snap.action_speed;
-    local.move_mult = snap.move_mult;
     local.finish = snap.finish;
-    local.gear = snap.gear;
+    if let Some(gear) = snap.gear {
+        local.gear = gear;
+    }
     // Оружие меняем только вне удара, чтобы не сбить анимацию.
     if snap.weapon != local.fighter.weapon && matches!(local.fighter.action, Action::Idle | Action::Guard { .. }) {
         local.fighter.weapon = snap.weapon;
