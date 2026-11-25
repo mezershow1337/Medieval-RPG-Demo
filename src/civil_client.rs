@@ -20,7 +20,7 @@ impl Plugin for CivilClientPlugin {
             .init_resource::<LawUi>()
             .add_systems(Startup, setup_law_ui.after(crate::inventory_ui::setup_fonts))
             .add_systems(Update, (apply_civil, law_input, draw_law_ui).chain())
-            .add_systems(Update, law_demo.before(apply_civil).run_if(|| std::env::var_os("MRPG_LAW_DEMO").is_some()));
+            .add_systems(Update, law_demo.before(apply_civil).run_if(crate::settings::env_flag("MRPG_LAW_DEMO")));
     }
 }
 
