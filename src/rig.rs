@@ -10,7 +10,7 @@
 use crate::appearance::{Folk, Look, Shape};
 use crate::combat::WeaponKind;
 use crate::protocol::ActorKind;
-use bevy::camera::visibility::DynamicSkinnedMeshBounds;
+use bevy::camera::visibility::{DynamicSkinnedMeshBounds, NoFrustumCulling};
 use bevy::gltf::{Gltf, GltfMaterial, GltfMesh, GltfSkin};
 use bevy::mesh::morph::MeshMorphWeights;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
@@ -439,6 +439,21 @@ fn apply_look_tints(
         // Модель ещё грузится — попробуем в следующем кадре.
         if found {
             commands.entity(root).insert(LookTinted);
+        }
+    }
+}
+
+/// Рука от первого лица всегда перед камерой, а лишние кости у неё сжаты в точку (нулевой
+/// масштаб), и рамка по суставам у такой руки получается негодной — рука пропадала. Её детали
+/// не отсекаем, как и раньше.
+fn keep_view_arm_drawn(
+    mut commands: Commands,
+    parts: Query<(Entity, &ChildOf), (Added<SkinnedMesh>, With<DynamicSkinnedMeshBounds>)>,
+    arms: Query<(), Or<(With<ViewArm>, With<NeedsViewArm>)>>,
+) {
+    for (e, parent) in &parts {
+        if arms.contains(parent.parent()) {
+            commands.entity(e).remove::<DynamicSkinnedMeshBounds>().insert(NoFrustumCulling);
         }
     }
 }
@@ -1106,7 +1121,7 @@ impl Plugin for RigPlugin {
         app.init_resource::<BladeTints>()
             .add_systems(Startup, load_models)
             .add_systems(Update, finish_models.run_if(resource_exists::<ModelsHandle>))
-            .add_systems(PostUpdate, apply_look_tints)
+            .add_systems(PostUpdate, (apply_look_tints, keep_view_arm_drawn))
             .add_systems(Update, attach_rigs.run_if(resource_exists::<CharacterModels>).before(PoseSet))
             .add_systems(Update, apply_poses.after(PoseSet));
     }
