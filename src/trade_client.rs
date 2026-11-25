@@ -484,17 +484,50 @@ fn aim_merchants(
 }
 
 /// Торговцы дышат, переминаются и время от времени поправляют товар.
+/// Как и жителей (`life_client`), не рисуем тех, кто вне кадра или далеко (прилавок
+/// остаётся), а позу дальних считаем реже.
+#[allow(clippy::type_complexity)]
 fn idle_merchants(
     time: Res<Time>,
-    npcs: Query<(&MerchantNpc, &Children)>,
-    mut poses: Query<&mut RigPose>,
+    camera: Query<(&Camera, &GlobalTransform, &Projection), With<Camera3d>>,
+    npcs: Query<(&MerchantNpc, &GlobalTransform, &Children, Has<crate::civil_client::Fallen>)>,
+    mut poses: Query<(&mut RigPose, &mut Visibility)>,
+    mood: Option<Res<crate::daylight::CurrentMood>>,
+    mut frame: Local<u32>,
 ) {
+    use crate::life_client::{ALWAYS_NEAR, BODY_REACH, ViewCone, shadow_light};
+    /// Дальше этого торговца не рисуем (жителей — дальше 60 м).
+    const MERCHANT_VIEW: f32 = 90.0;
+    *frame = frame.wrapping_add(1);
     let t = time.elapsed_secs();
-    for (npc, children) in &npcs {
+    let view = camera
+        .iter()
+        .find(|(c, _, _)| c.is_active)
+        .map(|(_, t, p)| ViewCone::new(t, p, shadow_light(mood.as_deref())));
+    for (k, (npc, at, children, fallen)) in npcs.iter().enumerate() {
+        let pos = at.translation();
+        let dist = view.map_or(0.0, |v| v.eye.distance(pos));
+        // Убитого торговца прячет `civil_client` — не показываем его снова.
+        let seen = !fallen
+            && dist <= MERCHANT_VIEW
+            && view.is_none_or(|v| dist < ALWAYS_NEAR || v.sees_person(pos, dist, BODY_REACH));
+        let every = if dist < 22.0 {
+            1
+        } else if dist < 38.0 {
+            2
+        } else {
+            4
+        };
+        let pose_now = (*frame + k as u32).is_multiple_of(every);
         for child in children.iter() {
-            let Ok(mut pose) = poses.get_mut(child) else {
+            let Ok((mut pose, mut vis)) = poses.get_mut(child) else {
                 continue;
             };
+            let was_hidden = *vis == Visibility::Hidden;
+            vis.set_if_neq(if seen { Visibility::Inherited } else { Visibility::Hidden });
+            if !seen || !(pose_now || was_hidden) {
+                continue;
+            }
             let solved = crate::rig::solve_pose(&crate::life_client::merchant_pose(t, npc.phase));
             *pose = solved.pose;
         }
