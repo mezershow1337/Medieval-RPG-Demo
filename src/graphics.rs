@@ -487,7 +487,10 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
     };
     let photo = photo_layers(mat);
     let tex = surface_textures();
-    let has_photo = tex.is_some() && photo.is_some();
+    // Слой, файла которого не нашлось, выключает фото только у своих материалов. Рельеф
+    // вдобавок берёт почву и гальку по номерам прямо в шейдере.
+    let extra_ok = mat != Mat::Terrain || (photo_layer_ok(crate::surface_layers::L_SOIL) && photo_layer_ok(crate::surface_layers::L_GRAVEL));
+    let has_photo = tex.is_some() && extra_ok && photo.is_some_and(|(top, side, ..)| photo_layer_ok(top) && photo_layer_ok(side));
     let (top, side, tint, relief) = photo.unwrap_or((0, 0, 0.0, 0.0));
     let layer = |l: u32| &crate::surface_layers::LAYERS[l as usize];
     let mean = |l: u32| Vec3::from_array(layer(l).mean);
@@ -603,9 +606,39 @@ fn photo_layers(mat: Mat) -> Option<(u32, u32, f32, f32)> {
 }
 
 static SURFACE_TEXTURES: std::sync::OnceLock<Option<(Handle<Image>, Handle<Image>)>> = std::sync::OnceLock::new();
+/// Каких слоёв не нашлось (или они битые): их место в массиве пустое.
+static MISSING_LAYERS: std::sync::OnceLock<Vec<bool>> = std::sync::OnceLock::new();
 
 fn surface_textures() -> Option<&'static (Handle<Image>, Handle<Image>)> {
     SURFACE_TEXTURES.get().and_then(|t| t.as_ref())
+}
+
+fn photo_layer_ok(l: u32) -> bool {
+    !MISSING_LAYERS.get().is_some_and(|m| m.get(l as usize).copied().unwrap_or(true))
+}
+
+/// Склеивает слои (с мип-уровнями) в данные одного массива текстур: ((ширина, высота, мипы),
+/// байты, каких слоёв нет). Раньше один недостающий файл (новый слой при старой папке assets)
+/// выключал фото у всего города: мостовая становилась шахматкой, стены — гладким кирпичом.
+/// Теперь место такого слоя пустое, а его материалы остаются процедурными ([`photo_layer_ok`]).
+/// `None` — только если не загрузился ни один слой.
+fn pack_layers(decoded: &[Option<Image>]) -> Option<((u32, u32, u32), Vec<u8>, Vec<bool>)> {
+    let first = decoded.iter().flatten().find(|i| i.data.is_some())?;
+    let (w, h, levels) = (first.width(), first.height(), first.texture_descriptor.mip_level_count);
+    let bytes = first.data.as_ref().map_or(0, Vec::len);
+    let mut data = Vec::with_capacity(bytes * decoded.len());
+    let mut missing = vec![false; decoded.len()];
+    for (k, img) in decoded.iter().enumerate() {
+        let fits = img.as_ref().filter(|i| i.width() == w && i.height() == h && i.texture_descriptor.mip_level_count == levels);
+        match fits.and_then(|i| i.data.as_ref()).filter(|d| d.len() == bytes) {
+            Some(d) => data.extend_from_slice(d),
+            None => {
+                missing[k] = true;
+                data.resize(data.len() + bytes, 0);
+            }
+        }
+    }
+    Some(((w, h, levels), data, missing))
 }
 
 /// Собирает массивы слоёв фотоматериалов (assets/textures/surface) с мип-уровнями.
@@ -614,7 +647,7 @@ fn load_surface_textures(images: &mut Assets<Image>) -> Option<(Handle<Image>, H
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension};
     let dir = bevy::asset::io::file::FileAssetReader::get_base_path().join("assets/textures/surface");
     let layers = crate::surface_layers::LAYERS;
-    let load = |suffix: &str, srgb: bool| -> Option<Image> {
+    let load = |suffix: &str, srgb: bool| -> Option<(Image, Vec<bool>)> {
         // Слои декодируем и уменьшаем параллельно — это ~40 картинок 1024².
         let decoded: Vec<Option<Image>> = std::thread::scope(|s| {
             let jobs: Vec<_> = layers
@@ -632,17 +665,9 @@ fn load_surface_textures(images: &mut Assets<Image>) -> Option<(Handle<Image>, H
                 .collect();
             jobs.into_iter().map(|j| j.join().ok().flatten()).collect()
         });
-        let decoded: Vec<Image> = decoded.into_iter().collect::<Option<_>>()?;
-        let first = &decoded[0];
-        let (w, h) = (first.width(), first.height());
-        if decoded.iter().any(|i| i.width() != w || i.height() != h) {
-            warn!("слои фотоматериалов разного размера");
-            return None;
-        }
-        let levels = first.texture_descriptor.mip_level_count;
-        let mut data = Vec::new();
-        for img in &decoded {
-            data.extend_from_slice(img.data.as_ref()?);
+        let ((w, h, levels), data, missing) = pack_layers(&decoded)?;
+        for (k, _) in missing.iter().enumerate().filter(|(_, m)| **m) {
+            warn!("фотослой {} ({suffix}) не загружен — его материалы остаются процедурными", layers[k].name);
         }
         let format = if srgb { TextureFormat::Rgba8UnormSrgb } else { TextureFormat::Rgba8Unorm };
         let mut arr = Image::new_uninit(Extent3d { width: w, height: h, depth_or_array_layers: decoded.len() as u32 }, TextureDimension::D2, format, RenderAssetUsages::RENDER_WORLD);
@@ -650,12 +675,15 @@ fn load_surface_textures(images: &mut Assets<Image>) -> Option<(Handle<Image>, H
         arr.texture_descriptor.mip_level_count = levels;
         arr.sampler = crate::textures::quality_sampler(true);
         arr.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::D2Array), ..default() });
-        Some(arr)
+        Some((arr, missing))
     };
     let started = std::time::Instant::now();
-    let albedo = load("albedo", true)?;
-    let nrm = load("nrm", false)?;
-    info!("Фотоматериалы: {} слоёв за {:.2} с", layers.len(), started.elapsed().as_secs_f32());
+    let (albedo, miss_a) = load("albedo", true)?;
+    let (nrm, miss_n) = load("nrm", false)?;
+    let missing: Vec<bool> = miss_a.iter().zip(&miss_n).map(|(a, n)| *a || *n).collect();
+    let ok = missing.iter().filter(|m| !**m).count();
+    info!("Фотоматериалы: {ok} из {} слоёв за {:.2} с", layers.len(), started.elapsed().as_secs_f32());
+    let _ = MISSING_LAYERS.set(missing);
     Some((images.add(albedo), images.add(nrm)))
 }
 
@@ -922,6 +950,20 @@ mod tests {
     fn terrain_layers_match_shader() {
         assert_eq!(L_SOIL, 8);
         assert_eq!(L_GRAVEL, 18);
+    }
+
+    /// Слой без файла (или другого размера) не должен выключать фото у остальных.
+    #[test]
+    fn missing_layer_keeps_the_others() {
+        use bevy::asset::RenderAssetUsages;
+        use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+        let img = |size: u32, v: u8| bevy::image::Image::new_fill(Extent3d { width: size, height: size, depth_or_array_layers: 1 }, TextureDimension::D2, &[v, v, v, 255], TextureFormat::Rgba8Unorm, RenderAssetUsages::default());
+        let ((w, h, levels), data, missing) = super::pack_layers(&[Some(img(4, 10)), None, Some(img(8, 30)), Some(img(4, 20))]).unwrap();
+        assert_eq!((w, h, levels), (4, 4, 1));
+        assert_eq!(missing, vec![false, true, true, false]);
+        assert_eq!(data.len(), 4 * 4 * 4 * 4);
+        assert_eq!((data[0], data[64], data[128], data[192]), (10, 0, 0, 20));
+        assert!(super::pack_layers(&[None, None]).is_none());
     }
 
     #[test]
