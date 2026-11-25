@@ -26,6 +26,11 @@ pub struct ConsoleRules {
     pub cheats_for_all: bool,
 }
 
+/// Можно ли этому клиенту читы: он хозяин игры (прислал `host_token`) или читы разрешены всем.
+pub fn cheats_allowed(token: u64, rules: Option<&ConsoleRules>) -> bool {
+    (token != 0 && token == host_token()) || rules.is_some_and(|r| r.cheats_for_all)
+}
+
 /// Что получилось у команды.
 struct Out {
     lines: Vec<(String, bool)>,
@@ -415,6 +420,14 @@ fn give(ctx: &mut Ctx, args: &[String], out: &mut Out) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_loot_only_for_the_host_or_with_sv_cheats() {
+        // В проверках хозяина нет (`host_token` — 0): гость с любым токеном читов не получает.
+        assert!(!cheats_allowed(0, None));
+        assert!(!cheats_allowed(12345, Some(&ConsoleRules { cheats_for_all: false })));
+        assert!(cheats_allowed(0, Some(&ConsoleRules { cheats_for_all: true })));
+    }
 
     #[test]
     fn finds_items_by_part_of_name() {
