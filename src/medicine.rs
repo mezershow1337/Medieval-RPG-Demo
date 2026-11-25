@@ -271,8 +271,7 @@ pub struct HitTaken {
     pub target: u64,
     pub weapon: crate::combat::WeaponKind,
     pub amount: f32,
-    pub head: bool,
-    /// Куда пришёлся удар.
+    /// Куда пришёлся удар (голова — `BodyPart::Head`).
     pub part: BodyPart,
 }
 

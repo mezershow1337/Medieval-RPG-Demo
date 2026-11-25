@@ -43,8 +43,10 @@ pub const SAND: &str = "Морской песок";
 pub const LIMESTONE: &str = "Известняковый блок";
 pub const PICK: &str = "Кайло рудокопа";
 pub const SPADE: &str = "Заступ";
+#[cfg_attr(not(test), allow(dead_code))] // название для проверок; в игре топор узнаётся по `Tool::Axe`
 pub const WOOD_AXE: &str = "Топор дровосека";
 /// Книга об углежжении (Феофраст, V, 9).
+#[cfg_attr(not(test), allow(dead_code))] // название для проверок
 pub const THEOPHRASTUS_PLANTS: &str = "Феофраст. Исследование о растениях";
 
 /// Какой руду кладут в сыродутный горн. Чем богаче, тем больше крица (множитель)
@@ -178,6 +180,7 @@ pub struct SiteInfo {
 }
 
 impl SiteKind {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub const ALL: [SiteKind; 8] = [SiteKind::BogOre, SiteKind::Outcrop, SiteKind::Adit, SiteKind::Shaft, SiteKind::Woodlot, SiteKind::ClayPit, SiteKind::Sand, SiteKind::Quarry];
 
     pub fn info(self) -> SiteInfo {

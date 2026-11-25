@@ -223,7 +223,9 @@ pub struct ContainerSpec {
     pub pos: Vec3,
     pub name: &'static str,
     pub table: crate::items::LootTableId,
-    /// Стоит в жилом доме (номер в [`Layout::houses`]): взять оттуда — кража у хозяев.
+    /// Стоит в жилом доме (номер в [`Layout::houses`]). Саму кражу из сундука ведёт
+    /// `loot_server::ContainerTaken`, номер дома читают проверки.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub house: Option<u32>,
 }
 
