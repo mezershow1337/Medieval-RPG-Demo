@@ -171,7 +171,7 @@ fn profile_with_name(name: &str, look: (Look, StartKit)) -> crate::estates::Prof
 fn connect(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time: &Time, addr: SocketAddr, name: &str, look: (Look, StartKit)) {
     let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
     let client_id = now.as_nanos() as u64;
-    let transport = UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string()).and_then(|socket| {
+    let transport = UdpSocket::bind(if crate::server::local_only() { "127.0.0.1:0" } else { "0.0.0.0:0" }).map_err(|e| e.to_string()).and_then(|socket| {
         // Билет подключения собираем сами, а не через ClientAuthentication::Unsecure: там таймаут
         // жёстко 15 с, и если игра у друга замирает дольше (первая загрузка уровня, компиляция
         // шейдеров, перетаскивание окна), сервер выкидывал его. Сервер работает в режиме

@@ -117,7 +117,13 @@ struct SnapshotTimer {
 }
 
 pub fn bind_socket(port: u16) -> std::io::Result<UdpSocket> {
-    UdpSocket::bind(("0.0.0.0", port))
+    UdpSocket::bind((if local_only() { "127.0.0.1" } else { "0.0.0.0" }, port))
+}
+
+/// Фоновый запуск для снимков и замеров (`settings::background_run`) — игра только для этого
+/// компьютера: сеть не слушаем, и Windows не выводит поверх всех окон вопрос брандмауэра.
+pub fn local_only() -> bool {
+    crate::settings::background_run()
 }
 
 /// Запускает сервер в текущем потоке (блокирует до выхода).

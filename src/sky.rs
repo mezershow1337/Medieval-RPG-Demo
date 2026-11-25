@@ -27,6 +27,10 @@ pub struct SkyUniform {
     pub moon: Vec4,
     /// x — ночь 0..1, y — ненастье 0..1, zw — ветер (м/с).
     pub extra: Vec4,
+    /// Сумерки: rgb — коралловое небо над зарёй, w — пелена высококучевых облаков 0..1.
+    pub glow: Vec4,
+    /// Сумерки: rgb — сиреневое небо в стороне от солнца, w — сила подсветки облаков снизу.
+    pub tint: Vec4,
 }
 
 // ---------- Купол неба ----------
@@ -151,8 +155,26 @@ fn norm2(v: Vec2) -> Vec2 {
     (v + Vec2::new(1e-5, 0.0)).normalize()
 }
 
+/// Свет низкого солнца на нижней кромке облаков и доходит ли он (как `twilight_light`
+/// в sky_common.wesl): у солнца золото и оранжевый, выше малиновый и розовый, вдали от
+/// солнца — тень Земли.
+fn twilight_light(dir: Vec3, sun: Vec3, e: f32, reach: f32) -> (Vec3, f32) {
+    let cos_az = norm2(Vec2::new(dir.x, dir.z)).dot(norm2(Vec2::new(sun.x, sun.z)));
+    let local = sun.y.clamp(-1.0, 1.0).asin() + (reach / e.max(0.02) * cos_az).clamp(-0.1, 0.1);
+    let lit = smoothstep(-0.022, -0.008, local);
+    let k = ((local + 0.012) / 0.312).clamp(0.0, 1.0);
+    let mut c = Vec3::new(1.0, 0.04, 0.09).lerp(Vec3::new(1.0, 0.25, 0.07), smoothstep(0.06, 0.2, k));
+    c = c.lerp(Vec3::new(1.0, 0.6, 0.25), smoothstep(0.18, 0.42, k));
+    c = c.lerp(Vec3::new(1.0, 0.9, 0.75), smoothstep(0.4, 1.0, k));
+    (c * ((0.8 + 0.2 * smoothstep(0.0, 0.4, k)) * lit), lit)
+}
+
+/// Гряды пелены высококучевых (как `DECK_ROT` в sky_common.wesl).
+const DECK_ROT: Vec2 = Vec2::new(0.17, -0.985);
+
 /// Цвет неба в направлении `dir` (без дисков солнца и луны — в отражениях их даёт свет).
-/// Та же формула, что `sky_radiance` в sky_common.wesl (облака упрощены).
+/// Та же формула, что `sky_radiance` в sky_common.wesl (облака упрощены: без сноса ветром,
+/// перистых и золотой кромки).
 pub fn sky_radiance(dir: Vec3, s: &SkyUniform) -> Vec3 {
     let dir = dir.normalize();
     let sun = s.sun.truncate().normalize();
@@ -168,20 +190,26 @@ pub fn sky_radiance(dir: Vec3, s: &SkyUniform) -> Vec3 {
     let d2 = norm2(Vec2::new(dir.x, dir.z));
     let toward = (d2.dot(s2) * 0.5 + 0.5).clamp(0.0, 1.0);
     let zen = s.zenith.truncate();
-    let mut mid = Vec3::new(0.34, 0.40, 0.66).lerp(Vec3::new(1.0, 0.66, 0.46), toward.powi(3)).lerp(Vec3::new(0.26, 0.46, 0.86), d);
+    let tint = s.tint.truncate();
+    let tw_mid = tint.lerp(s.glow.truncate(), toward.powf(2.5) * (1.0 - smoothstep(0.03, 0.2, h)));
+    let mut mid = tw_mid.lerp(Vec3::new(0.26, 0.46, 0.86), d);
     mid = mid.lerp(hor.lerp(zen, 0.5), n);
     mid = mid.lerp(hor * 1.04, oc * 0.7);
-    let mut col = hor.lerp(mid, smoothstep(0.0, 0.22 + (0.16 - 0.22) * d, h));
-    col = col.lerp(zen.lerp(hor * 1.02, oc * 0.6), smoothstep(0.12, 0.85, h));
+    let mut col = hor.lerp(mid, smoothstep(0.0, 0.10 + (0.16 - 0.10) * d, h));
+    col = col.lerp(zen.lerp(hor * 1.02, oc * 0.6), smoothstep(0.12, 0.5 + (0.85 - 0.5) * d, h));
+    let el = sun.y;
     let veil = (1.0 - n) * (1.0 - 0.8 * oc);
-    let halo_gold = Vec3::new(2.2, 1.15, 0.45) * sd.powf(7.0) * 0.55 + Vec3::new(3.5, 2.0, 0.9) * sd.powf(90.0) * 0.9;
+    let zarya = smoothstep(-0.1, -0.035, el) * (1.0 - smoothstep(0.03, 0.12, el)) * veil;
+    let zarya_c = Vec3::new(1.4, 0.25, 0.04).lerp(Vec3::new(2.2, 0.75, 0.08), smoothstep(-0.07, -0.02, el));
+    col += zarya_c * (toward.powi(6) * (1.0 - smoothstep(0.0, 0.012, h)) * zarya);
+    let low = smoothstep(-0.05, 0.05, el);
+    let halo_gold = (Vec3::new(1.6, 0.45, 0.12).lerp(Vec3::new(2.2, 1.15, 0.45), smoothstep(0.0, 0.1, el)) * sd.powf(7.0) * 0.55 + Vec3::new(3.5, 2.0, 0.9) * sd.powf(90.0) * 0.9) * low;
     let halo_day = Vec3::new(1.0, 0.9, 0.7) * sd.powf(8.0) * 0.5;
     col += halo_gold.lerp(halo_day, d) * veil;
     let moon = s.moon.truncate().normalize_or_zero();
     let md = dir.dot(moon).max(0.0);
     let moon_up = smoothstep(-0.03, 0.05, moon.y) * s.moon.w * n;
     col += Vec3::new(0.10, 0.12, 0.16) * md.powf(60.0) * moon_up * (1.0 - 0.6 * oc);
-    // Облака (упрощённо: без перистых и без кромки).
     if e > 0.0 {
         let p = Vec2::new(dir.x, dir.z) / (e + 0.07) * 0.75;
         let w = Vec2::new(fbm3(p * 0.6 + Vec2::splat(3.1)), fbm3(p * 0.6 + Vec2::splat(7.7)));
@@ -193,18 +221,42 @@ pub fn sky_radiance(dir: Vec3, s: &SkyUniform) -> Vec3 {
         let d_sun = fbm((q + s2 * 0.16) * 1.3);
         let lit = ((dn - d_sun) * 5.0 + 0.45).clamp(0.0, 1.0);
         let thin = 1.0 - smoothstep(thr + 0.05, thr + 0.3, dn);
+        let tw_amb = tint * 0.75;
+        let moon_lit = smoothstep(-0.02, 0.1, moon.y) * s.moon.w;
+        let fade = (1.0 - smoothstep(0.0, 0.22, e)) * 0.55;
+        // Кучевые.
         let day_c = Vec3::new(0.62, 0.66, 0.76).lerp(Vec3::new(1.32, 1.3, 1.26), lit * 0.7 + thin * 0.3);
-        let gold = Vec3::new(1.25, 0.62, 0.55).lerp(Vec3::new(2.9, 1.45, 0.55), toward * toward);
-        let shadow = Vec3::new(0.26, 0.27, 0.40).lerp(Vec3::new(0.42, 0.26, 0.26), toward);
-        let gold_c = shadow.lerp(gold, lit * (0.35 + 0.65 * thin));
-        let mut c = gold_c.lerp(day_c, d);
+        let (low_c, low_lit) = twilight_light(dir, sun, e, 0.001);
+        let tw_c = tw_amb * ((0.9 - 0.3 * lit) * (1.0 - 0.8 * low_lit)) + low_c * s.tint.w * (0.45 + 0.55 * lit * (0.35 + 0.65 * thin));
+        let mut c = tw_c.lerp(day_c, d);
         let grey = Vec3::new(0.34, 0.35, 0.38).lerp(Vec3::new(0.62, 0.64, 0.68), lit * 0.6 + thin * 0.4) * (0.55 + 0.45 * d);
         c = c.lerp(grey, oc * 0.8);
-        let moon_lit = smoothstep(-0.02, 0.1, moon.y) * s.moon.w;
         let night_c = Vec3::new(0.010, 0.012, 0.020).lerp(Vec3::new(0.045, 0.052, 0.075), lit) * (0.6 + 0.8 * moon_lit);
         c = c.lerp(night_c, n);
-        c = c.lerp(hor, (1.0 - smoothstep(0.0, 0.22, e)) * 0.55);
-        col = col.lerp(c, cover);
+        c = c.lerp(hor, fade);
+        // Пелена высококучевых.
+        let (mut deck, mut cd) = (0.0, Vec3::ZERO);
+        if s.glow.w > 0.01 {
+            let pd = Vec2::new(dir.x, dir.z) / (e + 0.035) * 0.9;
+            let r = Vec2::new(pd.x * DECK_ROT.x + pd.y * DECK_ROT.y, -pd.x * DECK_ROT.y + pd.y * DECK_ROT.x) * Vec2::new(0.7, 1.35);
+            let dd = fbm(r * 1.6 + w * 1.17 + Vec2::new(11.0, 3.0)) * 0.7 + fbm3(r * 6.0 + w * 1.8) * 0.3;
+            let dthr = 0.62 + (0.26 - 0.62) * s.glow.w;
+            deck = smoothstep(dthr, dthr + 0.14, dd) * smoothstep(0.0, 0.05, e) * (s.glow.w * 3.0).min(1.0) * (1.0 - 0.45 * d) * (1.0 - oc * 0.5);
+            let thick = smoothstep(dthr + 0.1, dthr + 0.3, dd);
+            let (hi_c, hi_lit) = twilight_light(dir, sun, e, 0.0015);
+            let sunny = smoothstep(0.36, 0.62, w.y);
+            let glow_k = hi_lit * s.tint.w * 1.25 * (1.1 - 0.85 * thick) * (0.4 + 0.9 * sunny);
+            let tw_d = tw_amb * ((1.0 - 0.25 * thick) * (1.0 - 0.8 * hi_lit * (1.0 - 0.6 * thick) * sunny)) + hi_c * (2.0 * (1.0 - (-glow_k / 2.0).exp()) / hi_lit.max(1e-3));
+            let day_d = Vec3::new(1.15, 1.15, 1.18).lerp(Vec3::new(0.75, 0.78, 0.86), thick) + Vec3::new(0.5, 0.45, 0.35) * sd.powf(10.0) * (1.0 - thick);
+            cd = tw_d.lerp(day_d, d).lerp(grey, oc * 0.8);
+            let night_d = Vec3::new(0.045, 0.052, 0.075).lerp(Vec3::new(0.010, 0.012, 0.020), thick) * (0.6 + 0.8 * moon_lit);
+            cd = cd.lerp(night_d, n).lerp(hor, fade * 0.5);
+        }
+        let back = deck * (1.0 - cover);
+        let total = cover + back;
+        if total > 1e-4 {
+            col = col.lerp((c * cover + cd * back) / total, total.min(1.0));
+        }
     }
     if e < 0.0 {
         // Снизу — земля и море в дымке: темнее горизонта.
@@ -266,12 +318,12 @@ fn surround_radiance(dir: Vec3, s: &SkyUniform, stone: Vec3) -> Vec3 {
     let c = if e < 0.0 {
         stone * 0.85
     } else {
-        let walls = (1.0 - smoothstep(0.02, 0.3, e)) * 0.65;
+        let walls = (1.0 - smoothstep(0.0, 0.16, e)) * 0.5;
         sky_radiance(dir, s).lerp(stone, walls)
     };
     // Чуть приглушаем цвет: в отражениях смешано много всего.
     let l = c.dot(Vec3::new(0.2126, 0.7152, 0.0722));
-    c.lerp(Vec3::splat(l), 0.25)
+    c.lerp(Vec3::splat(l), 0.15)
 }
 
 fn prefilter_with(n: Vec3, rough: f32, samples: u32, radiance: impl Fn(Vec3) -> Vec3) -> Vec3 {
@@ -402,6 +454,8 @@ mod tests {
             zenith: Vec4::new(0.11, 0.2, 0.46, 0.0),
             moon: Vec4::new(0.8, -0.2, 0.4, 0.5),
             extra: Vec4::ZERO,
+            glow: Vec4::new(1.0, 0.66, 0.46, 0.0),
+            tint: Vec4::new(0.34, 0.40, 0.66, 2.2),
         };
         let toward = sky_radiance(Vec3::new(-0.8, 0.02, -0.42), &s);
         let away = sky_radiance(Vec3::new(0.8, 0.02, 0.42), &s);
