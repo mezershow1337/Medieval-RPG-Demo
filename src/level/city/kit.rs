@@ -308,15 +308,19 @@ pub fn gable_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32, ridge_x: bool,
     roof_edges(b.mesh(Mat::Tile), &w, (a0, a1), [(c0, -1.0), (c1, 1.0)], e, top, cm, slope);
     // Конёк — ряд полукруглых калиптеров на растворе.
     b.mesh(Mat::Tile).ridge_pipe(w(a0 - 0.04, top - 0.03, cm), w(a1 + 0.04, top - 0.03, cm), 0.13, 8);
-    // Фронтоны.
+    // Фронтоны — с обеих сторон: изнутри дома на их месте иначе видно небо.
     let m = b.mesh(gable_mat);
     if ridge_x {
         for (x, s) in [(r.x0, -1.0f32), (r.x1, 1.0)] {
-            m.tri(Vec3::new(x, eave, r.z0), Vec3::new(x, eave, r.z1), Vec3::new(x, top, r.cz()), Vec3::X * s);
+            for f in [s, -s] {
+                m.tri(Vec3::new(x, eave, r.z0), Vec3::new(x, eave, r.z1), Vec3::new(x, top, r.cz()), Vec3::X * f);
+            }
         }
     } else {
         for (z, s) in [(r.z0, -1.0f32), (r.z1, 1.0)] {
-            m.tri(Vec3::new(r.x0, eave, z), Vec3::new(r.x1, eave, z), Vec3::new(r.cx(), top, z), Vec3::Z * s);
+            for f in [s, -s] {
+                m.tri(Vec3::new(r.x0, eave, z), Vec3::new(r.x1, eave, z), Vec3::new(r.cx(), top, z), Vec3::Z * f);
+            }
         }
     }
 }
@@ -402,11 +406,72 @@ pub fn lean_roof(b: &mut Builder, r: Rect, high: Side, y_high: f32, y_low: f32, 
     for (h, l, u0, u1, f) in [(hi[0], lo[0], 0.0, lip, -ax), (hi[1], lo[1], along, along - lip, ax)] {
         t.quad_uv([h, l, l + down, h + down], [Vec2::new(u0, 0.0), Vec2::new(u0, slope_len), Vec2::new(u1, slope_len), Vec2::new(u1, 0.0)], f);
     }
+    // И у высокого края: без торца между черепицей и настилом видна щель на просвет.
+    t.quad_uv([hi[0], hi[1], hi[1] + down, hi[0] + down], [Vec2::new(0.0, lip), Vec2::new(along, lip), Vec2::new(along, 0.0), Vec2::new(0.0, 0.0)], -out);
     // Треугольные торцы между стеной и скатом закрываем кладкой — делает вызывающий (стены выше),
     // а здесь — концы стропил под карнизом.
     let m = b.mesh(Mat::Wood);
     let inward = -out * 0.18 + Vec3::Y * -(ROOF_T + 0.05);
     m.beam(lo[0] + inward, lo[1] + inward, 0.05, 0.05, Vec3::Y);
+}
+
+/// Насколько кладка под скатом заходит в толщу кровли: выше настила, но ниже черепицы.
+const FILL_LIFT: f32 = 0.04;
+
+/// Кладка под односкатной крышей (те же `r`, `high`, `y_high`, `y_low`, что у [`lean_roof`]):
+/// стены доводятся от своего верха до низа кровли. Без неё между стеной и черепицей остаётся
+/// щель до метра и крыша будто висит над домом.
+/// Стена под высоким краем стоит внутри `r` толщиной `t` (0 — её нет) и сверху кончается на
+/// `wall_top`. `ends` — торцевые стены: (от, до) по оси вдоль высокого края и высота их верха;
+/// над ними кладка идёт от высокой стены до места, где скат опускается на стену.
+/// Верх кладки повторяет скат (тупая стена-коробка или пробила бы черепицу, или оставила щель).
+pub fn lean_fill(b: &mut Builder, r: Rect, high: Side, y_high: f32, y_low: f32, t: f32, wall_top: f32, ends: &[(f32, f32, f32)], mat: Mat) {
+    let span = if high.along_x() { r.d() } else { r.w() };
+    let slope = (y_high - y_low) / span;
+    // Верх кладки на расстоянии `s` от высокой стороны внутрь.
+    let top = |s: f32| y_high - ROOF_T + FILL_LIFT - slope * s;
+    // (вдоль, высота, поперёк от высокой стороны) → мир.
+    let w = |al: f32, y: f32, s: f32| match high {
+        Side::N => Vec3::new(al, y, r.z0 + s),
+        Side::S => Vec3::new(al, y, r.z1 - s),
+        Side::W => Vec3::new(r.x0 + s, y, al),
+        Side::E => Vec3::new(r.x1 - s, y, al),
+    };
+    let along = if high.along_x() { Vec3::X } else { Vec3::Z };
+    let m = b.mesh(mat);
+    // Сечение (поперёк, высота) — выпуклый многоугольник против часовой; вытягиваем его вдоль от `l0` до `l1`.
+    let prism = |m: &mut MeshBuilder, l0: f32, l1: f32, prof: &[(f32, f32)]| {
+        let at = |l: f32| prof.iter().map(|&(s, y)| w(l, y, s)).collect::<Vec<_>>();
+        let uv: Vec<Vec2> = prof.iter().map(|&(s, y)| Vec2::new(s, -y)).collect();
+        m.polygon(&at(l0), &uv, -along);
+        m.polygon(&at(l1), &uv, along);
+        for i in 0..prof.len() {
+            let (p, q) = (prof[i], prof[(i + 1) % prof.len()]);
+            // Наружу от сечения — перпендикуляр к ребру; снизу кладка стоит на стене, там граней нет.
+            let e = Vec2::new(q.0 - p.0, q.1 - p.1);
+            if e.length() < 1e-4 || (p.1 == q.1 && e.x > 0.0) {
+                continue;
+            }
+            let n = w(0.0, -e.x, e.y) - w(0.0, 0.0, 0.0);
+            let len = e.length();
+            m.quad_uv([w(l0, p.1, p.0), w(l1, p.1, p.0), w(l1, q.1, q.0), w(l0, q.1, q.0)], [Vec2::ZERO, Vec2::new(l1 - l0, 0.0), Vec2::new(l1 - l0, len), Vec2::new(0.0, len)], n);
+        }
+    };
+    let (a0, a1) = if high.along_x() { (r.x0, r.x1) } else { (r.z0, r.z1) };
+    // Высокая стена: трапеция от её верха до ската.
+    if t > 0.0 && top(t) > wall_top + 0.005 {
+        prism(m, a0, a1, &[(0.0, wall_top), (t, wall_top), (t, top(t)), (0.0, top(0.0))]);
+    }
+    // Торцы: треугольник от высокой стены до места, где скат садится на стену (у самого низа —
+    // трапеция, если стена торца ниже низкого края крыши).
+    for &(l0, l1, y0) in ends {
+        let s_end = ((top(0.0) - y0) / slope).min(span);
+        if s_end <= t + 0.01 || top(t) <= y0 + 0.005 {
+            continue;
+        }
+        let prof: Vec<(f32, f32)> = if top(s_end) > y0 + 0.005 { vec![(t, y0), (s_end, y0), (s_end, top(s_end)), (t, top(t))] } else { vec![(t, y0), (s_end, y0), (t, top(t))] };
+        prism(m, l0, l1, &prof);
+    }
 }
 
 /// Треугольный кусок кладки под односкатной крышей на торце крыла.

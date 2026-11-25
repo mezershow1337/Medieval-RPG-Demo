@@ -380,6 +380,8 @@ fn kleros(b: &mut Builder) {
         kit::wall_z(t, h.z0 + 0.6, h.z1, h.x0 + 0.3, 0.6, 3.2, &[], Mat::Rubble);
         kit::wall_z(t, h.z0 + 0.6, h.z1, 15.0, 0.5, 3.2, &[], Mat::Rubble);
         kit::lean_roof(t, Rect::new(h.x0, h.z0, h.x1 + 0.6, h.z1 + 0.6), kit::Side::S, 4.0, 3.2, 0.5);
+        // Высокий край — над оградой двора: ограда и торцы доведены до черепицы.
+        kit::lean_fill(t, Rect::new(h.x0, h.z0, h.x1 + 0.6, h.z1 + 0.6), kit::Side::S, 4.0, 3.2, 0.6, 2.2, &[(h.x0, h.x0 + 0.6, 3.2), (h.x1, h.x1 + 0.6, 2.2)], Mat::Rubble);
         kit::hearth(t, Vec3::new(10.5, 0.0, 13.6));
         kit::bed(t, Rect::new(12.6, 13.4, 14.5, 14.6));
         kit::loom(t, Vec3::new(18.0, 0.0, 14.4), true);
