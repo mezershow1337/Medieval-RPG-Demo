@@ -1234,18 +1234,13 @@ pub fn blade_hits_body(hilt: Vec3, tip: Vec3, target: &Pose) -> Option<Vec3> {
     Some(best)
 }
 
-/// Есть ли прямая видимость (без стен) между точками.
+/// Есть ли прямая видимость (без стен) между точками: точки через каждые 15 см не в твёрдом.
+/// Зовут враги (каждый кадр на каждую цель), стрелы, удары и сундуки — поэтому коробки около
+/// отрезка перебираются один раз на весь отрезок (см. [`LevelColliders::samples_hit_solid`]).
 pub fn line_of_sight(level: &LevelColliders, from: Vec3, to: Vec3) -> bool {
-    let d = to - from;
-    let len = d.length();
+    let len = (to - from).length();
     let steps = (len / 0.15).ceil().max(1.0) as usize;
-    for i in 1..steps {
-        let p = from + d * (i as f32 / steps as f32);
-        if level.point_solid(p) {
-            return false;
-        }
-    }
-    true
+    !level.samples_hit_solid(from, to, steps)
 }
 
 /// Отрезок клинка в стойке парирования (мир).

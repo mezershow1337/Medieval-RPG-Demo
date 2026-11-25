@@ -305,6 +305,7 @@ pub struct Bed {
     pub along: Vec3,
 }
 
+#[derive(Clone)]
 pub struct Layout {
     /// Постели (на них жители спят ночью, больные лежат в ксеноне).
     pub beds: Vec<Bed>,
@@ -494,7 +495,7 @@ impl EstateCatalog {
 /// Усадьбы и переключаемые группы активного уровня.
 pub fn estates() -> &'static EstateCatalog {
     static CAT: std::sync::OnceLock<EstateCatalog> = std::sync::OnceLock::new();
-    CAT.get_or_init(|| EstateCatalog::from_layout(&layout()))
+    CAT.get_or_init(|| EstateCatalog::from_layout(shared()))
 }
 
 /// Рабочее место кузнеца: где огонь и где стоять у наковальни.
@@ -1046,29 +1047,121 @@ pub fn active() -> LevelKind {
     })
 }
 
-/// Полная раскладка активного уровня.
-pub fn layout() -> Layout {
-    // Раскладку города строят многие системы запуска (сервер, клиент, карта, звук, жители),
-    // и Bevy запускает их параллельно. Каждая сборка — сотни мегабайт геометрии, поэтому
-    // строим по одной: пик памяти — одна раскладка, а не пять сразу.
-    static BUILDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _one = BUILDING.lock().unwrap_or_else(|e| e.into_inner());
-    match active() {
+// ---------------------------------------------------------------------------------------------
+// Одна раскладка на процесс
+// ---------------------------------------------------------------------------------------------
+//
+// Раскладку берут сервер, клиент, звук, карта, жители, усадьбы, горны и очаги. Раньше каждый
+// строил город заново (около десяти раз при запуске хоста, по очереди), теперь он строится
+// один раз: первый, кто попросил, строит, остальные ждут готовую.
+//
+// Декоративные меши (сотни мегабайт вершин) нужны только клиенту при запуске: уровень,
+// звук и карта читают их и отпускают ([`release_meshes`]). Остальное держим до выхода.
+
+/// Раскладка без декоративных мешей (`decor` пуст): коробки, двери, жители, сундуки и прочее.
+static CORE: std::sync::OnceLock<Layout> = std::sync::OnceLock::new();
+/// Полная раскладка с мешами — пока клиент не отпустит её после запуска.
+static FULL: std::sync::Mutex<Option<std::sync::Arc<Layout>>> = std::sync::Mutex::new(None);
+/// Держать ли меши после постройки (клиенту нужны, выделенному серверу — нет).
+static KEEP_MESHES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(cfg!(test));
+
+fn build_active() -> Layout {
+    let started = std::time::Instant::now();
+    let layout = match active() {
         LevelKind::Chersonesus => city::city_layout(),
         LevelKind::Castle => castle::castle_layout(),
+    };
+    info!("Уровень построен за {:.2} с", started.elapsed().as_secs_f32());
+    layout
+}
+
+/// Клиент: меши уровня понадобятся (нарисовать город, звук, карта) — не выбрасывать их сразу.
+pub fn keep_meshes() {
+    KEEP_MESHES.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Начать строить уровень в фоне, пока запускается остальное (окно, видеокарта, текстуры).
+pub fn prebuild() {
+    let _ = std::thread::Builder::new().name("level".into()).stack_size(16 * 1024 * 1024).spawn(|| {
+        shared();
+    });
+}
+
+/// Общая раскладка активного уровня без декоративных мешей (строится при первом вызове).
+pub fn shared() -> &'static Layout {
+    CORE.get_or_init(|| {
+        let mut full = build_active();
+        let decor = std::mem::take(&mut full.decor);
+        let core = full.clone();
+        if KEEP_MESHES.load(std::sync::atomic::Ordering::Relaxed) {
+            full.decor = decor;
+            *FULL.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::sync::Arc::new(full));
+        }
+        core
+    })
+}
+
+/// Общая полная раскладка (с мешами). Если меши уже отпущены — строит заново (долго).
+pub fn shared_full() -> std::sync::Arc<Layout> {
+    shared();
+    if let Some(full) = FULL.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        return full.clone();
+    }
+    warn!("Меши уровня уже отпущены — строим уровень ещё раз");
+    std::sync::Arc::new(build_active())
+}
+
+/// Меши уровня больше никому не нужны: отпустить их, как только последний читатель закончит.
+/// Возвращает true, когда отпущены (или их и не было).
+pub fn release_meshes() -> bool {
+    let mut full = FULL.lock().unwrap_or_else(|e| e.into_inner());
+    if full.as_ref().is_some_and(|f| std::sync::Arc::strong_count(f) > 1) {
+        return false;
+    }
+    if full.take().is_some() {
+        info!("Меши уровня отпущены");
+    }
+    true
+}
+
+/// Клиент: отпускает меши уровня, когда город нарисован, а звук и карта прочитали их.
+pub fn release_meshes_after_start(mut done: Local<bool>) {
+    if !*done {
+        *done = release_meshes();
     }
 }
 
-/// Коллизии из раскладки.
+/// Клиент: коллизии уровня (ресурс [`LevelColliders`]). Ставятся в `finish` — после того как
+/// `GraphicsPlugin::finish` загрузит фотоматериалы: город тем временем строится в фоне ([`prebuild`]).
+pub struct LevelCollidersPlugin;
+
+impl Plugin for LevelCollidersPlugin {
+    fn build(&self, _app: &mut App) {}
+
+    fn finish(&self, app: &mut App) {
+        app.insert_resource(level_colliders());
+    }
+}
+
+/// Полная раскладка активного уровня (своя копия, с мешами).
+pub fn layout() -> Layout {
+    (*shared_full()).clone()
+}
+
 /// Коллайдеры Херсонеса (для тестов других модулей: торговцы, лотки).
 #[cfg(test)]
 pub fn city_colliders() -> LevelColliders {
-    colliders(city::city_layout())
+    match active() {
+        LevelKind::Chersonesus => colliders(shared()),
+        LevelKind::Castle => colliders(city::city_layout()),
+    }
 }
 
-pub fn colliders(layout: Layout) -> LevelColliders {
+/// Коллизии из раскладки. Принимает и свою раскладку, и общую (`&Layout`).
+pub fn colliders(layout: impl std::borrow::Borrow<Layout>) -> LevelColliders {
+    let layout = layout.borrow();
     let mut boxes: Vec<Aabb> = layout.blocks.iter().filter(|b| b.solid).map(|b| b.aabb).collect();
-    boxes.extend(layout.invisible);
+    boxes.extend(layout.invisible.iter().copied());
     let doors = layout.doors.iter().map(|d| (d.closed_box(), d.open)).collect();
     let bodies = layout.residents.iter().map(Resident::body).collect();
     let mut switches = Vec::new();
@@ -1077,7 +1170,7 @@ pub fn colliders(layout: Layout) -> LevelColliders {
         switches.extend(group.invisible.iter().map(|a| (*a, g as u32)));
     }
     let groups = layout.switches.len();
-    let level = LevelColliders::with_switches(boxes, layout.ground, doors, bodies, switches, groups);
+    let level = LevelColliders::with_switches(boxes, layout.ground.clone(), doors, bodies, switches, groups);
     // Пока мир не загружен — пепелища на всех стройплощадках.
     for (g, group) in layout.switches.iter().enumerate() {
         if matches!(group.key, SwitchKey::Site { stage: 0, .. }) {
@@ -1088,7 +1181,7 @@ pub fn colliders(layout: Layout) -> LevelColliders {
 }
 
 pub fn level_colliders() -> LevelColliders {
-    colliders(layout())
+    colliders(shared())
 }
 
 /// Точки появления игроков.
@@ -1119,18 +1212,20 @@ pub fn spawn_level(
     mut smoke_mats: ResMut<Assets<crate::smoke::SmokeMaterial>>,
     mut window_mats: ResMut<Assets<StandardMaterial>>,
 ) {
-    let mut layout = layout();
-    commands.insert_resource(crate::vegetation::PendingPlants(std::mem::take(&mut layout.plants)));
+    let layout = shared_full();
+    commands.insert_resource(crate::vegetation::PendingPlants(layout.plants.clone()));
+    // Меши общей раскладки ещё читают звук и карта: берём свою копию.
+    let mut decor = layout.decor.clone();
 
     // Все коробки и декор одного материала на одном участке — в один меш.
     for block in &layout.blocks {
         let size = block.aabb.max - block.aabb.min;
         // Огромные плиты (пол на весь мир) — отдельно, иначе их участок будет виден всегда.
         let chunk = if size.x > CHUNK * 2.0 || size.z > CHUNK * 2.0 { (i16::MAX, i16::MAX) } else { chunk_of((block.aabb.min + block.aabb.max) / 2.0) };
-        layout.decor.entry((block.mat, chunk)).or_default().cuboid(block.aabb.min, block.aabb.max);
+        decor.entry((block.mat, chunk)).or_default().cuboid(block.aabb.min, block.aabb.max);
     }
     if let Some(ground) = &layout.ground {
-        terrain::terrain_meshes(ground, &mut layout.decor);
+        terrain::terrain_meshes(ground, &mut decor);
     }
     // Море — свой материал (отражения неба, солнечная дорожка, пена у берега).
     if let Some(y) = layout.water_y {
@@ -1141,11 +1236,11 @@ pub fn spawn_level(
         commands.spawn((Mesh3d(meshes.add(mb.build())), MeshMaterial3d(mat), Transform::IDENTITY, NotShadowCaster));
     }
     // Дым из очагов и горнов: над крышей, если очаг под черепицей.
-    let roofs: Vec<[Vec3; 3]> = layout.decor.iter().filter(|((m, _), _)| *m == Mat::Tile).flat_map(|(_, mb)| mb.triangles()).collect();
+    let roofs: Vec<[Vec3; 3]> = decor.iter().filter(|((m, _), _)| *m == Mat::Tile).flat_map(|(_, mb)| mb.triangles()).collect();
     let forges: Vec<Vec3> = layout.forges.iter().map(|f| f.fire).collect();
     let smoke = crate::smoke::smoke_sources(&layout.hearths, &forges, &roofs);
     crate::smoke::spawn_smoke(&mut commands, &mut meshes, &mut smoke_mats, &smoke);
-    let mut decor: Vec<((Mat, Chunk), MeshBuilder)> = layout.decor.into_iter().collect();
+    let mut decor: Vec<((Mat, Chunk), MeshBuilder)> = decor.into_iter().collect();
     decor.sort_by_key(|(k, _)| *k);
     let mut materials: HashMap<Mat, Handle<crate::graphics::SurfaceMaterial>> = HashMap::new();
     for ((mat, _chunk), mb) in decor {

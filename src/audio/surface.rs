@@ -212,11 +212,12 @@ impl Surfaces {
 pub fn start_building(mut commands: Commands) {
     let slot = Surfaces::default();
     let target = slot.0.clone();
+    // Раскладку берём здесь, а не в потоке: пока поток её держит, меши уровня не отпустят.
+    let layout = crate::level::shared_full();
     std::thread::Builder::new()
         .name("audio-surfaces".into())
         .stack_size(16 * 1024 * 1024)
         .spawn(move || {
-            let layout = crate::level::layout();
             let _ = target.set(SurfaceMap::build(&layout));
         })
         .ok();
