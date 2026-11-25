@@ -342,12 +342,20 @@ fn update_work_hud(
     mut parts: Query<(&Part, &mut Node, Option<&mut Text>, Option<&mut TextColor>, Option<&mut BackgroundColor>), (Without<WorkHud>, Without<GaugeBox>)>,
 ) {
     let _ = knowledge;
+    // Без работы шкала спрятана — и узел не трогаем, иначе интерфейс раскладывается каждый кадр.
     let Some(m) = work.meter.as_ref() else {
-        hud.display = Display::None;
+        if hud.display != Display::None {
+            hud.display = Display::None;
+        }
         return;
     };
-    hud.display = Display::Flex;
-    gauge_box.display = if m.drill.tablet() { Display::None } else { Display::Flex };
+    if hud.display != Display::Flex {
+        hud.display = Display::Flex;
+    }
+    let shown = if m.drill.tablet() { Display::None } else { Display::Flex };
+    if gauge_box.display != shown {
+        gauge_box.display = shown;
+    }
     let (w, h) = (GAUGE_W, GAUGE_H);
     let (cx, cy) = (w / 2.0, h / 2.0);
     // Кольцо для кругов: радиус 0.9 по шкале.

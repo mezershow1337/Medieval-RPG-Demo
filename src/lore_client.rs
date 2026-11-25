@@ -337,12 +337,25 @@ fn spawn_master(commands: &mut Commands, m: &MasterView) -> Entity {
         .id()
 }
 
-/// Мастера на местах дышат, переминаются и объясняют что-то руками.
-fn pose_masters(time: Res<Time>, masters: Query<(&MasterBody, &Children)>, mut poses: Query<&mut crate::rig::RigPose>) {
+/// Мастера на местах дышат, переминаются и объясняют что-то руками. Дальних обновляем реже,
+/// ушедших домой (их не видно) — не обновляем вовсе.
+fn pose_masters(
+    time: Res<Time>,
+    camera: Query<&GlobalTransform, With<PlayerCamera>>,
+    masters: Query<(&MasterBody, &GlobalTransform, &Visibility, &Children)>,
+    mut poses: Query<&mut crate::rig::RigPose>,
+    mut frame: Local<u32>,
+) {
     let t = time.elapsed_secs();
-    for (m, children) in &masters {
+    *frame = frame.wrapping_add(1);
+    let eye = camera.single().ok().map(GlobalTransform::translation);
+    for (i, (m, gt, vis, children)) in masters.iter().enumerate() {
+        let due = *vis != Visibility::Hidden && crate::trade_client::idle_pose_due(*frame, i, eye, gt.translation());
         for child in children.iter() {
             if let Ok(mut pose) = poses.get_mut(child) {
+                if !due && !pose.is_added() {
+                    continue;
+                }
                 let phase = m.0 as u32 as f32 * 0.37;
                 *pose = crate::rig::solve_pose(&crate::life_client::teacher_pose(t, phase)).pose;
             }

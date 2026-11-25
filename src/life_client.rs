@@ -864,15 +864,18 @@ fn rain(
     let r = m.filter(|_| crate::level::active() == crate::level::LevelKind::Chersonesus).map_or(0.0, |m| m.rain);
     let Some(cam) = camera.iter().find(|(c, _)| c.is_active).map(|(_, t)| t.translation()) else { return };
     let want = if r > 0.02 { Visibility::Inherited } else { Visibility::Hidden };
-    if let Some(look) = look
-        && let Some(mut mat) = mats.get_mut(&look.0)
-    {
+    if let Some(look) = look {
         // Струи светятся сами (unlit): ночью они лишь чуть светлее тьмы.
         let day = m.map_or(1.0, |md| md.dayness.max(1.0 - md.night));
         let lit = 0.16 + 0.66 * day;
         let c = Color::srgba(0.95 * lit, lit, (1.07 * lit).min(1.0), 0.75 * r);
-        let old = mat.base_color.to_srgba();
-        if (old.red - c.to_srgba().red).abs() + (old.alpha - c.alpha()).abs() > 0.01 {
+        // `get_mut` сам по себе помечает материал изменённым — и он заново уходит в видеокарту
+        // каждый кадр, даже в ясную погоду. Поэтому сначала смотрим, а правим только при смене.
+        let stale = mats.get(&look.0).is_some_and(|mat| {
+            let old = mat.base_color.to_srgba();
+            (old.red - c.to_srgba().red).abs() + (old.alpha - c.alpha()).abs() > 0.01
+        });
+        if stale && let Some(mut mat) = mats.get_mut(&look.0) {
             mat.base_color = c;
         }
     }
@@ -884,6 +887,10 @@ fn rain(
     for (b, mut tf, mut vis) in &mut boxes {
         if *vis != want {
             *vis = want;
+        }
+        // Без дождя коробки спрятаны: двигать их за камерой незачем.
+        if want == Visibility::Hidden {
+            continue;
         }
         tf.rotation = tilt;
         tf.translation = cam + tilt * Vec3::new(0.0, -4.0 - fall + b.0 * RAIN_H, 0.0);

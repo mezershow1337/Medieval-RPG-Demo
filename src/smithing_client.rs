@@ -1195,22 +1195,26 @@ fn update_live(state: Res<SmithState>, knowledge: Res<MyKnowledge>, mut nodes: Q
                 }
             }
             Live::Sweet => {
+                // Ширина «хорошего удара» меняется только с навыком — не раскладываем окно зря.
                 if let Some(mut n) = node {
                     let w = sweet_width(skill) * 0.5 * 48.0;
-                    n.left = percent(50.0 - w);
-                    n.width = percent(w * 2.0);
+                    let (left, width) = (percent(50.0 - w), percent(w * 2.0));
+                    if n.left != left || n.width != width {
+                        n.left = left;
+                        n.width = width;
+                    }
                 }
             }
             Live::HeatSwatch => {
                 if let Some(mut b) = bg {
                     // Закалённая и зачищенная сталь при отпуске — цвета побежалости.
-                    b.0 = match job {
+                    b.set_if_neq(BackgroundColor(match job {
                         Some(Job::Forge(f)) if f.quenched && f.temp < 400.0 => {
                             let (c, _) = temper_color(f.temper.max(f.temp));
                             Color::srgb(c[0], c[1], c[2])
                         }
                         _ => col,
-                    };
+                    }));
                 }
             }
             Live::HeatText => {
@@ -1255,15 +1259,21 @@ fn update_live(state: Res<SmithState>, knowledge: Res<MyKnowledge>, mut nodes: Q
                         Some(Job::Soak(s)) => s.blast,
                         _ => blast,
                     };
-                    n.width = percent(b * 100.0);
+                    let w = percent(b * 100.0);
+                    if n.width != w {
+                        n.width = w;
+                    }
                 }
             }
             Live::SegFill(i) => {
                 if let (Some(mut n), Some(Job::Forge(f))) = (node, job) {
                     let s = f.shape.get(*i as usize).copied().unwrap_or(0.0);
-                    n.height = percent((s / 1.3 * 100.0).clamp(2.0, 100.0));
+                    let h = percent((s / 1.3 * 100.0).clamp(2.0, 100.0));
+                    if n.height != h {
+                        n.height = h;
+                    }
                     if let Some(mut b) = bg {
-                        b.0 = if temp > 480.0 { col } else { Color::srgb(0.32, 0.31, 0.3) };
+                        b.set_if_neq(BackgroundColor(if temp > 480.0 { col } else { Color::srgb(0.32, 0.31, 0.3) }));
                     }
                 }
             }
@@ -1275,7 +1285,7 @@ fn update_live(state: Res<SmithState>, knowledge: Res<MyKnowledge>, mut nodes: Q
                         t.0 = v;
                     }
                     if let Some(mut c) = tc {
-                        c.0 = if s > 1.2 { BAD } else { TEXT };
+                        c.set_if_neq(TextColor(if s > 1.2 { BAD } else { TEXT }));
                     }
                 }
             }
@@ -1322,7 +1332,10 @@ fn update_live(state: Res<SmithState>, knowledge: Res<MyKnowledge>, mut nodes: Q
                         Some(Job::Repair { progress, .. }) | Some(Job::Fletch { progress, .. }) => *progress,
                         _ => 0.0,
                     };
-                    n.width = percent(v.clamp(0.0, 1.0) * 100.0);
+                    let w = percent(v.clamp(0.0, 1.0) * 100.0);
+                    if n.width != w {
+                        n.width = w;
+                    }
                 }
             }
         }

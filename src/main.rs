@@ -91,6 +91,7 @@ mod smithing_net;
 mod smithing_server;
 mod sky;
 mod smoke;
+mod static_bounds;
 mod surface_layers;
 mod textures;
 mod towns;

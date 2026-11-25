@@ -586,32 +586,45 @@ fn layout_map(
     mut loading: Single<&mut Visibility, (With<MapLoading>, Without<MapRoot>, Without<MapImage>, Without<MapLabel>)>,
     mut labels: Query<(&MapLabel, &mut Node, &mut Visibility), (Without<MapViewport>, Without<MapImage>, Without<MapRoot>, Without<MapLoading>)>,
 ) {
-    **root = if view.open { Visibility::Inherited } else { Visibility::Hidden };
+    // Закрытая карта — сотни подписей под корнем: если каждый кадр «менять» его видимость,
+    // Bevy каждый кадр заново разносит её по всем потомкам. Пишем только при смене.
+    root.set_if_neq(if view.open { Visibility::Inherited } else { Visibility::Hidden });
     if !view.open {
         return;
     }
     // Окно карты — квадрат, сколько позволяет экран (место под заголовок и подсказку).
     let side = (window.width() * 0.9 - 70.0).min(window.height() - 190.0).max(240.0).floor();
-    view.side = side;
+    if view.side != side {
+        view.side = side;
+    }
     let (vp_node, vp_computed, vp_tf) = &mut *viewport;
-    vp_node.width = px(side + 2.0 * MAP_BORDER);
-    vp_node.height = px(side + 2.0 * MAP_BORDER);
-    view.screen_center = vp_tf.translation * vp_computed.inverse_scale_factor();
+    let vp = px(side + 2.0 * MAP_BORDER);
+    if vp_node.width != vp || vp_node.height != vp {
+        vp_node.width = vp;
+        vp_node.height = vp;
+    }
+    let screen_center = vp_tf.translation * vp_computed.inverse_scale_factor();
+    if view.screen_center != screen_center {
+        view.screen_center = screen_center;
+    }
     let (Some(handle), Some(bounds)) = (&sheet.image, sheet.bounds) else {
-        **loading = Visibility::Inherited;
+        loading.set_if_neq(Visibility::Inherited);
         return;
     };
-    **loading = Visibility::Hidden;
+    loading.set_if_neq(Visibility::Hidden);
     let (node, img, vis) = &mut *image;
     if img.image != *handle {
         img.image = handle.clone();
     }
-    **vis = Visibility::Inherited;
+    vis.set_if_neq(Visibility::Inherited);
     let full = side * view.zoom;
-    node.width = px(full);
-    node.height = px(full);
-    node.left = px(side / 2.0 - view.center.x * full);
-    node.top = px(side / 2.0 - view.center.y * full);
+    let (size, left, top) = (px(full), px(side / 2.0 - view.center.x * full), px(side / 2.0 - view.center.y * full));
+    if node.width != size || node.height != size || node.left != left || node.top != top {
+        node.width = size;
+        node.height = size;
+        node.left = left;
+        node.top = top;
+    }
     // Подписи по важности; та, что налезла бы на уже поставленную, прячется (до приближения).
     let mut placed: Vec<Rect> = view.occupied.clone();
     let mut sorted: Vec<_> = labels.iter_mut().collect();
@@ -627,9 +640,13 @@ fn layout_map(
         if show {
             placed.push(rect);
         }
-        *vis = if show { Visibility::Inherited } else { Visibility::Hidden };
-        node.left = px(p.x - label.half_w);
-        node.top = px(p.y + 6.0);
+        vis.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
+        // Только при смене: карта стоит — подписи не раскладываются заново.
+        let (left, top) = (px(p.x - label.half_w), px(p.y + 6.0));
+        if node.left != left || node.top != top {
+            node.left = left;
+            node.top = top;
+        }
     }
 }
 
@@ -746,15 +763,23 @@ fn update_map_markers(
         let uv = bounds.to_uv(m.pos.x, m.pos.z);
         let p = (uv - view.center) * full + view.side / 2.0;
         if let Ok(mut node) = nodes.get_mut(entity) {
-            node.left = px(p.x - size / 2.0);
-            node.top = px(p.y - size / 2.0);
+            let (left, top) = (px(p.x - size / 2.0), px(p.y - size / 2.0));
+            if node.left != left || node.top != top {
+                node.left = left;
+                node.top = top;
+            }
         }
         if let Some(&icon) = kids.first()
             && let Ok((mut img, mut tf)) = icons.get_mut(icon)
         {
-            img.color = m.color;
+            if img.color != m.color {
+                img.color = m.color;
+            }
             // Стрелка смотрит туда же, куда игрок: вперёд — (−sin yaw, −cos yaw) по X/Z, север вверху.
-            tf.rotation = Rot2::radians(-m.yaw.unwrap_or(0.0));
+            let rot = Rot2::radians(-m.yaw.unwrap_or(0.0));
+            if tf.rotation != rot {
+                tf.rotation = rot;
+            }
         }
         // Подпись справа от значка; если налезает на подпись соседа (стоят рядом) — ниже.
         let est = Vec2::new(m.label.chars().count() as f32 * 15.0 * 0.55, 18.0);
@@ -767,13 +792,16 @@ fn update_map_markers(
         occupied.push(label_rect(dy));
         if let Some(&label) = kids.get(1) {
             if let Ok(mut n) = nodes.get_mut(label) {
-                n.top = px(size / 2.0 - 10.0 + dy);
+                let top = px(size / 2.0 - 10.0 + dy);
+                if n.top != top {
+                    n.top = top;
+                }
             }
             if let Ok((mut t, mut c)) = texts.get_mut(label) {
                 if t.0 != m.label {
                     t.0 = m.label.clone();
                 }
-                c.0 = m.color.mix(&INK, 0.35);
+                c.set_if_neq(TextColor(m.color.mix(&INK, 0.35)));
             }
         }
     }
@@ -834,17 +862,22 @@ fn update_name_tags(
         let in_range = is_mark || dist < TAG_RANGE;
         match cam.world_to_viewport(cam_t, head) {
             Ok(p) if in_range && !view.open && (head - eye).dot(*cam_t.forward()) > 0.0 => {
-                *vis = Visibility::Inherited;
-                node.left = px(p.x - 120.0);
-                node.top = px(p.y - 22.0);
+                vis.set_if_neq(Visibility::Inherited);
+                let (left, top) = (px(p.x - 120.0), px(p.y - 22.0));
+                if node.left != left || node.top != top {
+                    node.left = left;
+                    node.top = top;
+                }
                 let s = if is_mark || dist > 25.0 { format!("{}  ·  {:.0} м", m.label, dist) } else { m.label.clone() };
                 if t.0 != s {
                     t.0 = s;
                 }
                 // Цвет игрока, высветленный, чтобы читался на фоне неба и камня.
-                c.0 = m.color.mix(&Color::WHITE, 0.45);
+                c.set_if_neq(TextColor(m.color.mix(&Color::WHITE, 0.45)));
             }
-            _ => *vis = Visibility::Hidden,
+            _ => {
+                vis.set_if_neq(Visibility::Hidden);
+            }
         }
     }
 }

@@ -24,8 +24,13 @@ pub enum TimeOfDay {
 }
 
 pub fn time_of_day() -> TimeOfDay {
-    let m = crate::graphics::mood();
-    let y = m.sun.normalize_or_zero().y;
+    time_of_day_of(&crate::graphics::mood())
+}
+
+/// Время суток по нынешнему свету: высота самого солнца (`sun_sky`; главный свет `sun`
+/// ночью — луна, она бывает высоко над горизонтом).
+pub fn time_of_day_of(m: &crate::graphics::Mood) -> TimeOfDay {
+    let y = m.sun_sky.normalize_or_zero().y;
     if y > 0.35 {
         TimeOfDay::Day
     } else if y > -0.05 {
@@ -51,15 +56,16 @@ pub struct Scene {
     pub(super) target: [f32; 6],
 }
 
-fn sense_scene(time: Res<Time>, ears: Res<Ears>, surfaces: Res<Surfaces>, mut scene: ResMut<Scene>) {
+fn sense_scene(time: Res<Time>, ears: Res<Ears>, surfaces: Res<Surfaces>, mood: Option<Res<crate::daylight::CurrentMood>>, mut scene: ResMut<Scene>) {
     if !ears.valid {
         return;
     }
     let now = time.elapsed_secs();
-    let tod = *scene.time.get_or_insert_with(time_of_day);
-    let _ = tod;
     if now >= scene.next {
         scene.next = now + 0.3;
+        // Время суток — по часам мира (свет считает `daylight`), а не раз навсегда при входе:
+        // раньше ночные сверчки и ночная музыка так и не включались, днём оставалось утро.
+        scene.time = Some(mood.as_ref().map_or_else(time_of_day, |m| time_of_day_of(&m.0)));
         let p = ears.pos;
         let mut t = [0.0f32; 6];
         if let Some(map) = surfaces.get() {
@@ -278,5 +284,19 @@ mod tests {
         for (name, _) in t {
             assert!(super::super::bank_gen::AMBIENT.contains(&name), "нет петли {name}");
         }
+    }
+
+    #[test]
+    fn time_of_day_follows_the_clock() {
+        use crate::graphics::mood_at;
+        use crate::world_clock::DAY;
+        let at = |h: f64| time_of_day_of(&mood_at(DAY * 2.0 + h * 3600.0));
+        assert_eq!(at(13.0), TimeOfDay::Day);
+        // Ночью главный свет — луна, но ночь остаётся ночью.
+        assert_eq!(at(0.5), TimeOfDay::Night);
+        assert_eq!(at(3.0), TimeOfDay::Night);
+        // За сутки — и вечер (сумерки).
+        let hours: Vec<TimeOfDay> = (0..96).map(|q| at(q as f64 / 4.0)).collect();
+        assert!(hours.contains(&TimeOfDay::Evening));
     }
 }

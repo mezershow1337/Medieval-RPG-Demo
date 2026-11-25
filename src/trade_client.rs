@@ -483,18 +483,46 @@ fn aim_merchants(
     }
 }
 
+/// Через сколько кадров обновлять позу стоящего на месте человека (торговец, мастер) на таком
+/// расстоянии от камеры. Поза — расчёт всего скелета и 15 суставов к перерисовке; вдали
+/// разницы не видно, а таких людей в городе полсотни (как у жителей в `life_client`).
+pub(crate) fn idle_pose_every(dist: f32) -> u32 {
+    match dist {
+        d if d < 22.0 => 1,
+        d if d < 40.0 => 2,
+        d if d < 70.0 => 4,
+        d if d < 120.0 => 8,
+        _ => 16,
+    }
+}
+
+/// Пора ли обновить позу `i`-го человека в кадре `frame` (дальних — по очереди, не всех разом).
+pub(crate) fn idle_pose_due(frame: u32, i: usize, eye: Option<Vec3>, at: Vec3) -> bool {
+    let every = eye.map_or(1, |e| idle_pose_every(e.distance(at)));
+    frame.wrapping_add(i as u32).is_multiple_of(every)
+}
+
 /// Торговцы дышат, переминаются и время от времени поправляют товар.
 fn idle_merchants(
     time: Res<Time>,
-    npcs: Query<(&MerchantNpc, &Children)>,
+    camera: Query<&GlobalTransform, With<PlayerCamera>>,
+    npcs: Query<(&MerchantNpc, &GlobalTransform, &Children)>,
     mut poses: Query<&mut RigPose>,
+    mut frame: Local<u32>,
 ) {
     let t = time.elapsed_secs();
-    for (npc, children) in &npcs {
+    *frame = frame.wrapping_add(1);
+    let eye = camera.single().ok().map(GlobalTransform::translation);
+    for (i, (npc, gt, children)) in npcs.iter().enumerate() {
+        let due = idle_pose_due(*frame, i, eye, gt.translation());
         for child in children.iter() {
             let Ok(mut pose) = poses.get_mut(child) else {
                 continue;
             };
+            // Только что одетый (скелет появился) — позу сразу, остальных — по очереди.
+            if !due && !pose.is_added() {
+                continue;
+            }
             let solved = crate::rig::solve_pose(&crate::life_client::merchant_pose(t, npc.phase));
             *pose = solved.pose;
         }
@@ -656,5 +684,32 @@ fn update_trade_hud(
             }
         }
         None => bar.display = Display::None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn idle_poses_thin_out_with_distance() {
+        // Рядом — каждый кадр, дальше — реже, и никогда не реже раза в 16 кадров.
+        let mut last = 1;
+        for d in [0.0, 10.0, 25.0, 45.0, 80.0, 150.0, 900.0] {
+            let every = idle_pose_every(d);
+            assert!(every >= last && every <= 16, "{d} м: раз в {every}");
+            last = every;
+        }
+        assert_eq!(idle_pose_every(5.0), 1);
+        // Дальние обновляются по очереди: за 16 кадров каждый ровно раз, а не все в один кадр.
+        let eye = Some(Vec3::ZERO);
+        let far = Vec3::new(300.0, 0.0, 0.0);
+        for i in 0..5 {
+            assert_eq!((0..16).filter(|f| idle_pose_due(*f, i, eye, far)).count(), 1);
+        }
+        let first: Vec<u32> = (0..5).map(|i| (0..16).find(|f| idle_pose_due(*f, i, eye, far)).unwrap()).collect();
+        assert!(first.windows(2).all(|w| w[0] != w[1]), "{first:?}");
+        // Без камеры (ещё не вошли) — как вблизи.
+        assert!((0..3).all(|f| idle_pose_due(f, 0, None, far)));
     }
 }
