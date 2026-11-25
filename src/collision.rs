@@ -315,6 +315,57 @@ impl LevelColliders {
         self.near(a).any(|c| p.cmpgt(c.min).all() && p.cmplt(c.max).all())
     }
 
+    /// Попадает ли в твёрдое (стену или землю) хоть одна из точек `from + (to - from) * (i / steps)`,
+    /// i = 1..steps-1 (концы не считаются). Ответ тот же, что у [`LevelColliders::point_solid`] в каждой
+    /// точке, но коробки около отрезка перебираются один раз, а не для каждой точки.
+    pub fn samples_hit_solid(&self, from: Vec3, to: Vec3, steps: usize) -> bool {
+        if steps < 2 {
+            return false;
+        }
+        let d = to - from;
+        let at = |i: usize| from + d * (i as f32 / steps as f32);
+        if self.1.ground.is_some() && (1..steps).any(|i| {
+            let p = at(i);
+            p.y < self.ground_height(p.x, p.z)
+        }) {
+            return true;
+        }
+        // Запас: точки, которые проверка внутри коробки сочтёт внутри, точно лежат в коробке,
+        // раздутой на `PAD` (ошибка округления координат — доли миллиметра).
+        const PAD: f32 = 0.01;
+        let seg = Aabb { min: from.min(to) - Vec3::splat(PAD), max: from.max(to) + Vec3::splat(PAD) };
+        let n = steps as f32;
+        self.near(seg).any(|c| {
+            if c.min.cmpge(seg.max).any() || c.max.cmple(seg.min).any() {
+                return false;
+            }
+            // На каком участке отрезка (в долях 0..1) он идёт через раздутую коробку.
+            let (mut t0, mut t1) = (0.0f32, 1.0f32);
+            for a in 0..3 {
+                let (lo, hi) = (c.min[a] - PAD, c.max[a] + PAD);
+                if d[a] == 0.0 {
+                    if from[a] <= lo || from[a] >= hi {
+                        return false;
+                    }
+                    continue;
+                }
+                let (u, v) = ((lo - from[a]) / d[a], (hi - from[a]) / d[a]);
+                t0 = t0.max(u.min(v));
+                t1 = t1.min(u.max(v));
+            }
+            if t0 > t1 {
+                return false;
+            }
+            // Точки этого участка (с запасом в одну) проверяем точно так же, как `point_solid`.
+            let first = ((t0 * n).floor() as usize).max(1);
+            let last = ((t1 * n).ceil() as usize + 1).min(steps - 1);
+            (first..=last).any(|i| {
+                let p = at(i);
+                p.cmpgt(c.min).all() && p.cmplt(c.max).all()
+            })
+        })
+    }
+
     pub fn body_is_free(&self, body: &Body, feet: Vec3) -> bool {
         if feet.y < self.ground_height(feet.x, feet.z) - 0.01 {
             return false;
@@ -466,6 +517,49 @@ mod tests {
         copy.set_door_open(0, true);
         assert!(level.door_open(0), "флаги общие у копий");
         assert!(walk(&level) > 5.0);
+    }
+
+    /// Перебор коробок один раз на отрезок даёт тот же ответ, что проверка каждой точки.
+    #[test]
+    fn segment_samples_match_point_checks() {
+        let level = crate::level::city_colliders();
+        // Часть дверей открыта: открытые створки не мешают ни так, ни так.
+        for id in (0..level.door_count()).step_by(3) {
+            level.set_door_open(id, true);
+        }
+        let mut seed = 0x9E37_79B9u32;
+        let mut rnd = |lo: f32, hi: f32| {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            lo + (hi - lo) * (seed as f32 / u32::MAX as f32)
+        };
+        let (mut hits, mut clear) = (0, 0);
+        for k in 0..20_000 {
+            let mut from = Vec3::new(rnd(-320.0, 320.0), rnd(-2.0, 12.0), rnd(-180.0, 190.0));
+            // И ровно на уровне пола и этажей: точка на грани коробки — не внутри.
+            if k % 7 == 0 {
+                from.y = from.y.round();
+            }
+            let len = if k % 10 == 0 { rnd(30.0, 120.0) } else { rnd(0.0, 25.0) };
+            // Каждый пятый отрезок — строго вдоль оси (там у проверки «внутри» самые тонкие места).
+            let dir = match k % 5 {
+                0 => Vec3::X,
+                1 => Vec3::NEG_Z,
+                _ => Vec3::new(rnd(-1.0, 1.0), rnd(-0.4, 0.4), rnd(-1.0, 1.0)).normalize_or(Vec3::X),
+            };
+            let to = from + dir * len;
+            let steps = ((len / 0.15).ceil().max(1.0)) as usize;
+            let by_points = (1..steps).any(|i| level.point_solid(from + (to - from) * (i as f32 / steps as f32)));
+            assert_eq!(level.samples_hit_solid(from, to, steps), by_points, "{from} -> {to}");
+            if by_points {
+                hits += 1;
+            } else {
+                clear += 1;
+            }
+        }
+        // Проверка осмысленная: есть и отрезки сквозь стены, и чистые.
+        assert!(hits > 2000 && clear > 2000, "сквозь стены {hits}, чистых {clear}");
     }
 
     #[test]

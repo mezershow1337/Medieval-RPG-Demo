@@ -657,7 +657,7 @@ pub fn warm_up() {
         .stack_size(16 * 1024 * 1024)
         .spawn(|| {
             let started = std::time::Instant::now();
-            let town = Town::build(crate::level::layout());
+            let town = Town::build(crate::level::shared().clone());
             info!("Распорядок жителей: город готов за {:.1} с", started.elapsed().as_secs_f32());
             let _ = TOWN.set(town);
         })
@@ -1646,6 +1646,10 @@ impl Fright {
 
     /// Состояние жителя `i` с учётом испуга и отставания.
     pub fn state(&self, plan: &Plan, i: usize, now: f64) -> Option<NpcState> {
+        // Обычно никто не напуган: не ищем каждого из сотен жителей в пустых таблицах.
+        if self.scared.is_empty() && self.lag.is_empty() {
+            return plan.state(now.max(0.0));
+        }
         let lag = self.lag.get(&i).copied().unwrap_or(0.0);
         if let Some(&(from, until)) = self.scared.get(&i)
             && now >= from

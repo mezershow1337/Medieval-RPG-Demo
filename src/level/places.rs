@@ -232,20 +232,17 @@ pub fn staffed_stalls(id: &str) -> usize {
 
 /// Кузнечные и сыродутные горны активного уровня.
 pub fn forges() -> &'static [super::ForgeSpec] {
-    static F: OnceLock<Vec<super::ForgeSpec>> = OnceLock::new();
-    F.get_or_init(|| super::layout().forges)
+    &super::shared().forges
 }
 
 /// Очаги, на которых можно варить (в домах, корчмах, кухне ксенона, станах).
 pub fn hearths() -> &'static [Vec3] {
-    static H: OnceLock<Vec<Vec3>> = OnceLock::new();
-    H.get_or_init(|| super::layout().hearths)
+    &super::shared().hearths
 }
 
 /// Жилые дома горожан активного уровня (номер дома — индекс).
 pub fn houses() -> &'static [super::HouseSpec] {
-    static H: OnceLock<Vec<super::HouseSpec>> = OnceLock::new();
-    H.get_or_init(|| super::layout().houses)
+    &super::shared().houses
 }
 
 /// В чьём доме точка (номер в [`houses`]): для «залез в чужой дом» и краж.

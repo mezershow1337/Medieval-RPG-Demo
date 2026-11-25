@@ -81,12 +81,19 @@ impl ItemIcons {
 }
 
 /// 3D-модели предметов на земле по номеру вида.
+///
+/// Модель грузится, когда её впервые попросили: моделей сотни, у каждой по три картинки 1024²,
+/// а в мире и на людях их нужно от силы несколько десятков. Загрузка всех разом стоила
+/// гигабайт памяти и десяток секунд фоновой работы на старте.
 #[derive(Resource)]
-pub struct ItemModels(pub Vec<Handle<WorldAsset>>);
+pub struct ItemModels {
+    server: AssetServer,
+    models: Vec<std::sync::OnceLock<Handle<WorldAsset>>>,
+}
 
 impl ItemModels {
     pub fn get(&self, base: ItemBaseId) -> Handle<WorldAsset> {
-        self.0[base.0 as usize].clone()
+        self.models[base.0 as usize].get_or_init(|| self.server.load(GltfAssetLabel::Scene(0).from_asset(model_path(art_key(base))))).clone()
     }
 }
 
@@ -104,8 +111,8 @@ pub fn setup_icons(mut commands: Commands, assets: Res<AssetServer>, mut images:
 }
 
 pub fn setup_models(mut commands: Commands, assets: Res<AssetServer>) {
-    let models = (0..ITEM_BASES.len()).map(|i| assets.load(GltfAssetLabel::Scene(0).from_asset(model_path(art_key(ItemBaseId(i as u16)))))).collect();
-    commands.insert_resource(ItemModels(models));
+    let models = (0..ITEM_BASES.len()).map(|_| std::sync::OnceLock::new()).collect();
+    commands.insert_resource(ItemModels { server: assets.clone(), models });
 }
 
 #[cfg(test)]

@@ -74,6 +74,16 @@ impl Frame {
     pub fn side0(&self) -> Side {
         if self.mirror { Side::E } else { Side::W }
     }
+    /// Отрезок u0..u1 (вдоль фасада) в мировых координатах по его оси.
+    pub fn span_u(&self, u0: f32, u1: f32) -> (f32, f32) {
+        let r = self.rect(u0, u1, 0.0, 0.0);
+        if self.front.along_x() { (r.x0, r.x1) } else { (r.z0, r.z1) }
+    }
+    /// Отрезок v0..v1 (вглубь от фасада) в мировых координатах по его оси.
+    pub fn span_v(&self, v0: f32, v1: f32) -> (f32, f32) {
+        let r = self.rect(0.0, 0.0, v0, v1);
+        if self.front.along_x() { (r.z0, r.z1) } else { (r.x0, r.x1) }
+    }
 }
 
 pub fn map_op(o: Op, f: impl Fn(f32) -> f32) -> Op {
@@ -355,12 +365,14 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, m
             m.beam(a, c, 0.08, 0.09, Vec3::Y);
         }
     }
-    kit::lean_roof(b, wing, f.front_side(), h_front + 1.1, h_front + 0.05, 0.7);
-    for u in [0.0, w] {
-        let a = f.p(u, h_front, 0.0);
-        let c = f.p(u, h_front, FRONT_D);
-        kit::lean_gable(b, mat, c, a, 1.1, if f.front.along_x() { Vec3::X } else { Vec3::Z }, OUTER_T);
+    // Торцевые стены фасадного крыла (дальше по боковым улицам идут стена бокового крыла и стена двора).
+    for u in [OUTER_T / 2.0, w - OUTER_T / 2.0] {
+        f.wall_v(b, u, OUTER_T, FRONT_D, OUTER_T, h_front, &[], mat);
     }
+    kit::lean_roof(b, wing, f.front_side(), h_front + 1.1, h_front + 0.05, 0.7);
+    // Скат — во двор: фасад и торцы доведены кладкой до черепицы.
+    let ends = [f.span_u(0.0, OUTER_T), f.span_u(w - OUTER_T, w)].map(|(a, c)| (a, c, h_front));
+    kit::lean_fill(b, wing, f.front_side(), h_front + 1.1, h_front + 0.05, OUTER_T, h_front, &ends, mat);
     // Угловые камни.
     for (u, v) in [(0.0, 0.0), (w, 0.0)] {
         let p = f.p(u, 0.0, v);
@@ -403,14 +415,20 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, m
         }
         plan.push(f.rect(OUTER_T, SIDE_D - INNER_T, v0 + INNER_T / 2.0, v1 - INNER_T / 2.0));
     }
-    f.wall_v(b, OUTER_T / 2.0, side_v0, side_v1, OUTER_T, H1, &side_outer_ops, mat);
+    // Наружная стена по боковой улице — и вдоль кладовых, до задней стены.
+    f.wall_v(b, OUTER_T / 2.0, side_v0, if has_back_wing { d - 0.3 } else { side_v1 }, OUTER_T, H1, &side_outer_ops, mat);
     f.wall_v(b, SIDE_D - INNER_T / 2.0, side_v0, side_v1, INNER_T, H1, &side_inner_ops, mat);
+    if has_back_wing {
+        // Торец бокового крыла со стороны кладовых.
+        f.wall_u(b, side_v1, OUTER_T, SIDE_D, OUTER_T, H1, &[], mat);
+    }
     let side_wing = f.rect(0.0, SIDE_D, side_v0, side_v1);
     kit::lean_roof(b, side_wing, f.side0(), H1 + 1.0, H1 + 0.05, 0.7);
-    let end_dir = if f.front.along_x() { Vec3::Z } else { Vec3::X };
-    let a = f.p(0.0, H1, side_v1);
-    let c = f.p(SIDE_D, H1, side_v1);
-    kit::lean_gable(b, mat, c, a, 1.0, end_dir, OUTER_T);
+    // Наружная стена и торцы — до черепицы: ближний торец стоит на внутренней стене фасадного
+    // крыла, дальний — на задней стене (наша половина) или на торце со стороны кладовых.
+    let (n0, n1) = f.span_v(FRONT_D - INNER_T, FRONT_D);
+    let (e0, e1) = if has_back_wing { f.span_v(side_v1 - OUTER_T / 2.0, side_v1 + OUTER_T / 2.0) } else { f.span_v(d - 0.3, d) };
+    kit::lean_fill(b, side_wing, f.side0(), H1 + 1.0, H1 + 0.05, OUTER_T, H1, &[(n0, n1, h_front), (e0, e1, H1)], mat);
 
     // ---- Заднее крыло (кладовые) или глухая стена соседа ----
     if has_back_wing {
@@ -419,6 +437,9 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, m
         let back_wing = f.rect(0.0, w, v0, d);
         let back_side = if f.front == Side::N { Side::S } else { Side::N };
         kit::lean_roof(b, back_wing, back_side, H1 + 0.9, H1 + 0.05, 0.6);
+        // Задняя стена (наша половина) и торцы на боковых стенах — до черепицы.
+        let ends = [f.span_u(0.0, OUTER_T), f.span_u(w - OUTER_T, w)].map(|(a, c)| (a, c, H1));
+        kit::lean_fill(b, back_wing, back_side, H1 + 0.9, H1 + 0.05, 0.3, H1, &ends, mat);
     }
     // Задняя (общая с соседней усадьбой) стена — половина толщины на нашей стороне.
     f.wall_u(b, d - 0.15, 0.0, w, 0.3, H1, &[], mat);

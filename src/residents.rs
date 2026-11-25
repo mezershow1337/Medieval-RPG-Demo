@@ -160,8 +160,7 @@ pub fn outfit(role: Role, seed: u64) -> Outfit {
 
 /// Кем служит житель с этим номером (по раскладке уровня).
 pub fn role_of(i: usize) -> Option<Role> {
-    static ROLES: std::sync::OnceLock<Vec<Role>> = std::sync::OnceLock::new();
-    ROLES.get_or_init(|| crate::level::layout().residents.iter().map(|r| r.role).collect()).get(i).copied()
+    crate::level::shared().residents.get(i).map(|r| r.role)
 }
 
 /// Клиент: ставит жителей (вызывается при постройке уровня).

@@ -213,12 +213,13 @@ impl Plugin for MapClientPlugin {
 fn start_drawing_map(mut commands: Commands) {
     let pending: Arc<Mutex<Option<MapRaster>>> = Arc::default();
     let out = pending.clone();
+    // Раскладку берём здесь, а не в потоке: пока поток её держит, меши уровня не отпустят.
+    let layout = crate::level::shared_full();
     // Растр рисуется ~секунду-две: не задерживаем запуск игры.
     std::thread::Builder::new()
         .name("map".into())
         .stack_size(16 * 1024 * 1024)
         .spawn(move || {
-            let layout = crate::level::layout();
             let bounds = map_render::bounds_for(&layout, &map_points());
             let raster = map_render::render(&layout, bounds, MAP_PX);
             *out.lock().unwrap() = Some(raster);

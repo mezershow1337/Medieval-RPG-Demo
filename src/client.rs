@@ -168,6 +168,9 @@ impl CharacterAssets {
 }
 
 pub fn run(start: crate::menu::Start) {
+    // Город строится в фоне, пока открывается окно, запускается видеокарта и грузятся текстуры.
+    level::keep_meshes();
+    level::prebuild();
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window { title: "Херсонес, 510 — Medieval RPG".into(), present_mode: bevy::window::PresentMode::AutoVsync, focused: !crate::settings::background_run(), ..default() }),
@@ -204,7 +207,7 @@ pub fn run(start: crate::menu::Start) {
         .insert_resource(NetState::default())
         .insert_resource(start)
         .add_plugins((crate::settings::SettingsPlugin, crate::menu::MenuPlugin))
-        .insert_resource(level::level_colliders())
+        .add_plugins(level::LevelCollidersPlugin)
         .insert_resource(RemoteIndex::default())
         .insert_resource(PlayerNames::default())
         .insert_resource(CorpseIndex::default())
@@ -214,6 +217,7 @@ pub fn run(start: crate::menu::Start) {
         .insert_resource(GlobalAmbientLight { color: Color::srgb(0.7, 0.72, 0.85), brightness: 250.0, ..default() })
         .add_observer(on_netcode_error)
         .add_systems(Startup, (level::spawn_level, setup_character_assets, spawn_waiting_camera))
+        .add_systems(Update, level::release_meshes_after_start)
         .add_systems(
             Update,
             ((receive_reliable, receive_snapshots).chain(), send_state, animate_remote).run_if(client_connected).before(fight::FightSet).in_set(rig::PoseSet),
