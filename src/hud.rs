@@ -264,7 +264,7 @@ fn update_aim(
     for (dot, mut bg) in &mut dots {
         let swing = Swing::ALL[dot.0];
         let allowed = f.fighter.weapon.normalize(swing) == swing;
-        bg.0 = if !melee || !allowed {
+        let c = if !melee || !allowed {
             Color::NONE
         } else if active == Some(swing) {
             if riposte { Color::srgb(1.0, 0.25, 0.15) } else { Color::srgb(1.0, 0.65, 0.2) }
@@ -275,6 +275,7 @@ fn update_aim(
         } else {
             Color::srgba(1.0, 1.0, 1.0, 0.16)
         };
+        bg.set_if_neq(BackgroundColor(c));
     }
     let c = if !melee {
         Color::NONE
@@ -289,9 +290,14 @@ fn update_aim(
     } else {
         Color::NONE
     };
-    **ring = BorderColor::all(c);
+    ring.set_if_neq(BorderColor::all(c));
 }
 
+/// Как часто переписывать строку состояния (FPS, пинг, место): текст с каждым кадром
+/// заново раскладывается по буквам, а глазу хватает четырёх раз в секунду.
+const STATUS_EVERY: f32 = 0.25;
+
+#[allow(clippy::too_many_arguments)]
 fn update_status(
     state: Res<NetState>,
     client: Option<Res<bevy_renet::RenetClient>>,
@@ -300,7 +306,14 @@ fn update_status(
     player: Query<&Transform, With<LocalPlayer>>,
     mut text: Single<(&mut Text, &mut Node), With<StatusText>>,
     settings: Option<Res<crate::settings::Settings>>,
+    time: Res<Time>,
+    mut next: Local<f32>,
 ) {
+    let now = time.elapsed_secs();
+    if now < *next {
+        return;
+    }
+    *next = now + STATUS_EVERY;
     let fps = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS).and_then(|d| d.smoothed()).unwrap_or(0.0);
     let addr = state.server_addr.map(|a| a.to_string()).unwrap_or_default();
     let status = match (&client, state.my_id, &state.error) {
@@ -314,17 +327,32 @@ fn update_status(
         (Some(c), _, _) if c.is_disconnected() => format!("Disconnected from {addr}"),
         _ => format!("Connecting to {addr}..."),
     };
-    let pos = player.single().map(|t| format!(" | pos {:.1} {:.1} {:.1}", t.translation.x, t.translation.y, t.translation.z)).unwrap_or_default();
     // Без «Показывать FPS» строка видна, только пока что-то не так со связью.
     let show = settings.is_none_or(|s| s.show_fps);
     let connected = client.as_ref().is_some_and(|c| c.is_connected()) && state.error.is_none();
+    let line = if show {
+        let pos = player.single().map(|t| format!(" | pos {:.1} {:.1} {:.1}", t.translation.x, t.translation.y, t.translation.z)).unwrap_or_default();
+        format!("{status}\nFPS {fps:.0}{pos}")
+    } else if connected {
+        String::new()
+    } else {
+        status
+    };
     let (text, node) = &mut *text;
-    text.0 = if show { format!("{status}\nFPS {fps:.0}{pos}") } else if connected { String::new() } else { status };
     // Пустая строка не занимает места в колонке.
-    let want = if text.0.is_empty() { Display::None } else { Display::Flex };
+    let want = if line.is_empty() { Display::None } else { Display::Flex };
+    if text.0 != line {
+        text.0 = line;
+    }
     if node.display != want {
         node.display = want;
     }
+}
+
+/// Доля полоски в процентах ширины, с шагом 0,25 %: восстановление сил меняет её
+/// каждый кадр на доли пикселя, а каждая правка ширины — новая раскладка интерфейса.
+fn bar_width(k: f32) -> Val {
+    percent((k.clamp(0.0, 1.0) * 400.0).round() / 4.0)
 }
 
 fn update_health(
@@ -338,24 +366,34 @@ fn update_health(
     if let Ok(f) = local.single() {
         let s = (f.fighter.stamina / f.fighter.max_stamina.max(1.0)).clamp(0.0, 1.0);
         let (node, color) = &mut *stamina;
-        node.width = percent(s * 100.0);
+        let w = bar_width(s);
+        if node.width != w {
+            node.width = w;
+        }
         // Почти без сил — полоска краснеет.
-        color.0 = if s < 0.2 { Color::srgb(0.85, 0.3, 0.15) } else { Color::srgb(0.85, 0.75, 0.25) };
-        let k = (f.fighter.hp / f.fighter.max_hp).clamp(0.0, 1.0);
-        fill.width = percent(k * 100.0);
-        label.0 = format!("{:.0} / {:.0}", f.fighter.hp, f.fighter.max_hp);
+        color.set_if_neq(BackgroundColor(if s < 0.2 { Color::srgb(0.85, 0.3, 0.15) } else { Color::srgb(0.85, 0.75, 0.25) }));
+        let w = bar_width(f.fighter.hp / f.fighter.max_hp);
+        if fill.width != w {
+            fill.width = w;
+        }
+        let line = format!("{:.0} / {:.0}", f.fighter.hp, f.fighter.max_hp);
+        if label.0 != line {
+            label.0 = line;
+        }
         let dead = f.fighter.is_dead();
         let a = if dead { 0.45 } else { flash.0 * 0.5 };
-        overlay.0 = Color::srgba(0.6, 0.0, 0.0, a);
+        overlay.set_if_neq(BackgroundColor(Color::srgba(0.6, 0.0, 0.0, a)));
     }
 }
 
 fn update_banner(banner: Res<Banner>, mut q: Single<(&mut Text, &mut TextColor), With<BannerText>>) {
     let (text, color) = &mut *q;
     if banner.time_left > 0.0 {
-        text.0 = banner.text.clone();
-        color.0 = banner.color.with_alpha(banner.time_left.min(1.0));
-    } else {
+        if text.0 != banner.text {
+            text.0 = banner.text.clone();
+        }
+        color.set_if_neq(TextColor(banner.color.with_alpha(banner.time_left.min(1.0))));
+    } else if !text.0.is_empty() {
         text.0.clear();
     }
 }
@@ -370,7 +408,10 @@ fn update_target(
     // Названия врагов по-русски — нужен шрифт с кириллицей.
     let (label, font) = &mut *label;
     if let Some(fonts) = fonts {
-        font.font = fonts.regular.clone().into();
+        let regular: bevy::text::FontSource = fonts.regular.clone().into();
+        if font.font != regular {
+            font.font = regular;
+        }
     }
     let Ok(cam) = camera.single() else { return };
     let eye = cam.translation();
@@ -384,11 +425,30 @@ fn update_target(
             (dist < 10.0 && fwd.dot(d / dist) > 0.96).then_some((r, dist))
         })
         .min_by(|a, b| a.1.total_cmp(&b.1));
-    label.0 = match best {
+    let line = match best {
         Some((r, _)) => {
             let name = if r.kind == ActorKind::Player { names.as_ref().map_or_else(|| r.kind.name_ru().to_string(), |n| n.of(r.id)) } else { r.kind.name_ru().to_string() };
             format!("{name}  {:.0} / {:.0}", r.fighter.hp, r.fighter.max_hp)
         }
         None => String::new(),
     };
+    if label.0 != line {
+        label.0 = line;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bar_width_ignores_tiny_changes() {
+        assert_eq!(bar_width(0.0), percent(0.0));
+        assert_eq!(bar_width(1.0), percent(100.0));
+        assert_eq!(bar_width(1.7), percent(100.0));
+        assert_eq!(bar_width(-0.2), percent(0.0));
+        // Восстановление сил за кадр (сотые доли процента) не трогает полоску.
+        assert_eq!(bar_width(0.5), bar_width(0.5004));
+        assert_ne!(bar_width(0.5), bar_width(0.51));
+    }
 }

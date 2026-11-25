@@ -338,7 +338,9 @@ fn draw_hotbar(
     let (Some(fonts), Some(icons)) = (fonts, icons) else { return };
     let (root, mut node) = root.into_inner();
     let Some(inv) = state.inventory.as_ref() else {
-        node.display = Display::None;
+        if node.display != Display::None {
+            node.display = Display::None;
+        }
         return;
     };
     let active = bar.active(inv);
@@ -357,7 +359,10 @@ fn draw_hotbar(
         active,
         visible: true,
     };
-    node.display = Display::Flex;
+    // Правка узла — новая раскладка всего интерфейса: пишем, только если что-то сменилось.
+    if node.display != Display::Flex {
+        node.display = Display::Flex;
+    }
     if *drawn == want {
         return;
     }

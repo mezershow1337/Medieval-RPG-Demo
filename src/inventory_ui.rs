@@ -191,16 +191,23 @@ fn rebuild_ui(
     window: Single<&Window, With<PrimaryWindow>>,
     body: Option<Res<crate::medicine_client::MyBody>>,
     knowledge: Option<Res<crate::lore_client::MyKnowledge>>,
+    mut health_sig: Local<Option<u64>>,
 ) {
     let dock_w = dock.width();
     let screen_w = window.width();
+    // Окно здоровья показываем, когда не открыт чужой сундук или тело (иначе не влезет).
+    let show_body = state.ui_open && state.container.is_none();
+    // Подпись окна «Тело» (раны и признаки словами) собирать недёшево: только когда тело
+    // или знания сменились, а не каждый кадр, пока открыта сумка.
+    let stale = body.as_ref().is_some_and(|b| b.is_changed()) || knowledge.as_ref().is_some_and(|k| k.is_changed());
+    if !show_body || stale {
+        *health_sig = None;
+    }
     let healthy = crate::medicine::Body::default();
     let body = body.as_deref().map_or(&healthy, |b| &b.0);
     let unschooled = crate::lore::Knowledge::default();
     let k = knowledge.as_deref().map_or(&unschooled, |k| &k.0);
-    // Окно здоровья показываем, когда не открыт чужой сундук или тело (иначе не влезет).
-    let show_body = state.ui_open && state.container.is_none();
-    let health = if show_body { crate::health_ui::signature(body, k) } else { 0 };
+    let health = if show_body { *health_sig.get_or_insert_with(|| crate::health_ui::signature(body, k)) } else { 0 };
     let want = Built { rev: state.rev, open: state.ui_open, held: held.0.as_ref().map(|h| h.item.uid), dock: dock_w as u32, screen: screen_w as u32, health };
     if *built == want && (roots.is_empty() != state.ui_open) {
         return;
@@ -831,19 +838,29 @@ fn update_tooltip(
     } else {
         None
     };
+    // Подсказка спрятана почти всегда (сумка закрыта): не трогаем узел зря, иначе
+    // интерфейс раскладывается заново каждый кадр.
     let Some((owner, item)) = hovered_item else {
-        node.display = Display::None;
-        tooltip_for.0 = None;
+        if node.display != Display::None {
+            node.display = Display::None;
+        }
+        if tooltip_for.0.is_some() {
+            tooltip_for.0 = None;
+        }
         return;
     };
     if let Some(pos) = window.cursor_position() {
         // Не даём подсказке уйти за правый и нижний край.
         let x = if pos.x + 340.0 > window.width() { pos.x - 330.0 } else { pos.x + 18.0 };
         let y = (pos.y + 18.0).min(window.height() - 260.0).max(0.0);
-        node.left = px(x);
-        node.top = px(y);
+        if node.left != px(x) || node.top != px(y) {
+            node.left = px(x);
+            node.top = px(y);
+        }
     }
-    node.display = Display::Flex;
+    if node.display != Display::Flex {
+        node.display = Display::Flex;
+    }
     // Знания меняют имя и описание (опознали траву, выучили грамоту).
     if tooltip_for.0 == Some((owner, item.uid)) && !knowledge.as_ref().is_some_and(|k| k.is_changed()) {
         return;

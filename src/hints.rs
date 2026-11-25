@@ -141,6 +141,7 @@ fn watch_situations(
     players: Query<(), With<crate::player::LocalPlayer>>,
     mut alive_for: Local<f32>,
     mut forced: Local<bool>,
+    mut next_look: Local<f32>,
 ) {
     if players.is_empty() {
         *alive_for = 0.0;
@@ -154,6 +155,12 @@ fn watch_situations(
     if !hints.enabled || *alive_for < 3.0 {
         return;
     }
+    // Осматриваемся пару раз в секунду: перебор сумки, веса и умений каждый кадр ни к чему,
+    // совет и так висит секунды.
+    if *alive_for < *next_look {
+        return;
+    }
+    *next_look = *alive_for + 0.5;
     let k = &knowledge.0;
     hints.offer(
         "welcome",
