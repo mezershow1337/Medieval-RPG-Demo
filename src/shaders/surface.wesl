@@ -61,8 +61,15 @@ fn photo_plane(layer: i32, uv: vec2<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f3
     return o;
 }
 
+// Слои с правильным рисунком (кладка, плиты, брусчатка, доски, кирпич, ткань): повёрнутая
+// копия поверх них даёт косые «призрачные» швы и камни другого размера, поэтому для них
+// вторую выборку не подмешиваем. Номера — из surface_layers.rs.
+fn layer_has_grid(layer: i32) -> bool {
+    return layer == 0 || layer == 1 || layer == 4 || layer == 5 || layer == 10 || layer == 11 || layer == 13 || layer == 14;
+}
+
 // Сверху — две выборки: обычная и повёрнутая на ~37° крупнее, смешанные по мягкому шуму,
-// чтобы на больших площадях не было видно повтора тайла.
+// чтобы на больших площадях (трава, земля, галька) не было видно повтора тайла.
 fn photo_top(layer: i32, inv: f32, wp: vec3<f32>, n: vec3<f32>, relief: f32, sy: f32) -> Photo {
     let a = photo_plane(layer, vec2<f32>(wp.x, -wp.z * sy) * inv, vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, sy), n, relief);
     let r = mat2x2<f32>(0.8, 0.6, -0.6, 0.8);
@@ -70,7 +77,9 @@ fn photo_top(layer: i32, inv: f32, wp: vec3<f32>, n: vec3<f32>, relief: f32, sy:
     let tb = r * vec2<f32>(1.0, 0.0);
     let bb = r * vec2<f32>(0.0, 1.0);
     let b = photo_plane(layer, q, vec3<f32>(tb.x, 0.0, -tb.y * sy), vec3<f32>(bb.x, 0.0, -bb.y * sy), n, relief);
-    let k = smoothstep(0.35, 0.65, fbm(wp.xz * 0.11));
+    // Обе выборки читаются всегда (номер слоя зависит от нормали — ветвиться по нему нельзя),
+    // у слоёв с рисунком просто берём только первую.
+    let k = select(smoothstep(0.35, 0.65, fbm(wp.xz * 0.11)), 0.0, layer_has_grid(layer));
     var o: Photo;
     o.albedo = mix(a.albedo, b.albedo, k);
     o.n = mix(a.n, b.n, k);
@@ -349,6 +358,55 @@ fn tile(uv: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(h, id, joint, id);
 }
 
+// Солома и камыш по развёртке (u — вдоль карниза, v — вниз по скату): стебли вдоль ската,
+// уложенные рядами внахлёст по ~0.3 м. Под нижним краем каждого ряда — тень, сам край
+// неровный (пучки разной длины). `fine` — доля мелких стеблей: вдали её гасим, иначе рябит.
+// x — высота, y — тон стебля, z — тень под краем ряда, w — плавные пятна (гуще/реже, темнее).
+fn thatch(uv: vec2<f32>, fine: f32) -> vec4<f32> {
+    let course = 0.3;
+    let ragged = (vnoise(vec2<f32>(uv.x * 5.0, floor(uv.y / course) * 3.1)) - 0.5) * 0.12
+        + (vnoise(vec2<f32>(uv.x * 23.0, uv.y * 2.0)) - 0.5) * 0.05;
+    let q = uv.y + ragged;
+    let row = floor(q / course);
+    let fv = fract(q / course);
+    let su = uv.x + hash21(vec2<f32>(row, 2.7)) * 3.0;
+    let thin = vnoise(vec2<f32>(su * 110.0, q * 4.0));
+    let mid = vnoise(vec2<f32>(su * 26.0, q * 1.6));
+    // Пятна — плавные и вдоль, и поперёк ската: без них кровля ровная, как ткань,
+    // а пятна «по ряду и пучку» превращают солому в дранку.
+    let blotch = vnoise(vec2<f32>(uv.x * 1.7, uv.y * 1.1)) * 0.6 + vnoise(vec2<f32>(uv.x * 5.3, uv.y * 3.7)) * 0.4;
+    let strands = mix(0.5, thin, fine) * 0.5 + mid * 0.5;
+    let shade = 1.0 - smoothstep(0.0, 0.22, fv);
+    // Ряд толще книзу, а у самого края скруглён (без ступеньки в пиксель — она бы рябила).
+    let h = clamp(0.25 + fv * (1.0 - smoothstep(0.88, 1.0, fv)) * 0.45 + strands * 0.3, 0.0, 1.0);
+    return vec4<f32>(h, strands, shade, blotch);
+}
+
+// Касательные по развёртке (u, v): t — вдоль u, b — против v (вверх по картинке).
+// Без развёртки (вырожденные производные) — горизонталь по грани и «вверх» по ней.
+struct UvFrame {
+    t: vec3<f32>,
+    b: vec3<f32>,
+}
+
+fn uv_frame(n: vec3<f32>, dp_x: vec3<f32>, dp_y: vec3<f32>, duv_x: vec2<f32>, duv_y: vec2<f32>) -> UvFrame {
+    var f: UvFrame;
+    f.t = normalize(cross(n, vec3<f32>(0.0, 1.0, 0.0)) + vec3<f32>(1e-4, 0.0, 0.0));
+    f.b = cross(f.t, n);
+    let det = duv_x.x * duv_y.y - duv_x.y * duv_y.x;
+    if abs(det) > 1e-12 {
+        let tu = (dp_x * duv_y.y - dp_y * duv_x.y) / det;
+        let tv = (dp_y * duv_x.x - dp_x * duv_y.x) / det;
+        let t2 = tu - n * dot(n, tu);
+        let b2 = tv - n * dot(n, tv);
+        if dot(t2, t2) > 1e-10 && dot(b2, b2) > 1e-10 {
+            f.t = normalize(t2);
+            f.b = -normalize(b2);
+        }
+    }
+    return f;
+}
+
 // Узор в 2D-проекции.
 fn pattern2d(kind: i32, p: vec2<f32>, top: bool) -> vec4<f32> {
     let s = surface.params.y;
@@ -509,7 +567,7 @@ fn fragment(
     var emissive = vec3<f32>(0.0);
     var water = false;
 
-    if kind == 5 || kind == 6 || kind == 7 || kind == 8 || kind == 9 || kind == 12 {
+    if kind == 5 || kind == 6 || kind == 7 || kind == 8 || kind == 9 || kind == 12 || kind == 20 {
         // Узоры, завязанные на UV или особые.
         var uv = vec2<f32>(0.0);
         @if(VERTEX_UVS_A) {
@@ -561,19 +619,9 @@ fn fragment(
                     // Касательные — по самой развёртке (t вдоль u, b к коньку, против v): на двух
                     // скатах одной крыши u идёт в одну сторону, а нормаль — в разные, и по одному
                     // лишь `cross(n, Y)` свет на калиптерах падал бы на половине крыш не с той стороны.
-                    var tt = normalize(cross(n, vec3<f32>(0.0, 1.0, 0.0)) + vec3<f32>(1e-4, 0.0, 0.0));
-                    var bb = cross(tt, n);
-                    let det = duv_x.x * duv_y.y - duv_x.y * duv_y.x;
-                    if abs(det) > 1e-12 {
-                        let tu = (dp_x * duv_y.y - dp_y * duv_x.y) / det;
-                        let tv = (dp_y * duv_x.x - dp_x * duv_y.x) / det;
-                        let t2 = tu - n * dot(n, tu);
-                        let b2 = tv - n * dot(n, tv);
-                        if dot(t2, t2) > 1e-10 && dot(b2, b2) > 1e-10 {
-                            tt = normalize(t2);
-                            bb = -normalize(b2);
-                        }
-                    }
+                    let fr = uv_frame(n, dp_x, dp_y, duv_x, duv_y);
+                    let tt = fr.t;
+                    let bb = fr.b;
                     // Каждая черепица своя (шаг колонн и рядов в текстуре — 0.5 м): тегулы и
                     // калиптеры из разных обжигов, часть заменена новыми, часть старая и тёмная.
                     // Ряды кладут руками — каждый чуть сдвинут поперёк ската.
@@ -621,6 +669,46 @@ fn fragment(
                 let tt = normalize(cross(n, vec3<f32>(0.0, 1.0, 0.0)) + vec3<f32>(1e-4, 0.0, 0.0));
                 let bb = cross(tt, n);
                 N = perturb(N, (tt * hu + bb * hv) / e, bump);
+            }
+            case 20: {
+                let fr = uv_frame(n, dp_x, dp_y, duv_x, duv_y);
+                if surface.photo.x >= 0.0 {
+                    // Своя солома из Blender (tools/textures/blender_thatch.py): ряды по 0.3 м,
+                    // пучки стеблей с рваными комлями, верх картинки — конёк. Развёртка та же,
+                    // что у черепицы: u — вдоль карниза, v — вниз по скату.
+                    let ph = photo_plane(i32(surface.photo.x + 0.5), uv * surface.photo.y, fr.t, fr.b, n, surface.photo_mean_b.w);
+                    color = retint(ph.albedo, surface.photo_mean.rgb, base_a, surface.photo_mean.w);
+                    // Тайл 1.5 м повторяется вдоль карниза — полосы по скату своей ширины и
+                    // оттенка (не кратные тайлу) прячут повтор.
+                    let streak = fbm(vec2<f32>(uv.x * 2.3, uv.y * 0.45) + wp.xz * 0.05);
+                    color *= 0.84 + 0.32 * streak;
+                    // Старая солома сереет и темнеет пятнами, свежие заплаты светлее и желтее.
+                    let age = smoothstep(0.35, 0.75, fbm(wp.xz * 0.18 + vec2<f32>(wp.y * 0.1, 2.3)));
+                    color = mix(color * vec3<f32>(1.08, 1.04, 0.9), color * vec3<f32>(0.72, 0.71, 0.72), age);
+                    let moss = smoothstep(0.62, 0.8, fbm(uv * 0.9 + wp.xz * 0.04)) * moss_amount * (0.4 + age);
+                    color = mix(color, vec3<f32>(0.17, 0.19, 0.08), moss * 0.7);
+                    rough = clamp(ph.rough + moss * 0.1, 0.6, 1.0);
+                    N = normalize(ph.n);
+                    break;
+                }
+                // Без фото — процедурная солома: стебли вниз по скату, ряды внахлёст.
+                // Мелкие стебли гасим, когда на пиксель их приходится больше пары, — иначе рябь.
+                let fw = max(length(duv_x), length(duv_y));
+                let fine = 1.0 - smoothstep(0.004, 0.012, fw);
+                let th = thatch(uv, fine);
+                color = mix(base_b, base_a, 0.2 + 0.8 * th.y) * (0.78 + 0.44 * th.w);
+                // Старая солома сереет пятнами, свежие заплаты светлее и желтее.
+                let age = smoothstep(0.35, 0.75, fbm(wp.xz * 0.18 + vec2<f32>(wp.y * 0.1, 2.3)));
+                color = mix(color * vec3<f32>(1.08, 1.04, 0.9), color * vec3<f32>(0.7, 0.7, 0.72), age);
+                color *= 1.0 - th.z * 0.38;
+                let moss = smoothstep(0.62, 0.8, fbm(uv * 0.9 + wp.xz * 0.04)) * moss_amount * (0.4 + age);
+                color = mix(color, vec3<f32>(0.17, 0.19, 0.08), moss * 0.7);
+                rough = 0.96;
+                let e = 0.004;
+                let hu = thatch(uv + vec2<f32>(e, 0.0), fine).x - th.x;
+                let hv = thatch(uv + vec2<f32>(0.0, e), fine).x - th.x;
+                // v растёт вниз, `fr.b` смотрит вверх — отсюда минус у второй производной.
+                N = perturb(N, (fr.t * hu - fr.b * hv) / e, bump * (0.35 + 0.65 * fine));
             }
             case 7: {
                 if surface.photo.x >= 0.0 {

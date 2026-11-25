@@ -105,7 +105,7 @@ impl Plugin for FightPlugin {
                 (
                     combat_input.before(crate::player::grab_cursor),
                     tick_local,
-                    fp_pose_for_shots.run_if(|| std::env::var("MRPG_FP_POSE").is_ok()),
+                    fp_pose_for_shots.run_if(crate::settings::env_flag("MRPG_FP_POSE")),
                     animate_view_sword,
                     feedback_effects,
                     update_sparks,

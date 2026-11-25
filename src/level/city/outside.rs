@@ -309,6 +309,8 @@ fn memorial_chapel(b: &mut Builder, c: Vec2) {
         let prof = [(2.1, 0.0), (2.1, h - 0.6)];
         t.mesh(Mat::OpusMixtum).lathe_arc(ap, &prof, -FRAC_PI_2, FRAC_PI_2, 8, false);
         t.mesh(Mat::Plaster).lathe_arc(ap, &[(1.5, 0.0), (1.5, h - 0.6)], -FRAC_PI_2, FRAC_PI_2, 8, true);
+        // Конха изнутри оштукатурена: иначе из апсиды видна изнанка черепицы.
+        t.mesh(Mat::Plaster).dome(ap + Vec3::Y * (h - 0.6), 2.0, -FRAC_PI_2, FRAC_PI_2, 8, 0.0);
         t.mesh(Mat::Tile).dome(ap + Vec3::Y * (h - 0.6), 2.1, -FRAC_PI_2, FRAC_PI_2, 8, 0.1);
         for k in 0..6 {
             let a = -FRAC_PI_2 + PI * (k as f32 + 0.5) / 6.0;

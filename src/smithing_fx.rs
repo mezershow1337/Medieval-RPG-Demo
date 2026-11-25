@@ -25,8 +25,8 @@ impl Plugin for SmithFxPlugin {
             .init_resource::<FxRng>()
             .init_resource::<DipsOut>()
             .add_systems(Startup, setup_fx)
-            .add_systems(Update, showcase.run_if(|| std::env::var("MRPG_SMITH_SHOWCASE").is_ok()))
-            .add_systems(Update, demo.run_if(|| std::env::var("MRPG_SMITH_DEMO").is_ok()).before(play_fx).after(crate::smithing_client::SmithSet))
+            .add_systems(Update, showcase.run_if(crate::settings::env_flag("MRPG_SMITH_SHOWCASE")))
+            .add_systems(Update, demo.run_if(crate::settings::env_flag("MRPG_SMITH_DEMO")).before(play_fx).after(crate::smithing_client::SmithSet))
             .add_systems(Update, (play_fx, forge_fires, pieces, dips, hammers, particles).chain().after(crate::smithing_client::SmithSet));
     }
 }
@@ -767,14 +767,25 @@ fn forge_fires(
     for (mut f, mut light, tf) in &mut fires {
         let (fuel, blast) = state.fire(f.station).unwrap_or((0.0, 0.0));
         let lit = fuel > 0.0;
-        let flicker = 0.85 + 0.1 * (t * 13.0 + f.phase).sin() + 0.05 * (t * 31.0 + f.phase * 2.0).sin();
+        let near = tf.translation.distance(ear) <= FX_RANGE;
+        // Мерцают только ближние горны. Правка материала углей заставляет Bevy заново готовить
+        // все его меши (44 уголька на горн), поэтому дальний или потухший горн материал не трогает,
+        // пока жар не изменится.
+        let flicker = if near && lit { 0.85 + 0.1 * (t * 13.0 + f.phase).sin() + 0.05 * (t * 31.0 + f.phase * 2.0).sin() } else { 1.0 };
         let heat = if lit { 0.35 + blast * 0.9 } else { 0.0 };
-        if let Some(mut m) = materials.get_mut(&f.coal) {
-            m.emissive = LinearRgba::rgb(1.0, 0.32 + blast * 0.3, 0.06 + blast * 0.15) * (heat * heat * 5.0 * flicker);
+        let glow = LinearRgba::rgb(1.0, 0.32 + blast * 0.3, 0.06 + blast * 0.15) * (heat * heat * 5.0 * flicker);
+        if materials.get(&f.coal).is_some_and(|m| m.emissive != glow)
+            && let Some(mut m) = materials.get_mut(&f.coal)
+        {
+            m.emissive = glow;
         }
-        light.intensity = 60_000.0 * heat * flicker;
-        light.color = Color::srgb(1.0, 0.42 + blast * 0.25, 0.14 + blast * 0.2);
-        if !lit || tf.translation.distance(ear) > FX_RANGE {
+        let intensity = 60_000.0 * heat * flicker;
+        let color = Color::srgb(1.0, 0.42 + blast * 0.25, 0.14 + blast * 0.2);
+        if light.intensity != intensity || light.color != color {
+            light.intensity = intensity;
+            light.color = color;
+        }
+        if !lit || !near {
             continue;
         }
         let pos = tf.translation - Vec3::Y * 0.3;

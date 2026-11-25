@@ -9,7 +9,9 @@ https://polyhaven.com/license): можно использовать, менят�
 `tools/textures/blender_byz_roof.py`. Поверхность глины для неё собрана
 `tools/textures/quilt_clay.py` из кусочков фотоскана Poly Haven `clay_roof_tiles_02` (без его
 рисунка черепицы), поры — карта высот `clay_plaster`, пятна грязи — `worn_mossy_plasterwall`
-(все CC0). Ассеты сторонних игр не используются.
+(все CC0). Слой `thatch` — тоже своя работа целиком: пучки стеблей соломы и камыша смоделированы
+кодом и запечены в Blender скриптом `tools/textures/blender_thatch.py`, без фото.
+Ассеты сторонних игр не используются.
 
 | Слой | Материал | Что это |
 |---|---|---|
@@ -32,3 +34,4 @@ https://polyhaven.com/license): можно использовать, менят�
 | bronze | [Metal047B](https://ambientcg.com/view?id=Metal047B) | бронза/медь с патиной |
 | gold | [Metal048C](https://ambientcg.com/view?id=Metal048C) | золото |
 | gravel | [Gravel041](https://ambientcg.com/view?id=Gravel041) | береговая галька |
+| thatch | своя (Blender, `tools/textures/blender_thatch.py`) | солома и камыш: ряды пучков стеблей внахлёст |

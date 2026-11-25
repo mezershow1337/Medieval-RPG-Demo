@@ -36,7 +36,7 @@ impl Plugin for GameAudioPlugin {
             .add_systems(Startup, (load_bank, surface::start_building))
             .add_systems(Update, (attach_listener, play_sfx, update_emitters, reap_one_shots).chain().in_set(AudioSet))
             .configure_sets(Update, AudioSet.after(crate::fight::FightSet))
-            .add_systems(Update, debug_log.run_if(|| std::env::var("MRPG_AUDIO_LOG").is_ok()))
+            .add_systems(Update, debug_log.run_if(crate::settings::env_flag("MRPG_AUDIO_LOG")))
             .add_plugins((steps::StepsPlugin, combat_sfx::CombatSfxPlugin, world_sfx::WorldSfxPlugin, ambience::AmbiencePlugin, music::MusicPlugin));
     }
 }
