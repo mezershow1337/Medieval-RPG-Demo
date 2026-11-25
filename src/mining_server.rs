@@ -399,19 +399,16 @@ pub fn act(world: &mut MineWorld, k: &Knowledge, inv: &mut Inventory, feet: Vec3
 /// Что сказать и что ещё сделать после работы руками.
 pub struct Finished {
     pub notice: String,
-    /// Поденная плата (нуммии), уже положена в сумку.
-    pub wage: u32,
 }
 
 /// Работа руками кончилась с качеством `q`.
 pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uids: &mut UidGen, player: u64, task: &MineTask, q: f32) -> Finished {
-    let mut wage = 0;
     let MineWorld { sites, piles, rng, .. } = world;
     let notice = match *task {
         MineTask::Dig { site } => {
-            let Some(s) = sites.get_mut(&site) else { return Finished { notice: String::new(), wage } };
+            let Some(s) = sites.get_mut(&site) else { return Finished { notice: String::new() } };
             if s.charges == 0 {
-                return Finished { notice: "Здесь уже всё выбрано".into(), wage };
+                return Finished { notice: "Здесь уже всё выбрано".into() };
             }
             let prospect = k.knows(Lore::Technique(Technique::Prospecting));
             let dug = dig_yield(s.kind, prospect, k.skill(Skill::Smithing), q, [rng.f32(), rng.f32(), rng.f32()]);
@@ -426,13 +423,14 @@ pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uid
                 }
             }
             if got.is_empty() && !dug.items.is_empty() {
-                return Finished { notice: "Нет места в сумке".into(), wage };
+                return Finished { notice: "Нет места в сумке".into() };
             }
             s.charges -= 1;
             k.practice(Skill::Smithing, 0.3);
             let mut msg = match s.kind {
                 SiteKind::Shaft => {
-                    wage = shaft_wage(q);
+                    // Поденная плата (нуммии) — сразу в сумку.
+                    let mut wage = shaft_wage(q);
                     if wage > 0 && give_money(inv, wage, uids).is_err() {
                         wage = 0;
                     }
@@ -460,7 +458,7 @@ pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uid
             msg
         }
         MineTask::StackWood { pile, n } => {
-            let Some(ps) = piles.get_mut(&pile) else { return Finished { notice: String::new(), wage } };
+            let Some(ps) = piles.get_mut(&pile) else { return Finished { notice: String::new() } };
             let taken = take(inv, WOOD, n);
             // Знающий ставит плотно, без щелей: качество укладки выше.
             let knows = k.knows(Lore::Technique(Technique::Charcoal));
@@ -483,7 +481,7 @@ pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uid
             m
         }
         MineTask::Cover { pile } => {
-            let Some(ps) = piles.get_mut(&pile) else { return Finished { notice: String::new(), wage } };
+            let Some(ps) = piles.get_mut(&pile) else { return Finished { notice: String::new() } };
             ps.pile.add_cover(q);
             if ps.pile.stage == Stage::Stack {
                 ps.pile.stage = Stage::Cover;
@@ -496,7 +494,7 @@ pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uid
             if ps.pile.cover >= 1.0 { "Куча укрыта целиком — можно поджигать".into() } else { format!("Укрыто примерно на {:.0}%", ps.pile.cover * 100.0) }
         }
         MineTask::Patch { pile } => {
-            let Some(ps) = piles.get_mut(&pile) else { return Finished { notice: String::new(), wage } };
+            let Some(ps) = piles.get_mut(&pile) else { return Finished { notice: String::new() } };
             ps.pile.patch(q);
             ps.dirty = true;
             if ps.pile.cracks > 0.0 { "Прогар засыпан не до конца".into() } else { "Прогар засыпан".into() }
@@ -509,7 +507,7 @@ pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uid
             "Поворошили руду".into()
         }
         MineTask::Rake { pile } => {
-            let Some(ps) = piles.get_mut(&pile) else { return Finished { notice: String::new(), wage } };
+            let Some(ps) = piles.get_mut(&pile) else { return Finished { notice: String::new() } };
             let kind = ps.pile.kind;
             // Не дожжённое (разобрали раньше) — дрова и руда возвращаются как есть.
             let h = if matches!(ps.pile.stage, Stage::Stack | Stage::Cover | Stage::Ready) {
@@ -552,7 +550,7 @@ pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uid
             m
         }
     };
-    Finished { notice, wage }
+    Finished { notice }
 }
 
 fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, world: Res<MineWorld>) {
