@@ -137,9 +137,9 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         authentication: ServerAuthentication::Unsecure,
     };
     let transport = NetcodeServerTransport::new(config, socket).expect("не удалось запустить сервер");
-    let layout = level::layout();
+    let layout = level::shared();
     let mut civil = crate::civil_server::CivilWorld::new(&layout.residents);
-    civil.set_lights(&layout);
+    civil.set_lights(layout);
     let level = level::colliders(layout);
     let mut world = GameWorld {
         actors: HashMap::new(),

@@ -496,7 +496,7 @@ fn container_inventory(world: &mut LootWorld, table: LootTableId) -> Inventory {
 
 /// Сундуки, шкафы и корзины в домах, лавках и казармах (места задаёт уровень).
 fn spawn_world_containers(mut server: ResMut<RenetServer>, mut world: ResMut<LootWorld>, mut homes: ResMut<crate::home_items::HomeItems>) {
-    let layout = crate::level::layout();
+    let layout = crate::level::shared();
     for (i, c) in layout.containers.iter().enumerate() {
         let id = CONTAINER_ID_BASE + i as LootId;
         let inv = container_inventory(&mut world, c.table);
@@ -504,7 +504,7 @@ fn spawn_world_containers(mut server: ResMut<RenetServer>, mut world: ResMut<Loo
         world.corpses.insert(id, Corpse { pos: c.pos, yaw: 0.0, name: c.name.to_string(), inv, created: 0, own_model: false });
     }
     // Вещи хозяев в жилых домах: на столах, полках, сундуках.
-    homes.setup(&mut server, &mut world, &layout);
+    homes.setup(&mut server, &mut world, layout);
 }
 
 fn refill_world_containers(time: Res<Time>, mut server: ResMut<RenetServer>, mut world: ResMut<LootWorld>, mut next: Local<f32>) {

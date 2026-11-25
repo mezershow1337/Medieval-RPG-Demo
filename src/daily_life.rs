@@ -657,7 +657,7 @@ pub fn warm_up() {
         .stack_size(16 * 1024 * 1024)
         .spawn(|| {
             let started = std::time::Instant::now();
-            let town = Town::build(crate::level::layout());
+            let town = Town::build(crate::level::shared().clone());
             info!("Распорядок жителей: город готов за {:.1} с", started.elapsed().as_secs_f32());
             let _ = TOWN.set(town);
         })
