@@ -317,6 +317,10 @@ pub fn startup() -> &'static Settings {
 
 pub struct SettingsPlugin;
 
+/// Системы, применяющие настройки (PostUpdate).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SettingsSet;
+
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(startup().clone())
@@ -324,6 +328,7 @@ impl Plugin for SettingsPlugin {
             .add_systems(
                 PostUpdate,
                 (apply_window, apply_audio, apply_sun, apply_cameras, apply_render_scale, apply_smoke, apply_water, detail_ranges, toggle_effects_f9, toggle_fullscreen_f11, free_cursor_in_background)
+                    .in_set(SettingsSet)
                     .before(bevy::camera::CameraUpdateSystems),
             );
     }

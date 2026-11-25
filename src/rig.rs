@@ -444,16 +444,20 @@ fn apply_look_tints(
 }
 
 /// Рука от первого лица всегда перед камерой, а лишние кости у неё сжаты в точку (нулевой
-/// масштаб), и рамка по суставам у такой руки получается негодной — рука пропадала. Её детали
-/// не отсекаем, как и раньше.
+/// масштаб): и рамка по суставам, и затухание по дальности (оно берёт положение из матрицы
+/// скина) у такой руки негодные — рука пропадала. Её детали рисуем всегда, как раньше.
+#[allow(clippy::type_complexity)]
 fn keep_view_arm_drawn(
     mut commands: Commands,
-    parts: Query<(Entity, &ChildOf), (Added<SkinnedMesh>, With<DynamicSkinnedMeshBounds>)>,
+    parts: Query<(Entity, &ChildOf), (With<SkinnedMesh>, Without<NoFrustumCulling>)>,
     arms: Query<(), Or<(With<ViewArm>, With<NeedsViewArm>)>>,
 ) {
     for (e, parent) in &parts {
         if arms.contains(parent.parent()) {
-            commands.entity(e).remove::<DynamicSkinnedMeshBounds>().insert(NoFrustumCulling);
+            commands
+                .entity(e)
+                .remove::<(DynamicSkinnedMeshBounds, bevy::camera::visibility::VisibilityRange)>()
+                .insert((NoFrustumCulling, crate::settings::NoDetailRange));
         }
     }
 }
@@ -1121,7 +1125,7 @@ impl Plugin for RigPlugin {
         app.init_resource::<BladeTints>()
             .add_systems(Startup, load_models)
             .add_systems(Update, finish_models.run_if(resource_exists::<ModelsHandle>))
-            .add_systems(PostUpdate, (apply_look_tints, keep_view_arm_drawn))
+            .add_systems(PostUpdate, (apply_look_tints, keep_view_arm_drawn.before(crate::settings::SettingsSet)))
             .add_systems(Update, attach_rigs.run_if(resource_exists::<CharacterModels>).before(PoseSet))
             .add_systems(Update, apply_poses.after(PoseSet));
     }
