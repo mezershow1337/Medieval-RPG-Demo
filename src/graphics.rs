@@ -99,6 +99,13 @@ pub fn frozen_time() -> Option<f64> {
     })
 }
 
+/// Мокрость города для снимков: `MRPG_WET=0.8` — как после дождя (лужи), без переменной —
+/// по погоде.
+fn shot_wet() -> Option<f32> {
+    static W: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+    *W.get_or_init(|| std::env::var("MRPG_WET").ok()?.parse::<f32>().ok().map(|w| w.clamp(0.0, 1.0)))
+}
+
 /// Время для очередного снимка обхода (`MRPG_TOUR="имя@часы:…"`).
 static SHOT_TIME: std::sync::Mutex<Option<f64>> = std::sync::Mutex::new(None);
 
@@ -314,7 +321,7 @@ pub fn mood_at(game: f64) -> Mood {
         moon_light,
         wind: w.wind,
         rain: w.rain,
-        wet: wc::wetness(game),
+        wet: shot_wet().unwrap_or_else(|| wc::wetness(game)),
         haze: key.haze + 0.03 * fog * fog + 0.004 * w.rain,
         // Под тучами и в дождь мир темнее и глуше (глаз не успевает подстроиться полностью).
         exposure: key.exposure - 0.35 * overcast - 0.25 * w.rain,
@@ -343,7 +350,14 @@ impl Plugin for GraphicsPlugin {
         ))
         .add_observer(setup_camera)
         .add_systems(Startup, setup_environment)
-        .add_systems(Update, (billboard_flames, flicker_lights, cull_far_lights, follow_sky, attach_sky_light));
+        .add_systems(Update, (billboard_flames, flicker_lights, cull_far_lights, follow_sky, attach_sky_light))
+        .add_systems(Update, log_fps.run_if(|| fps_log_path().is_some()));
+        // Окно в фоне (снимки и замеры, `settings::background_run`): без фокуса Bevy урезает кадры
+        // до 60 в секунду — для замера FPS не надо.
+        if crate::settings::background_run() {
+            use bevy::winit::{UpdateMode, WinitSettings};
+            app.insert_resource(WinitSettings { focused_mode: UpdateMode::Continuous, unfocused_mode: UpdateMode::Continuous });
+        }
     }
 
     fn finish(&self, app: &mut App) {
@@ -717,8 +731,14 @@ pub fn spawn_flame(commands: &mut Commands, mesh: Handle<Mesh>, material: Handle
     ));
 }
 
-fn billboard_flames(cameras: Query<&GlobalTransform, With<Camera3d>>, mut flames: Query<&mut Transform, With<Billboard>>) {
-    let Some(cam) = cameras.iter().next() else { return };
+/// Камера, которая сейчас рисует (для снимков `MRPG_CAM` камера игрока выключена — небо и
+/// факелы должны идти за камерой снимка).
+fn active_camera<'a>(cameras: &'a Query<(&GlobalTransform, &Camera), With<Camera3d>>) -> Option<&'a GlobalTransform> {
+    cameras.iter().find(|(_, c)| c.is_active).or_else(|| cameras.iter().next()).map(|(t, _)| t)
+}
+
+fn billboard_flames(cameras: Query<(&GlobalTransform, &Camera), With<Camera3d>>, mut flames: Query<&mut Transform, With<Billboard>>) {
+    let Some(cam) = active_camera(&cameras) else { return };
     let cam_pos = cam.translation();
     for mut t in &mut flames {
         let d = cam_pos - t.translation;
@@ -739,13 +759,13 @@ fn flicker_lights(time: Res<Time>, mood: Option<Res<crate::daylight::CurrentMood
 }
 
 /// Далёкие факелы и светильники выключаем: в городе их сотни, а освещают они лишь пару комнат.
-fn cull_far_lights(time: Res<Time>, settings: Res<crate::settings::Settings>, mut next: Local<f32>, cameras: Query<&GlobalTransform, With<Camera3d>>, mut lights: Query<(&GlobalTransform, &PointLight, &mut Visibility), With<Flicker>>) {
+fn cull_far_lights(time: Res<Time>, settings: Res<crate::settings::Settings>, mut next: Local<f32>, cameras: Query<(&GlobalTransform, &Camera), With<Camera3d>>, mut lights: Query<(&GlobalTransform, &PointLight, &mut Visibility), With<Flicker>>) {
     let now = time.elapsed_secs();
     if now < *next {
         return;
     }
     *next = now + 0.25;
-    let Some(cam) = cameras.iter().next() else { return };
+    let Some(cam) = active_camera(&cameras) else { return };
     let c = cam.translation();
     for (t, light, mut vis) in &mut lights {
         let far = settings.light_distance() + light.range * if settings.effects == 0 { 1.2 } else { 2.0 };
@@ -853,14 +873,43 @@ pub struct HazeVolume;
 
 const SKY_RADIUS: f32 = 900.0;
 
-fn follow_sky(cameras: Query<&GlobalTransform, With<Camera3d>>, settings: Res<crate::settings::Settings>, mut sky: Query<&mut Transform, With<SkyDome>>) {
-    let Some(cam) = cameras.iter().next() else { return };
+fn follow_sky(cameras: Query<(&GlobalTransform, &Camera), With<Camera3d>>, settings: Res<crate::settings::Settings>, mut sky: Query<&mut Transform, With<SkyDome>>) {
+    let Some(cam) = active_camera(&cameras) else { return };
     // Сфера неба — внутри дальности прорисовки, иначе камера её обрежет.
     let scale = (crate::settings::sky_radius(&settings) / SKY_RADIUS).min(1.0);
     for mut t in &mut sky {
         t.translation = cam.translation();
         t.scale = Vec3::splat(scale);
     }
+}
+
+// ---------- Замер скорости ----------
+
+/// `MRPG_FPS_LOG=файл` — раз в 5 с дописывать в файл средний FPS, среднее и худшее время кадра
+/// (замер без оверлея: окно можно не трогать).
+fn fps_log_path() -> Option<&'static std::path::PathBuf> {
+    static P: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+    P.get_or_init(|| std::env::var_os("MRPG_FPS_LOG").map(Into::into)).as_ref()
+}
+
+fn log_fps(time: Res<Time<Real>>, clock: Option<Res<crate::world_clock::WorldClock>>, mut acc: Local<(f32, u32, f32)>) {
+    let dt = time.delta_secs();
+    let (sum, frames, worst) = &mut *acc;
+    *sum += dt;
+    *frames += 1;
+    *worst = worst.max(dt);
+    if *sum < 5.0 {
+        return;
+    }
+    let hour = clock.map_or(0.0, |c| crate::daylight::sky_time(&c) / 3600.0);
+    let line = format!("t {:.0} с  FPS {:.1}  кадр {:.2} мс (худший {:.1} мс)  часы {:.2}\n", time.elapsed_secs(), *frames as f32 / *sum, *sum * 1000.0 / *frames as f32, *worst * 1000.0, hour % 24.0);
+    if let Some(path) = fps_log_path() {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = f.write_all(line.as_bytes());
+        }
+    }
+    *acc = (0.0, 0, 0.0);
 }
 
 // ---------- Камера и пост-обработка ----------
