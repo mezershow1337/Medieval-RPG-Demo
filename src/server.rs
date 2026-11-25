@@ -180,8 +180,20 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .add_plugins(crate::towns_server::TownServerPlugin)
         .add_plugins(crate::console_server::ConsoleServerPlugin)
         .add_systems(Update, (receive_client_messages, run_npcs, combat_tick, respawns, send_snapshots).chain());
+    run_in_one_thread(&mut app);
     info!("Сервер слушает {addr}");
     app.run();
+}
+
+/// Все расписания сервера выполняются в его собственном потоке, система за системой.
+/// Системы сервера короткие, и будить ради каждой потоки пула дороже, чем выполнить их подряд.
+/// А у хозяина игры сервер живёт в одном процессе с игрой и делит с ней пул задач Bevy:
+/// многопоточный сервер занимал потоки, которых ждали системы кадра.
+fn run_in_one_thread(app: &mut App) {
+    let mut schedules = app.world_mut().resource_mut::<Schedules>();
+    for (_, schedule) in schedules.iter_mut() {
+        schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
+    }
 }
 
 impl GameWorld {
@@ -1027,7 +1039,7 @@ const GEAR_KEYFRAME_TICKS: u32 = 60;
 
 /// Снимки со всеми бойцами мира, без отбора по расстоянию: камера для снимков экрана
 /// (`MRPG_CAM`, `MRPG_TOUR`) смотрит не оттуда, где стоит игрок. Или `MRPG_SNAPSHOT_ALL=1`.
-fn snapshot_everyone() -> bool {
+pub(crate) fn snapshot_everyone() -> bool {
     static EVERYONE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *EVERYONE.get_or_init(|| ["MRPG_SNAPSHOT_ALL", "MRPG_CAM", "MRPG_TOUR"].iter().any(|v| std::env::var_os(v).is_some()))
 }
