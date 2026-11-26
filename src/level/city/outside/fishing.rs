@@ -132,6 +132,10 @@ fn jetty(b: &mut Builder) {
     // Коллизия настила — одной коробкой; видимые доски — поперёк, с зазорами.
     b.at((x0 + x1) / 2.0, JETTY_Z);
     b.invisible.push(Aabb::new(Vec3::new(x0, y - 0.25, z0), Vec3::new(x1, y, z1)));
+    // Под мостками обшивка вдоль краёв: под них не заплыть, упёршись — выбираешься наверх.
+    for (lo, hi) in [(Vec3::new(x0, WATER_Y - 2.5, z0), Vec3::new(x1, y - 0.25, z0 + 0.2)), (Vec3::new(x0, WATER_Y - 2.5, z1 - 0.2), Vec3::new(x1, y - 0.25, z1)), (Vec3::new(x0, WATER_Y - 2.5, z0), Vec3::new(x0 + 0.2, y - 0.25, z1))] {
+        b.invisible.push(Aabb::new(lo, hi));
+    }
     let mut x = x0;
     let mut k = 0;
     while x < x1 {
@@ -158,7 +162,7 @@ fn jetty(b: &mut Builder) {
         }
         x += 2.6;
     }
-    // Тумбы на конце и посередине, ограждение вдоль краёв невидимое (чтобы не падали сослепу).
+    // Тумбы на конце и посередине; ограждения нет — с мостков можно прыгнуть в воду.
     for px in [x0 + 0.35, (x0 + x1) / 2.0] {
         for pz in [z0 + 0.25, z1 - 0.25] {
             let p = Vec3::new(px, y, pz);
@@ -166,9 +170,6 @@ fn jetty(b: &mut Builder) {
             kit::hidden(b, p - Vec3::new(0.15, 0.0, 0.15), p + Vec3::new(0.15, 0.62, 0.15));
         }
     }
-    b.invisible.push(Aabb::new(Vec3::new(x0, y, z0 - 0.3), Vec3::new(x1 - 3.0, y + 1.0, z0)));
-    b.invisible.push(Aabb::new(Vec3::new(x0, y, z1), Vec3::new(x1 - 3.0, y + 1.0, z1 + 0.3)));
-    b.invisible.push(Aabb::new(Vec3::new(x0 - 0.3, y, z0), Vec3::new(x0, y + 1.0, z1)));
     // Лесенка к лодке.
     let lx = x0 + 6.0;
     let m = b.mesh(Mat::Wood);
