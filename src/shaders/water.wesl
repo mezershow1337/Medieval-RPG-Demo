@@ -151,7 +151,23 @@ fn ripples(p: vec2<f32>, t: f32) -> vec2<f32> {
 
 // Поглощение света в воде, 1/м (красный — сильнее всего): вода Понта зеленовато-синяя.
 fn sigma() -> vec3<f32> {
-    return vec3<f32>(0.36, 0.095, 0.12) * water.deep.w;
+    return vec3<f32>(0.55, 0.2, 0.21) * water.deep.w;
+}
+
+// Блики на дне (каустика): свет, собранный в сетку волнами наверху. 0..~1.
+fn caustic(p: vec2<f32>, t: f32) -> f32 {
+    let q = (p * 0.55) % vec2<f32>(6.2831853) - vec2<f32>(250.0);
+    var i = q;
+    var c = 1.0;
+    let inten = 0.005;
+    for (var n = 0; n < 4; n++) {
+        let tt = t * 0.55 * (1.0 - 3.5 / f32(n + 1));
+        i = q + vec2<f32>(cos(tt - i.x) + sin(tt + i.y), sin(tt - i.y) + cos(tt + i.x));
+        c += 1.0 / length(vec2<f32>(q.x / (sin(i.x + tt) / inten), q.y / (cos(i.y + tt) / inten)));
+    }
+    c /= 4.0;
+    c = 1.17 - pow(c, 1.4);
+    return clamp(pow(abs(c), 8.0), 0.0, 2.0);
 }
 
 fn screen_uv(frag: vec2<f32>) -> vec2<f32> {
@@ -313,9 +329,11 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     }
     let thick = ray_len * max(v.y, 0.05);
 
-    let shore_band = 1.0 - smoothstep(0.0, 0.7, thick + (foam_noise - 0.5) * 0.45);
-    let surf = 0.5 + 0.5 * sin(thick * 8.0 - t * 1.5 + foam_noise * 5.0);
-    var foam = shore_band * mix(0.5, 1.0, surf);
+    // Прибой: полосы пены бегут к берегу и рвутся на кружево.
+    let shore_band = 1.0 - smoothstep(0.0, 0.45, thick + (foam_noise - 0.5) * 0.3);
+    let surf = 0.5 + 0.5 * sin(thick * 10.0 - t * 1.5 + foam_noise * 5.0);
+    let lace = smoothstep(0.25, 0.6, foam_fine * 0.6 + foam_noise * 0.6);
+    var foam = shore_band * mix(0.35, 1.0, surf) * mix(0.45, 1.0, lace);
     // Гребни: где волна сжата сильнее всего, рваными пятнами.
     let crest_foam = smoothstep(0.32, 0.62, crest + (foam_noise - 0.5) * 0.35) * smoothstep(0.35, 0.75, foam_fine + foam_noise * 0.4);
     foam = max(foam, crest_foam * 0.85 * (1.0 - smoothstep(150.0, 400.0, dist)));
@@ -391,8 +409,19 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
                 len = max(water_z - sz, 0.0);
             }
         }
-        let bottom = scene_color(uv);
-        let tr = exp(-sigma() * len);
+        var bottom = scene_color(uv);
+        // Каустика на дне: точка дна по лучу, блики гаснут с глубиной и в тени туч.
+        if have_depth && water.params.w < 0.5 {
+            let fwd = -normalize(view.world_from_view[2].xyz);
+            let along = len / max(dot(-v, fwd), 0.15);
+            let bp = wp - v * along;
+            let d = max(water.waves.y - bp.y, 0.0);
+            let sun_k = smoothstep(0.0, 0.25, water.sky.sun.y) * (1.0 - 0.8 * clamp(water.sky.extra.y, 0.0, 1.0));
+            let ck = caustic(bp.xz + N.xz * 0.6, t) * exp(-d * 0.22) * smoothstep(0.05, 0.6, d) * sun_k * (1.0 - smoothstep(40.0, 120.0, dist));
+            bottom *= 1.0 + ck * 1.6;
+        }
+        // Свет идёт до дна сверху и потом от дна к глазу: гаснет на обоих отрезках.
+        let tr = exp(-sigma() * (len + len * max(v.y, 0.05)));
         let through = bottom * tr + inscatter * (vec3<f32>(1.0) - tr);
         col = mix(through, refl, fres) + spec + spec_moon;
     }

@@ -7,7 +7,7 @@
 
 use crate::level::WATER_Y;
 use bevy::asset::RenderAssetUsages;
-use bevy::camera::visibility::{NoFrustumCulling, VisibilityRange};
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::NotShadowCaster;
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -180,21 +180,19 @@ fn spawn_sea(mut commands: Commands, sea: Res<SeaLevel>, settings: Option<Res<cr
     commands.spawn((SeaSurface, Mesh3d(meshes.add(sea_mesh())), MeshMaterial3d(mat), Transform::from_xyz(0.0, sea.0, 0.0), NotShadowCaster, NoFrustumCulling));
     // Дно глубже двух метров: земля уровня его не рисует (раньше вода была непрозрачной),
     // а сквозь новую воду его видно. Тот же материал рельефа — у воды это галька.
-    let layout = crate::level::shared_full();
-    if let Some(hf) = &layout.ground {
-        let material = surfaces.add(crate::graphics::surface_material(crate::level::Mat::Terrain));
-        for (center, mesh) in seabed_meshes(hf, sea.0) {
-            commands.spawn((
-                Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(material.clone()),
-                Transform::IDENTITY,
-                NotShadowCaster,
-                // Дальше ~300 м дно сквозь толщу уже не видно.
-                VisibilityRange { start_margin: 0.0..0.0, end_margin: 300.0..330.0, use_aabb: true },
-                Name::new(format!("Дно {center}")),
-            ));
-        }
+    let material = surfaces.add(crate::graphics::surface_material(crate::level::Mat::Terrain));
+    let mut chunks = 0;
+    for (center, mesh) in seabed_meshes(sea.0) {
+        chunks += 1;
+        commands.spawn((
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(material.clone()),
+            Transform::IDENTITY,
+            NotShadowCaster,
+            Name::new(format!("Дно {center}")),
+        ));
     }
+    info!("Море: дно — {chunks} участков");
 }
 
 /// Участок дна (сторона, м).
@@ -202,18 +200,21 @@ const SEABED_CHUNK: f32 = 120.0;
 
 /// Меши дна по участкам: клетки карты высот, которые пропускает рельеф уровня (все углы
 /// глубже двух метров, см. `terrain::terrain_meshes`), — стык без щелей и без наложения.
-fn seabed_meshes(hf: &crate::collision::HeightField, sea: f32) -> Vec<(Vec2, Mesh)> {
-    let n = hf.nx;
-    let pos = |ix: usize, iz: usize| Vec3::new(hf.origin.x + ix as f32 * hf.cell, hf.node(ix, iz), hf.origin.y + iz as f32 * hf.cell);
+fn seabed_meshes(sea: f32) -> Vec<(Vec2, Mesh)> {
+    // Узлы той же сетки, что у рельефа (шаг 6 м, весь мир): `ground_y` в узле — ровно его высота.
+    const CELL: f32 = 6.0;
+    let n = (MAP_HALF * 2.0 / CELL) as usize + 1;
+    let node = |ix: usize, iz: usize| crate::level::ground_y(-MAP_HALF + ix as f32 * CELL, -MAP_HALF + iz as f32 * CELL);
+    let pos = |ix: usize, iz: usize| Vec3::new(-MAP_HALF + ix as f32 * CELL, node(ix, iz), -MAP_HALF + iz as f32 * CELL);
     let normal = |ix: usize, iz: usize| {
-        let l = hf.node(ix.saturating_sub(1), iz);
-        let r = hf.node((ix + 1).min(n - 1), iz);
-        let d = hf.node(ix, iz.saturating_sub(1));
-        let u = hf.node(ix, (iz + 1).min(hf.nz - 1));
-        Vec3::new(l - r, 2.0 * hf.cell, d - u).normalize()
+        let l = node(ix.saturating_sub(1), iz);
+        let r = node((ix + 1).min(n - 1), iz);
+        let d = node(ix, iz.saturating_sub(1));
+        let u = node(ix, (iz + 1).min(n - 1));
+        Vec3::new(l - r, 2.0 * CELL, d - u).normalize()
     };
     let mut chunks: std::collections::HashMap<(i32, i32), (crate::level::MeshBuilder, std::collections::HashMap<usize, u32>)> = default();
-    for iz in 0..hf.nz - 1 {
+    for iz in 0..n - 1 {
         for ix in 0..n - 1 {
             let corners = [pos(ix, iz), pos(ix + 1, iz), pos(ix + 1, iz + 1), pos(ix, iz + 1)];
             if !corners.iter().all(|c| c.y < sea - 2.0) {
