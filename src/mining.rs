@@ -276,7 +276,7 @@ pub fn dig_yield(kind: SiteKind, prospect: bool, skill: f32, q: f32, roll: [f32;
     Dug { items, rich, note }
 }
 
-/// Поденная плата за смену у ворота (нуммии) при качестве работы `q`.
+/// Поденная плата за смену у ворота (в долях) при качестве работы `q`.
 pub fn shaft_wage(q: f32) -> u32 {
     (12.0 * crate::work::wage_mult(q)).round() as u32
 }

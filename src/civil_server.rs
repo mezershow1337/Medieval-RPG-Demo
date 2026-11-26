@@ -154,7 +154,7 @@ pub enum Victim {
 #[derive(Clone, Debug)]
 pub struct Theft {
     pub player: u64,
-    /// Цена украденного, нуммии.
+    /// Цена украденного, в долях.
     pub value: u32,
     pub at: Vec3,
     pub what: String,

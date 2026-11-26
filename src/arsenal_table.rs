@@ -33,7 +33,7 @@ pub struct Arm {
     pub weld: bool,
     pub needs: Option<Technique>,
     pub parts: &'static [(&'static str, u16)],
-    /// Цена обычного качества, нуммии.
+    /// Цена обычного качества, в долях (медная монета — 10).
     pub price: u32,
     pub kg: f32,
     pub desc: &'static str,

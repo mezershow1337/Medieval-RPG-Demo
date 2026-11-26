@@ -4,14 +4,14 @@
 //! лавок и выполняет сделки, клиент (`trade_client.rs`, `trade_ui.rs`) только показывает.
 //!
 //! Как устроены цены:
-//! - справочная цена товара — `economy::base_price` (нуммии), умножается на качество;
+//! - справочная цена товара — `economy::base_price` (в долях), умножается на качество;
 //! - лавка продаёт с наценкой: своя продукция дешевле, привозное дороже; мало товара — дороже;
 //! - лавка покупает только то, что ей нужно (`buys`), примерно за половину цены (перекупщику
 //!   надо жить), и тем дешевле, чем больше такого товара у неё уже лежит;
 //! - отношение фракции к игроку (`Standing`) двигает обе цены;
 //! - за стенами — бартер: медь не берут или берут плохо, золото ценят, товар меряют своей мерой.
 
-use crate::economy::{base_price, coin_value, is_gold_coin, quality_price, round_price};
+use crate::economy::{base_price, coin_value, is_precious_coin, quality_price, round_price};
 use crate::factions::{Faction, Standing};
 use crate::items::{ItemBaseId, ItemShape, Quality};
 use serde::{Deserialize, Serialize};
@@ -334,7 +334,7 @@ pub struct LessonDef {
     pub hours: f32,
     /// Сколько секунд игрок должен провести рядом с мастером.
     pub secs: f32,
-    /// Плата за урок или жалованье за смену (нуммии).
+    /// Плата за урок или жалованье за смену (в долях).
     pub money: u32,
     pub min: Standing,
 }
@@ -364,7 +364,7 @@ const fn s(item: &'static str, min: u16, max: u16, markup: f32) -> StockDef {
 pub struct OrderDef {
     pub item: &'static str,
     pub count: u16,
-    /// Полная цена (нуммии).
+    /// Полная цена (в долях).
     pub price: u32,
     /// Сколько секунд реального времени делается.
     pub secs: f32,
@@ -375,7 +375,7 @@ pub struct OrderDef {
 pub enum MoneyPolicy {
     /// Обычная городская торговля: всё в монетах, со сдачей.
     Coins,
-    /// Мена. Торговец не платит деньгами; монеты принимает как товар: медь по `bronze`, золото по `gold`
+    /// Мена. Торговец не платит деньгами; монеты принимает как товар: медь по `bronze`, золото и серебро по `gold`
     /// от номинала (0 — не берёт вовсе).
     Barter { bronze: f32, gold: f32 },
 }
@@ -418,7 +418,7 @@ pub struct MerchantDef {
     pub money: MoneyPolicy,
     /// Насколько зорко смотрит за прилавком (0..1).
     pub vigilance: f32,
-    /// Сколько денег в кассе (нуммии): больше этого за раз не заплатит.
+    /// Сколько денег в кассе (в долях): больше этого за раз не заплатит.
     pub cash: u32,
     pub orders: &'static [OrderDef],
     pub lessons: &'static [LessonDef],
@@ -2108,7 +2108,7 @@ pub fn bid_price(
         let MoneyPolicy::Barter { bronze, gold } = def.money else {
             return None;
         };
-        let rate = if is_gold_coin(base) { gold } else { bronze };
+        let rate = if is_precious_coin(base) { gold } else { bronze };
         return (rate > 0.0).then(|| (coin_value(base).unwrap_or(0) as f32 * rate).round() as u32);
     }
     if stolen && def.has(Service::Fence) {
@@ -2288,8 +2288,9 @@ mod tests {
             "Солёная рыба",
             "Овчина",
             "Войлок",
-            "Фоллис",
-            "Солид",
+            "Медная монета",
+            "Серебряная монета",
+            "Золотая монета",
         ] {
             assert!(ItemBaseId::find(name).is_some(), "{name}");
         }
@@ -2307,7 +2308,7 @@ mod tests {
             category(ItemBaseId::by_name("Амфора вина")),
             Category::WineOil
         );
-        assert_eq!(category(ItemBaseId::by_name("Фоллис")), Category::Coin);
+        assert_eq!(category(ItemBaseId::by_name("Медная монета")), Category::Coin);
     }
 
     #[test]
@@ -2383,7 +2384,7 @@ mod tests {
         assert_eq!(
             bid_price(
                 steppe,
-                ItemBaseId::by_name("Фоллис"),
+                ItemBaseId::by_name("Медная монета"),
                 Quality::Common,
                 Standing::Neutral,
                 0,
@@ -2394,20 +2395,25 @@ mod tests {
         assert!(
             bid_price(
                 steppe,
-                ItemBaseId::by_name("Солид"),
+                ItemBaseId::by_name("Золотая монета"),
                 Quality::Common,
                 Standing::Neutral,
                 0,
                 false
             )
             .unwrap()
-                > 7200
+                > crate::economy::GOLD
+        );
+        // Серебро в степи тоже в цене.
+        assert!(
+            bid_price(steppe, ItemBaseId::by_name("Серебряная монета"), Quality::Common, Standing::Neutral, 0, false).unwrap()
+                > crate::economy::SILVER
         );
         let city = merchant_by_key("andronikos").unwrap().def();
         assert_eq!(
             bid_price(
                 city,
-                ItemBaseId::by_name("Солид"),
+                ItemBaseId::by_name("Золотая монета"),
                 Quality::Common,
                 Standing::Neutral,
                 0,

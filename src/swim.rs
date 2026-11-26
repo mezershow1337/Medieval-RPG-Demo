@@ -152,7 +152,8 @@ pub fn swim_move(p: &mut LocalPlayer, tf: &mut Transform, level: &LevelColliders
     p.grounded = false;
     p.crouching = false;
     let mut pos = feet;
-    let r = level.move_body(&Body::CROUCHING, &mut pos, p.velocity * dt, false);
+    // Как при ходьбе, тело перешагивает невысокие уступы: на подъёме дна у пляжа не застрять.
+    let r = level.move_body(&Body::CROUCHING, &mut pos, p.velocity * dt, true);
     if r.blocked_x {
         p.velocity.x = 0.0;
     }
@@ -162,11 +163,12 @@ pub fn swim_move(p: &mut LocalPlayer, tf: &mut Transform, level: &LevelColliders
     if r.grounded && p.velocity.y < 0.0 {
         p.velocity.y = 0.0;
     }
-    // У отвесной набережной: Пробел у стенки — выбраться наверх, если там есть где встать.
-    if up && (r.blocked_x || r.blocked_z) && at_surface {
-        let ahead = pos + flat * Vec3::NEG_Z * 0.6;
-        for step in [0.6f32, 1.0, 1.4, 1.8] {
-            let top = Vec3::new(ahead.x, surface + step, ahead.z);
+    // У отвесного края (набережная, причал, борт лодки): упёрлись, плывя вперёд или жмём
+    // Пробел, — выбираемся наверх, если там есть где встать.
+    if (up || fwd_in > 0.0) && (r.blocked_x || r.blocked_z) && at_surface {
+        let ahead = pos + flat * Vec3::NEG_Z * 0.8;
+        for k in 0..=17 {
+            let top = Vec3::new(ahead.x, surface + 0.3 + k as f32 * 0.1, ahead.z);
             if level.body_is_free(&Body::STANDING, top) && !level.body_is_free(&Body::STANDING, top - Vec3::Y * 0.3) {
                 pos = top;
                 p.velocity = Vec3::ZERO;
@@ -436,6 +438,41 @@ fn swim_tilt() -> Transform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Плывём вперёд (W) из точки `from` с поворотом `yaw`, пока не выйдем из воды. Возвращает,
+    /// где оказались ноги, и вышли ли (как `swim_state`: глубина меньше `LEAVE` или не море).
+    fn swim_ashore(level: &LevelColliders, from: Vec3, yaw: f32, secs: f32) -> (Vec3, bool) {
+        let mut p = LocalPlayer { yaw, ..default() };
+        let mut tf = Transform::from_translation(from);
+        let dt = 1.0 / 30.0;
+        for _ in 0..(secs / dt) as usize {
+            let feet = tf.translation;
+            let depth = crate::water::surface_y(feet.x, feet.z, 0.0) - feet.y;
+            if !deep_water(feet.x, feet.z) || depth < LEAVE {
+                return (feet, true);
+            }
+            swim_move(&mut p, &mut tf, level, None, dt, 0.0, |k| k == KeyCode::KeyW);
+        }
+        (tf.translation, false)
+    }
+
+    #[test]
+    fn climbs_out_on_quay_beach_and_pier() {
+        let level = crate::level::colliders(crate::level::layout());
+        let float = WATER_Y - FLOAT;
+        // Набережная Карантинной бухты: плывём на запад, к стенке.
+        let (feet, out) = swim_ashore(&level, Vec3::new(312.0, float, 20.0), std::f32::consts::FRAC_PI_2, 30.0);
+        assert!(out && feet.x < 303.0, "не выбрались к набережной: {feet}");
+        // Причал: плывём к его боку с севера и выбираемся на настил.
+        let (feet, out) = swim_ashore(&level, Vec3::new(318.0, float, 40.0), 0.0, 30.0);
+        assert!(out && feet.y > -0.3, "не выбрались на причал: {feet}");
+        // Северный пляж: плывём к берегу на юг.
+        let (feet, out) = swim_ashore(&level, Vec3::new(-150.0, float, -215.0), std::f32::consts::PI, 60.0);
+        assert!(out, "застряли у пляжа: {feet}");
+        // Восточный берег бухты.
+        let (feet, out) = swim_ashore(&level, Vec3::new(400.0, float, 260.0), -std::f32::consts::FRAC_PI_2, 90.0);
+        assert!(out, "застряли у восточного берега бухты: {feet}");
+    }
 
     #[test]
     fn breath_runs_out_and_returns() {

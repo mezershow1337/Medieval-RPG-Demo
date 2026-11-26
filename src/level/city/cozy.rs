@@ -626,7 +626,7 @@ pub fn table_wares(wealth: u8, rng: &mut Rng) -> Vec<Ware> {
         w.push(one(DICE));
     }
     if rng.chance(0.45) {
-        let coins = if wealth >= 2 && rng.chance(0.4) { ("Декануммий", 2 + rng.int(4) as u16) } else { ("Фоллис", 3 + rng.int(10) as u16) };
+        let coins = if wealth >= 2 && rng.chance(0.4) { (crate::economy::COPPER_COIN, 2 + rng.int(4) as u16) } else { (crate::economy::COPPER_COIN, 12 + rng.int(36) as u16) };
         w.push(Ware::Item(coins.0, coins.1));
     }
     w.push(one(LAMP));

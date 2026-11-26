@@ -431,9 +431,9 @@ mod tests {
 
     #[test]
     fn finds_items_by_part_of_name() {
-        let coins = find_items("фоллис");
+        let coins = find_items("золотая");
         assert_eq!(coins.len(), 1);
-        assert_eq!(coins[0].base().name, "Фоллис");
+        assert_eq!(coins[0].base().name, "Золотая монета");
         assert!(find_items("несуществующая штука").is_empty());
     }
 

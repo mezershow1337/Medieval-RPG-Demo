@@ -245,7 +245,7 @@ impl P2pSession {
 pub struct TradeWorld {
     pub merchants: Vec<MerchantState>,
     reps: HashMap<u64, Reputation>,
-    /// Неуплаченные штрафы (нуммии).
+    /// Неуплаченные штрафы (в долях).
     fines: HashMap<u64, u32>,
     open: HashMap<u64, MerchantId>,
     orders: Vec<Order>,
@@ -261,7 +261,7 @@ pub struct TradeWorld {
     standing_dirty: HashSet<u64>,
     /// Умение торговаться (покупка, продажа) — множители цен от навыка «Торговля» (ведёт skills_server.rs).
     pub haggle: HashMap<u64, (f32, f32)>,
-    /// Обороты сделок за кадр (игрок, нуммии) — из них растёт навык торговли.
+    /// Обороты сделок за кадр (игрок, доли) — из них растёт навык торговли.
     pub turnover: Vec<(u64, u32)>,
     rng: Rng,
 }
@@ -705,12 +705,12 @@ fn near(a: Vec3, b: Vec3, range: f32) -> bool {
 // Окно торговца
 // ---------------------------------------------------------------------------
 
-/// Цена с поправкой на умение торговаться (не меньше нуммия, если была).
+/// Цена с поправкой на умение торговаться: до медной монеты, не меньше одной, если была.
 fn haggled(price: u32, k: f32) -> u32 {
     if price == 0 {
         return 0;
     }
-    ((price as f32 * k).round() as u32).max(1)
+    crate::economy::round_price(price as f32 * k)
 }
 
 fn build_view(
@@ -1176,7 +1176,7 @@ fn deal(
     loot.uids = uids;
     // Оборот учит торговать.
     tw.turnover.push((player, buy_total + sell_total));
-    // Оборот улучшает отношения: +1 за каждые полсолида, не больше +3 за сделку.
+    // Оборот улучшает отношения: +1 за каждые 3,6 золотых, не больше +3 за сделку.
     let turnover = (buy_total + sell_total) as f32;
     tw.change_rep(player, def.faction, (turnover / 3600.0).min(3.0));
     // Оружие варварам: по закону нельзя. Кто-нибудь да донесёт.
@@ -1875,7 +1875,7 @@ fn receive_trade_messages(
                     let reply = match take_money(inv, nummi, &mut uids) {
                         Ok(()) => {
                             loot.uids = uids;
-                            // Солид милостыни — +10 у церкви (и немного у горожан).
+                            // Каждые 72 медных милостыни — +1 у церкви, не больше +25 за раз.
                             tw.change_rep(pid, Faction::Church, (nummi as f32 / 720.0).min(25.0));
                             format!(
                                 "«Да воздаст тебе Господь». Вы пожертвовали {}",
@@ -2557,11 +2557,11 @@ mod tests {
         let (mut tw, mut loot) = world();
         let id = merchant_by_key("eskam").unwrap();
         let fat = shelf_uid(&tw, id, "Овчина");
-        // Только медью — нельзя (медь кочевнику не нужна, а солиды в кошеле разменяны не будут).
+        // Только медью — нельзя (медь кочевнику не нужна, а золото в кошеле разменяно не будет).
         let inv = loot.inventories.get_mut(&1).unwrap();
         let folles = Item {
             uid: 77,
-            base: ItemBaseId::by_name("Фоллис"),
+            base: ItemBaseId::by_name("Медная монета"),
             quality: Quality::Common,
             affixes: vec![],
             count: 50,
@@ -2732,7 +2732,7 @@ mod tests {
         };
         inv2.place(sword, Target::Auto).unwrap();
         loot.inventories.insert(2, inv2);
-        // Игрок 1 платит 2 фоллиса за кинжал; у игрока 2 сумка 1×2 занята кинжалом.
+        // Игрок 1 платит 8 медных за кинжал; у игрока 2 сумка 1×2 занята кинжалом.
         let s = P2pSession {
             a: 1,
             b: 2,

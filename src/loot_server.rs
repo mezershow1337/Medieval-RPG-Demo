@@ -218,7 +218,7 @@ impl LootWorld {
         roll_item(ItemBaseId::by_name(name), quality, count, &mut self.rng, &mut self.uids)
     }
 
-    /// «Нищий старт»: выбранные игроком простое оружие и доспех, бинт, уксус и пять фоллисов.
+    /// «Нищий старт»: выбранные игроком простое оружие и доспех, бинт, уксус и две серебряные монеты.
     fn starter_inventory(&mut self, player: u64) -> Inventory {
         let mut inv = Inventory::new(PLAYER_GRID);
         let chosen = self.kits.get(&player).copied().unwrap_or_default();
@@ -906,7 +906,7 @@ mod tests {
         let count = |name: &str| inv.all_items().filter(|i| i.info().name == name).map(|i| i.count as u32).sum::<u32>();
         assert_eq!(count("Бинт"), 1);
         assert_eq!(count("Винный уксус"), 1);
-        assert_eq!(crate::economy::purse(&inv), 5 * crate::economy::NUMMI_PER_FOLLIS);
+        assert_eq!(crate::economy::purse(&inv), 2 * crate::economy::SILVER);
         // Без набора (старый клиент) — набор по умолчанию: спата и стёганка.
         let plain = world.starter_inventory(8);
         assert_eq!(plain.equipped(EquipSlot::MainHand).map(|i| i.info().name), Some("Спата"));

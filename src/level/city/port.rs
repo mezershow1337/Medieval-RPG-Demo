@@ -10,7 +10,6 @@ use super::ships;
 use super::interior::{self, extras};
 use crate::items::LootTableId as L;
 use crate::level::Role;
-use crate::collision::Aabb;
 use std::f32::consts::FRAC_PI_2;
 
 pub const QUAY_TOP: f32 = 0.0;
@@ -39,17 +38,7 @@ fn quay(b: &mut Builder) {
         b.solid([edge - 1.2, -6.0, z], [edge, QUAY_TOP, zz], Mat::Limestone);
         b.decor([EAST_WALL_X + WALL_T / 2.0, QUAY_TOP, z], [edge - 1.2, QUAY_TOP + 0.04, zz], Mat::Paving);
         b.mesh(Mat::Limestone).cuboid(Vec3::new(edge - 1.3, QUAY_TOP, z), Vec3::new(edge + 0.05, QUAY_TOP + 0.2, zz));
-        // Невидимое ограждение края (кроме выходов на причалы).
-        let mut s = z;
-        for &pz in PIER_Z.iter().filter(|&&pz| pz > z - PIER_W && pz < zz + PIER_W) {
-            if pz - PIER_W / 2.0 > s {
-                b.invisible.push(Aabb::new(Vec3::new(edge - 0.1, QUAY_TOP, s), Vec3::new(edge + 0.3, QUAY_TOP + 1.3, pz - PIER_W / 2.0)));
-            }
-            s = pz + PIER_W / 2.0;
-        }
-        if zz > s {
-            b.invisible.push(Aabb::new(Vec3::new(edge - 0.1, QUAY_TOP, s), Vec3::new(edge + 0.3, QUAY_TOP + 1.3, zz)));
-        }
+        // Края нет: с набережной можно спрыгнуть в воду (выбраться — Пробел у стенки).
         z = zz;
     }
     // Тумбы для швартовки.
@@ -73,16 +62,11 @@ fn quay(b: &mut Builder) {
             }
             x += 3.0;
         }
-        // Ограждение краёв причала — с проходами к сходням.
-        for (dir, z0, z1) in [(-1.0f32, r.z0 - 0.3, r.z0), (1.0, r.z1, r.z1 + 0.3)] {
-            let mut x = r.x0;
-            for gx in GANGWAYS.iter().filter(|g| g.0 == pz && g.1 == dir).map(|g| edge + g.2) {
-                b.invisible.push(Aabb::new(Vec3::new(x, 0.0, z0), Vec3::new(gx - 0.45, 1.3, z1)));
-                x = gx + 0.45;
-            }
-            b.invisible.push(Aabb::new(Vec3::new(x, 0.0, z0), Vec3::new(r.x1, 1.3, z1)));
+        // Ограждения нет: с причала прыгают в воду. Под настилом между сваями — обшивка:
+        // под причал не заплыть, а упёршись в край, пловец выбирается наверх.
+        for (lo, hi) in [([r.x0, -4.0, r.z0], [r.x1, QUAY_TOP - 0.25, r.z0 + 0.25]), ([r.x0, -4.0, r.z1 - 0.25], [r.x1, QUAY_TOP - 0.25, r.z1]), ([r.x1 - 0.25, -4.0, r.z0], [r.x1, QUAY_TOP - 0.25, r.z1])] {
+            b.invisible.push(crate::collision::Aabb::new(Vec3::from(lo), Vec3::from(hi)));
         }
-        b.invisible.push(Aabb::new(Vec3::new(r.x1, 0.0, r.z0), Vec3::new(r.x1 + 0.3, 1.3, r.z1)));
         b.torch(r.x1 - 0.5, 1.6, r.z0 + 0.3, Vec3::ZERO);
     }
     moored_ships(b, edge);

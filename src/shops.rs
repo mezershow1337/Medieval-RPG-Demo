@@ -25,7 +25,7 @@ pub struct Wares {
     pub buys: &'static [(Category, f32)],
     /// Цвет туники (у каждого ремесла свой).
     pub tunic: [f32; 3],
-    /// Сколько денег в кассе (нуммии).
+    /// Сколько денег в кассе (доли монеты, см. `economy.rs`).
     pub cash: u32,
 }
 
@@ -33,8 +33,8 @@ const fn s(item: &'static str, min: u16, max: u16, markup: f32) -> StockDef {
     StockDef { item, min, max, markup }
 }
 
-/// Нуммиев в солиде (касса лавок — в солидах).
-const SOLIDUS: u32 = 7200;
+/// Касса небольшой лавки (доли монеты, см. `economy.rs`): как у лавочников на агоре.
+const CASH: u32 = 7200;
 
 /// Ремёсла обычных лавок: соседние лавки получают разные (см. [`wares_for`]).
 pub const COMMON_WARES: &[Wares] = &[
@@ -45,7 +45,7 @@ pub const COMMON_WARES: &[Wares] = &[
         stock: &[s("Глиняный горшок", 3, 8, 1.0), s("Глиняная кружка", 4, 10, 1.0), s("Краснолаковая миска", 3, 8, 1.05), s("Глиняный светильник", 3, 8, 1.0)],
         buys: &[(Category::Vessel, 0.8)],
         tunic: [0.62, 0.42, 0.3],
-        cash: SOLIDUS,
+        cash: CASH,
     },
     Wares {
         key: "baker",
@@ -54,7 +54,7 @@ pub const COMMON_WARES: &[Wares] = &[
         stock: &[s("Каравай хлеба", 6, 14, 1.0), s("Головка сыра", 2, 5, 1.05), s("Сушёные смоквы", 4, 10, 1.05), s("Горшок мёда", 1, 3, 1.1)],
         buys: &[(Category::Food, 0.8)],
         tunic: [0.85, 0.8, 0.68],
-        cash: SOLIDUS,
+        cash: CASH,
     },
     Wares {
         key: "fishmonger",
@@ -63,7 +63,7 @@ pub const COMMON_WARES: &[Wares] = &[
         stock: &[s("Хамса", 6, 16, 1.0), s("Ставрида", 3, 8, 1.0), s("Барабулька", 3, 8, 1.0), s("Кефаль", 1, 4, 1.0), s("Солёная рыба", 4, 10, 1.0), s("Мешок соли", 1, 3, 1.05)],
         buys: &[(Category::Food, 0.85)],
         tunic: [0.4, 0.5, 0.55],
-        cash: SOLIDUS,
+        cash: CASH,
     },
     Wares {
         key: "vintner",
@@ -72,7 +72,7 @@ pub const COMMON_WARES: &[Wares] = &[
         stock: &[s("Кувшин вина", 3, 8, 1.0), s("Кувшин оливкового масла", 2, 6, 1.1), s("Винный уксус", 2, 5, 1.0), s("Глиняная кружка", 2, 6, 1.0)],
         buys: &[(Category::WineOil, 0.85), (Category::Vessel, 0.5)],
         tunic: [0.55, 0.22, 0.25],
-        cash: SOLIDUS * 2,
+        cash: CASH * 2,
     },
     Wares {
         key: "draper",
@@ -81,7 +81,7 @@ pub const COMMON_WARES: &[Wares] = &[
         stock: &[s("Отрез льна", 2, 6, 1.0), s("Отрез шерсти", 2, 5, 1.0), s("Моток пряжи", 4, 10, 1.0), s("Веретено с пряслицем", 1, 3, 1.0), s("Железные ножницы", 1, 2, 1.1), s("Бинт", 4, 10, 1.0)],
         buys: &[(Category::Textile, 0.85)],
         tunic: [0.32, 0.38, 0.6],
-        cash: SOLIDUS * 2,
+        cash: CASH * 2,
     },
     Wares {
         key: "tanner",
@@ -90,7 +90,7 @@ pub const COMMON_WARES: &[Wares] = &[
         stock: &[s("Овчина", 2, 5, 1.0), s("Войлок", 2, 4, 1.0), s("Сырая шкура", 1, 3, 1.0), s("Кожаные сапоги", 1, 2, 1.0), s("Кожаные перчатки", 1, 3, 1.0)],
         buys: &[(Category::Hide, 0.9)],
         tunic: [0.45, 0.33, 0.22],
-        cash: SOLIDUS * 2,
+        cash: CASH * 2,
     },
     Wares {
         key: "coppersmith",
@@ -99,7 +99,7 @@ pub const COMMON_WARES: &[Wares] = &[
         stock: &[s("Медный котелок", 1, 3, 1.0), s("Бронзовый кувшин", 1, 3, 1.0), s("Бронзовый светильник", 1, 3, 1.0), s("Весы с гирями", 1, 2, 1.0), s("Ступка с пестиком", 1, 2, 1.0)],
         buys: &[(Category::Vessel, 0.75), (Category::Material, 0.8)],
         tunic: [0.6, 0.45, 0.25],
-        cash: SOLIDUS * 3,
+        cash: CASH * 3,
     },
     Wares {
         key: "haberdasher",
@@ -108,7 +108,7 @@ pub const COMMON_WARES: &[Wares] = &[
         stock: &[s("Костяной гребень", 2, 5, 1.0), s("Бронзовое зеркальце", 1, 3, 1.05), s("Бронзовая фибула", 2, 4, 1.0), s("Бронзовая пряжка", 2, 5, 1.0), s("Серебряная ложка", 1, 2, 1.1), s("Деревянная шкатулка", 1, 2, 1.0)],
         buys: &[(Category::Jewelry, 0.8)],
         tunic: [0.5, 0.4, 0.55],
-        cash: SOLIDUS * 3,
+        cash: CASH * 3,
     },
     Wares {
         key: "spicer",
@@ -117,7 +117,7 @@ pub const COMMON_WARES: &[Wares] = &[
         stock: &[s("Перец", 2, 6, 1.15), s("Шафран", 1, 3, 1.2), s("Корица", 2, 5, 1.15), s("Хиосская мастика", 2, 5, 1.15), s("Ладан", 2, 5, 1.1), s("Мирра", 1, 3, 1.2)],
         buys: &[(Category::Import, 0.85)],
         tunic: [0.7, 0.55, 0.2],
-        cash: SOLIDUS * 4,
+        cash: CASH * 4,
     },
     Wares {
         key: "chandler",
@@ -126,7 +126,7 @@ pub const COMMON_WARES: &[Wares] = &[
         stock: &[s("Воск", 4, 10, 1.0), s("Мыло", 3, 8, 1.0), s("Щёлок", 1, 4, 1.0), s("Глиняный светильник", 2, 6, 1.0), s("Кувшин оливкового масла", 1, 4, 1.1)],
         buys: &[(Category::Material, 0.8), (Category::Food, 0.6)],
         tunic: [0.75, 0.7, 0.5],
-        cash: SOLIDUS,
+        cash: CASH,
     },
     Wares {
         key: "cutler",
@@ -135,7 +135,7 @@ pub const COMMON_WARES: &[Wares] = &[
         stock: &[s("Кухонный нож", 2, 5, 1.0), s("Кинжал", 1, 2, 1.05), s("Железные ножницы", 1, 3, 1.0), s("Плотничий топор", 1, 2, 1.0), s("Заступ", 1, 2, 1.0), s("Топор дровосека", 1, 2, 1.0)],
         buys: &[(Category::Weapon, 0.6), (Category::Material, 0.75)],
         tunic: [0.35, 0.35, 0.38],
-        cash: SOLIDUS * 3,
+        cash: CASH * 3,
     },
     Wares {
         key: "glazier",
@@ -144,7 +144,7 @@ pub const COMMON_WARES: &[Wares] = &[
         stock: &[s("Стеклянная чаша", 1, 3, 1.05), s("Стеклянный кубок", 2, 4, 1.05), s("Пустой флакон", 3, 8, 1.0)],
         buys: &[(Category::Vessel, 0.75)],
         tunic: [0.4, 0.58, 0.55],
-        cash: SOLIDUS * 2,
+        cash: CASH * 2,
     },
     Wares {
         key: "devotional",
@@ -153,7 +153,7 @@ pub const COMMON_WARES: &[Wares] = &[
         stock: &[s("Нательный крест", 1, 3, 1.0), s("Энколпион", 1, 2, 1.1), s("Ампула святого Мины", 1, 3, 1.0), s("Ладан", 2, 5, 1.05), s("Псалтирь", 0, 1, 1.1)],
         buys: &[(Category::Jewelry, 0.7)],
         tunic: [0.3, 0.28, 0.3],
-        cash: SOLIDUS * 2,
+        cash: CASH * 2,
     },
     Wares {
         key: "toymaker",
@@ -162,7 +162,7 @@ pub const COMMON_WARES: &[Wares] = &[
         stock: &[s("Деревянная лошадка", 1, 3, 1.0), s("Игральные кости", 3, 8, 1.0), s("Доска для тавлей", 1, 2, 1.0), s("Деревянная шкатулка", 1, 2, 1.0)],
         buys: &[(Category::Jewelry, 0.5)],
         tunic: [0.6, 0.55, 0.3],
-        cash: SOLIDUS,
+        cash: CASH,
     },
     Wares {
         key: "tackle",
@@ -171,7 +171,7 @@ pub const COMMON_WARES: &[Wares] = &[
         stock: &[s("Тростниковая удочка", 1, 2, 1.0), s("Бронзовые крючки", 5, 15, 1.0), s("Свинцовые грузила", 4, 10, 1.0), s("Морские черви", 6, 20, 1.0), s("Креветки", 4, 12, 1.0)],
         buys: &[(Category::Food, 0.6)],
         tunic: [0.45, 0.52, 0.42],
-        cash: SOLIDUS,
+        cash: CASH,
     },
     Wares {
         key: "herbalist",
@@ -180,7 +180,7 @@ pub const COMMON_WARES: &[Wares] = &[
         stock: &[s("Сушёный шалфей", 2, 6, 1.0), s("Сушёная мята", 2, 6, 1.0), s("Сушёный чабрец", 2, 6, 1.0), s("Сушёный шиповник", 2, 6, 1.0), s("Ягоды можжевельника", 2, 5, 1.0)],
         buys: &[(Category::Herb, 0.85)],
         tunic: [0.42, 0.55, 0.35],
-        cash: SOLIDUS,
+        cash: CASH,
     },
 ];
 
@@ -192,7 +192,7 @@ pub const BOOKSELLER: Wares = Wares {
     stock: &[s("Тетрадь пергамента", 4, 12, 1.0), s("Чернила", 2, 6, 1.0), s("Тростниковое перо", 4, 12, 1.0), s("Восковая табличка", 2, 5, 1.0), s("Псалтирь", 1, 2, 1.0), s("Обрывок травника", 0, 1, 1.0)],
     buys: &[(Category::Book, 0.9)],
     tunic: [0.35, 0.3, 0.45],
-    cash: SOLIDUS * 3,
+    cash: CASH * 3,
 };
 
 /// Корчма у главной улицы.
@@ -203,7 +203,7 @@ pub const TAVERN: Wares = Wares {
     stock: &[s("Кувшин вина", 3, 8, 1.1), s("Каравай хлеба", 3, 8, 1.1), s("Головка сыра", 1, 4, 1.1), s("Солёная рыба", 2, 6, 1.1), s("Глиняная кружка", 2, 6, 1.0)],
     buys: &[(Category::WineOil, 0.8), (Category::Food, 0.7)],
     tunic: [0.5, 0.3, 0.2],
-    cash: SOLIDUS * 2,
+    cash: CASH * 2,
 };
 
 /// Имена продавцов (у торговцев из `trade::MERCHANTS` — свои, не повторяются).

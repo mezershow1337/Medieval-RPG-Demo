@@ -147,7 +147,10 @@ pub fn unpack_profile(data: &[u8; 256]) -> Option<Profile> {
 // Цены
 // ---------------------------------------------------------------------------
 
-/// Цена усадьбы (нуммии): по величине дома и по тому, как теснится и богатеет город.
+/// Солид VI века в долях (медная монета — 10): цены домов взяты из папирусов в солидах.
+const SOLIDUS: f32 = 7200.0;
+
+/// Цена усадьбы (в долях): по величине дома и по тому, как теснится и богатеет город.
 pub fn estate_price(spec: &EstateSpec, town: &TownState) -> u32 {
     let rooms = spec.rooms.len() as f32;
     let base_solidi = match spec.town {
@@ -157,15 +160,16 @@ pub fn estate_price(spec: &EstateSpec, town: &TownState) -> u32 {
     let demand = (0.75 + 0.6 * (town.crowding() - 0.85)).clamp(0.7, 1.5);
     let mood = 0.85 + 0.3 * town.mood;
     let plague = if town.plague() { 0.8 } else { 1.0 };
-    let nummi = base_solidi * crate::economy::NUMMI_PER_SOLIDUS as f32 * demand * mood * plague;
-    // Круглые суммы: до тремисса (треть солида).
+    let nummi = base_solidi * SOLIDUS * demand * mood * plague;
+    // Круглые суммы: до 2 золотых 4 серебряных (треть солида).
     ((nummi / 2400.0).round().max(1.0) * 2400.0) as u32
 }
 
-/// Плата за месяц (4 недели) аренды: около 1/90 цены, до фоллиса.
+/// Плата за месяц (4 недели) аренды: около 1/90 цены, до 4 медных (как прежде — до фоллиса).
 pub fn rent_price(sale: u32) -> u32 {
     let n = sale as f32 / 90.0;
-    ((n / crate::economy::NUMMI_PER_FOLLIS as f32).round().max(1.0) * crate::economy::NUMMI_PER_FOLLIS as f32) as u32
+    const STEP: f32 = 4.0 * crate::economy::COPPER as f32;
+    ((n / STEP).round().max(1.0) * STEP) as u32
 }
 
 /// Сколько курия даёт, если продать дом обратно.
@@ -195,7 +199,7 @@ pub struct EstateBrief {
     pub owner: String,
     /// Кто из игроков в сети может входить (номера подключений).
     pub access: Vec<u64>,
-    /// Цена покупки и месяца аренды (нуммии).
+    /// Цена покупки и месяца аренды (в долях).
     pub price: u32,
     pub rent: u32,
     /// Обстановка по комнатам.
@@ -310,13 +314,13 @@ mod tests {
         let town = TownState::new(TownId::Herson);
         for e in cat.estates.iter().filter(|e| e.town == TownId::Herson) {
             let p = estate_price(e, &town);
-            let sol = p as f32 / crate::economy::NUMMI_PER_SOLIDUS as f32;
+            let sol = p as f32 / SOLIDUS;
             assert!((5.0..=40.0).contains(&sol), "{}: {sol} солидов", e.name);
             let rent = rent_price(p);
             assert!(rent >= 400 && rent < p / 50, "аренда {rent} при цене {p}");
         }
         let hut = cat.estates.iter().find(|e| e.town == TownId::GothVillage).expect("мазанка у готов");
         let p = estate_price(hut, &TownState::new(TownId::GothVillage));
-        assert!(p <= 5 * crate::economy::NUMMI_PER_SOLIDUS, "мазанка {p}");
+        assert!(p as f32 <= 5.0 * SOLIDUS, "мазанка {p}");
     }
 }
