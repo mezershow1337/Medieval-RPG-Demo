@@ -251,6 +251,11 @@ pub fn hearths() -> &'static [Vec3] {
     &super::shared().hearths
 }
 
+/// Лавки в первых этажах домов активного уровня (номер лавки — индекс).
+pub fn shops() -> &'static [super::ShopSpec] {
+    &super::shared().shops
+}
+
 /// Жилые дома горожан активного уровня (номер дома — индекс).
 pub fn houses() -> &'static [super::HouseSpec] {
     &super::shared().houses

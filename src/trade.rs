@@ -401,6 +401,7 @@ pub struct Look {
     pub helmet: bool,
 }
 
+#[derive(Clone)]
 pub struct MerchantDef {
     /// Короткий ключ (для тестов, отладки и связи с квестами).
     #[allow(dead_code)]
@@ -440,8 +441,20 @@ pub struct MerchantId(pub u16);
 
 impl MerchantId {
     pub fn def(self) -> &'static MerchantDef {
-        &MERCHANTS[self.0 as usize]
+        // Торговцы из таблицы — сразу, продавцы лавок (`shops.rs`) — из полного списка.
+        MERCHANTS.get(self.0 as usize).unwrap_or_else(|| &merchants()[self.0 as usize])
     }
+}
+
+/// Все торговцы уровня: из таблицы [`MERCHANTS`] и, следом за ними, продавцы лавок
+/// главной улицы (`shops.rs`). Номер в списке — [`MerchantId`].
+pub fn merchants() -> &'static [MerchantDef] {
+    static ALL: std::sync::OnceLock<Vec<MerchantDef>> = std::sync::OnceLock::new();
+    ALL.get_or_init(|| {
+        let mut v = MERCHANTS.to_vec();
+        v.extend(crate::shops::sellers().iter().map(|s| s.def.clone()));
+        v
+    })
 }
 
 const GREEK: Look = Look {
@@ -2034,7 +2047,7 @@ pub const MERCHANTS: &[MerchantDef] = &[
 
 #[allow(dead_code)]
 pub fn merchant_by_key(key: &str) -> Option<MerchantId> {
-    MERCHANTS
+    merchants()
         .iter()
         .position(|m| m.key == key)
         .map(|i| MerchantId(i as u16))
@@ -2122,23 +2135,26 @@ pub fn bid_price(
 // ---------------------------------------------------------------------------
 
 /// Столешница прилавка в системе торговца (он смотрит в −Z): центр и половинные размеры.
-/// `felt` — войлок на земле (за стенами), иначе деревянный стол.
+/// `felt` — войлок на земле (за стенами), иначе деревянный стол. `fixed` — столешница
+/// принадлежит постройке (каменный прилавок лавки): клиент её не рисует, а упирается
+/// человек в коллизию уровня.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct StallBox {
     pub center: [f32; 3],
     pub half: [f32; 3],
     pub felt: bool,
+    pub fixed: bool,
 }
 
 /// Из чего состоит прилавок: в городе — стол перед торговцем (и боковой столик, если есть место),
 /// за стенами — войлок на земле.
 pub fn stall_layout(outside: bool, side_table: bool) -> Vec<StallBox> {
     if outside {
-        return vec![StallBox { center: [0.0, 0.015, -1.15], half: [1.2, 0.015, 0.75], felt: true }];
+        return vec![StallBox { center: [0.0, 0.015, -1.15], half: [1.2, 0.015, 0.75], felt: true, fixed: false }];
     }
-    let mut v = vec![StallBox { center: [0.0, 0.45, -0.95], half: [1.0, 0.45, 0.35], felt: false }];
+    let mut v = vec![StallBox { center: [0.0, 0.45, -0.95], half: [1.0, 0.45, 0.35], felt: false, fixed: false }];
     if side_table {
-        v.push(StallBox { center: [1.65, 0.38, -0.6], half: [0.45, 0.38, 0.4], felt: false });
+        v.push(StallBox { center: [1.65, 0.38, -0.6], half: [0.45, 0.38, 0.4], felt: false, fixed: false });
     }
     v
 }
@@ -2163,7 +2179,8 @@ pub const STALL_POST_HEIGHT: f32 = 2.4;
 /// Торговцы стоят по сторонам света, так что коробки по осям совпадают со столами.
 pub fn stall_solids(pos: bevy::math::Vec3, yaw: f32, boxes: &[StallBox]) -> Vec<crate::collision::Aabb> {
     use bevy::math::Vec3;
-    let tables: Vec<StallBox> = boxes.iter().filter(|b| !b.felt).copied().collect();
+    // Каменный прилавок лавки — уже коллизия уровня, жердей навеса у него нет.
+    let tables: Vec<StallBox> = boxes.iter().filter(|b| !b.felt && !b.fixed).copied().collect();
     let mut out: Vec<_> = stall_obbs(pos, yaw, &tables).iter().map(|o| o.aabb()).collect();
     if !tables.is_empty() {
         let rot = bevy::math::Quat::from_rotation_y(yaw);

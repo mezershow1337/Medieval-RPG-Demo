@@ -255,6 +255,46 @@ impl HouseSpec {
     }
 }
 
+/// Лавка в первом этаже дома (комната с широким проёмом на улицу): где каменный прилавок,
+/// где встаёт продавец и какие ставни запирают её на ночь. Продавцов ставит торговля
+/// (`shops.rs`, `trade_server.rs`), ставни закрывает `shop_hours.rs`.
+#[derive(Clone, Copy, Debug)]
+pub struct ShopSpec {
+    /// Пол комнаты лавки (без стен).
+    pub room_min: Vec3,
+    pub room_max: Vec3,
+    /// Каменный прилавок: низ и верх коробки (верх — столешница).
+    pub counter_min: Vec3,
+    pub counter_max: Vec3,
+    /// Куда смотрит прилавок — к двери на улицу (единичный, по оси X или Z).
+    pub facing: Vec3,
+    /// Где стоит продавец: на полу за прилавком.
+    pub seller: Vec3,
+    /// Свободные под товар части столешницы (низ — по верху прилавка): безмен и вмазанные
+    /// в стойку корчмы долии остаются в стороне.
+    pub goods: [Option<(Vec3, Vec3)>; 2],
+    /// Номер двустворчатой двери-ставней в [`Layout::doors`].
+    pub door: Option<u32>,
+    /// Особая лавка (аптека, книжная, корчма) или обычная.
+    pub kind: ShopKind,
+}
+
+impl ShopSpec {
+    /// Внутри ли точка комнаты лавки (по полу, с запасом `pad`).
+    pub fn contains(&self, p: Vec3, pad: f32) -> bool {
+        p.x >= self.room_min.x - pad && p.x <= self.room_max.x + pad && p.z >= self.room_min.z - pad && p.z <= self.room_max.z + pad && p.y > self.room_min.y - 1.0 && p.y < self.room_min.y + 3.0
+    }
+}
+
+/// Что за лавка (см. `level::city::houses::Shop`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ShopKind {
+    Common,
+    Apothecary,
+    Bookseller,
+    Tavern,
+}
+
 /// Вещь хозяев дома: лежит на столе, полке, сундуке или на полу. Сервер выкладывает её
 /// настоящим предметом (`GroundItem` с хозяином), её можно взять, переставить и украсть.
 #[derive(Clone, Copy, Debug)]
@@ -349,6 +389,8 @@ pub struct Layout {
     /// Жилые дома горожан и вещи в них.
     pub houses: Vec<HouseSpec>,
     pub house_items: Vec<HouseItemSpec>,
+    /// Лавки в первых этажах домов (по порядку постройки).
+    pub shops: Vec<ShopSpec>,
 }
 
 /// Чем обставить комнату купленного дома.
@@ -585,6 +627,7 @@ struct Builder {
     sites: u16,
     houses: Vec<HouseSpec>,
     house_items: Vec<HouseItemSpec>,
+    shops: Vec<ShopSpec>,
     /// Дом, который сейчас обставляется (вещи и сундуки получают хозяев).
     house: Option<u32>,
     /// Достаток дома: 0 — бедный, 1 — средний, 2 — зажиточный (больше серебра и стекла).
@@ -619,6 +662,7 @@ impl Builder {
             sites: 0,
             houses: Vec::new(),
             house_items: Vec::new(),
+            shops: Vec::new(),
             house: None,
             wealth: 1,
         }
@@ -646,6 +690,7 @@ impl Builder {
             switches: self.switches,
             houses: self.houses,
             house_items: self.house_items,
+            shops: self.shops,
         }
     }
 
@@ -701,6 +746,16 @@ impl Builder {
         }
         self.residents.extend(t.residents.into_iter().map(|r| Resident { pos: r.pos + offset, ..r }));
         self.house_items.extend(t.house_items.into_iter().map(|h| HouseItemSpec { pos: h.pos + offset, ..h }));
+        self.shops.extend(t.shops.into_iter().map(|s| ShopSpec {
+            room_min: s.room_min + offset,
+            room_max: s.room_max + offset,
+            counter_min: s.counter_min + offset,
+            counter_max: s.counter_max + offset,
+            seller: s.seller + offset,
+            goods: s.goods.map(|g| g.map(|(a, c)| (a + offset, c + offset))),
+            door: s.door.map(|d| d + d0),
+            ..s
+        }));
         self.plants.extend(t.plants.into_iter().map(|p| Plant { pos: p.pos + offset, ..p }));
         for mut g in t.glass {
             g.pts.iter_mut().for_each(|p| *p += offset);
@@ -724,6 +779,11 @@ impl Builder {
     /// Обыскиваемое место (сундук, шкаф, корзина) по текущей таблице добычи.
     fn container(&mut self, pos: Vec3, name: &'static str) {
         self.containers.push(ContainerSpec { pos, name, table: self.loot.0, house: self.house });
+    }
+
+    /// Лавка в первом этаже дома (см. [`ShopSpec`]).
+    fn shop(&mut self, s: ShopSpec) {
+        self.shops.push(s);
     }
 
     /// Вещь хозяев дома, который сейчас обставляется (вне жилого дома — ничего).

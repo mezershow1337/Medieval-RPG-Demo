@@ -106,7 +106,12 @@ impl Person {
     }
 
     fn vulnerable(&self) -> bool {
-        self.alive() && self.rallied.is_none() && self.role.is_none_or(vulnerable)
+        self.alive() && self.rallied.is_none() && self.role.is_none_or(vulnerable) && !self.away()
+    }
+
+    /// Продавец лавки ушёл на ночь домой (лавка заперта): его нет у прилавка.
+    fn away(&self) -> bool {
+        matches!(self.civ, Civ::Merchant(_)) && self.act == Act::Away
     }
 
     pub fn pose(&self) -> Pose {
@@ -525,7 +530,7 @@ fn witnesses(civil: &CivilWorld, world: &GameWorld, level: &LevelColliders, sigh
     let mut out = Vec::new();
     let r = sight.range(SIGHT_DAY, lit, crouch);
     for (i, p) in civil.people.iter().enumerate() {
-        if !p.alive() || p.rallied.is_some() || p.pos.distance_squared(me.pose.feet) > (r + 1.0) * (r + 1.0) {
+        if !p.alive() || p.rallied.is_some() || p.away() || p.pos.distance_squared(me.pose.feet) > (r + 1.0) * (r + 1.0) {
             continue;
         }
         if killed && victim == Some(Victim::Civ(i)) {
@@ -648,6 +653,15 @@ pub fn civil_tick(
     let world = &mut *world;
     if let Some(t) = trade.as_deref() {
         civil.add_merchants(t);
+        // Лавки с часами работы: на ночь продавец уходит домой.
+        for p in civil.people.iter_mut() {
+            if let Civ::Merchant(id) = p.civ
+                && let Some(m) = t.merchants.get(id as usize)
+                && m.hours.is_some()
+            {
+                p.act = if m.closed { Act::Away } else { Act::Idle };
+            }
+        }
     }
     if civil.jail.is_none() {
         let spot = crate::level::places::place("praetorium").map(|p| p.pos).unwrap_or_else(|| crate::level::spawn_point(0));

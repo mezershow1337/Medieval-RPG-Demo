@@ -75,7 +75,7 @@ fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, l
     }
 }
 
-fn receive_door_messages(mut server: ResMut<RenetServer>, game: Res<crate::server::GameWorld>, level: Res<LevelColliders>, mut locks: Option<ResMut<crate::towns_server::Locks>>) {
+fn receive_door_messages(mut server: ResMut<RenetServer>, game: Res<crate::server::GameWorld>, level: Res<LevelColliders>, mut locks: Option<ResMut<crate::towns_server::Locks>>, shutters: Option<Res<crate::shop_hours::ShopShutters>>) {
     for pid in server.clients_id() {
         while let Some(bytes) = server.receive_message(pid, CH_DOOR) {
             let Some(DoorClientMessage::Toggle { id }) = decode::<DoorClientMessage>(&bytes) else { continue };
@@ -93,6 +93,14 @@ fn receive_door_messages(mut server: ResMut<RenetServer>, game: Res<crate::serve
             if let Some(locks) = locks.as_mut()
                 && !locks.door(id as u32, pid)
             {
+                server.send_message(pid, CH_DOOR, encode(&DoorServerMessage::Set { id: id as u32, open: level.door_open(id) }));
+                continue;
+            }
+            // Ставни лавки на ночь заперты снаружи (изнутри выйти можно).
+            if let Some(Err(why)) = shutters.as_ref().map(|s| s.may_toggle(id as u32, actor.pose.feet)) {
+                if let Some(locks) = locks.as_mut() {
+                    locks.denied.push((pid, why));
+                }
                 server.send_message(pid, CH_DOOR, encode(&DoorServerMessage::Set { id: id as u32, open: level.door_open(id) }));
                 continue;
             }
