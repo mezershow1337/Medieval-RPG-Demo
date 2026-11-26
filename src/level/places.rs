@@ -175,6 +175,7 @@ fn city_places() -> Vec<Place> {
         p("glassworks", "Стекольная мастерская", "ὑελουργεῖον", Glassworks, flat(gw.cx(), gw.z1 - 3.0), 10.0),
         p("pottery", "Гончарная мастерская", "κεραμεῖον", Pottery, flat(pt.cx(), pt.z0 + 3.0), 10.0),
         p("smithy", "Кузница", "χαλκεῖον", Smithy, flat(sm.cx() + 1.5, sm.z0 + 3.0), 8.0),
+        p("iron_yard", "Угольный и железный двор", "σιδηροπωλεῖον", Warehouse, crafts::iron_yard_counter().0 - crafts::iron_yard_counter().1 * SELLER_BEHIND, 8.0),
         p("armoury", "Оружейная мастерская гарнизона", "φαβρίκα", Smithy, flat(ar.x0 + 7.0, ar.z0 + 6.5), 8.0),
         p("winery", "Винодельня (тарапан)", "ληνός", Winery, flat(wn.cx(), wn.z0 + 3.0), 10.0),
         p("church_west", "Западная церковь", "ἐκκλησία", Church, flat(wc.x0 + 4.0, wc.cz()), 8.0),
@@ -221,6 +222,7 @@ pub fn stall_slots(id: &str) -> Vec<StallSlot> {
         "port_market" => port::market_stalls().into_iter().map(behind).collect(),
         "apothecary_agora" => vec![behind(houses::shop_counter(17, -2, Side::S))],
         "apothecary_port" => vec![behind(houses::shop_counter(17, 1, Side::N))],
+        "iron_yard" => vec![behind(crafts::iron_yard_counter())],
         _ => Vec::new(),
     }
 }

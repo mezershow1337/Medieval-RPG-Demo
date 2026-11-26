@@ -821,24 +821,48 @@ fn charcoal_camp(b: &mut Builder) {
     let t = Vec3::new(-a.sin(), 0.0, a.cos()) * 0.45;
     b.mesh(Mat::DarkStone).quad([door - t, door + t, door + t * 0.4 + Vec3::Y * 1.3, door - t * 0.4 + Vec3::Y * 1.3], Vec3::new(a.cos(), 0.0, a.sin()));
     kit::hidden(b, hp - Vec3::new(1.5, 0.1, 1.5), hp + Vec3::new(1.5, 2.6, 1.5));
-    // Угольные площадки: чёрная земля, обугленные колья, лопаты.
-    for p in clamp_spots() {
+    // Угольные площадки (тока): выжженная земля с неровным краем — тут годами ставят кучи;
+    // по краю зола, крошки угля, недогоревшие головни и сложенный штабелем дёрн для укрытия.
+    for (k, p) in clamp_spots().into_iter().enumerate() {
         b.at(p.x, p.z);
-        ground_disc(b, Mat::Soot, p, 3.6, 0.03);
-        b.mesh(Mat::Coals).disc(p + Vec3::new(2.9, 0.045, -2.0), 0.4, 8, true);
-        for _ in 0..3 {
-            let ang = rng.range(0.0, TAU);
-            let q = p + Vec3::new(ang.cos(), 0.0, ang.sin()) * rng.range(3.9, 4.6);
+        burnt_patch(b, p, 3.5, &mut rng);
+        let to_c = (Vec2::new(c.x, c.y) - Vec2::new(p.x, p.z)).normalize_or(Vec2::X);
+        let side = Vec2::new(-to_c.y, to_c.x);
+        // Дёрн для укрытия кучи — аккуратным штабелем травой вниз, с краю тока.
+        let sod = Vec2::new(p.x, p.z) + side * 4.6 + to_c * 0.8;
+        sod_stack(b, g(sod.x, sod.y), to_c.x.atan2(to_c.y), &mut rng);
+        // Недогоревшие головни и крошки угля по краю.
+        for _ in 0..4 {
+            let a = rng.range(0.0, TAU);
+            let q = p + Vec3::new(a.cos(), 0.0, a.sin()) * rng.range(2.6, 3.4);
+            let q = g(q.x, q.z) + Vec3::Y * 0.06;
+            let d = Vec3::new(rng.range(-1.0, 1.0), 0.0, rng.range(-1.0, 1.0)).normalize_or(Vec3::X);
+            b.mesh(Mat::Soot).beam(q, q + d * rng.range(0.6, 1.1), 0.06, 0.05, Vec3::Y);
+        }
+        for _ in 0..14 {
+            let a = rng.range(0.0, TAU);
+            let q = p + Vec3::new(a.cos(), 0.0, a.sin()) * rng.range(2.4, 3.6);
             let q = g(q.x, q.z);
-            b.mesh(Mat::Grass).obox(q, Vec3::new(0.2, 0.05, 0.14), ang);
+            let s = rng.range(0.025, 0.05);
+            b.mesh(Mat::Coals).obox(q + Vec3::Y * s * 0.5, Vec3::new(s, s * 0.7, s * 0.9), rng.range(0.0, TAU));
+        }
+        // У каждого тока своя лопата, воткнутая в землю.
+        if k != 1 {
+            let q = Vec2::new(p.x, p.z) - side * 3.9 + to_c * 0.6;
+            let foot = g(q.x, q.y);
+            spade_tool(b, foot - Vec3::Y * 0.12, foot + Vec3::new(0.12, 1.25, 0.05), Vec3::new(side.x, 0.0, side.y));
         }
     }
-    // Поленницы (полуторааршинные дубовые поленья) и козлы для пилки.
-    for (dx, dz, along) in [(3.0f32, 1.0f32, true), (6.0, -3.0, false), (-1.0, 9.0, true)] {
+    // Штабеля дубовых брёвен с распиленными торцами (на подпорках-кольях) и поленница
+    // колотых полуторааршинных поленьев — из них кладут кучи.
+    for (dx, dz, yaw, rows) in [(3.0f32, 1.0f32, 0.15f32, 4usize), (6.5, -3.5, 1.45, 3)] {
         let p = g(c.x + dx, c.y + dz);
-        let r = if along { Rect::new(-1.8, -0.45, 1.8, 0.45) } else { Rect::new(-0.45, -1.8, 0.45, 1.8) };
-        b.placed(p - Vec3::Y * 0.05, move |t| kit::woodpile(t, r, 1.1));
+        b.at(p.x, p.z);
+        log_stack(b, p, yaw, 3.4, rows, &mut rng);
     }
+    let cord = g(c.x - 1.0, c.y + 9.0);
+    b.at(cord.x, cord.z);
+    billet_cord(b, cord, 0.1, 3.2, &mut rng);
     let sh = g(c.x + 6.0, c.y + 4.5);
     b.at(sh.x, sh.z);
     let m = b.mesh(Mat::Wood);
@@ -848,19 +872,14 @@ fn charcoal_camp(b: &mut Builder) {
     }
     m.beam(sh + Vec3::new(-1.1, 0.7, 0.0), sh + Vec3::new(1.2, 0.72, 0.05), 0.12, 0.12, Vec3::Y);
     kit::hidden(b, sh - Vec3::new(0.9, 0.0, 0.4), sh + Vec3::new(0.9, 0.85, 0.4));
-    // Корзины с готовым углём, грабли и лестница (на кучу влезают пробивать отдушины).
+    // Корзины с готовым углём и лестница: на кучу влезают пробивать отдушины, а пока куча
+    // не горит — лестница лежит у поленницы, одним концом на штабеле.
     for (dx, dz) in [(-4.5f32, 3.0f32), (-5.2, 3.6), (-4.0, 3.9)] {
         basket(b, g(c.x + dx, c.y + dz), 0.32, 0.6, Some(Mat::Coals));
     }
-    let lp = g(c.x - 2.0, c.y + 6.0);
-    let m = b.mesh(Mat::Wood);
-    for sx in [-0.22f32, 0.22] {
-        m.beam(lp + Vec3::new(sx, 0.0, 0.0), lp + Vec3::new(sx, 2.6, 0.8), 0.03, 0.03, Vec3::X);
-    }
-    for k in 0..7 {
-        let t = (k as f32 + 0.5) / 7.0;
-        m.beam(lp + Vec3::new(-0.24, 2.6 * t, 0.8 * t), lp + Vec3::new(0.24, 2.6 * t, 0.8 * t), 0.02, 0.02, Vec3::Y);
-    }
+    let lp = g(c.x - 3.6, c.y + 9.6);
+    let top = g(c.x - 1.0, c.y + 9.6) + Vec3::Y * 0.95;
+    ladder(b, lp + Vec3::Y * 0.04, top, 0.48);
     let rk = g(c.x + 0.5, c.y + 5.5);
     b.mesh(Mat::Wood).beam(rk, rk + Vec3::new(0.3, 1.5, 0.5), 0.02, 0.02, Vec3::X);
     b.mesh(Mat::Wood).beam(rk + Vec3::new(-0.25, 0.0, -0.05), rk + Vec3::new(0.25, 0.0, 0.05), 0.02, 0.05, Vec3::Y);
@@ -909,6 +928,148 @@ fn charcoal_camp(b: &mut Builder) {
             let ang = rng.range(0.0, TAU);
             b.mesh(Mat::Wood).beam(qp, qp + Vec3::new(ang.cos(), 0.0, ang.sin()) * 0.7, 0.07, 0.06, Vec3::Y);
         }
+    }
+}
+
+/// Выжженный ток: чёрное ядро и бурая зола к краю, край неровный (не циркулем), всё по рельефу.
+fn burnt_patch(b: &mut Builder, c: Vec3, r: f32, rng: &mut Rng) {
+    let n = 28;
+    // Радиус по углу — сумма пары синусоид со случайной фазой: край рваный, но плавный.
+    let (p1, p2, p3) = (rng.range(0.0, TAU), rng.range(0.0, TAU), rng.range(0.0, TAU));
+    let edge = move |a: f32| r * (1.0 + 0.1 * (3.0 * a + p1).sin() + 0.07 * (5.0 * a + p2).sin() + 0.05 * (8.0 * a + p3).sin());
+    let at = |rr: f32, a: f32, lift: f32| {
+        let (x, z) = (c.x + a.cos() * rr, c.z + a.sin() * rr);
+        Vec3::new(x, ground_y(x, z) + lift, z)
+    };
+    for (mat, k0, k1, lift) in [(Mat::Soot, 0.0f32, 0.78f32, 0.035f32), (Mat::Earth, 0.72, 1.0, 0.03)] {
+        let rings = 3;
+        let m = b.mesh(mat);
+        for ring in 0..rings {
+            let t0 = k0 + (k1 - k0) * ring as f32 / rings as f32;
+            let t1 = k0 + (k1 - k0) * (ring + 1) as f32 / rings as f32;
+            for k in 0..n {
+                let (a0, a1) = (k as f32 / n as f32 * TAU, (k + 1) as f32 / n as f32 * TAU);
+                if t0 < 1e-3 {
+                    m.tri(at(0.0, 0.0, lift), at(edge(a1) * t1, a1, lift), at(edge(a0) * t1, a0, lift), Vec3::Y);
+                } else {
+                    m.quad([at(edge(a0) * t0, a0, lift), at(edge(a1) * t0, a1, lift), at(edge(a1) * t1, a1, lift), at(edge(a0) * t1, a0, lift)], Vec3::Y);
+                }
+            }
+        }
+    }
+}
+
+/// Штабель нарезанного дёрна (пласты травой вниз) — им укрывают кучу.
+fn sod_stack(b: &mut Builder, p: Vec3, yaw: f32, rng: &mut Rng) {
+    let (dir, side) = (Vec3::new(yaw.sin(), 0.0, yaw.cos()), Vec3::new(yaw.cos(), 0.0, -yaw.sin()));
+    for layer in 0..3 {
+        let n = 3 - layer;
+        for k in 0..n {
+            let q = p + side * ((k as f32 - (n - 1) as f32 / 2.0) * 0.52) + dir * rng.range(-0.05, 0.05) + Vec3::Y * (0.06 + layer as f32 * 0.12);
+            b.mesh(Mat::Earth).obox(q, Vec3::new(0.25, 0.05, 0.36), yaw + rng.range(-0.08, 0.08));
+            b.mesh(Mat::Grass).obox(q - Vec3::Y * 0.05, Vec3::new(0.25, 0.012, 0.36), yaw);
+        }
+    }
+    kit::hidden(b, p - Vec3::new(0.8, 0.0, 0.8), p + Vec3::new(0.8, 0.4, 0.8));
+}
+
+/// Бревно: восьмигранник с торцами (кора — дерево, торцы светлее — ошкуренная древесина).
+fn log(b: &mut Builder, a: Vec3, c: Vec3, r: f32) {
+    let dir = (c - a).normalize_or(Vec3::X);
+    let u = dir.cross(Vec3::Y).normalize_or(Vec3::X);
+    let v = u.cross(dir);
+    let n = 8;
+    let ring = |k: usize| {
+        let ang = k as f32 / n as f32 * TAU + 0.3;
+        u * (ang.cos() * r) + v * (ang.sin() * r)
+    };
+    let m = b.mesh(Mat::Wood);
+    for k in 0..n {
+        let (o0, o1) = (ring(k), ring(k + 1));
+        m.quad([a + o0, c + o0, c + o1, a + o1], (o0 + o1).normalize());
+    }
+    let ends = b.mesh(Mat::Thatch);
+    for (p, out) in [(a, -dir), (c, dir)] {
+        for k in 0..n {
+            ends.tri(p, p + ring(k), p + ring(k + 1), out);
+        }
+    }
+}
+
+/// Штабель брёвен по оси `yaw`: ряды друг на друге в сдвиг, с кольями по концам.
+fn log_stack(b: &mut Builder, p: Vec3, yaw: f32, len: f32, rows: usize, rng: &mut Rng) {
+    let dir = Vec3::new(yaw.cos(), 0.0, -yaw.sin());
+    let side = Vec3::new(yaw.sin(), 0.0, yaw.cos());
+    let r = 0.14;
+    // Подкладки поперёк, чтобы нижний ряд не гнил на земле.
+    for s in [-0.35f32, 0.35] {
+        let q = p + dir * (len * s);
+        b.mesh(Mat::Wood).beam(q - side * 0.9 + Vec3::Y * 0.05, q + side * 0.9 + Vec3::Y * 0.05, 0.06, 0.05, Vec3::Y);
+    }
+    let mut top = 0.0;
+    for row in 0..rows {
+        let n = 5 - row.min(3);
+        let y = 0.1 + r + row as f32 * r * 1.75;
+        for k in 0..n {
+            let off = (k as f32 - (n - 1) as f32 / 2.0) * (r * 2.05);
+            let l = len * rng.range(0.93, 1.03);
+            let sh = rng.range(-0.12, 0.12);
+            let q = p + side * off + Vec3::Y * y + dir * sh;
+            log(b, q - dir * (l / 2.0), q + dir * (l / 2.0), r * rng.range(0.85, 1.1));
+        }
+        top = y + r;
+    }
+    // Колья по концам штабеля, чтобы брёвна не раскатились.
+    for s in [-1.0f32, 1.0] {
+        for e in [-0.5f32, 0.5] {
+            let q = p + side * (s * 0.62) + dir * (len * e * 0.8);
+            b.mesh(Mat::Wood).beam(q - Vec3::Y * 0.1, q + Vec3::Y * (top + 0.15) + side * (s * 0.05), 0.035, 0.035, dir);
+        }
+    }
+    let (a, c) = (p - dir * (len / 2.0) - side * 0.7, p + dir * (len / 2.0) + side * 0.7);
+    kit::hidden(b, a.min(c), a.max(c) + Vec3::Y * top);
+}
+
+/// Поленница колотых поленьев (поленья поперёк, торцами наружу) между двумя парами кольев.
+fn billet_cord(b: &mut Builder, p: Vec3, yaw: f32, len: f32, rng: &mut Rng) {
+    let dir = Vec3::new(yaw.cos(), 0.0, -yaw.sin());
+    let side = Vec3::new(yaw.sin(), 0.0, yaw.cos());
+    let h = 1.15;
+    let mut y = 0.12;
+    while y < h {
+        let mut t = -len / 2.0 + 0.1;
+        while t < len / 2.0 - 0.1 {
+            let r = rng.range(0.06, 0.09);
+            let q = p + dir * t + Vec3::Y * (y + r);
+            let l = rng.range(0.32, 0.38);
+            log(b, q - side * l, q + side * l + dir * rng.range(-0.03, 0.03), r);
+            t += r * 2.05;
+        }
+        y += 0.16;
+    }
+    for e in [-0.5f32, 0.5] {
+        for s in [-1.0f32, 1.0] {
+            let q = p + dir * (len * e + 0.08 * e.signum()) + side * (s * 0.3);
+            b.mesh(Mat::Wood).beam(q - Vec3::Y * 0.1, q + Vec3::Y * (h + 0.2), 0.04, 0.04, side);
+        }
+    }
+    let (a, c) = (p - dir * (len / 2.0) - side * 0.4, p + dir * (len / 2.0) + side * 0.4);
+    kit::hidden(b, a.min(c), a.max(c) + Vec3::Y * h);
+}
+
+/// Лестница-приставка из двух жердей с перекладинами от `foot` до `top`.
+fn ladder(b: &mut Builder, foot: Vec3, top: Vec3, width: f32) {
+    let dir = (top - foot).normalize_or(Vec3::Y);
+    let side = dir.cross(Vec3::Y).normalize_or(Vec3::X) * (width / 2.0);
+    let up = side.cross(dir).normalize_or(Vec3::Y);
+    let m = b.mesh(Mat::Wood);
+    for s in [-1.0f32, 1.0] {
+        m.beam(foot + side * s, top + side * s, 0.03, 0.03, up);
+    }
+    let n = ((top - foot).length() / 0.35) as usize;
+    for k in 1..n {
+        let q = foot.lerp(top, k as f32 / n as f32);
+        m.beam(q - side * 1.1, q + side * 1.1, 0.018, 0.018, up);
     }
 }
 
