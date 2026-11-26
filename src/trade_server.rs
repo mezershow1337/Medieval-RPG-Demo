@@ -500,7 +500,7 @@ pub fn merchant_spots(level: &LevelColliders) -> Vec<(Vec3, f32, Vec<StallBox>)>
     spots
 }
 
-fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
+fn setup_merchants(mut commands: Commands, mut level: ResMut<LevelColliders>) {
     let mut rng = Rng::from_time();
     let mut uids = UidGen(4_000_000_000);
     let merchants = merchant_spots(&level)
@@ -533,6 +533,8 @@ fn setup_merchants(mut commands: Commands, level: Res<LevelColliders>) {
         .flat_map(|m| stall_obbs(m.pos, m.yaw, &m.stall))
         .collect();
     commands.insert_resource(crate::props_server::PropStatics(statics));
+    // Сквозь прилавки и жерди навесов не пройти (клиент ставит те же коробки, см. `trade_client`).
+    level.set_extra(merchants.iter().flat_map(|m| crate::trade::stall_solids(m.pos, m.yaw, &m.stall)).collect());
     commands.insert_resource(TradeWorld {
         merchants,
         reps: HashMap::new(),
@@ -2312,6 +2314,36 @@ mod tests {
                     MERCHANTS[j].key
                 );
             }
+        }
+    }
+
+    /// Сквозь прилавок не пройти, а торговец за ним и покупатель перед ним стоят свободно.
+    #[test]
+    fn stalls_are_solid_but_leave_room_for_both_sides() {
+        let mut level = crate::level::city_colliders();
+        let spots = merchant_spots(&level);
+        level.set_extra(spots.iter().flat_map(|(p, yaw, st)| stall_solids(*p, *yaw, st)).collect());
+        let body = crate::collision::Body::STANDING;
+        for (i, (p, yaw, st)) in spots.iter().enumerate() {
+            let key = MERCHANTS[i].key;
+            assert!(level.body_is_free(&body, *p), "{key}: торговец зажат своим прилавком");
+            let forward = Quat::from_rotation_y(*yaw) * Vec3::NEG_Z;
+            if st.iter().all(|b| b.felt) {
+                // Войлок на земле: на него можно ступить.
+                assert!(level.body_is_free(&body, *p + forward * 1.15), "{key}: войлок твёрдый");
+                continue;
+            }
+            assert!(!level.body_is_free(&body, *p + forward * 0.95), "{key}: сквозь прилавок можно пройти");
+            // Покупатель встаёт перед прилавком (в лавке — перед каменной стойкой) и достаёт до торговца.
+            let buyer = (32..=68).map(|k| k as f32 * 0.05).find(|d| level.body_is_free(&body, *p + forward * d));
+            assert!(buyer.is_some_and(|d| d < crate::trade_net::TALK_RANGE), "{key}: покупателю негде встать перед прилавком");
+            let buyer = buyer.unwrap();
+            // Идём к торговцу от покупателя — упираемся в стол, а не проходим насквозь.
+            let mut feet = *p + forward * buyer;
+            for _ in 0..60 {
+                level.move_body(&body, &mut feet, -forward * 0.05 - Vec3::Y * 0.01, true);
+            }
+            assert!((feet - *p).xz().length() > 1.4, "{key}: прошёл сквозь прилавок к торговцу");
         }
     }
 

@@ -1860,6 +1860,30 @@ pub fn stall_obbs(pos: bevy::math::Vec3, yaw: f32, boxes: &[StallBox]) -> Vec<cr
         .collect()
 }
 
+/// Жерди навеса над городским прилавком (в системе торговца): по ним ставится и сам навес.
+pub const STALL_POSTS: [(f32, f32); 4] = [(-1.05, -1.35), (1.05, -1.35), (-1.05, 0.45), (1.05, 0.45)];
+/// Половина толщины жерди навеса для столкновений (сама жердь — 10 см).
+const STALL_POST_HALF: f32 = 0.06;
+/// Высота жердей навеса.
+pub const STALL_POST_HEIGHT: f32 = 2.4;
+
+/// Во что упирается человек у прилавка: столы и жерди навеса (войлок на земле не мешает).
+/// Торговцы стоят по сторонам света, так что коробки по осям совпадают со столами.
+pub fn stall_solids(pos: bevy::math::Vec3, yaw: f32, boxes: &[StallBox]) -> Vec<crate::collision::Aabb> {
+    use bevy::math::Vec3;
+    let tables: Vec<StallBox> = boxes.iter().filter(|b| !b.felt).copied().collect();
+    let mut out: Vec<_> = stall_obbs(pos, yaw, &tables).iter().map(|o| o.aabb()).collect();
+    if !tables.is_empty() {
+        let rot = bevy::math::Quat::from_rotation_y(yaw);
+        let h = Vec3::new(STALL_POST_HALF, 0.0, STALL_POST_HALF);
+        for (x, z) in STALL_POSTS {
+            let c = pos + rot * Vec3::new(x, 0.0, z);
+            out.push(crate::collision::Aabb::new(c - h, c + h + Vec3::Y * STALL_POST_HEIGHT));
+        }
+    }
+    out
+}
+
 /// Продажа оружия и доспехов варварам запрещена законом.
 pub fn is_contraband_for(def: &MerchantDef, base: ItemBaseId) -> bool {
     def.faction.outside_walls() && matches!(category(base), Category::Weapon | Category::Armor)

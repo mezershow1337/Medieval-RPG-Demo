@@ -207,6 +207,20 @@ impl LevelColliders {
         LevelColliders(boxes, Accel { grid, ground: ground.map(std::sync::Arc::new), doors: std::sync::Arc::new(DoorFlags { first, open, bodies_first, gone, switch_first, switch_of, switch_on }) })
     }
 
+    /// Неподвижные коробки, которых нет в раскладке уровня, а ставятся позже (прилавки торговцев:
+    /// их расставляют по уже готовым коллизиям). Лежат в самом конце `.0`, всегда твёрдые.
+    /// Повторный вызов заменяет прежние; двери, тела и группы не трогает.
+    pub fn set_extra(&mut self, extra: Vec<Aabb>) {
+        let end = self.1.doors.switch_first + self.1.doors.switch_of.len();
+        let same = self.0.len() - end == extra.len() && self.0[end..].iter().zip(&extra).all(|(a, b)| a.min == b.min && a.max == b.max);
+        if same {
+            return;
+        }
+        self.0.truncate(end);
+        self.0.extend(extra);
+        self.1.grid = Grid::build(&self.0);
+    }
+
     /// Включить или выключить группу коробок.
     pub fn set_switch(&self, group: usize, on: bool) {
         if let Some(f) = self.1.doors.switch_on.get(group) {
@@ -287,8 +301,11 @@ impl LevelColliders {
                     !doors.open.get(i - doors.first).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
                 } else if i < doors.switch_first {
                     !doors.gone.get(i - doors.bodies_first).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+                } else if let Some(g) = doors.switch_of.get(i - doors.switch_first) {
+                    doors.switch_on.get(*g as usize).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
                 } else {
-                    doors.switch_of.get(i - doors.switch_first).and_then(|g| doors.switch_on.get(*g as usize)).is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+                    // После групп — добавленные коробки (`set_extra`): твёрдые всегда.
+                    true
                 }
             })
             .map(|&i| i as usize)
@@ -497,6 +514,38 @@ mod tests {
         let mut boxes = vec![Aabb::new(Vec3::new(-50.0, -1.0, -50.0), Vec3::new(50.0, 0.0, 50.0))];
         boxes.extend(extra);
         LevelColliders::new(boxes, None)
+    }
+
+    #[test]
+    fn extra_boxes_block_and_can_be_replaced() {
+        let floor = Aabb::new(Vec3::new(-50.0, -1.0, -50.0), Vec3::new(50.0, 0.0, 50.0));
+        let door = (Aabb::new(Vec3::new(-10.0, 0.0, -1.0), Vec3::new(-9.8, 2.2, 1.0)), true);
+        let switch = (Aabb::new(Vec3::new(10.0, 0.0, -1.0), Vec3::new(10.2, 2.0, 1.0)), 0);
+        let mut level = LevelColliders::with_switches(vec![floor], None, vec![door], Vec::new(), vec![switch], 1);
+        let copy = level.clone();
+        let table = Aabb::new(Vec3::new(2.0, 0.0, -1.0), Vec3::new(2.7, 0.9, 1.0));
+        let walk = |level: &LevelColliders| {
+            let mut feet = Vec3::ZERO;
+            for _ in 0..60 {
+                level.move_body(&Body::STANDING, &mut feet, Vec3::new(0.1, -0.01, 0.0), true);
+            }
+            feet.x
+        };
+        assert!(walk(&level) > 5.0);
+        level.set_extra(vec![table]);
+        assert!(walk(&level) < 2.0, "сквозь прилавок не пройти и на него не зашагнуть");
+        assert!(level.point_in_wall(Vec3::new(2.3, 0.5, 0.0)).is_some());
+        // Двери и группы на месте и общие с копиями.
+        copy.set_door_open(0, false);
+        assert!(!level.body_is_free(&Body::STANDING, Vec3::new(-9.9, 0.0, 0.0)));
+        assert!(level.body_is_free(&Body::STANDING, Vec3::new(10.1, 0.0, 0.0)));
+        level.set_switch(0, true);
+        assert!(!level.body_is_free(&Body::STANDING, Vec3::new(10.1, 0.0, 0.0)));
+        // Замена, а не добавление: старый прилавок исчез.
+        level.set_extra(vec![table]);
+        level.set_extra(vec![Aabb::new(Vec3::new(-3.0, 0.0, -1.0), Vec3::new(-2.5, 0.9, 1.0))]);
+        assert_eq!(level.0.len(), 4);
+        assert!(walk(&level) > 5.0);
     }
 
     #[test]
