@@ -687,8 +687,8 @@ mod tests {
         c.input = "nocl".into();
         complete(&mut c);
         assert_eq!(c.input, "noclip ");
-        c.input = "give фолл".into();
+        c.input = "give золотая".into();
         complete(&mut c);
-        assert_eq!(c.input, "give «Фоллис» ");
+        assert_eq!(c.input, "give «Золотая монета» ");
     }
 }

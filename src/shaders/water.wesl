@@ -387,10 +387,16 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     pbr_input.material.emissive = vec4<f32>(0.0);
     pbr_input.N = normalize(mix(vec3<f32>(0.0, 1.0, 0.0), N, 0.35));
     let light = apply_pbr_lighting(pbr_input).rgb;
+    // Толщу в тени подсвечивает рассеянный свет соседней освещённой воды, поэтому тень корабля
+    // или набережной в воде мягче и светлее, чем на суше: берём свет и с тенями, и без них.
+    var open_input = pbr_input;
+    open_input.flags = pbr_input.flags & ~(1u << 29u);
+    let light_open = apply_pbr_lighting(open_input).rgb;
+    let light_body = mix(light, light_open, 0.75);
 
     // Рассеяние на гребнях волн, просвеченных низким солнцем.
     let sss = pow(max(dot(-v, sun), 0.0), 3.0) * clamp(crest * 1.5 + 0.15, 0.0, 1.0) * smoothstep(0.0, 0.2, sun.y) * 1.6;
-    let inscatter = water.deep.rgb * light + water.deep.rgb * sss * sun_col * 0.6;
+    let inscatter = water.deep.rgb * light_body + water.deep.rgb * sss * sun_col * 0.6;
 
     var col: vec3<f32>;
     var alpha = 1.0;
@@ -411,6 +417,25 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
             }
         }
         var bottom = scene_color(uv);
+        // Дно сквозь толщу размыто тем сильнее, чем толще вода: резкие края теней и швы
+        // на дне не проступают квадратами. Соседей над водой (сваи, борт) не подмешиваем.
+        if have_depth {
+            let r = clamp(len * 0.012, 0.0, 0.03) / max(1.0, dist * 0.05);
+            if r > 0.0005 {
+                var sum = bottom;
+                var n = 1.0;
+                let offs = array<vec2<f32>, 6>(vec2(1.0, 0.0), vec2(-0.5, 0.87), vec2(-0.5, -0.87), vec2(0.5, 0.87), vec2(-1.0, 0.0), vec2(0.5, -0.87));
+                for (var i = 0; i < 6; i++) {
+                    let o = offs[i] * r * select(1.0, 0.5, i >= 3);
+                    let q = uv + vec2<f32>(o.x, o.y * view.viewport.z / max(view.viewport.w, 1.0));
+                    if scene_view_z(q) < water_z {
+                        sum += scene_color(q);
+                        n += 1.0;
+                    }
+                }
+                bottom = sum / n;
+            }
+        }
         // Каустика на дне: точка дна по лучу, блики гаснут с глубиной и в тени туч.
         if have_depth && water.params.w < 0.5 {
             let fwd = -normalize(view.world_from_view[2].xyz);

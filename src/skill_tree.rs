@@ -480,7 +480,7 @@ impl Perk {
                 "Покупка −3%, продажа +3%.",
                 &[N::Skill(S::Trade, 15.0)],
             ),
-            Haggler => p("Торгаш", S::Trade, 1, "Торгуется до последнего фоллиса.", "Покупка −3%, продажа +3%.", &[N::Skill(S::Trade, 35.0), N::Perk(KnowsPrice)]),
+            Haggler => p("Торгаш", S::Trade, 1, "Торгуется до последнего медяка.", "Покупка −3%, продажа +3%.", &[N::Skill(S::Trade, 35.0), N::Perk(KnowsPrice)]),
             Merchant => p(
                 "Купец",
                 S::Trade,
@@ -740,7 +740,7 @@ pub const PRACTICE_HIT: f32 = 0.35;
 pub const PRACTICE_DEFEND: f32 = 0.45;
 /// За попадание стрелой.
 pub const PRACTICE_ARROW: f32 = 0.6;
-/// За сделку: столько за каждые 100 нуммиев оборота, но не больше [`PRACTICE_DEAL_MAX`].
+/// За сделку: столько за каждые 100 долей оборота, но не больше [`PRACTICE_DEAL_MAX`].
 pub const PRACTICE_DEAL_PER_100: f32 = 0.15;
 pub const PRACTICE_DEAL_MAX: f32 = 2.5;
 /// Выносливость за 100 потраченных единиц сил.
@@ -750,7 +750,7 @@ pub const PRACTICE_LOAD_PER_SEC: f32 = 0.004;
 /// Книжность за минуту чтения.
 pub const PRACTICE_READ_PER_MIN: f32 = 0.6;
 
-/// Опыт торговли за сделку на `turnover` нуммиев.
+/// Опыт торговли за сделку на `turnover` долей.
 pub fn deal_practice(turnover: u32) -> f32 {
     (turnover as f32 / 100.0 * PRACTICE_DEAL_PER_100).min(PRACTICE_DEAL_MAX)
 }

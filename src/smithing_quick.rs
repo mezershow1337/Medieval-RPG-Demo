@@ -169,7 +169,7 @@ pub fn is_quick_product(name: &str) -> bool {
 pub struct Order {
     pub pattern: Pattern,
     pub min: Quality,
-    /// Плата, нуммии.
+    /// Плата, в долях.
     pub reward: u32,
 }
 

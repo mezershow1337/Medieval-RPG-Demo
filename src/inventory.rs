@@ -354,7 +354,7 @@ mod tests {
     fn loot_from_corpse_and_stack() {
         let mut uids = UidGen::default();
         let mut rng = Rng::new(9);
-        let gold = ItemBaseId::by_name("Фоллис");
+        let gold = ItemBaseId::by_name("Медная монета");
         let mut invs = vec![Inventory::new((3, 3)), Inventory::new((3, 3))];
         invs[0].place(roll_item(gold, Quality::Common, 90, &mut rng, &mut uids), Target::Auto).unwrap();
         let g2 = roll_item(gold, Quality::Common, 30, &mut rng, &mut uids);

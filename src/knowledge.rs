@@ -16,7 +16,7 @@
 //! в [`Lesson`]; если платному ученику учить нечего — `trade_server::RefundLesson`.
 
 use crate::collision::LevelColliders;
-use crate::economy::{NUMMI_PER_FOLLIS, format_money, give_money, take_money};
+use crate::economy::{COPPER, format_money, give_money, take_money};
 use crate::combat::Action;
 use crate::inventory::{Inventory, Target};
 use crate::items::{ItemBaseId, ItemUid, Quality, Rng, roll_item};
@@ -411,9 +411,9 @@ fn setup_world(mut world: ResMut<KnowledgeWorld>, level: Res<LevelColliders>, ci
         place_demo_patches(&mut world, &level, origin);
     }
     // Врача, ризотома, аптекаря и прочих ведёт торговля (лавки в trade.rs). Здесь — только те,
-    // кого там нет: церковный писец (грамота) и деревенская знахарка. Цены в нуммиях.
+    // кого там нет: церковный писец (грамота) и деревенская знахарка. Цены в долях (медная монета — 10).
     // Учителя грамоты (school.rs): школа в дидаскалионе — жители города, нотарий и сочинитель — на местах.
-    let masters = [(Teacher::Scribe, 2 * NUMMI_PER_FOLLIS, 10, "church_west", (6.0, 18.5)), (Teacher::Wisewoman, NUMMI_PER_FOLLIS, 0, "goth_village", (0.0, 24.0))];
+    let masters = [(Teacher::Scribe, 8 * COPPER, COPPER, "church_west", (6.0, 18.5)), (Teacher::Wisewoman, 4 * COPPER, 0, "goth_village", (0.0, 24.0))];
     let mut id = 1;
     for (i, (teacher, price, wage, place, hours)) in masters.into_iter().enumerate() {
         let pos = crate::level::place_pos(place).unwrap_or(origin + Vec3::new(-2.0 + i as f32 * 4.0, 0.0, 5.0));

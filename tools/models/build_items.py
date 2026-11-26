@@ -7,7 +7,7 @@
 
 Запуск (Blender как модуль: pip install bpy):
     python3 tools/models/build_items.py              # все предметы
-    python3 tools/models/build_items.py spatha coins # только эти
+    python3 tools/models/build_items.py spatha gold_coin # только эти
 
 Как добавить предмет: написать функцию с декоратором
 @item(ключ, (ширина, высота), name="Название из items.rs", pose=...) и запустить скрипт с этим ключом.
@@ -729,34 +729,6 @@ def pectoral_cross():
     K.mesh_obj("cord", K.loft(path, [0.0011] * len(path), 8, up=(0, 1, 0), closed=True), "leather_dark")
 
 
-@item("coins", (1, 1), name="Солид", pose="upright", azimuth=24, elevation=32, margin=0.88)
-def coins():
-    """Горстка золотых солидов (диаметр ~21 мм)."""
-    mats_common()
-    import random
-    rnd = random.Random(5)
-
-    def coin(x, y, z, tilt_x=0.0, tilt_y=0.0, rz=0.0):
-        r, t = 0.0105, 0.0013
-        c = K.lathe([(0, 0.0001), (0, r * 0.82), (0.0002, r * 0.86), (0.00012, r * 0.9), (0.0, r * 0.98), (0.0004, r), (t - 0.0004, r), (t, r * 0.98), (t - 0.00012, r * 0.9), (t - 0.0002, r * 0.86), (t, r * 0.82), (t, 0.0001)], 40, cap_top=False, cap_bot=False)
-        # Рельеф: «бюст» и надпись как бугорки.
-        K.deform(c, lambda v: (v.x, v.y, v.z + (0.00025 * math.exp(-((v.x + 0.001) ** 2 + (v.y - 0.001) ** 2) / 0.00002) if v.z > t * 0.5 else 0)))
-        K.rot(c, "Z", rz)
-        K.rot(c, "X", tilt_x)
-        K.rot(c, "Y", tilt_y)
-        K.move(c, x, y, z)
-        K.mesh_obj("coin", c, "gold", smooth_angle=50)
-
-    z = 0.0
-    for i in range(7):
-        coin(rnd.uniform(-0.0012, 0.0012), rnd.uniform(-0.0012, 0.0012), z, rnd.uniform(-2, 2), rnd.uniform(-2, 2), rnd.uniform(0, 360))
-        z += 0.00135
-    coin(0.019, -0.006, 0.0, 0, 0, 40)
-    coin(-0.017, -0.01, 0.0, 0, 0, 100)
-    coin(0.004, -0.019, 0.0, 0, 0, 200)
-    coin(-0.012, 0.012, 0.004, 25, -10, 20)
-
-
 @item("bandage", (1, 1), name="Бинт", pose="upright", azimuth=24, elevation=28, margin=0.88)
 def bandage():
     """Скатка льняного бинта с размотанным концом."""
@@ -838,6 +810,7 @@ import items_arsenal  # noqa: E402,F401  (кованое оружие арсен
 import items_archery  # noqa: E402,F401  (луки, стрелы и их части)
 import items_home  # noqa: E402,F401  (домашняя утварь горожан)
 import items_fishing  # noqa: E402,F401  (снасти и рыба)
+import items_coins  # noqa: E402,F401  (золотые, серебряные и медные монеты)
 
 
 def build(key):

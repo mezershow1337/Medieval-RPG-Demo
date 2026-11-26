@@ -486,6 +486,9 @@ pub fn ship(b: &mut Builder, s: &Ship, at: Vec3, yaw: f32) -> Moored {
         b.invisible.push(Aabb::new(Vec3::new(lo.x, f.keel, lo.z), Vec3::new(hi.x, top, hi.z)));
     }
 
+    hull_blockers(b, &f, |t| f.y(t, DECK_U));
+    bilge_floor(b, &f, at.y);
+
     Moored { deck_y: deck_at(mid_t), mid }
 }
 
@@ -568,10 +571,58 @@ pub fn skiff(b: &mut Builder, at: Vec3, yaw: f32) {
         b.mesh(Mat::Wood).beam(a, c, 0.028, 0.028, Vec3::Y);
     }
     // Сеть и корзина на дне.
-    let p = f.o + fwd * (-1.4) + Vec3::Y * (f.y(0.27, 0.35));
+    let p = f.o + fwd * (-1.4) + Vec3::Y * (at.y + 0.06 + 0.12);
     b.mesh(Mat::Canvas).obox(p, Vec3::new(0.4, 0.12, 0.35), yaw + 0.3);
     let stem: Vec<Vec3> = (0..=4).map(|j| f.pt(1.0, j as f32 / 4.0, 0.0) + fwd * 0.03).chain([f.pt(1.0, 1.0, 0.0) + fwd * 0.12 + Vec3::Y * 0.25]).collect();
     b.mesh(Mat::Wood).beam_path(&stem, 0.05, 0.05, side);
+    hull_blockers(b, &f, |_| at.y + 0.06);
+    bilge_floor(b, &f, at.y);
+}
+
+/// Настил в трюме чуть выше ватерлинии: вода не видна внутри открытого корпуса.
+fn bilge_floor(b: &mut Builder, f: &Frame, water: f32) {
+    let y = water + 0.06;
+    // Для каждого шпангоута ищем высоту обвода `u`, на которой борт проходит на уровне `y`.
+    let at = |t: f32| -> Option<(Vec3, Vec3)> {
+        if f.y(t, 1.0) <= y || f.y(t, 0.0) >= y {
+            return None;
+        }
+        let (mut lo, mut hi) = (0.0f32, 1.0f32);
+        for _ in 0..16 {
+            let mid = (lo + hi) / 2.0;
+            if f.y(t, mid) < y {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let u = (lo + hi) / 2.0;
+        let l = f.pt(t, u, -1.0);
+        let r = f.pt(t, u, 1.0);
+        Some((Vec3::new(l.x, y, l.z) + f.side * 0.03, Vec3::new(r.x, y, r.z) - f.side * 0.03))
+    };
+    let n = 24;
+    let m = b.mesh(Mat::Timber);
+    for i in 0..n {
+        let (t0, t1) = (i as f32 / n as f32, (i + 1) as f32 / n as f32);
+        if let (Some((l0, r0)), Some((l1, r1))) = (at(t0), at(t1)) {
+            m.quad([l0, l1, r1, r0], Vec3::Y);
+        }
+    }
+}
+
+/// Корпус целиком, от носа до кормы: вплавь внутрь не заплыть. Сверху — по `top(t)`
+/// (палуба судна или настил лодки), так что на нём можно стоять, выбравшись из воды.
+fn hull_blockers(b: &mut Builder, f: &Frame, top: impl Fn(f32) -> f32) {
+    let n = 12;
+    for i in 0..n {
+        let (t0, t1) = (i as f32 / n as f32, (i + 1) as f32 / n as f32);
+        let hw = [t0, (t0 + t1) / 2.0, t1].into_iter().map(|t| f.half(t, 1.0)).fold(0.0f32, f32::max).max(0.25);
+        let a = f.o + f.fwd * ((t0 - 0.5) * f.s.len) - f.side * hw;
+        let c = f.o + f.fwd * ((t1 - 0.5) * f.s.len) + f.side * hw;
+        let (lo, hi) = (a.min(c), a.max(c));
+        b.invisible.push(Aabb::new(Vec3::new(lo.x, f.keel - 0.1, lo.z), Vec3::new(hi.x, top(t0).min(top(t1)), hi.z)));
+    }
 }
 
 /// Гладкая сетка (строки по `t`, столбцы по `u`) с нормалями по соседям — с двух сторон.
