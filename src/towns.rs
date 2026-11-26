@@ -159,9 +159,11 @@ pub enum TownId {
     SteppeCamp,
     Bosporus,
     Sinope,
+    /// Село Святого Фоки — греческое село хоры к югу от Херсона.
+    Phocas,
 }
 
-pub const TOWNS: [TownId; 7] = [TownId::Herson, TownId::GothVillage, TownId::Doros, TownId::AlanCamp, TownId::SteppeCamp, TownId::Bosporus, TownId::Sinope];
+pub const TOWNS: [TownId; 8] = [TownId::Herson, TownId::GothVillage, TownId::Doros, TownId::AlanCamp, TownId::SteppeCamp, TownId::Bosporus, TownId::Sinope, TownId::Phocas];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TownKind {
@@ -196,7 +198,7 @@ const EAT_CITY: [f32; NG] = [10.0, 3.0, 1.0, 3.0, 1.5, 1.0, 1.0, 0.5, 3.0, 0.3];
 const EAT_VILLAGE: [f32; NG] = [10.0, 1.0, 1.0, 1.5, 0.3, 0.8, 0.5, 0.3, 3.0, 0.05];
 const EAT_STEPPE: [f32; NG] = [5.0, 0.3, 1.0, 1.5, 0.1, 1.5, 2.0, 0.6, 0.6, 0.1];
 
-pub const DEFS: [TownDef; 7] = [
+pub const DEFS: [TownDef; 8] = [
     TownDef {
         name: "Херсон",
         about: "Форпост империи: порт, базилики, засолочные цистерны и хорреи. Своего хлеба мало — живёт морем и торговлей.",
@@ -281,6 +283,18 @@ pub const DEFS: [TownDef; 7] = [
         eat: EAT_CITY,
         walls: 1.0,
     },
+    TownDef {
+        name: "Село Святого Фоки",
+        about: "Греческое село херсонской хоры на плато, в получасе от главных ворот: пашни, огороды, пасека, гончарная печь и корчма у колодца. Хлеб, мёд и горшки везут на агору.",
+        kind: TownKind::Village,
+        place: Some("phocas_village"),
+        pop: 170.0,
+        homes: 30.0,
+        per_home: 6.0,
+        make: [22.0, 0.0, 0.0, 4.0, 0.0, 1.0, 3.0, 0.1, 3.0, 0.0],
+        eat: EAT_VILLAGE,
+        walls: 0.05,
+    },
 ];
 
 impl TownId {
@@ -294,6 +308,7 @@ impl TownId {
     pub fn of_place(place: &str) -> TownId {
         match place {
             "goth_village" => TownId::GothVillage,
+            "phocas_village" | "phocas_tavern" | "phocas_pottery" => TownId::Phocas,
             "alan_camp" => TownId::AlanCamp,
             "steppe_camp" => TownId::SteppeCamp,
             _ => TownId::Herson,
@@ -323,7 +338,7 @@ pub struct Route {
     pub name: &'static str,
 }
 
-pub const ROUTES: [Route; 11] = [
+pub const ROUTES: [Route; 12] = [
     Route { a: TownId::Herson, b: TownId::GothVillage, kind: RouteKind::Road, cap: 12.0, danger: 0.01, name: "дорога на готское село" },
     Route { a: TownId::Herson, b: TownId::Doros, kind: RouteKind::Road, cap: 22.0, danger: 0.03, name: "горная дорога в Дори" },
     Route { a: TownId::Herson, b: TownId::AlanCamp, kind: RouteKind::Road, cap: 10.0, danger: 0.04, name: "тропа к аланам" },
@@ -335,6 +350,7 @@ pub const ROUTES: [Route; 11] = [
     Route { a: TownId::AlanCamp, b: TownId::SteppeCamp, kind: RouteKind::Steppe, cap: 8.0, danger: 0.03, name: "степью к кочевью" },
     Route { a: TownId::SteppeCamp, b: TownId::Bosporus, kind: RouteKind::Steppe, cap: 14.0, danger: 0.04, name: "степью на Боспор" },
     Route { a: TownId::Bosporus, b: TownId::Sinope, kind: RouteKind::Sea, cap: 30.0, danger: 0.05, name: "морем с Боспора" },
+    Route { a: TownId::Herson, b: TownId::Phocas, kind: RouteKind::Road, cap: 10.0, danger: 0.01, name: "дорога на село Святого Фоки" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -1208,6 +1224,7 @@ fn from_name(t: TownId) -> &'static str {
         TownId::SteppeCamp => "кочевья",
         TownId::Bosporus => "Боспора",
         TownId::Sinope => "Синопы",
+        TownId::Phocas => "села Святого Фоки",
     }
 }
 
@@ -1220,6 +1237,7 @@ fn to_name(t: TownId) -> &'static str {
         TownId::SteppeCamp => "кочевье",
         TownId::Bosporus => "Боспор",
         TownId::Sinope => "Синопу",
+        TownId::Phocas => "село Святого Фоки",
     }
 }
 
@@ -1500,9 +1518,9 @@ mod balance {
             let mut w = Towns::new(4, seed);
             for y in 0..10 {
                 let mut raids = 0;
-                let mut maxh = [0.0f32; 7];
-                let mut b = [0.0f32; 7];
-                let mut dd = [0.0f32; 7];
+                let mut maxh = [0.0f32; 8];
+                let mut b = [0.0f32; 8];
+                let mut dd = [0.0f32; 8];
                 for _ in 0..WEEKS_PER_YEAR {
                     raids += w.tick_week().iter().filter(|c| matches!(c, WorldCue::Raid { .. })).count();
                     for (i, t) in w.towns.iter().enumerate() {

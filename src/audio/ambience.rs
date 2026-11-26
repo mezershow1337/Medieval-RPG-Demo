@@ -252,7 +252,7 @@ fn critters(time: Res<Time>, ears: Res<Ears>, scene: Res<Scene>, surfaces: Res<S
         }
     }
     // Скот у ферм, сёл и кочевых станов.
-    for (name, spot) in [("sheep", places::KLEROS_FARM), ("sheep", places::GOTH_VILLAGE), ("sheep", places::STEPPE_CAMP), ("donkey", places::KLEROS_FARM), ("donkey", places::ALAN_CAMP)] {
+    for (name, spot) in [("sheep", places::KLEROS_FARM), ("sheep", places::GOTH_VILLAGE), ("sheep", places::PHOCAS_VILLAGE), ("sheep", places::STEPPE_CAMP), ("donkey", places::KLEROS_FARM), ("donkey", places::ALAN_CAMP)] {
         let flat = Vec2::new(spot.x - p.x, spot.z - p.z).length();
         if flat < 140.0 && awake && due(if name == "sheep" { "sheep" } else { "donkey" }, 10.0, 28.0, &mut rng) {
             let at = Vec3::new(spot.x + rng.range(-20.0, 20.0), p.y, spot.z + rng.range(-20.0, 20.0));

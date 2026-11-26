@@ -224,7 +224,7 @@ pub fn pottery(b: &mut Builder) {
 }
 
 /// Горновая печь: круглое тело, топочный канал с углями, обжигательная камера под куполом.
-fn kiln(b: &mut Builder, p: Vec3, burning: bool) {
+pub(crate) fn kiln(b: &mut Builder, p: Vec3, burning: bool) {
     let r = 1.8;
     let mut prof = vec![(r + 0.3, 0.0), (r, 0.3), (r, 1.8)];
     for k in 0..=6 {

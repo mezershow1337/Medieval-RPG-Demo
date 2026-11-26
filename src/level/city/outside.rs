@@ -16,6 +16,7 @@ use std::f32::consts::{FRAC_PI_2, PI, TAU};
 use terrain::{balka_x, ground_y};
 
 pub(crate) mod mines;
+pub(crate) mod village;
 
 const ROAD_W: f32 = 4.0;
 
@@ -42,6 +43,8 @@ pub fn outside(b: &mut Builder) {
     herbs(b);
     mines::mines(b);
     wilderness(b, &roads);
+    // Село — последним: его усадьба на продажу идёт в конце списка (сохранения не сдвигаются).
+    village::village(b);
 }
 
 // ---------------- дороги ----------------
@@ -60,6 +63,7 @@ pub fn roads() -> Vec<Vec<Vec2>> {
     ];
     // Тропы к руднику и к стану углежогов.
     all.extend(mines::mine_roads());
+    all.extend(village::village_roads());
     all
 }
 
@@ -955,6 +959,7 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
         clear.push((Vec2::new(h.pos.x, h.pos.z), h.radius + 2.0));
     }
     clear.extend(mines::clearings());
+    clear.push(village::clearing());
     let blocked = |p: Vec2| {
         terrain::city_distance(p.x, p.y) < 40.0
             || p.y < 186.0 && p.x < 330.0
