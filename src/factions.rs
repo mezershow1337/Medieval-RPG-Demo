@@ -8,6 +8,10 @@
 //!
 //! Репутация от −100 до 100. Изменение у одной фракции частично передаётся другим
 //! (помог готам — гарнизон доволен союзником, кочевники — нет).
+//!
+//! Как вернуть доброе имя: отработать смену у мастера (+10–15, по качеству работы),
+//! общественные работы в гарнизоне (+10–20) и уплатить штраф — тогда город прощает
+//! половину вражды: −100 → −50.
 
 use serde::{Deserialize, Serialize};
 
@@ -249,6 +253,50 @@ impl Reputation {
             }
         }
     }
+
+    /// Штраф уплачен: город прощает половину вражды у каждой городской фракции,
+    /// у которой игрок в минусе (−100 → −50). Без отголосков у других фракций.
+    /// Возвращает, у кого и как изменилось (фракция, было, стало).
+    pub fn forgive_half(&mut self) -> Vec<(Faction, f32, f32)> {
+        let mut out = Vec::new();
+        for f in Faction::ALL.into_iter().filter(|f| f.city_law()) {
+            let v = &mut self.0[f.index()];
+            if *v < 0.0 {
+                let before = *v;
+                *v *= 0.5;
+                out.push((f, before, *v));
+            }
+        }
+        out
+    }
+}
+
+/// Сколько репутации даёт смена у мастера: 10 за кое-как, 15 за отличную работу.
+pub fn shift_reward(quality: f32) -> f32 {
+    10.0 + 5.0 * quality.clamp(0.0, 1.0)
+}
+
+/// Общественные работы для гарнизона (носить камень на стены, чистить ров): 10–20.
+pub fn public_works_reward(quality: f32) -> f32 {
+    10.0 + 10.0 * quality.clamp(0.0, 1.0)
+}
+
+/// Сколько репутации даёт смена у мастера этой фракции.
+pub fn work_reward(faction: Faction, quality: f32) -> f32 {
+    if faction == Faction::Garrison {
+        public_works_reward(quality)
+    } else {
+        shift_reward(quality)
+    }
+}
+
+/// Подпись к смене в окне торговца: сколько она прибавит к репутации.
+pub fn work_reward_label(faction: Faction) -> &'static str {
+    if faction == Faction::Garrison {
+        "репутация +10–20"
+    } else {
+        "репутация +10–15"
+    }
 }
 
 /// Преступления, за которые в городе наказывают.
@@ -302,6 +350,42 @@ mod tests {
         assert!(r.get(Faction::Goths) > 19.0);
         assert!(r.get(Faction::Nomads) < nomads);
         assert!(r.get(Faction::Garrison) > 0.0);
+    }
+
+    #[test]
+    fn paying_fine_forgives_half() {
+        let mut r = Reputation::default();
+        r.0[Faction::Garrison.index()] = -100.0;
+        r.0[Faction::Citizens.index()] = -30.0;
+        r.0[Faction::Merchants.index()] = 10.0;
+        r.0[Faction::Underworld.index()] = -40.0;
+        let changed = r.forgive_half();
+        assert_eq!(r.get(Faction::Garrison), -50.0);
+        assert_eq!(r.get(Faction::Citizens), -15.0);
+        // Кто не в минусе — без изменений; «дно» штрафов гарнизона не прощает.
+        assert_eq!(r.get(Faction::Merchants), 10.0);
+        assert_eq!(r.get(Faction::Underworld), -40.0);
+        assert_eq!(changed.len(), 2);
+        // Второй штраф — снова половина: −50 → −25.
+        r.forgive_half();
+        assert_eq!(r.get(Faction::Garrison), -25.0);
+    }
+
+    #[test]
+    fn work_gives_reputation() {
+        assert_eq!(shift_reward(0.0), 10.0);
+        assert_eq!(shift_reward(1.0), 15.0);
+        assert_eq!(public_works_reward(0.0), 10.0);
+        assert_eq!(public_works_reward(1.0), 20.0);
+        assert_eq!(work_reward(Faction::Citizens, 0.5), 12.5);
+        assert_eq!(work_reward(Faction::Garrison, 0.5), 15.0);
+        // −50 у гарнизона после штрафа: несколько дней общественных работ — и снова безразличие.
+        let mut r = Reputation::default();
+        r.0[Faction::Garrison.index()] = -50.0;
+        for _ in 0..3 {
+            r.change(Faction::Garrison, public_works_reward(0.7));
+        }
+        assert_eq!(r.standing(Faction::Garrison), Standing::Neutral);
     }
 
     #[test]

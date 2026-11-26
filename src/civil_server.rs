@@ -746,9 +746,9 @@ pub fn civil_tick(
                         l.uids = uids;
                         server.send_message(player, crate::loot_net::CH_LOOT, encode(&crate::loot_net::LootServerMessage::Inventory(inv.clone())));
                         settle(civil, t, player);
-                        t.change_rep(player, Faction::Garrison, 1.0);
+                        let forgiven = t.fine_paid(player);
                         end_arrest(civil, world, &mut server, player);
-                        send_law(&mut server, player, LawMessage::Notice(format!("Пеня {} уплачена. Вы больше не в розыске.", crate::economy::format_money(fine))));
+                        send_law(&mut server, player, LawMessage::Notice(format!("Пеня {} уплачена. Вы больше не в розыске.{forgiven}", crate::economy::format_money(fine))));
                     }
                     Err(e) => send_law(&mut server, player, LawMessage::Notice(format!("{}: пеня {}.", e.message(), crate::economy::format_money(fine)))),
                 }

@@ -71,6 +71,7 @@ mod health_ui;
 mod npc;
 mod player;
 mod props;
+mod rep_demo;
 mod props_client;
 mod props_server;
 mod protocol;

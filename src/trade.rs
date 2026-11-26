@@ -1143,7 +1143,17 @@ pub const MERCHANTS: &[MerchantDef] = &[
         vigilance: 0.9,
         cash: 7200 * 6,
         orders: &[],
-        lessons: &[],
+        // Общественные работы (opera publica): берут любого, даже кто только что уплатил штраф.
+        // Знаний не дают (hours = 0) — только кормят и возвращают доброе имя у гарнизона (+10–20).
+        lessons: &[LessonDef {
+            title: "Общественные работы: носить камень на починку стен",
+            teacher: TeacherKind::Miner,
+            mode: LessonMode::Apprentice,
+            hours: 0.0,
+            secs: 120.0,
+            money: 12,
+            min: Standing::Hostile,
+        }],
         services: &[Service::Fines],
         look: Look {
             tunic: [0.55, 0.12, 0.1],

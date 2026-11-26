@@ -471,7 +471,11 @@ fn merchant_window(
                     let money = if l.paid {
                         format!("плата {}", format_money_short(l.money))
                     } else {
-                        format!("платят {}", format_money_short(l.money))
+                        format!(
+                            "платят {} · {}",
+                            format_money_short(l.money),
+                            crate::factions::work_reward_label(view.faction)
+                        )
                     };
                     let started = if l.done > 0.0 {
                         format!(" · начато {:.0}%", l.done * 100.0)
