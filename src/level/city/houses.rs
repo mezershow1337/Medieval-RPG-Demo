@@ -95,25 +95,89 @@ pub fn map_op(o: Op, f: impl Fn(f32) -> f32) -> Op {
     }
 }
 
-/// Две усадьбы квартала.
-pub fn block_houses(b: &mut Builder, i: i32, j: i32, seed: u32) {
+/// Участок квартала: прямоугольник, сторона фасада, зеркальность (с какой боковой улицы
+/// боковое крыло) и своё зерно планировки.
+#[derive(Clone, Copy, Debug)]
+pub struct Lot {
+    pub r: Rect,
+    pub front: Side,
+    pub mirror: bool,
+    /// Половина квартала: 0 — к северу (фасад на N), 1 — к югу.
+    pub half: usize,
+    pub seed: u32,
+    /// Узкий дом (квартал поделён на три участка): стена двора — общая с соседом, без ворот.
+    pub narrow: bool,
+    /// Насколько фасадное крыло выше соседнего (м): у соседних узких домов крыши — уступом.
+    pub step: f32,
+}
+
+/// Зерно квартала (то же, что у `city_layout`).
+pub fn block_seed(i: i32, j: i32) -> u32 {
+    (i as u32 * 131 + (j + 4) as u32 * 7919) ^ 0x5eed
+}
+
+/// Как поделён квартал. Межа между усадьбами — не ровно посередине (участки покупали, делили
+/// по наследству), а примерно каждый четвёртый квартал в одной половине — два узких дома
+/// вместо одного. В кварталах с особыми лавками, пустующими домами и пепелищами — две равные
+/// усадьбы (на них завязаны места и номера участков).
+pub fn lots(i: i32, j: i32) -> Vec<Lot> {
     let r = block(i, j);
-    let zm = r.cz();
-    let lots = [(Rect::new(r.x0, r.z0, r.x1, zm), Side::N), (Rect::new(r.x0, zm, r.x1, r.z1), Side::S)];
-    for (k, (lot, front)) in lots.into_iter().enumerate() {
-        let mut rng = Rng::new(seed.wrapping_add(k as u32 * 977));
+    let seed = block_seed(i, j);
+    let special = [Side::N, Side::S].iter().any(|&s| special_shop(i, j, s) != Shop::None) || (0..2).any(|k| lot_mode(i, j, k, Shop::None) != LotMode::Lived || iron_yard_lot(i, j, k));
+    let mut h = Rng::new(seed ^ 0x10ce);
+    let shift = h.range(-4.5, 4.5);
+    let split = h.chance(0.28);
+    let split_half = h.int(2);
+    let split_at = h.range(0.44, 0.56);
+    let zm = if special { r.cz() } else { r.cz() + shift };
+    let halves = [(Rect::new(r.x0, r.z0, r.x1, zm), Side::N), (Rect::new(r.x0, zm, r.x1, r.z1), Side::S)];
+    let mut out = Vec::new();
+    for (k, (lot, front)) in halves.into_iter().enumerate() {
+        let lot_seed = seed.wrapping_add(k as u32 * 977);
+        let mirror = Rng::new(lot_seed).chance(0.5);
+        if !special && split && split_half == k {
+            let xm = lot.x0 + lot.w() * split_at;
+            // Боковые крылья — по внешним улицам, стены дворов сходятся на меже.
+            let tall = h.int(2);
+            out.push(Lot { r: Rect::new(lot.x0, lot.z0, xm, lot.z1), front, mirror: false, half: k, seed: lot_seed, narrow: true, step: if tall == 0 { 0.45 } else { 0.0 } });
+            out.push(Lot { r: Rect::new(xm, lot.z0, lot.x1, lot.z1), front, mirror: true, half: k, seed: lot_seed ^ 0x2b1d, narrow: true, step: if tall == 1 { 0.45 } else { 0.0 } });
+        } else {
+            out.push(Lot { r: lot, front, mirror, half: k, seed: lot_seed, narrow: false, step: 0.0 });
+        }
+    }
+    out
+}
+
+/// Северный участок квартала (6, 2) — угольный и железный двор напротив кузницы.
+fn iron_yard_lot(i: i32, j: i32, half: usize) -> bool {
+    (i, j, half) == (6, 2, 0)
+}
+
+/// Усадьбы квартала.
+pub fn block_houses(b: &mut Builder, i: i32, j: i32, _seed: u32) {
+    for lot in lots(i, j) {
+        let k = lot.half;
+        let mut rng = Rng::new(lot.seed);
+        // Первое число зерна ушло на зеркальность (как в `lots`).
+        rng.f();
+        let front = lot.front;
         let main_street = (j == -1 && front == Side::S) || (j == 1 && front == Side::N);
         let shop = special_shop(i, j, front);
-        let f = Frame { r: lot, front, mirror: rng.chance(0.5) };
+        let f = Frame { r: lot.r, front, mirror: lot.mirror };
+        let shape = Shape { narrow: lot.narrow, step: lot.step };
+        if iron_yard_lot(i, j, k) {
+            super::crafts::iron_yard(b, f);
+            continue;
+        }
         match lot_mode(i, j, k, shop) {
             LotMode::Lived => {
                 let (h, r0) = (b.houses.len() as u32, b.residents.len() as u32);
                 b.house = Some(h);
                 // Достаток: у главной улицы и с лавкой живут богаче.
                 let rich = if main_street || shop != Shop::None { 0.45 } else { 0.15 };
-                let mut wr = Rng::new(seed ^ (0x0a11 + k as u32 * 31));
+                let mut wr = Rng::new(lot.seed ^ (0x0a11 + k as u32 * 31));
                 b.wealth = if wr.chance(rich) { 2 } else if wr.chance(0.3) { 0 } else { 1 };
-                let info = house(b, f, main_street || shop != Shop::None, shop, &mut rng, LotMode::Lived);
+                let info = house(b, f, main_street || shop != Shop::None, shop, &mut rng, LotMode::Lived, shape);
                 b.house = None;
                 b.wealth = 1;
                 let name = house_name(&f, shop, info.two_storey);
@@ -122,7 +186,7 @@ pub fn block_houses(b: &mut Builder, i: i32, j: i32, seed: u32) {
             }
             LotMode::Vacant => {
                 let (d0, c0, bl0) = (b.doors.len(), b.containers.len(), b.blocks.len());
-                let info = house(b, f, false, Shop::None, &mut rng, LotMode::Vacant);
+                let info = house(b, f, false, Shop::None, &mut rng, LotMode::Vacant, shape);
                 let (d1, c1) = (b.doors.len(), b.containers.len());
                 let name = estate_name(&f, info.two_storey);
                 estate::register(b, name, crate::towns::TownId::Herson, f.r, info.top, info.entrance, d0..d1, c0..c1, bl0, info.rooms, info.two_storey, None);
@@ -130,6 +194,13 @@ pub fn block_houses(b: &mut Builder, i: i32, j: i32, seed: u32) {
             LotMode::Site => site(b, f, &mut rng),
         }
     }
+}
+
+/// Узкий дом или обычный; уступ крыши.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Shape {
+    pub narrow: bool,
+    pub step: f32,
 }
 
 /// Что стоит на участке.
@@ -196,7 +267,7 @@ fn site(b: &mut Builder, f: Frame, rng: &mut Rng) {
     t.chunk = b.chunk;
     let near = f.r.inset(-3.0);
     t.keep_clear = b.keep_clear.iter().filter(|p| p.x > near.x0 && p.x < near.x1 && p.z > near.z0 && p.z < near.z1).copied().collect();
-    let info = house(&mut t, f, false, Shop::None, rng, LotMode::Site);
+    let info = house(&mut t, f, false, Shop::None, rng, LotMode::Site, Shape::default());
     // Двор (цистерна, пифосы, деревья) пережил пожар — он в общей геометрии.
     courtyard(b, &f, info.court.0, info.court.1, info.back_wing, rng);
     // Двери и сундуки готового дома — в общих списках (номера постоянные), пока дом не достроен,
@@ -243,13 +314,9 @@ pub fn special_shop(i: i32, j: i32, front: Side) -> Shop {
 
 /// Центр комнаты особой лавки (для именованных точек): лавка — вторая комната фасада.
 pub fn shop_point(i: i32, j: i32, front: Side) -> Vec3 {
-    let r = block(i, j);
-    let zm = r.cz();
-    let lot = if front == Side::N { Rect::new(r.x0, r.z0, r.x1, zm) } else { Rect::new(r.x0, zm, r.x1, r.z1) };
-    let seed = (i as u32 * 131 + (j + 4) as u32 * 7919) ^ 0x5eed;
-    let k = if front == Side::N { 0 } else { 1 };
-    let mut rng = Rng::new(seed.wrapping_add(k * 977));
-    let f = Frame { r: lot, front, mirror: rng.chance(0.5) };
+    // Кварталы с особыми лавками делятся ровно на две усадьбы (см. `lots`).
+    let lot = lots(i, j).into_iter().find(|l| l.front == front).expect("участок лавки");
+    let f = Frame { r: lot.r, front, mirror: lot.mirror };
     let (u0, u1) = front_rooms(&f)[SHOP_ROOM];
     f.p((u0 + u1) / 2.0, 0.0, FRONT_D * 0.55)
 }
@@ -269,29 +336,42 @@ const SHOP_ROOM: usize = 1;
 /// Комнаты фасадного крыла (u0, u1 между перегородками).
 fn front_rooms(f: &Frame) -> Vec<(f32, f32)> {
     let w = f.w();
-    let n = 4;
+    // Узкий дом — две комнаты по фасаду.
+    let n = if w > 16.0 { 4 } else { 2 };
     let inner0 = OUTER_T;
     let inner1 = w - OUTER_T;
     let step = (inner1 - inner0) / n as f32;
     (0..n).map(|k| (inner0 + step * k as f32 + if k > 0 { INNER_T / 2.0 } else { 0.0 }, inner0 + step * (k + 1) as f32 - if k + 1 < n { INNER_T / 2.0 } else { 0.0 })).collect()
 }
 
-fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, mode: LotMode) -> HouseInfo {
+fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, mode: LotMode, shape: Shape) -> HouseInfo {
     let lived = mode == LotMode::Lived;
     let mut entrance = f.p(f.w() / 2.0, 0.0, -1.2);
     let (w, d) = (f.w(), f.d());
     let mat = if rng.chance(0.35) { Mat::Plaster } else { Mat::Rubble };
-    let two_storey = rng.chance(0.45);
-    let h_front = if two_storey { H1 * 2.0 - 0.2 } else { H1 };
-    let has_back_wing = rng.chance(0.35);
+    // Узкий дом — одноэтажный и без кладовых сзади: лестнице и заднему крылу во дворе тесно.
+    let two_storey = rng.chance(0.45) && !shape.narrow;
+    // Одноэтажные дома строили в разное время и разные артели: стены разной высоты,
+    // поэтому крыши квартала не идут одной линией (своё зерно — планировка не сдвигается).
+    let mut hr = Rng::new((f.r.x0 * 13.0 + f.r.z0 * 71.0) as i32 as u32 ^ 0x4e1f);
+    let h_front = if two_storey {
+        H1 * 2.0 - 0.2
+    } else if shape.narrow {
+        // У соседних узких домов крыши — уступом (одна выше на `step`), иначе черепица
+        // двух крыш легла бы в одну плоскость внахлёст.
+        H1 + shape.step
+    } else {
+        H1 + [0.0, 0.0, 0.25, 0.5][hr.int(4)]
+    };
+    let has_back_wing = rng.chance(0.35) && !shape.narrow;
     let back_d = if has_back_wing { 4.4 } else { 0.0 };
     let rooms = front_rooms(&f);
-    let vestibule = if shops { 0 } else { 1 + rng.int(2) };
+    let vestibule = if shops { 0 } else { (1 + rng.int(2)).min(rooms.len() - 1) };
     // Что где: комнаты обставляются, когда все стены (и двери в них) уже стоят.
     let mut plan: Vec<Rect> = Vec::new();
     let mut shop_rooms: Vec<(f32, f32, Shop)> = Vec::new();
     // Лестница на второй этаж — со двора, у перегородки между средними комнатами.
-    let stair_u = (rooms[1].1 + rooms[2].0) / 2.0;
+    let stair_u = if rooms.len() > 2 { (rooms[1].1 + rooms[2].0) / 2.0 } else { (rooms[0].1 + rooms[1].0) / 2.0 };
 
     // ---- Фасадное крыло ----
     let mut front_ops = Vec::new();
@@ -445,16 +525,25 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, m
     f.wall_u(b, d - 0.15, 0.0, w, 0.3, H1, &[], mat);
     // Стена двора вдоль второй боковой улицы, с воротами.
     let gate_v = (FRONT_D + d - back_d) / 2.0;
-    let gate = rng.chance(0.6);
+    let gate = rng.chance(0.6) && !shape.narrow;
     let ops = if gate { vec![Op::Door { s: gate_v, w: 2.2, h: 2.6 }] } else { vec![] };
     let yard_wall_h = 3.0;
-    f.wall_v(b, w - OUTER_T / 2.0, FRONT_D, d - back_d, OUTER_T, yard_wall_h, &ops, mat);
-    if has_back_wing {
-        f.wall_v(b, w - OUTER_T / 2.0, d - back_d, d, OUTER_T, H1, &[], mat);
+    if shape.narrow {
+        // Межа с соседним узким домом: у каждого — половина общей стены, гребень кладёт западный.
+        f.wall_v(b, w - OUTER_T / 4.0, FRONT_D, d - back_d, OUTER_T / 2.0, yard_wall_h, &[], mat);
+        if !f.mirror {
+            let top = f.rect(w - OUTER_T / 2.0, w + OUTER_T / 2.0, FRONT_D, d - back_d);
+            b.mesh(Mat::Tile).gable_roof_slopes(Vec2::new(top.x0 - 0.08, top.z0), Vec2::new(top.x1 + 0.08, top.z1), yard_wall_h, yard_wall_h + 0.22, !f.front.along_x());
+        }
+    } else {
+        f.wall_v(b, w - OUTER_T / 2.0, FRONT_D, d - back_d, OUTER_T, yard_wall_h, &ops, mat);
+        if has_back_wing {
+            f.wall_v(b, w - OUTER_T / 2.0, d - back_d, d, OUTER_T, H1, &[], mat);
+        }
+        // Черепичный «гребень» по верху стены двора.
+        let top = f.rect(w - OUTER_T, w, FRONT_D, d - back_d);
+        b.mesh(Mat::Tile).gable_roof_slopes(Vec2::new(top.x0 - 0.08, top.z0), Vec2::new(top.x1 + 0.08, top.z1), yard_wall_h, yard_wall_h + 0.22, !f.front.along_x());
     }
-    // Черепичный «гребень» по верху стены двора.
-    let top = f.rect(w - OUTER_T, w, FRONT_D, d - back_d);
-    b.mesh(Mat::Tile).gable_roof_slopes(Vec2::new(top.x0 - 0.08, top.z0), Vec2::new(top.x1 + 0.08, top.z1), yard_wall_h, yard_wall_h + 0.22, !f.front.along_x());
 
     // ---- Двор ----
     let court = ((SIDE_D, w - OUTER_T), (FRONT_D, d - back_d - 0.3));
@@ -805,34 +894,488 @@ fn courtyard(b: &mut Builder, f: &Frame, (u0, u1): (f32, f32), (v0, v1): (f32, f
     }
 }
 
-/// Пустырь у стены: огороды за низкой оградой, плодовые деревья.
+/// Пустырь у стены: огороды, сады и виноградники горожан. Квартал поделён межами на участки
+/// разной величины — у каждого хозяина своё: грядки, смоковницы, лоза, шалаш со сторожем.
+/// Ограды из бута с проходами, кипарисы вдоль межи; деревья и грядки — не по линейке.
 pub fn garden(b: &mut Builder, r: Rect, seed: u32) {
     let mut rng = Rng::new(seed);
-    // Ограда лишь там, где квартал целиком в городе; иначе — несколько деревьев.
+    // Только там, где квартал в городе (у стены — с запасом на улицу вдоль неё).
     let inside = |x: f32, z: f32| terrain::inside_city(x, z) && edge_distance(x, z) > 5.0;
-    let mut k = 0;
-    let mut z = r.z0 + 3.0;
-    while z < r.z1 - 2.0 {
-        let mut x = r.x0 + 2.0;
-        while x < r.x1 - 2.0 {
-            if inside(x, z) {
-                if k % 3 == 0 {
-                    kit::fig_tree(b, Vec3::new(x + rng.range(-1.0, 1.0), 0.0, z), rng.range(3.0, 5.0), &mut rng);
-                } else {
-                    // Грядки.
-                    let bed = Rect::new(x - 2.5, z - 0.5, x + 2.5, z + 0.5);
-                    b.mesh(Mat::Earth).cuboid(bed.min3(0.0), bed.max3(0.18));
-                    let n = 6;
-                    for q in 0..n {
-                        let p = Vec3::new(bed.x0 + 0.4 + q as f32 * 0.8, 0.18, bed.cz());
-                        b.mesh(Mat::HerbGreen).lathe(p, &[(0.0, 0.0), (0.22, 0.08), (0.15, 0.25), (0.0, 0.3)], 6);
+    let inside_r = |q: Rect, m: f32| [(q.x0 + m, q.z0 + m), (q.x1 - m, q.z0 + m), (q.x0 + m, q.z1 - m), (q.x1 - m, q.z1 - m), (q.cx(), q.cz())].iter().filter(|&&(x, z)| inside(x, z)).count();
+    // Межи поперёк квартала — на разной глубине; иногда участок ещё поделён вдоль.
+    let mut cuts = vec![r.z0];
+    let mut z = r.z0;
+    loop {
+        z += rng.range(10.0, 17.0);
+        if r.z1 - z < 8.0 {
+            break;
+        }
+        cuts.push(z);
+    }
+    cuts.push(r.z1);
+    let mut plots: Vec<Rect> = Vec::new();
+    for w in cuts.windows(2) {
+        let (z0, z1) = (w[0], w[1]);
+        if rng.chance(0.4) {
+            let xm = r.x0 + r.w() * rng.range(0.38, 0.62);
+            plots.push(Rect::new(r.x0, z0, xm, z1));
+            plots.push(Rect::new(xm, z0, r.x1, z1));
+        } else {
+            plots.push(Rect::new(r.x0, z0, r.x1, z1));
+        }
+    }
+    // Ограда квартала по улицам: низкая бутовая стенка, у каждого участка — свой проход.
+    let wall_h = 0.85;
+    let mut gaps_x: Vec<(f32, f32, f32)> = Vec::new(); // (z стены, x0, x1) проходов
+    let mut gaps_z: Vec<(f32, f32, f32)> = Vec::new(); // (x стены, z0, z1)
+    for p in &plots {
+        let gw = 1.6;
+        if (p.x0 - r.x0).abs() < 0.01 && rng.chance(0.6) {
+            let zc = rng.range(p.z0 + 2.0, p.z1 - 2.0);
+            gaps_z.push((r.x0, zc - gw / 2.0, zc + gw / 2.0));
+        }
+        if (p.x1 - r.x1).abs() < 0.01 && rng.chance(0.6) {
+            let zc = rng.range(p.z0 + 2.0, p.z1 - 2.0);
+            gaps_z.push((r.x1, zc - gw / 2.0, zc + gw / 2.0));
+        }
+        if (p.z0 - r.z0).abs() < 0.01 {
+            let xc = rng.range(p.x0 + 2.0, p.x1 - 2.0);
+            gaps_x.push((r.z0, xc - gw / 2.0, xc + gw / 2.0));
+        }
+        if (p.z1 - r.z1).abs() < 0.01 {
+            let xc = rng.range(p.x0 + 2.0, p.x1 - 2.0);
+            gaps_x.push((r.z1, xc - gw / 2.0, xc + gw / 2.0));
+        }
+    }
+    // Стенка кусками по 2–3 м: где кусок выходит за город (к стене), его нет; иногда кладка
+    // осыпалась и в стенке пролом.
+    let low_wall_x = |b: &mut Builder, z: f32, x0: f32, x1: f32, gaps: &[(f32, f32)], rng: &mut Rng| {
+        let mut x = x0;
+        while x < x1 - 0.3 {
+            let mut x_end = (x + rng.range(2.0, 3.2)).min(x1);
+            if let Some(&(g0, _)) = gaps.iter().find(|&&(g0, g1)| g0 >= x - 0.01 && g0 < x_end || (x >= g0 && x < g1)) {
+                if x >= g0 {
+                    x = gaps.iter().find(|&&(a, c)| x >= a && x < c).map(|&(_, c)| c).unwrap_or(x_end);
+                    continue;
+                }
+                x_end = g0;
+            }
+            if inside(x, z) && inside(x_end, z) && x_end - x > 0.3 {
+                let h = wall_h * rng.range(0.85, 1.1);
+                b.solid([x, 0.0, z - 0.25], [x_end, h, z + 0.25], Mat::Rubble);
+                b.mesh(Mat::Limestone).cuboid(Vec3::new(x - 0.02, h, z - 0.28), Vec3::new(x_end + 0.02, h + 0.07, z + 0.28));
+            }
+            x = x_end;
+        }
+    };
+    for &zw in &[r.z0, r.z1] {
+        let gaps: Vec<(f32, f32)> = gaps_x.iter().filter(|g| (g.0 - zw).abs() < 0.01).map(|g| (g.1, g.2)).collect();
+        let zz = if zw == r.z0 { zw + 0.3 } else { zw - 0.3 };
+        low_wall_x(b, zz, r.x0, r.x1, &gaps, &mut rng);
+    }
+    let low_wall_z = |b: &mut Builder, x: f32, z0: f32, z1: f32, gaps: &[(f32, f32)], rng: &mut Rng| {
+        let mut z = z0;
+        while z < z1 - 0.3 {
+            let mut z_end = (z + rng.range(2.0, 3.2)).min(z1);
+            if let Some(&(g0, _)) = gaps.iter().find(|&&(g0, g1)| g0 >= z - 0.01 && g0 < z_end || (z >= g0 && z < g1)) {
+                if z >= g0 {
+                    z = gaps.iter().find(|&&(a, c)| z >= a && z < c).map(|&(_, c)| c).unwrap_or(z_end);
+                    continue;
+                }
+                z_end = g0;
+            }
+            if inside(x, z) && inside(x, z_end) && z_end - z > 0.3 {
+                let h = wall_h * rng.range(0.85, 1.1);
+                b.solid([x - 0.25, 0.0, z], [x + 0.25, h, z_end], Mat::Rubble);
+                b.mesh(Mat::Limestone).cuboid(Vec3::new(x - 0.28, h, z - 0.02), Vec3::new(x + 0.28, h + 0.07, z_end + 0.02));
+            }
+            z = z_end;
+        }
+    };
+    for &xw in &[r.x0, r.x1] {
+        let gaps: Vec<(f32, f32)> = gaps_z.iter().filter(|g| (g.0 - xw).abs() < 0.01).map(|g| (g.1, g.2)).collect();
+        let xx = if xw == r.x0 { xw + 0.3 } else { xw - 0.3 };
+        low_wall_z(b, xx, r.z0 + 0.55, r.z1 - 0.55, &gaps, &mut rng);
+    }
+    // Межи внутри квартала: плетень из прутьев на кольях (дешевле кладки), с перелазом.
+    for p in &plots {
+        if p.z1 < r.z1 - 0.01 {
+            let gap = rng.range(p.x0 + 1.5, p.x1 - 3.0);
+            for (a, c) in [(p.x0 + 0.6, gap), (gap + 1.4, p.x1 - 0.6)] {
+                wattle(b, Vec3::new(a, 0.0, p.z1), Vec3::new(c, 0.0, p.z1), &inside, &mut rng);
+            }
+        }
+        if p.x1 < r.x1 - 0.01 {
+            let gap = rng.range(p.z0 + 1.5, p.z1 - 3.0);
+            for (a, c) in [(p.z0 + 0.6, gap), (gap + 1.4, p.z1 - 0.6)] {
+                wattle(b, Vec3::new(p.x1, 0.0, a), Vec3::new(p.x1, 0.0, c), &inside, &mut rng);
+            }
+        }
+    }
+    // Что на участке: у кого огород, у кого сад или лоза; шалаш — не больше одного на квартал.
+    let mut hut = false;
+    let mut last = 9;
+    for p in &plots {
+        let inner = p.inset(1.0);
+        if inner.w() < 4.0 || inner.d() < 4.0 || inside_r(*p, 1.5) < 3 {
+            // Клочок у стены: пара деревьев и куст, без грядок.
+            for _ in 0..2 {
+                let q = Vec3::new(rng.range(inner.x0, inner.x1), 0.0, rng.range(inner.z0, inner.z1));
+                if inside(q.x, q.z) {
+                    if rng.chance(0.6) {
+                        kit::fig_tree(b, q, rng.range(2.8, 4.6), &mut rng);
+                    } else {
+                        kit::shrub(b, q, rng.range(0.8, 1.4));
                     }
                 }
             }
-            k += 1;
-            x += 7.0;
+            continue;
         }
-        z += 6.0;
+        b.at(p.cx(), p.cz());
+        // Огород чаще всего, сад реже, виноградник — у немногих.
+        let pick = |k: usize| match k {
+            0..=5 => 0,
+            6..=9 => 1,
+            _ => 2,
+        };
+        let mut kind = pick(rng.int(12));
+        // Соседние участки разные.
+        if kind == last {
+            kind = (kind + 1 + rng.int(2)) % 3;
+        }
+        last = kind;
+        match kind {
+            0 => kitchen_garden(b, inner, &inside, &mut rng),
+            1 => orchard(b, inner, &inside, &mut rng),
+            _ => {
+                if !hut && inner.w() > 6.0 && inner.d() > 7.0 {
+                    hut = true;
+                    vine_yard(b, inner, &inside, true, &mut rng);
+                } else {
+                    vine_yard(b, inner, &inside, false, &mut rng);
+                }
+            }
+        }
+        // Кипарисы по меже — по одному-два, не строем.
+        if rng.chance(0.5) {
+            let n = 1 + rng.int(2);
+            for _ in 0..n {
+                let q = Vec3::new(rng.range(p.x0 + 0.8, p.x1 - 0.8), 0.0, if rng.chance(0.5) { p.z0 + 0.9 } else { p.z1 - 0.9 });
+                if inside(q.x, q.z) {
+                    kit::cypress(b, q, rng.range(5.5, 8.5));
+                }
+            }
+        }
     }
-    let _ = Aabb::new(Vec3::ZERO, Vec3::ZERO);
+}
+
+/// Плетень: колья через 0,5 м и переплетённые прутья, местами подгнил и покосился.
+fn wattle(b: &mut Builder, a: Vec3, c: Vec3, inside: &impl Fn(f32, f32) -> bool, rng: &mut Rng) {
+    let len = a.distance(c);
+    if len < 0.6 {
+        return;
+    }
+    let dir = (c - a) / len;
+    let side = Vec3::new(-dir.z, 0.0, dir.x);
+    let n = (len / 0.5).ceil() as usize;
+    let h = rng.range(0.9, 1.15);
+    let m = b.mesh(Mat::Wood);
+    let mut seg_start: Option<Vec3> = None;
+    for k in 0..=n {
+        let p = a + dir * (len * k as f32 / n as f32);
+        if !inside(p.x, p.z) {
+            seg_start = None;
+            continue;
+        }
+        let lean = side * rng.range(-0.04, 0.04);
+        m.beam(p, p + Vec3::Y * (h + rng.range(-0.05, 0.08)) + lean, 0.025, 0.025, dir);
+        if let Some(s) = seg_start {
+            for y in [0.25f32, 0.5, 0.75] {
+                if y < h - 0.1 {
+                    let wob = if k % 2 == 0 { 0.02 } else { -0.02 };
+                    m.beam(s + Vec3::Y * y + side * wob, p + Vec3::Y * y - side * wob, 0.018, 0.03, Vec3::Y);
+                }
+            }
+        }
+        seg_start = Some(p);
+    }
+    let (lo, hi) = (a.min(c) - Vec3::new(0.06, 0.0, 0.06), a.max(c) + Vec3::new(0.06, h, 0.06));
+    if inside(a.x, a.z) && inside(c.x, c.z) {
+        kit::hidden(b, lo, hi);
+    }
+}
+
+/// Огород: грядки разной длины вдоль участка с тропкой, разные овощи; что-то уже убрано.
+fn kitchen_garden(b: &mut Builder, r: Rect, inside: &impl Fn(f32, f32) -> bool, rng: &mut Rng) {
+    let along_x = if rng.chance(0.5) { r.w() > r.d() } else { r.w() <= r.d() } || r.d() < 5.0;
+    let (len_total, across) = if along_x { (r.w(), r.d()) } else { (r.d(), r.w()) };
+    let path_at = across * rng.range(0.35, 0.65);
+    let pitch = rng.range(1.25, 1.55);
+    let mut t = 0.4;
+    while t < across - 0.6 {
+        if (t - path_at).abs() < 0.7 {
+            t += 1.3;
+            continue;
+        }
+        // Грядка: длина — не до самой ограды и у всех разная.
+        let s0 = rng.range(0.2, 1.4);
+        let s1 = len_total - rng.range(0.2, 1.8);
+        let wdt = rng.range(0.75, 0.95);
+        let bed = if along_x { Rect::new(r.x0 + s0, r.z0 + t, r.x0 + s1, r.z0 + t + wdt) } else { Rect::new(r.x0 + t, r.z0 + s0, r.x0 + t + wdt, r.z0 + s1) };
+        if !(inside(bed.x0, bed.z0) && inside(bed.x1, bed.z1)) {
+            t += pitch;
+            continue;
+        }
+        let hgt = rng.range(0.1, 0.17);
+        b.mesh(Mat::Earth).cuboid(bed.min3(0.0), bed.max3(hgt));
+        let crop = rng.int(6);
+        // Шаг посадки ~0,55 м; меш скромный — огородов много, а кадр должен держать 60 FPS.
+        let n = ((s1 - s0) / 0.55) as usize;
+        let at = |k: usize, rng: &mut Rng| {
+            let u = s0 + 0.3 + (s1 - s0 - 0.6) * (k as f32 + rng.range(0.3, 0.7)) / n.max(1) as f32;
+            let v = t + wdt * rng.range(0.3, 0.7);
+            if along_x { Vec3::new(r.x0 + u, hgt, r.z0 + v) } else { Vec3::new(r.x0 + v, hgt, r.z0 + u) }
+        };
+        match crop {
+            // Капуста и свёкла: кочаны разной величины, кое-где выдернуты.
+            0 | 1 => {
+                for k in 0..n {
+                    if rng.chance(0.15) {
+                        continue;
+                    }
+                    let p = at(k, rng);
+                    let s = rng.range(0.7, 1.25);
+                    b.mesh(Mat::HerbGreen).lathe(p, &[(0.0, 0.0), (0.21 * s, 0.09 * s), (0.0, 0.26 * s)], 6);
+                }
+            }
+            // Лук и чеснок: пучки тонких перьев.
+            2 => {
+                for k in 0..n {
+                    let p = at(k, rng) + Vec3::new(rng.range(-0.15, 0.15), 0.0, rng.range(-0.15, 0.15));
+                    let m = b.mesh(Mat::HerbGreen);
+                    for q in 0..2 {
+                        let a = q as f32 * 3.1 + rng.range(0.0, 1.0);
+                        m.beam(p, p + Vec3::new(a.cos() * 0.06, rng.range(0.25, 0.4), a.sin() * 0.06), 0.008, 0.008, Vec3::X);
+                    }
+                }
+            }
+            // Бобы на тычинах: колья шалашиком, плети кое-где добрались до верха.
+            3 => {
+                let m = (n / 2).max(2);
+                for k in 0..m {
+                    let p = at(k * 2, rng);
+                    let top = p + Vec3::new(rng.range(-0.08, 0.08), rng.range(1.1, 1.4), rng.range(-0.08, 0.08));
+                    for d in [-0.25f32, 0.25] {
+                        let foot = p + if along_x { Vec3::new(0.0, 0.0, d) } else { Vec3::new(d, 0.0, 0.0) };
+                        b.mesh(Mat::Wood).beam(foot, top, 0.015, 0.015, Vec3::Y);
+                    }
+                    // Плети у тычин: куст пониже, кое-где побеги уже поднялись выше.
+                    if rng.chance(0.65) {
+                        kit::shrub(b, p, rng.range(0.6, 0.95));
+                    }
+                }
+            }
+            // Зелень и травы: низкие кустики разного цвета.
+            4 => {
+                for k in 0..n {
+                    let p = at(k, rng);
+                    let mat = [Mat::HerbGreen, Mat::HerbSilver, Mat::HerbGreen][rng.int(3)];
+                    b.mesh(mat).lathe(p, &[(0.0, 0.0), (0.16, 0.07), (0.0, 0.2)], 5);
+                }
+            }
+            // Вскопано под посев: бороздки.
+            _ => {
+                let m = b.mesh(Mat::Earth);
+                let k_n = 3;
+                for k in 0..k_n {
+                    let v = t + wdt * (k as f32 + 0.5) / k_n as f32;
+                    let (a, c) = if along_x { (Vec3::new(r.x0 + s0 + 0.1, hgt, r.z0 + v), Vec3::new(r.x0 + s1 - 0.1, hgt, r.z0 + v)) } else { (Vec3::new(r.x0 + v, hgt, r.z0 + s0 + 0.1), Vec3::new(r.x0 + v, hgt, r.z0 + s1 - 0.1)) };
+                    m.beam(a, c, 0.06, 0.035, Vec3::Y);
+                }
+            }
+        }
+        t += pitch;
+    }
+    // Мелочи хозяина: кувшин для полива, корзина, мотыга, воткнутая в землю.
+    let p = Vec3::new(r.x0 + rng.range(0.4, 1.0), 0.0, r.z0 + rng.range(0.4, 1.0));
+    if inside(p.x, p.z) {
+        kit::jug(b, p, 0.45, Mat::Ceramic);
+        let q = p + Vec3::new(0.6, 0.0, 0.2);
+        b.mesh(Mat::Wood).beam(q, q + Vec3::new(0.15, 1.2, 0.3), 0.02, 0.02, Vec3::X);
+        b.mesh(Mat::Iron).beam(q + Vec3::new(-0.1, 0.02, 0.0), q + Vec3::new(0.1, 0.02, 0.0), 0.012, 0.08, Vec3::Z);
+    }
+}
+
+/// Ряд лозы на шпалере: кривые колья через 2–2,5 м, жердь поверху, лоза — сплошной
+/// неровной зелёной лентой (где гуще, где проредили), снизу — узловатые штамбы и грозди.
+fn vine_hedge(b: &mut Builder, a: Vec3, c: Vec3, h: f32, rng: &mut Rng) {
+    let len = a.distance(c);
+    let dir = (c - a) / len;
+    let side = Vec3::new(-dir.z, 0.0, dir.x);
+    // Колья и жердь.
+    let mut t = 0.0;
+    let mut posts = Vec::new();
+    while t <= len + 0.01 {
+        posts.push(a + dir * t.min(len) + side * rng.range(-0.05, 0.05));
+        t += rng.range(2.0, 2.6);
+    }
+    let m = b.mesh(Mat::Wood);
+    for p in &posts {
+        m.beam(*p, *p + Vec3::Y * (h + rng.range(-0.06, 0.08)) + side * rng.range(-0.05, 0.05), 0.03, 0.03, dir);
+    }
+    m.beam(a + Vec3::Y * h, c + Vec3::Y * h, 0.012, 0.012, Vec3::Y);
+    // Кусты лозы вдоль шпалеры — разной силы, где-то лоза выпала.
+    let mut t = rng.range(0.3, 0.8);
+    while t < len - 0.2 {
+        if !rng.chance(0.1) {
+            let p = a + dir * t + side * rng.range(-0.1, 0.1);
+            kit::shrub(b, p, h * rng.range(0.95, 1.15));
+        }
+        t += rng.range(2.0, 2.6);
+    }
+    // Грозди под листвой.
+    let n = (len / 1.6) as usize;
+    for _ in 0..n {
+        if rng.chance(0.5) {
+            let p = a + dir * rng.range(0.3, len - 0.3) + side * (if rng.chance(0.5) { 0.22 } else { -0.22 }) + Vec3::Y * (h * 0.55);
+            b.mesh(Mat::PetalPurple).lathe(p - Vec3::Y * 0.16, &[(0.0, 0.0), (0.05, 0.05), (0.07, 0.13), (0.0, 0.17)], 6);
+        }
+    }
+}
+
+/// Сад: смоковницы, гранаты и миндаль врассыпную — где посадили, где выросло само;
+/// у старых деревьев — подпорки, под деревом — лестница для сбора и корзины.
+fn orchard(b: &mut Builder, r: Rect, inside: &impl Fn(f32, f32) -> bool, rng: &mut Rng) {
+    let mut trees: Vec<Vec3> = Vec::new();
+    let area = r.w() * r.d();
+    let want = ((area / 26.0) as usize).clamp(2, 14);
+    let mut tries = 0;
+    while trees.len() < want && tries < want * 12 {
+        tries += 1;
+        let p = Vec3::new(rng.range(r.x0 + 1.0, r.x1 - 1.0), 0.0, rng.range(r.z0 + 1.0, r.z1 - 1.0));
+        // Разные расстояния между деревьями: где-то кроны сомкнулись, где-то прогалина.
+        let min_d = rng.range(3.2, 5.0);
+        if !inside(p.x, p.z) || trees.iter().any(|t| t.distance(p) < min_d) {
+            continue;
+        }
+        trees.push(p);
+    }
+    for (k, p) in trees.iter().enumerate() {
+        // Старые деревья выше, молодые саженцы — по пояс.
+        let h = if k % 5 == 4 { rng.range(1.6, 2.4) } else { rng.range(3.2, 5.6) };
+        kit::fig_tree(b, *p, h, rng);
+    }
+    if let Some(&p) = trees.first() {
+        // Лестница-стремянка прислонена к стволу (верх — в кроне).
+        let dir = Vec3::new(rng.range(-1.0, 1.0), 0.0, rng.range(-1.0, 1.0)).normalize_or(Vec3::X);
+        let foot = p + dir * 1.2;
+        let top = p + dir * 0.25 + Vec3::Y * 2.4;
+        let side = Vec3::new(-dir.z, 0.0, dir.x) * 0.22;
+        let m = b.mesh(Mat::Wood);
+        for s in [-1.0f32, 1.0] {
+            m.beam(foot + side * s, top + side * s, 0.025, 0.025, dir);
+        }
+        for k in 1..7 {
+            let t = k as f32 / 7.0;
+            let q = foot.lerp(top, t);
+            m.beam(q - side, q + side, 0.015, 0.015, Vec3::Y);
+        }
+        for _ in 0..2 {
+            let q = p + Vec3::new(rng.range(-1.6, 1.6), 0.0, rng.range(-1.6, 1.6));
+            if q.distance(p) > 0.8 && inside(q.x, q.z) {
+                b.mesh(Mat::Thatch).lathe(q, &[(0.18, 0.0), (0.24, 0.3), (0.26, 0.36), (0.0, 0.36)], 9);
+            }
+        }
+    }
+    // Подлесок у ограды.
+    for _ in 0..rng.int(3) {
+        let q = Vec3::new(rng.range(r.x0, r.x1), 0.0, if rng.chance(0.5) { r.z0 + 0.3 } else { r.z1 - 0.3 });
+        if inside(q.x, q.z) {
+            kit::shrub(b, q, rng.range(0.7, 1.3));
+        }
+    }
+}
+
+/// Виноградник: ряды лозы на шпалерах (ряды неровные, где-то лоза выпала); с шалашом
+/// сторожа, давильней и пифосом у входа, если `hut`.
+fn vine_yard(b: &mut Builder, r: Rect, inside: &impl Fn(f32, f32) -> bool, hut: bool, rng: &mut Rng) {
+    let along_x = r.w() > r.d();
+    let (len, across) = if along_x { (r.w(), r.d()) } else { (r.d(), r.w()) };
+    let hut_r = hut.then(|| {
+        let s = 3.2;
+        if along_x { Rect::new(r.x1 - s - 0.2, r.z0 + 0.2, r.x1 - 0.2, r.z0 + s + 0.2) } else { Rect::new(r.x0 + 0.2, r.z1 - s - 0.2, r.x0 + s + 0.2, r.z1 - 0.2) }
+    });
+    let pitch = rng.range(1.9, 2.3);
+    let mut t = rng.range(0.4, 0.9);
+    while t < across - 0.3 {
+        let s0 = rng.range(0.3, 1.0);
+        let s1 = len - rng.range(0.3, 1.0);
+        let (a, c) = if along_x { (Vec3::new(r.x0 + s0, 0.0, r.z0 + t), Vec3::new(r.x0 + s1, 0.0, r.z0 + t)) } else { (Vec3::new(r.x0 + t, 0.0, r.z0 + s0), Vec3::new(r.x0 + t, 0.0, r.z0 + s1)) };
+        // Ряд обрывается у шалаша и у границы города; иногда в ряду прогал.
+        let mut pieces = vec![(a, c)];
+        if let Some(h) = hut_r {
+            pieces = pieces
+                .into_iter()
+                .flat_map(|(a, c)| {
+                    let hit = |p: Vec3| p.x > h.x0 - 0.8 && p.x < h.x1 + 0.8 && p.z > h.z0 - 0.8 && p.z < h.z1 + 0.8;
+                    if hit(a) || hit(c) || hit((a + c) / 2.0) {
+                        if along_x { vec![(a, Vec3::new(h.x0 - 0.9, 0.0, a.z))] } else { vec![(Vec3::new(a.x, 0.0, h.z1 + 0.9), c)] }
+                    } else {
+                        vec![(a, c)]
+                    }
+                })
+                .collect();
+        }
+        if rng.chance(0.35) {
+            let (a, c) = pieces[0];
+            let m = rng.range(0.3, 0.7);
+            let g0 = a.lerp(c, m - 0.08);
+            let g1 = a.lerp(c, m + 0.08);
+            pieces = vec![(a, g0), (g1, c)];
+        }
+        for (a, c) in pieces {
+            if a.distance(c) > 1.6 && inside(a.x, a.z) && inside(c.x, c.z) {
+                vine_hedge(b, a, c, rng.range(1.3, 1.6), rng);
+            }
+        }
+        t += pitch;
+    }
+    let Some(h) = hut_r else { return };
+    if !(inside(h.x0, h.z0) && inside(h.x1, h.z1)) {
+        return;
+    }
+    // Шалаш сторожа: столбы, плетёные стенки с трёх сторон, соломенная крыша.
+    let posts = [(h.x0, h.z0), (h.x1, h.z0), (h.x0, h.z1), (h.x1, h.z1)];
+    for (x, z) in posts {
+        b.solid([x - 0.08, 0.0, z - 0.08], [x + 0.08, 2.1, z + 0.08], Mat::Wood);
+    }
+    let open_side = if along_x { Side::S } else { Side::E };
+    let sides = [
+        (Side::N, Vec3::new(h.x0, 0.0, h.z0), Vec3::new(h.x1, 0.0, h.z0)),
+        (Side::S, Vec3::new(h.x0, 0.0, h.z1), Vec3::new(h.x1, 0.0, h.z1)),
+        (Side::W, Vec3::new(h.x0, 0.0, h.z0), Vec3::new(h.x0, 0.0, h.z1)),
+        (Side::E, Vec3::new(h.x1, 0.0, h.z0), Vec3::new(h.x1, 0.0, h.z1)),
+    ];
+    for (s, a, c) in sides {
+        if s == open_side {
+            continue;
+        }
+        let m = b.mesh(Mat::Thatch);
+        let dir = (c - a).normalize();
+        let n = Vec3::new(-dir.z, 0.0, dir.x);
+        m.obox((a + c) / 2.0 + Vec3::Y * 0.95, Vec3::new(a.distance(c) / 2.0 * dir.x.abs() + 0.04 * n.x.abs(), 0.95, a.distance(c) / 2.0 * dir.z.abs() + 0.04 * n.z.abs()), 0.0);
+        let lo = a.min(c) - Vec3::new(0.06, 0.0, 0.06);
+        let hi = a.max(c) + Vec3::new(0.06, 1.9, 0.06);
+        b.invisible.push(Aabb::new(lo, hi));
+    }
+    super::outside::thatch_roof(b, h.inset(-0.35), 2.1, 1.0, along_x, 0.0, Mat::Thatch);
+    // У входа: пифос, корзины для гроздей, скамья.
+    let front = match open_side {
+        Side::S => Vec3::new(h.cx(), 0.0, h.z1 + 0.9),
+        _ => Vec3::new(h.x1 + 0.9, 0.0, h.cz()),
+    };
+    kit::pithos(b, front + Vec3::new(0.9, 0.0, 0.4), 1.2, 0.5);
+    b.mesh(Mat::Thatch).lathe(front + Vec3::new(-0.7, 0.0, 0.2), &[(0.2, 0.0), (0.26, 0.32), (0.28, 0.38), (0.0, 0.38)], 9);
+    let bench = if open_side == Side::S { Rect::new(h.x0 + 0.3, h.z1 - 0.7, h.x0 + 1.7, h.z1 - 0.35) } else { Rect::new(h.x1 - 0.7, h.z0 + 0.3, h.x1 - 0.35, h.z0 + 1.7) };
+    kit::bench(b, bench);
 }

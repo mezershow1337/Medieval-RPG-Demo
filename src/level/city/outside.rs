@@ -152,7 +152,7 @@ pub fn kleros_floor() -> f32 {
 }
 
 /// Двускатная кровля из камыша/соломы над прямоугольником (фронтоны — из `gable`).
-fn thatch_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32, ridge_x: bool, over: f32, gable: Mat) {
+pub fn thatch_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32, ridge_x: bool, over: f32, gable: Mat) {
     let ro = Rect::new(r.x0 - over, r.z0 - over, r.x1 + over, r.z1 + over);
     let half = if ridge_x { r.d() / 2.0 } else { r.w() / 2.0 };
     let e = eave - rise / half * over;
