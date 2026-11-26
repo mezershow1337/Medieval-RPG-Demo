@@ -32,6 +32,7 @@ mod economy;
 mod estates;
 mod factions;
 mod fight;
+mod fishing;
 mod guide;
 mod hints;
 mod gear_look;

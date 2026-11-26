@@ -239,4 +239,5 @@ pub const ITEM_ART: &[(&str, &str)] = &[
     ("Железные ножницы", "iron_shears"),
     ("Деревянная шкатулка", "wooden_casket"),
     ("Доска для тавлей", "tabula_board"),
+    ("Кефаль", "fish_kefal"),
 ];

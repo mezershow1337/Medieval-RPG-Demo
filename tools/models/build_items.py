@@ -837,6 +837,7 @@ import items_goods  # noqa: E402,F401  (товары, травы, посуда, 
 import items_arsenal  # noqa: E402,F401  (кованое оружие арсенала)
 import items_archery  # noqa: E402,F401  (луки, стрелы и их части)
 import items_home  # noqa: E402,F401  (домашняя утварь горожан)
+import items_fishing  # noqa: E402,F401  (снасти и рыба)
 
 
 def build(key):
@@ -848,8 +849,9 @@ def build(key):
     K.icon_camera(K.PARTS, spec["cells"], spec["azimuth"], spec["elevation"], spec["margin"], spec["roll"])
     K.render_icon(os.path.join(K.OUT_ICONS, key + ".png"))
     w, h = spec["cells"]
-    # мелким предметам (1x1, 1x2) хватает текстур 256 — на земле они маленькие, а glb легче
-    bake = 256 if w * h <= 2 else K.BAKE_SIZE
+    # Текстуры не меньше 1024 (правило проекта), даже у мелких предметов.
+    bake = max(K.BAKE_SIZE, 1024)
+    _ = (w, h)
     K.bake_and_export(key, spec["pose"], bake_size=bake, squash=spec["squash"])
     print(f"[items] {key}: готово")
 

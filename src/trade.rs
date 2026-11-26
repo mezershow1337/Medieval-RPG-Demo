@@ -224,6 +224,10 @@ pub fn category(base: ItemBaseId) -> Category {
     if coin_value(base).is_some() {
         return Category::Coin;
     }
+    // Рыба, крючки и наживка (fishing.rs).
+    if let Some(c) = crate::fishing::category(name) {
+        return c;
+    }
     if is(HERBS) {
         return Category::Herb;
     }
@@ -1774,6 +1778,37 @@ pub const MERCHANTS: &[MerchantDef] = &[
         look: Look {
             tunic: [0.3, 0.27, 0.24],
             trousers: [0.22, 0.2, 0.18],
+            helmet: false,
+        },
+    },
+    // ---------------- Рыбацкая лачуга у Песочной бухты (fishing.rs) ----------------
+    MerchantDef {
+        key: "euplos",
+        name: "Евпл-рыбак",
+        title: "снасти и свежая рыба",
+        faction: Faction::Citizens,
+        place: "fish_hut",
+        greeting: "Удочку, крючки, червей? А улов неси сюда — свежую рыбу беру всю, хоть хамсу, хоть калкана. Осётра принесёшь — озолочу.",
+        stock: &[
+            s("Тростниковая удочка", 1, 3, 1.0),
+            s("Можжевеловая удочка", 0, 1, 1.05),
+            s("Бронзовые крючки", 10, 30, 1.0),
+            s("Морские черви", 20, 60, 1.0),
+            s("Креветки", 10, 40, 1.0),
+            s("Свинцовые грузила", 2, 6, 1.0),
+            s("Солёная рыба", 2, 6, 1.0),
+        ],
+        // Свежую рыбу берёт охотно: вечером везёт её в город, на засолку и в корчмы.
+        buys: &[(Category::Food, 0.85)],
+        money: MoneyPolicy::Coins,
+        vigilance: 0.4,
+        cash: 7200 * 2,
+        orders: &[],
+        lessons: &[],
+        services: &[],
+        look: Look {
+            tunic: [0.62, 0.58, 0.5],
+            trousers: [0.32, 0.3, 0.27],
             helmet: false,
         },
     },
