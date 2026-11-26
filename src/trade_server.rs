@@ -290,6 +290,23 @@ impl TradeWorld {
         self.standing_dirty.insert(player);
     }
 
+    /// Штраф уплачен: розыск снят, город прощает половину вражды (−100 → −50).
+    /// Кто не был в минусе, получает лишь малую прибавку у гарнизона.
+    /// Возвращает строку для игрока: у кого и как поднялась репутация.
+    pub fn fine_paid(&mut self, player: u64) -> String {
+        self.clear_fine(player);
+        let forgiven = self.rep(player).forgive_half();
+        if forgiven.is_empty() {
+            self.change_rep(player, Faction::Garrison, 2.0);
+            return String::new();
+        }
+        let parts: Vec<String> = forgiven
+            .iter()
+            .map(|(f, before, after)| format!("{} {:.0} → {:.0}", f.name(), before, after))
+            .collect();
+        format!(" Город простил половину вражды: {}.", parts.join(", "))
+    }
+
     /// Убийце лавочник (или его наследник) не продаст ничего ещё долго.
     pub fn grudge(&mut self, player: u64, id: MerchantId, until: f64) {
         self.merchant(id).grudges.insert(player, until);
@@ -1437,6 +1454,14 @@ fn on_connection(
                 &TradeServerMessage::Merchants(merchant_list(&tw)),
             );
             tw.rep(id);
+            // Снимки системы репутации (`MRPG_REP_DEMO`, см. rep_demo.rs): игрок в розыске,
+            // гарнизон его ненавидит, горожане недолюбливают.
+            if std::env::var_os("MRPG_REP_DEMO").is_some() {
+                let r = tw.rep(id);
+                r.0[Faction::Garrison.index()] = -100.0;
+                r.0[Faction::Citizens.index()] = -40.0;
+                tw.add_fine(id, 160);
+            }
             tw.standing_dirty.insert(id);
         }
         ServerEvent::ClientDisconnected { client_id, .. } => {
@@ -1721,6 +1746,7 @@ fn receive_trade_messages(
                                 drill: Some(lesson_drill(l)),
                                 skill: crate::knowledge::teacher_from_trade(l.teacher)
                                     .skill()
+                                    .filter(|_| l.hours > 0.0)
                                     .and_then(|sk| {
                                         knowledge
                                             .as_ref()
@@ -1773,11 +1799,9 @@ fn receive_trade_messages(
                         match take_money(inv, fine, &mut uids) {
                             Ok(()) => {
                                 loot.uids = uids;
-                                tw.fines.remove(&pid);
-                                tw.standing_dirty.insert(pid);
-                                tw.change_rep(pid, Faction::Garrison, 2.0);
+                                let forgiven = tw.fine_paid(pid);
                                 format!(
-                                    "Штраф {} уплачен. Вы больше не в розыске.",
+                                    "Штраф {} уплачен. Вы больше не в розыске.{forgiven}",
                                     format_money(fine)
                                 )
                             }
@@ -2128,12 +2152,27 @@ fn tick_lessons(
                 ),
             );
         }
-        tw.change_rep(pid, def.faction, 1.0);
+        if lesson.mode == LessonMode::Apprentice {
+            // Честная работа в городе — лучший способ вернуть доброе имя.
+            let gain = crate::factions::work_reward(def.faction, q);
+            tw.change_rep(pid, def.faction, gain);
+            notice(
+                &mut server,
+                pid,
+                format!("{}: репутация +{:.0}", def.faction.name(), gain),
+            );
+        } else {
+            tw.change_rep(pid, def.faction, 1.0);
+        }
         send(
             &mut server,
             pid,
             &TradeServerMessage::LessonFinished { ok: true },
         );
+        // Общественные работы ничему не учат (hours = 0): только плата и репутация.
+        if lesson.hours <= 0.0 {
+            continue;
+        }
         commands.trigger(LessonRequested {
             player: pid,
             teacher: lesson.teacher,
@@ -2526,6 +2565,27 @@ mod tests {
                 .all_items()
                 .any(|i| i.info().name == "Овчина")
         );
+    }
+
+    #[test]
+    fn paid_fine_forgives_half_and_public_works_open() {
+        let (mut tw, _) = world();
+        tw.rep(1).0[Faction::Garrison.index()] = -100.0;
+        tw.add_fine(1, 400);
+        let said = tw.fine_paid(1);
+        assert_eq!(tw.fine(1), 0);
+        assert_eq!(tw.rep(1).get(Faction::Garrison), -50.0);
+        assert!(said.contains("-100 → -50"), "{said}");
+        // Казначей больше не гонит: можно отработать общественные работы.
+        let markianos = merchant_by_key("markianos").unwrap();
+        assert!(tw.refusal(1, markianos, 0.0).is_none());
+        let works = &markianos.def().lessons[0];
+        assert_eq!(works.mode, LessonMode::Apprentice);
+        assert!(tw.standing(1, Faction::Garrison) >= works.min);
+        // Кто не был в минусе, получает лишь малую прибавку.
+        let before = tw.rep(2).get(Faction::Garrison);
+        assert!(tw.fine_paid(2).is_empty());
+        assert_eq!(tw.rep(2).get(Faction::Garrison), before + 2.0);
     }
 
     #[test]
