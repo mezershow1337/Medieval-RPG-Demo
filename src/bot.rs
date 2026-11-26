@@ -3,6 +3,9 @@
 //! Подключается как обычный игрок, но без окна и графики: называет себя, ходит взад-вперёд
 //! от точки появления (с теми же столкновениями, что и у игрока) и ставит метку на карте
 //! (`MRPG_MARK="x,z"`). Удобно смотреть, как видны товарищи на карте, компасе и над головой.
+//! `MRPG_BOT_WALK="0,0"` — стоять на месте; `MRPG_BOT_CONSOLE="tp 88 11 8"` — команды консоли
+//! после входа (нужны читы для всех: `MEDIEVAL_CHEATS=1` у сервера) — например, поставить бота
+//! на крышу для снимка со стороны.
 
 use crate::collision::{Body, LevelColliders};
 use crate::map::{CH_MAP, MapClientMessage};
@@ -54,6 +57,10 @@ pub fn run(server_addr: SocketAddr, name: String) {
                 if let Some(v) = &mark {
                     client.send_message(CH_MAP, encode(&MapClientMessage::SetMark(Some([v[0], v[1]]))));
                 }
+                for line in std::env::var("MRPG_BOT_CONSOLE").unwrap_or_default().split(';').map(str::trim).filter(|l| !l.is_empty()) {
+                    let msg = crate::console_net::ConsoleClientMessage::Command { line: line.to_string(), token: 0 };
+                    client.send_message(crate::console_net::CH_CONSOLE, encode(&msg));
+                }
             }
             while let Some(bytes) = client.receive_message(CH_RELIABLE) {
                 match decode::<ServerMessage>(&bytes) {
@@ -78,7 +85,7 @@ pub fn run(server_addr: SocketAddr, name: String) {
                 let target = home + walk * if phase < 1.0 { phase } else { 2.0 - phase };
                 let mut d = target - *f;
                 d.y = 0.0;
-                let step = d.clamp_length_max(1.4 * dt.as_secs_f32());
+                let step = if walk == Vec3::ZERO { Vec3::ZERO } else { d.clamp_length_max(1.4 * dt.as_secs_f32()) };
                 let r = level.move_body(&Body::STANDING, f, step + Vec3::Y * -4.0 * dt.as_secs_f32(), grounded);
                 grounded = r.grounded;
                 let dir = if phase < 1.0 { walk } else { -walk };

@@ -181,6 +181,10 @@ pub fn site_stages(b: &mut Builder, site: u16, house: &Builder, outline: Rect, f
         if matches!(cut, Cut::Full) {
             g.invisible.extend(house.invisible.iter().copied());
         }
+        // Плиты по скатам — только когда черепица уже лежит (ниже, на стропилах, крыши ещё нет).
+        if stage == SITE_DONE {
+            g.invisible.extend(house.roofs.iter().map(|r| r.aabb));
+        }
         // Меши: черепица — только на готовом доме; остальное — по высоте стадии.
         for ((mat, _), mb) in &house.decor {
             if mb.is_empty() {

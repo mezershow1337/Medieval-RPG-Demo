@@ -174,7 +174,7 @@ fn courtyard(b: &mut Builder) {
     b.mesh(Mat::Water).cuboid(Vec3::new(wx - 1.1, 0.95, wz - 1.1), Vec3::new(wx + 1.1, 1.01, wz + 1.1));
     b.solid([wx - 1.5, 1.0, wz - 0.2], [wx - 1.2, 3.0, wz + 0.2], Mat::Wood);
     b.solid([wx + 1.2, 1.0, wz - 0.2], [wx + 1.5, 3.0, wz + 0.2], Mat::Wood);
-    b.mesh(Mat::Roof).gable_roof(Vec2::new(wx - 1.9, wz - 1.4), Vec2::new(wx + 1.9, wz + 1.4), 2.9, 4.0, true);
+    b.roof(Mat::Roof, |m| m.gable_roof(Vec2::new(wx - 1.9, wz - 1.4), Vec2::new(wx + 1.9, wz + 1.4), 2.9, 4.0, true));
     b.mesh(Mat::Wood).beam(Vec3::new(wx - 1.3, 2.4, wz), Vec3::new(wx + 1.3, 2.4, wz), 0.1, 0.1, Vec3::Y);
 
     // Фонарные столбы вдоль главной дороги.
@@ -189,7 +189,7 @@ fn courtyard(b: &mut Builder) {
         b.solid([sx0, 0.0, z], [sx0 + 0.3, 4.0, z + 0.3], Mat::Wood);
     }
     b.solid([sx0, 4.0, sz0], [sx1, 4.3, sz1], Mat::Wood);
-    b.mesh(Mat::Roof).lean_roof([Vec3::new(sx1, 6.0, sz0 - 0.4), Vec3::new(sx1, 6.0, sz1 + 0.4)], [Vec3::new(sx0 - 0.8, 4.3, sz0 - 0.4), Vec3::new(sx0 - 0.8, 4.3, sz1 + 0.4)]);
+    b.roof(Mat::Roof, |m| m.lean_roof([Vec3::new(sx1, 6.0, sz0 - 0.4), Vec3::new(sx1, 6.0, sz1 + 0.4)], [Vec3::new(sx0 - 0.8, 4.3, sz0 - 0.4), Vec3::new(sx0 - 0.8, 4.3, sz1 + 0.4)]));
     for z in [11.0, 16.0, 21.0] {
         b.solid([sx0 + 3.0, 0.0, z], [sx1, 1.5, z + 0.2], Mat::Wood);
     }
@@ -204,7 +204,7 @@ fn courtyard(b: &mut Builder) {
         b.solid([x, 0.0, z], [x + 0.3, 4.0, z + 0.3], Mat::Wood);
     }
     b.solid([kx0, 4.0, kz0], [kx1, 4.3, kz1], Mat::Wood);
-    b.mesh(Mat::Roof).gable_roof(Vec2::new(kx0 - 0.5, kz0 - 0.5), Vec2::new(kx1 + 0.5, kz1 + 0.5), 4.3, 6.5, true);
+    b.roof(Mat::Roof, |m| m.gable_roof(Vec2::new(kx0 - 0.5, kz0 - 0.5), Vec2::new(kx1 + 0.5, kz1 + 0.5), 4.3, 6.5, true));
     b.solid([36.0, 0.0, 31.0], [39.5, 1.1, 35.0], Mat::Stone); // горн
     b.mesh(Mat::Coals).cuboid(Vec3::new(36.4, 1.1, 31.4), Vec3::new(39.1, 1.18, 34.6));
     b.solid([38.2, 1.1, 34.2], [39.4, 6.8, 35.0], Mat::Stone); // труба
@@ -259,7 +259,7 @@ fn inner_wall(b: &mut Builder) {
     for x in [-5.5, 5.5] {
         b.solid([x - 2.5, 0.0, d0 - 1.0], [x + 2.5, 14.0, d1 + 1.0], Mat::DarkStone);
         b.merlons_x(x - 2.5, x + 2.5, 14.0, d1 + 0.4, d1 + 1.0);
-        b.mesh(Mat::Roof).spire(Vec3::new(x, 14.0, (d0 + d1) / 2.0), 2.6, 9.0, 4);
+        b.roof(Mat::Roof, |m| m.spire(Vec3::new(x, 14.0, (d0 + d1) / 2.0), 2.6, 9.0, 4));
         b.mesh(Mat::Gold).prism(Vec3::new(x, 22.8, (d0 + d1) / 2.0), 0.1, 1.0, 4);
         let (pts, uvs) = geom::lancet_outline(f, x, d1 + 1.03, 0.9, 7.0, 8.8, 0.6);
         b.glass.push(GlassPane { kind: GlassKind::Lancet, pts, uvs, normal: Vec3::Z });
@@ -376,7 +376,7 @@ fn cathedral(b: &mut Builder) {
         // Звонница и высокий шпиль.
         b.mesh(Mat::DarkStone).prism(Vec3::new(cx, 28.0, (z0 + z1) / 2.0), 2.4, 3.5, 8);
         b.mesh(Mat::Trim).prism(Vec3::new(cx, 31.5, (z0 + z1) / 2.0), 2.7, 0.4, 8);
-        b.mesh(Mat::Roof).spire(Vec3::new(cx, 31.9, (z0 + z1) / 2.0), 2.6, 18.0, 8);
+        b.roof(Mat::Roof, |m| m.spire(Vec3::new(cx, 31.9, (z0 + z1) / 2.0), 2.6, 18.0, 8));
         b.mesh(Mat::Gold).prism(Vec3::new(cx, 49.6, (z0 + z1) / 2.0), 0.15, 2.0, 4);
         b.mesh(Mat::Gold).cuboid(Vec3::new(cx - 0.7, 50.8, (z0 + z1) / 2.0 - 0.08), Vec3::new(cx + 0.7, 51.0, (z0 + z1) / 2.0 + 0.08));
         for (px, pz) in [(x0, z0), (x1, z0), (x0, z1), (x1, z1)] {
@@ -445,7 +445,7 @@ fn cathedral(b: &mut Builder) {
         b.mesh(Mat::Trim).cuboid(Vec3::new(sx * (NAVE_HALF - 1.0) - 0.25, 9.6, back_in), Vec3::new(sx * (NAVE_HALF - 1.0) + 0.25, 9.85, front_in));
         // Крыши боковых нефов.
         let (xi, xo) = (sx * NAVE_HALF, sx * (HALL_HALF + 0.4));
-        b.mesh(Mat::Roof).lean_roof([Vec3::new(xi, 10.3, back_in - 1.4), Vec3::new(xi, 10.3, front_in + 1.4)], [Vec3::new(xo, aisle_h, back_in - 1.4), Vec3::new(xo, aisle_h, front_in + 1.4)]);
+        b.roof(Mat::Roof, |m| m.lean_roof([Vec3::new(xi, 10.3, back_in - 1.4), Vec3::new(xi, 10.3, front_in + 1.4)], [Vec3::new(xo, aisle_h, back_in - 1.4), Vec3::new(xo, aisle_h, front_in + 1.4)]));
         // Знамёна на опорах аркады.
         for &z in COLUMN_Z.iter().skip(1).step_by(2) {
             b.banner(fx, z, sx * (NAVE_HALF - 1.2), -sx, 3.0, 5.3, 1.0);
@@ -469,9 +469,9 @@ fn cathedral(b: &mut Builder) {
         *b.mesh(Mat::Trim) = ribs;
     }
     // Крыша нефа.
-    b.mesh(Mat::Roof).gable_roof(Vec2::new(-NAVE_HALF - 0.6, HALL_BACK - 0.3), Vec2::new(NAVE_HALF + 0.6, HALL_FRONT + 0.3), nave_h, ridge, false);
+    b.roof(Mat::Roof, |m| m.gable_roof(Vec2::new(-NAVE_HALF - 0.6, HALL_BACK - 0.3), Vec2::new(NAVE_HALF + 0.6, HALL_FRONT + 0.3), nave_h, ridge, false));
     // Шпиль-флеш над средокрестием.
-    b.mesh(Mat::Roof).spire(Vec3::new(0.0, ridge - 1.0, -42.0), 1.6, 12.0, 8);
+    b.roof(Mat::Roof, |m| m.spire(Vec3::new(0.0, ridge - 1.0, -42.0), 1.6, 12.0, 8));
     b.mesh(Mat::Trim).prism(Vec3::new(0.0, ridge - 3.0, -42.0), 1.5, 2.0, 8);
     b.mesh(Mat::Gold).prism(Vec3::new(0.0, ridge + 10.8, -42.0), 0.1, 1.4, 4);
     // Карнизы нефа.
@@ -555,11 +555,12 @@ fn cloister(b: &mut Builder) {
     slab(b, [x0, ah, gz1 - 0.6], [x1 - 1.0, ah + 0.35, z1 - 1.0]);
     slab(b, [x0, ah, gz0], [gx0 + 0.6, ah + 0.35, gz1]);
     slab(b, [gx1 - 0.6, ah, gz0], [x1 - 1.0, ah + 0.35, gz1]);
-    let r = b.mesh(Mat::Roof);
-    r.lean_roof([Vec3::new(x0, h - 0.3, z0), Vec3::new(x1 - 1.0, h - 0.3, z0)], [Vec3::new(x0, ah + 0.35, gz0 + 0.9), Vec3::new(x1 - 1.0, ah + 0.35, gz0 + 0.9)]);
-    r.lean_roof([Vec3::new(x0, h - 0.3, z1 - 1.0), Vec3::new(x1 - 1.0, h - 0.3, z1 - 1.0)], [Vec3::new(x0, ah + 0.35, gz1 - 0.9), Vec3::new(x1 - 1.0, ah + 0.35, gz1 - 0.9)]);
-    r.lean_roof([Vec3::new(x0, h - 0.3, gz0), Vec3::new(x0, h - 0.3, gz1)], [Vec3::new(gx0 + 0.9, ah + 0.35, gz0), Vec3::new(gx0 + 0.9, ah + 0.35, gz1)]);
-    r.lean_roof([Vec3::new(x1 - 1.0, h - 0.3, gz0), Vec3::new(x1 - 1.0, h - 0.3, gz1)], [Vec3::new(gx1 - 0.9, ah + 0.35, gz0), Vec3::new(gx1 - 0.9, ah + 0.35, gz1)]);
+    b.roof(Mat::Roof, |r| {
+        r.lean_roof([Vec3::new(x0, h - 0.3, z0), Vec3::new(x1 - 1.0, h - 0.3, z0)], [Vec3::new(x0, ah + 0.35, gz0 + 0.9), Vec3::new(x1 - 1.0, ah + 0.35, gz0 + 0.9)]);
+        r.lean_roof([Vec3::new(x0, h - 0.3, z1 - 1.0), Vec3::new(x1 - 1.0, h - 0.3, z1 - 1.0)], [Vec3::new(x0, ah + 0.35, gz1 - 0.9), Vec3::new(x1 - 1.0, ah + 0.35, gz1 - 0.9)]);
+        r.lean_roof([Vec3::new(x0, h - 0.3, gz0), Vec3::new(x0, h - 0.3, gz1)], [Vec3::new(gx0 + 0.9, ah + 0.35, gz0), Vec3::new(gx0 + 0.9, ah + 0.35, gz1)]);
+        r.lean_roof([Vec3::new(x1 - 1.0, h - 0.3, gz0), Vec3::new(x1 - 1.0, h - 0.3, gz1)], [Vec3::new(gx1 - 0.9, ah + 0.35, gz0), Vec3::new(gx1 - 0.9, ah + 0.35, gz1)]);
+    });
     // Балки потолка галерей.
     let mut z = z0 + 1.5;
     while z < z1 - 1.0 {
@@ -620,7 +621,7 @@ fn barracks(b: &mut Builder) {
     // Потолок и крыша.
     b.solid([x0 + 1.0, ceil, z0], [x1, ceil + 0.4, z1 - 1.0], Mat::Wood);
     b.solid([x0, ceil + 0.4, z0 - 1.0], [x1, h, z1], Mat::Stone);
-    b.mesh(Mat::Roof).gable_roof(Vec2::new(x0 - 0.5, z0 - 1.5), Vec2::new(x1, z1 + 0.5), h, 12.5, false);
+    b.roof(Mat::Roof, |m| m.gable_roof(Vec2::new(x0 - 0.5, z0 - 1.5), Vec2::new(x1, z1 + 0.5), h, 12.5, false));
     // Внутренние стены коридоров (толщина 0.4) с дверями в комнаты.
     let wall_h = ceil;
     let door = |s: f32| Opening::door(s, 1.6, 2.2, 1.0);
