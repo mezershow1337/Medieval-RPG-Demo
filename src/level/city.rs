@@ -26,6 +26,7 @@ pub(crate) mod kit;
 pub(crate) mod outside;
 pub(crate) mod port;
 pub(crate) mod public;
+pub(crate) mod ships;
 pub(crate) mod walls;
 
 use super::terrain::{self, WATER_Y, WORLD_HALF};

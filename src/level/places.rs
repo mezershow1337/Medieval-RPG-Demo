@@ -48,6 +48,8 @@ pub enum PlaceKind {
     Quay,
     SteppeCamp,
     GothVillage,
+    /// Греческое село хоры (село Святого Фоки).
+    Village,
     AlanCamp,
     Spring,
     Vineyard,
@@ -106,6 +108,8 @@ pub const NECROPOLIS: Vec3 = Vec3::new(215.0, 0.0, 250.0);
 pub const KLEROS_FARM: Vec3 = Vec3::new(-178.0, 0.0, 300.0);
 pub const STEPPE_CAMP: Vec3 = Vec3::new(200.0, 0.0, 640.0);
 pub const GOTH_VILLAGE: Vec3 = Vec3::new(-465.0, 0.0, 515.0);
+/// Село Святого Фоки на плато к югу от города (середина площади у колодца).
+pub const PHOCAS_VILLAGE: Vec3 = Vec3::new(15.0, 0.0, 300.0);
 pub const ALAN_CAMP: Vec3 = Vec3::new(500.0, 0.0, 685.0);
 /// Широта родника в балке (x — по дну балки, см. [`terrain::balka_x`]).
 pub const SPRING_Z: f32 = 530.0;
@@ -188,6 +192,9 @@ fn city_places() -> Vec<Place> {
         p("alan_camp", "Аланский стан", "—", AlanCamp, on_ground(ALAN_CAMP.x, ALAN_CAMP.z + 3.0), 25.0),
         p("goth_smithy", "Кузница готов", "—", Smithy, smith_point(gs, 1.6, 1.4), 6.0),
         p("goth_bloomery", "Сыродутный горн готов", "—", Smithy, smith_point(gb, 1.6, -1.6), 4.0),
+        p("phocas_village", "Село Святого Фоки", "κώμη", Village, city::outside::village::stall_point(), 56.0),
+        p("phocas_tavern", "Корчма в селе Святого Фоки", "καπηλεῖον", Tavern, city::outside::village::tavern_point(), 4.0),
+        p("phocas_pottery", "Сельский гончар", "κεραμεῖον", Pottery, city::outside::village::potter_point(), 6.0),
         p("steppe_forge", "Горн кочевого кузнеца", "—", Smithy, smith_point(sf, 1.6, 1.4), 4.0),
         p("alan_forge", "Горн аланского кузнеца", "—", Smithy, smith_point(af, 1.4, 1.3), 4.0),
         p("mine", "Рудник на рудной горке", "μέταλλον", Mine, mines::mine_yard() + Vec3::new(-4.5, 0.0, -2.0), 20.0),
@@ -220,6 +227,7 @@ pub fn stall_slots(id: &str) -> Vec<StallSlot> {
     match id {
         "agora" => public::agora_stalls().into_iter().map(behind).collect(),
         "port_market" => port::market_stalls().into_iter().map(behind).collect(),
+        "quay" => port::quay_stalls().into_iter().map(behind).collect(),
         "apothecary_agora" => vec![behind(houses::shop_counter(17, -2, Side::S))],
         "apothecary_port" => vec![behind(houses::shop_counter(17, 1, Side::N))],
         "iron_yard" => vec![behind(crafts::iron_yard_counter())],
@@ -397,7 +405,7 @@ pub fn npc_posts() -> Vec<NpcPost> {
         post(flat(public::agora_rect().x1 - 4.0, -20.0), Garrison, PI / 2.0, 15.0),
         post(flat(gx + 20.0, 174.0), Garrison, 0.0, 30.0),
     ];
-    for (x, z) in [(232.0, 330.0), (140.0, 312.0), (terrain::balka_x(452.0), 452.0), (-90.0, 362.0), (-20.0, 525.0), (300.0, 470.0)] {
+    for (x, z) in [(232.0, 330.0), (168.0, 388.0), (terrain::balka_x(452.0), 452.0), (-90.0, 362.0), (-20.0, 525.0), (300.0, 470.0)] {
         v.push(post(on_ground(x, z), Brigands, 0.0, 20.0));
     }
     for (c, group, n) in [(STEPPE_CAMP, Nomads, 4), (GOTH_VILLAGE, Goths, 4), (ALAN_CAMP, Alans, 4)] {
