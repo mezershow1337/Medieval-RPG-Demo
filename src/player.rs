@@ -85,17 +85,12 @@ pub fn grab_cursor(
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
-    loot: Option<Res<crate::loot_client::LootState>>,
-    trade: Option<Res<crate::trade_client::TradeState>>,
-    menu: Option<Res<crate::menu::MenuState>>,
-    law: Option<Res<crate::civil_client::LawUi>>,
-    book: Option<Res<crate::skill_book::BookUi>>,
-    map: Option<Res<crate::map::MapView>>,
-    towns: Option<Res<crate::towns_client::TownUi>>,
-    school: Option<Res<crate::school_client::SchoolUi>>,
+    windows: crate::ui_cursor::OpenWindows,
 ) {
-    // Пока открыт инвентарь, окно торговли, книга навыков, разговор со стражей, карта, окно дома или меню, клики принадлежат окну, а не бою.
-    if loot.is_some_and(|l| l.ui_open) || trade.is_some_and(|t| t.window_open()) || law.is_some_and(|l| l.open()) || book.is_some_and(|b| b.open) || map.is_some_and(|m| m.open) || towns.is_some_and(|t| t.open()) || school.is_some_and(|s| s.open()) || menu.is_some_and(|m| m.is_open()) {
+    // Пока открыто окно (сумка, торговля, кузница, книга, карта, стражник, усадьба, школа,
+    // консоль) или меню, клики принадлежат окну, а не бою. Мышь в игру после закрытия
+    // окна возвращает ui_cursor.
+    if windows.any() {
         return;
     }
     if mouse.just_pressed(MouseButton::Left) {
