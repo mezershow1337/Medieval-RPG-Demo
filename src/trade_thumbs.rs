@@ -53,12 +53,12 @@ fn shot_open_trade(
     mut asked: Local<u32>,
 ) {
     let (Some(mut client), false) = (client, state.merchants.is_empty() || player.is_empty()) else { return };
-    // Спрашиваем раз в пару секунд, пока окно не открылось (первые сообщения могут потеряться при входе).
+    // Спрашиваем каждые 20 кадров, пока окно не открылось (до переноса к торговцу сервер откажет).
     if state.view.is_some() {
         return;
     }
     *asked += 1;
-    if *asked % 120 != 1 {
+    if *asked % 20 != 1 {
         return;
     }
     let key = std::env::var("MRPG_SHOT_UI").unwrap_or_default();
