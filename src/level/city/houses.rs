@@ -402,6 +402,8 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, m
             windows.push((uc, 0.8, H1 + 1.0, H1 + 2.0));
         }
     }
+    // Двери фасада (у лавок — двустворчатые ставни): их номера нужны лавкам.
+    let front_doors = b.doors.len();
     f.wall_u(b, OUTER_T / 2.0, 0.0, w, OUTER_T, h_front, &front_ops, mat);
     let iv = FRONT_D - INNER_T / 2.0;
     let mut inner_wall_ops = inner_ops.clone();
@@ -592,7 +594,7 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, m
         interior::furnish(b, f.rect(SIDE_D, w - OUTER_T, v0 + INNER_T, d - 0.15), interior::Kind::Storeroom, &mut people, rng);
     }
     for (u0, u1, kind) in shop_rooms {
-        shop_fittings(b, &f, u0, u1, kind, rng);
+        shop_fittings(b, &f, u0, u1, kind, front_doors, rng);
     }
     if two_storey {
         // Горница: пол на высоте второго этажа, дверь — со стороны лестницы.
@@ -755,12 +757,78 @@ fn hanging_wares(b: &mut Builder, a: Vec3, c: Vec3, mats: &[Mat], rng: &mut Rng)
     }
 }
 
-fn shop_fittings(b: &mut Builder, f: &Frame, u0: f32, u1: f32, kind: Shop, rng: &mut Rng) {
+/// Каменный прилавок лавки (вдоль фасада): от `u0 + COUNTER_IN` до `u1 - COUNTER_PASS`
+/// (сбоку — проход за прилавок), по глубине — `COUNTER_V0..COUNTER_V1`, высота — `COUNTER_TOP`.
+const COUNTER_IN: f32 = 0.2;
+const COUNTER_PASS: f32 = 1.2;
+const COUNTER_V0: f32 = OUTER_T + 0.9;
+const COUNTER_V1: f32 = OUTER_T + 1.4;
+const COUNTER_TOP: f32 = 1.0;
+/// Безмен лежит у дальнего от прохода края прилавка: под товар — остальное.
+const SCALE_ROOM: f32 = 0.6;
+/// Продавец стоит за прилавком на таком расстоянии от его задней грани.
+const SELLER_GAP: f32 = 0.65;
+
+/// Лавку — в список лавок уровня: прилавок, место продавца, свободная под товар столешница
+/// и ставни (двустворчатая дверь проёма на улицу).
+fn register_shop(b: &mut Builder, f: &Frame, u0: f32, u1: f32, kind: Shop, front_doors: usize) {
+    let room = f.rect(u0, u1, OUTER_T, FRONT_D - INNER_T / 2.0);
+    let counter = f.rect(u0 + COUNTER_IN, u1 - COUNTER_PASS, COUNTER_V0, COUNTER_V1);
+    let (a, c) = (u0 + COUNTER_IN, u1 - COUNTER_PASS);
+    let uc = (a + c) / 2.0;
+    let facing = if f.front == Side::N { Vec3::NEG_Z } else { Vec3::Z };
+    let door_at = f.p((u0 + u1) / 2.0, 0.0, OUTER_T / 2.0);
+    let door = b.doors[front_doors..]
+        .iter()
+        .position(|d| d.double && d.width > 2.5 && (d.center - door_at).xz().length() < 0.2)
+        .map(|k| (front_doors + k) as u32);
+    let span = |u_from: f32, u_to: f32| -> Option<(Vec3, Vec3)> {
+        if u_to - u_from < 0.45 {
+            return None;
+        }
+        let r = f.rect(u_from, u_to, COUNTER_V0 + 0.03, COUNTER_V1 - 0.03);
+        Some((r.min3(COUNTER_TOP), r.max3(COUNTER_TOP + 0.4)))
+    };
+    let free0 = a + SCALE_ROOM;
+    let free1 = c - 0.05;
+    let goods = if kind == Shop::Tavern {
+        // Посередине стойки вмазаны долии: товар — по обе стороны.
+        [span(free0, uc - 0.65), span(uc + 0.65, free1)]
+    } else {
+        [span(free0, free1), None]
+    };
+    let kind = match kind {
+        Shop::None => crate::level::ShopKind::Common,
+        Shop::Apothecary => crate::level::ShopKind::Apothecary,
+        Shop::Bookseller => crate::level::ShopKind::Bookseller,
+        Shop::Tavern => crate::level::ShopKind::Tavern,
+    };
+    b.shop(crate::level::ShopSpec {
+        room_min: room.min3(0.0),
+        room_max: room.max3(H1),
+        counter_min: counter.min3(0.0),
+        counter_max: counter.max3(COUNTER_TOP),
+        facing,
+        seller: f.p(uc, 0.0, COUNTER_V1 + SELLER_GAP),
+        goods,
+        door,
+        kind,
+    });
+}
+
+fn shop_fittings(b: &mut Builder, f: &Frame, u0: f32, u1: f32, kind: Shop, front_doors: usize, rng: &mut Rng) {
     let r = f.rect(u0, u1, OUTER_T, FRONT_D - INNER_T / 2.0).inset(0.1);
     // Прилавок у входа (каменный, с деревянной доской), проход сбоку.
-    let counter = f.rect(u0 + 0.2, u1 - 1.2, OUTER_T + 0.9, OUTER_T + 1.4);
-    b.solid([counter.x0, 0.0, counter.z0], [counter.x1, 0.95, counter.z1], Mat::Rubble);
-    b.mesh(Mat::Wood).cuboid(counter.min3(0.95) - Vec3::new(0.05, 0.0, 0.05), counter.max3(1.0) + Vec3::new(0.05, 0.0, 0.05));
+    let counter = f.rect(u0 + COUNTER_IN, u1 - COUNTER_PASS, COUNTER_V0, COUNTER_V1);
+    b.solid([counter.x0, 0.0, counter.z0], [counter.x1, COUNTER_TOP - 0.05, counter.z1], Mat::Rubble);
+    b.mesh(Mat::Wood).cuboid(counter.min3(COUNTER_TOP - 0.05) - Vec3::new(0.05, 0.0, 0.05), counter.max3(COUNTER_TOP) + Vec3::new(0.05, 0.0, 0.05));
+    register_shop(b, f, u0, u1, kind, front_doors);
+    // В обычной лавке, книжной и корчме за прилавком стоит торговец (`shops.rs`): его место
+    // обстановка не занимает. В аптеках — свои торговцы у своих столов (`trade.rs`).
+    let seller = f.p((u0 + COUNTER_IN + u1 - COUNTER_PASS) / 2.0, 0.0, COUNTER_V1 + SELLER_GAP);
+    if kind != Shop::Apothecary {
+        b.keep_clear.push(seller);
+    }
     // Полки у задней стены.
     let back = f.rect(u0 + 0.1, u1 - 0.1, FRONT_D - INNER_T / 2.0 - 0.45, FRONT_D - INNER_T / 2.0 - 0.1);
     let p = counter.center(1.0);
@@ -784,10 +852,7 @@ fn shop_fittings(b: &mut Builder, f: &Frame, u0: f32, u1: f32, kind: Shop, rng: 
             hanging_wares(b, f.p(u0 + 0.4, H1 - 0.35, v), f.p(u1 - 0.4, H1 - 0.35, v), mats, &mut drng);
         }
         if kind == Shop::Tavern {
-            // Кружки и кувшинчики на прилавке, штабель амфор в углу.
-            for k in 0..4 {
-                kit::jug(b, f.p(u0 + 0.5 + k as f32 * 0.35, 1.0, OUTER_T + 1.15), drng.range(0.1, 0.16), Mat::Ceramic);
-            }
+            // Штабель амфор в углу (кружки и кувшины на стойке — товар корчмаря).
             for k in 0..3 {
                 kit::amphora(b, f.p(u0 + 0.35 + k as f32 * 0.4, 0.0, FRONT_D - 1.3), 1.0, drng.int(3) as u32);
             }
@@ -808,13 +873,9 @@ fn shop_fittings(b: &mut Builder, f: &Frame, u0: f32, u1: f32, kind: Shop, rng: 
             b.lamp(r.center(2.6), Color::srgb(1.0, 0.75, 0.45), 6_000.0, 6.0);
         }
         Shop::Bookseller => {
-            // Книжная лавка: футляры-капсы со свитками, кодексы на столе.
+            // Книжная лавка: полки со свитками, футляры-капсы на полу (кодексы, чернила
+            // и пергамент на прилавке — товар книжника).
             kit::shelf(b, back, 3, rng, Mat::Canvas);
-            let m = b.mesh(Mat::Wood);
-            for k in 0..3 {
-                let q = p + Vec3::new(-0.5 + k as f32 * 0.5, 0.0, 0.0);
-                m.cuboid(q - Vec3::new(0.14, 0.0, 0.1), q + Vec3::new(0.14, 0.06, 0.1));
-            }
             for k in 0..3 {
                 let q = r.min3(0.0) + Vec3::new(0.4 + k as f32 * 0.5, 0.0, 0.4);
                 b.mesh(Mat::Wood).lathe(q, &[(0.18, 0.0), (0.18, 0.5), (0.0, 0.5)], 8);
@@ -832,8 +893,10 @@ fn shop_fittings(b: &mut Builder, f: &Frame, u0: f32, u1: f32, kind: Shop, rng: 
             b.lamp(r.center(2.6), Color::srgb(1.0, 0.7, 0.4), 8_000.0, 7.0);
         }
         Shop::None => {
-            interior::shop_extras(b, r, &[counter, back], true, rng);
-            // Обычная лавка: товар на прилавке и у стены.
+            // Безмен — у дальнего от прохода края прилавка, остальная столешница — под товар.
+            let scale = f.p(u0 + COUNTER_IN + 0.3, COUNTER_TOP, (COUNTER_V0 + COUNTER_V1) / 2.0);
+            interior::shop_extras(b, r, &[counter, back], scale, rng);
+            // Обычная лавка: запас у задней стены (товар продавца — на прилавке).
             match rng.int(3) {
                 0 => {
                     for k in 0..4 {
@@ -842,8 +905,11 @@ fn shop_fittings(b: &mut Builder, f: &Frame, u0: f32, u1: f32, kind: Shop, rng: 
                 }
                 1 => kit::shelf(b, back, 2, rng, Mat::Ceramic),
                 _ => {
+                    // Большие кувшины с запасом на полу у задней стены.
+                    let c = back.center(0.0);
+                    let along = if back.w() > back.d() { Vec3::X } else { Vec3::Z };
                     for k in 0..3 {
-                        kit::jug(b, p + Vec3::new(-0.4 + k as f32 * 0.4, 0.0, 0.0), 0.25, Mat::Ceramic);
+                        kit::jug(b, c + along * (-0.45 + k as f32 * 0.45), 0.42, Mat::Ceramic);
                     }
                 }
             }

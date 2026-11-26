@@ -91,6 +91,15 @@ pub struct MerchantNpc {
     pub id: MerchantId,
     /// Фаза «дыхания», чтобы торговцы не стояли как статуи синхронно.
     phase: f32,
+    /// Часы работы лавки: ночью продавец дома, его не видно и с ним не поговорить.
+    hours: Option<[f32; 2]>,
+}
+
+impl MerchantNpc {
+    /// На месте ли торговец в час `hour`.
+    pub fn at_work(&self, hour: f32) -> bool {
+        self.hours.is_none_or(|h| crate::shops::is_open(h, hour))
+    }
 }
 
 pub fn outfit_for(info: &MerchantInfo) -> Outfit {
@@ -148,6 +157,10 @@ fn spawn_stall(
         ..default()
     });
     // Прилавок (торговец смотрит в −Z): те же столешницы, что у сервера, — на них лежит товар.
+    // Продавец лавки торгует с каменного прилавка — он часть дома, рисовать нечего.
+    if info.stall.iter().any(|b| b.fixed) {
+        return;
+    }
     for b in &info.stall {
         let c = Vec3::from_array(b.center);
         let h = Vec3::from_array(b.half);
@@ -244,6 +257,7 @@ fn receive_trade(
                             MerchantNpc {
                                 id: info.id,
                                 phase: i as f32 * 1.7,
+                                hours: info.hours,
                             },
                             Transform::from_translation(pos)
                                 .with_rotation(Quat::from_rotation_y(info.yaw)),
@@ -441,7 +455,9 @@ fn aim_merchants(
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
     npcs: Query<(&MerchantNpc, &GlobalTransform), Without<crate::civil_client::Fallen>>,
     players: Query<(&RemoteActor, &GlobalTransform)>,
+    clock: Option<Res<crate::world_clock::WorldClock>>,
 ) {
+    let hour = clock.map_or(12.0, |c| c.hour());
     let aim = (|| {
         if loot.ui_open || state.window_open() {
             return None;
@@ -460,7 +476,7 @@ fn aim_merchants(
                 best = Some((along, aim));
             }
         };
-        for (npc, t) in &npcs {
+        for (npc, t) in npcs.iter().filter(|(n, _)| n.at_work(hour)) {
             test(
                 t.translation() + Vec3::Y * 1.1,
                 0.55,
@@ -495,11 +511,15 @@ fn idle_merchants(
     npcs: Query<(&MerchantNpc, &GlobalTransform, &Children, Has<crate::civil_client::Fallen>)>,
     mut poses: Query<(&mut RigPose, &mut Visibility)>,
     mood: Option<Res<crate::daylight::CurrentMood>>,
+    clock: Option<Res<crate::world_clock::WorldClock>>,
     mut frame: Local<u32>,
 ) {
     use crate::life_client::{ALWAYS_NEAR, BODY_REACH, ViewCone, shadow_light};
     /// Дальше этого торговца не рисуем (жителей — дальше 60 м).
     const MERCHANT_VIEW: f32 = 90.0;
+    /// Продавцы лавок стоят в комнатах, как жители: дальше 60 м их не видно.
+    const SHOP_VIEW: f32 = 60.0;
+    let hour = clock.map_or(12.0, |c| c.hour());
     *frame = frame.wrapping_add(1);
     let t = time.elapsed_secs();
     let view = camera
@@ -510,8 +530,11 @@ fn idle_merchants(
         let pos = at.translation();
         let dist = view.map_or(0.0, |v| v.eye.distance(pos));
         // Убитого торговца прячет `civil_client` — не показываем его снова.
+        let view_max = if npc.hours.is_some() { SHOP_VIEW } else { MERCHANT_VIEW };
+        // Ночью лавочник дома: лавка заперта.
         let seen = !fallen
-            && dist <= MERCHANT_VIEW
+            && npc.at_work(hour)
+            && dist <= view_max
             && view.is_none_or(|v| dist < ALWAYS_NEAR || v.sees_person(pos, dist, BODY_REACH));
         let every = if dist < 22.0 {
             1

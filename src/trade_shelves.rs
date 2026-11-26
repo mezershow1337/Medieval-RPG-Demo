@@ -79,7 +79,8 @@ fn shelf_props(loot: &LootWorld, id: MerchantId) -> Vec<(LootId, ItemUid, Option
 /// Выложить полку заново, если на ней что-то поменялось (купили, украли, подвезли).
 fn refresh_display(server: &mut RenetServer, tw: &TradeWorld, loot: &mut LootWorld, id: MerchantId) {
     let m = &tw.merchants[id.0 as usize];
-    let want = layout(m);
+    // На ночь лавочник убирает товар с прилавка (ставни заперты).
+    let want = if m.closed { Vec::new() } else { layout(m) };
     let shown = shelf_props(loot, id);
     let mut a: Vec<ItemUid> = want.iter().map(|w| w.0).collect();
     let mut b: Vec<ItemUid> = shown.iter().map(|s| s.1).collect();
@@ -333,6 +334,8 @@ mod tests {
                 thefts: vec![],
                 stall: stall_layout(def.faction.outside_walls(), i % 2 == 0),
                 dead: false,
+                hours: None,
+                closed: false,
                 market: [1.0; Category::COUNT],
                 supply: [1.0; Category::COUNT],
             };

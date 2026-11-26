@@ -84,6 +84,8 @@ mod rig;
 mod self_body;
 mod server;
 mod settings;
+mod shop_hours;
+mod shops;
 mod skill_book;
 mod skill_tree;
 mod skills_server;

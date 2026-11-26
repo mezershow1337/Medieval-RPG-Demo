@@ -75,7 +75,7 @@ fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, l
     }
 }
 
-fn receive_door_messages(mut server: ResMut<RenetServer>, game: Res<crate::server::GameWorld>, level: Res<LevelColliders>, mut locks: Option<ResMut<crate::towns_server::Locks>>) {
+fn receive_door_messages(mut server: ResMut<RenetServer>, game: Res<crate::server::GameWorld>, level: Res<LevelColliders>, mut locks: Option<ResMut<crate::towns_server::Locks>>, shutters: Option<Res<crate::shop_hours::ShopShutters>>) {
     for pid in server.clients_id() {
         while let Some(bytes) = server.receive_message(pid, CH_DOOR) {
             let Some(DoorClientMessage::Toggle { id }) = decode::<DoorClientMessage>(&bytes) else { continue };
@@ -93,6 +93,14 @@ fn receive_door_messages(mut server: ResMut<RenetServer>, game: Res<crate::serve
             if let Some(locks) = locks.as_mut()
                 && !locks.door(id as u32, pid)
             {
+                server.send_message(pid, CH_DOOR, encode(&DoorServerMessage::Set { id: id as u32, open: level.door_open(id) }));
+                continue;
+            }
+            // Ставни лавки на ночь заперты снаружи (изнутри выйти можно).
+            if let Some(Err(why)) = shutters.as_ref().map(|s| s.may_toggle(id as u32, actor.pose.feet)) {
+                if let Some(locks) = locks.as_mut() {
+                    locks.denied.push((pid, why));
+                }
                 server.send_message(pid, CH_DOOR, encode(&DoorServerMessage::Set { id: id as u32, open: level.door_open(id) }));
                 continue;
             }
@@ -301,14 +309,30 @@ fn setup_door_prompt(mut commands: Commands, fonts: Res<crate::inventory_ui::UiF
         });
 }
 
-fn update_door_prompt(aim: Res<DoorAim>, level: Res<LevelColliders>, mut text: Single<&mut Text, With<DoorPrompt>>) {
+fn update_door_prompt(
+    aim: Res<DoorAim>,
+    level: Res<LevelColliders>,
+    clock: Option<Res<crate::world_clock::WorldClock>>,
+    camera: Query<&GlobalTransform, With<crate::player::PlayerCamera>>,
+    mut text: Single<&mut Text, With<DoorPrompt>>,
+) {
     let line = match aim.0 {
-        Some(id) if level.door_open(id as usize) => "[E] Закрыть дверь",
-        Some(_) => "[E] Открыть дверь",
-        None => "",
+        Some(id) if level.door_open(id as usize) => "[E] Закрыть дверь".to_string(),
+        Some(id) => {
+            // Запертые на ночь ставни лавки снаружи не открыть (сервер всё равно откажет).
+            let feet = camera.single().map(|c| c.translation() - Vec3::Y * 1.6).ok();
+            let hour = clock.map_or(12.0, |c| c.hour());
+            match (crate::shop_hours::shutter(id), feet) {
+                (Some(s), Some(feet)) if !crate::shops::is_open(s.hours, hour) && !s.shop.contains(feet, 0.25) => {
+                    format!("Лавка заперта на ночь · открыта {}", crate::shops::hours_text(s.hours))
+                }
+                _ => "[E] Открыть дверь".to_string(),
+            }
+        }
+        None => String::new(),
     };
     if text.0 != line {
-        text.0 = line.to_string();
+        text.0 = line;
     }
 }
 

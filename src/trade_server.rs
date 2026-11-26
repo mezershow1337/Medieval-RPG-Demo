@@ -49,6 +49,7 @@ impl Plugin for TradeServerPlugin {
                 Update,
                 (
                     receive_trade_messages,
+                    tick_shop_hours,
                     tick_merchants,
                     tick_lessons,
                     tick_p2p,
@@ -128,6 +129,10 @@ pub struct MerchantState {
     pub stall: Vec<StallBox>,
     /// Торговец убит: лавка закрыта, пока дело не перейдёт к наследнику.
     pub dead: bool,
+    /// Часы работы лавки (`shops.rs`): `None` — торгует в любое время.
+    pub hours: Option<[f32; 2]>,
+    /// Лавка заперта на ночь: торговли нет, товар убран (ведёт [`tick_shop_hours`]).
+    pub closed: bool,
     /// Цены по видам товара от рынка поселения (1 — обычные): двигает `towns_server`.
     pub market: [f32; Category::COUNT],
     /// Сколько товара привозят на полки (1 — как обычно).
@@ -332,6 +337,10 @@ impl TradeWorld {
         if m.dead {
             return Some("Лавка закрыта: хозяина убили. Говорят, дело перейдёт к родне.".into());
         }
+        if m.closed {
+            let hours = m.hours.map(crate::shops::hours_text).unwrap_or_default();
+            return Some(format!("Лавка закрыта до утра: ставни заперты. {} торгует {hours}.", def.name));
+        }
         if m.grudges.get(&player).is_some_and(|t| *t > now) {
             return Some("«Я тебя запомнил, вор. Проваливай, пока стражу не кликнул».".into());
         }
@@ -461,9 +470,14 @@ pub fn merchant_spots(level: &LevelColliders) -> Vec<(Vec3, f32, Vec<StallBox>)>
         }
     }
     let mut used: HashMap<&str, usize> = HashMap::new();
-    let mut spots = MERCHANTS
+    let mut spots = merchants()
         .iter()
-        .map(|def| {
+        .enumerate()
+        .map(|(i, def)| {
+            // Продавец лавки — за каменным прилавком своей лавки.
+            if let Some(s) = crate::shops::seller(MerchantId(i as u16)) {
+                return crate::shops::seller_spot(&crate::level::shops()[s.shop]);
+            }
             let slot = used.entry(def.place).or_default();
             let k = *slot;
             *slot += 1;
@@ -499,7 +513,7 @@ pub fn merchant_spots(level: &LevelColliders) -> Vec<(Vec3, f32, Vec<StallBox>)>
         .collect::<Vec<_>>();
     // Торговцы на одном месте стоят тесно: боковой столик не должен залезать на соседний прилавок.
     for i in 0..spots.len() {
-        if spots[i].2.len() < 2 {
+        if spots[i].2.len() < 2 || spots[i].2.iter().any(|b| b.fixed) {
             continue;
         }
         let side = stall_obbs(spots[i].0, spots[i].1, &spots[i].2[1..])[0].aabb();
@@ -524,7 +538,7 @@ fn setup_merchants(mut commands: Commands, mut level: ResMut<LevelColliders>) {
         .into_iter()
         .enumerate()
         .map(|(i, (pos, yaw, stall))| {
-            let def = &MERCHANTS[i];
+            let def = &merchants()[i];
             let mut m = MerchantState {
                 id: MerchantId(i as u16),
                 pos,
@@ -538,6 +552,8 @@ fn setup_merchants(mut commands: Commands, mut level: ResMut<LevelColliders>) {
                 thefts: Vec::new(),
                 stall,
                 dead: false,
+                hours: crate::shops::merchant_hours(MerchantId(i as u16)),
+                closed: false,
                 market: [1.0; Category::COUNT],
                 supply: [1.0; Category::COUNT],
             };
@@ -1434,6 +1450,7 @@ fn merchant_list(tw: &TradeWorld) -> Vec<MerchantInfo> {
                 yaw: m.yaw,
                 look: def.look,
                 stall: m.stall.clone(),
+                hours: m.hours,
             }
         })
         .collect()
@@ -2019,6 +2036,38 @@ fn receive_trade_messages(
 }
 
 /// Внимание торговцев, пополнение полок, готовность заказов.
+/// Лавки с часами работы: к вечеру запираются (окна торговли закрываются, товар убирается
+/// с прилавка — см. `shelves::refresh_display`), утром открываются. Ставни — `shop_hours.rs`.
+fn tick_shop_hours(
+    mut server: ResMut<RenetServer>,
+    clock: Option<Res<crate::world_clock::WorldClock>>,
+    tw: Option<ResMut<TradeWorld>>,
+) {
+    let (Some(clock), Some(mut tw)) = (clock, tw) else { return };
+    let hour = clock.hour();
+    let tw = &mut *tw;
+    let mut closing = Vec::new();
+    for m in tw.merchants.iter_mut() {
+        let Some(hours) = m.hours else { continue };
+        let closed = !crate::shops::is_open(hours, hour);
+        if closed != m.closed {
+            m.closed = closed;
+            if closed {
+                closing.push(m.id);
+            }
+        }
+    }
+    if closing.is_empty() {
+        return;
+    }
+    let who: Vec<(u64, MerchantId)> = tw.open.iter().filter(|(_, id)| closing.contains(id)).map(|(p, id)| (*p, *id)).collect();
+    for (p, id) in who {
+        tw.open.remove(&p);
+        send(&mut server, p, &TradeServerMessage::Closed);
+        notice(&mut server, p, format!("{}: «Закрываю лавку, приходи утром».", id.def().name));
+    }
+}
+
 fn tick_merchants(
     mut server: ResMut<RenetServer>,
     time: Res<Time>,
@@ -2266,7 +2315,7 @@ mod tests {
     fn dump_merchant_spots() {
         let level = crate::level::city_colliders();
         for (i, (p, yaw, st)) in merchant_spots(&level).iter().enumerate() {
-            let d = &MERCHANTS[i];
+            let d = &merchants()[i];
             let a = crate::level::place(d.place)
                 .map(|x| x.pos)
                 .unwrap_or(Vec3::ZERO);
@@ -2294,7 +2343,9 @@ mod tests {
         let level = crate::level::city_colliders();
         let spots = merchant_spots(&level);
         let mut slot_used: HashMap<&str, usize> = HashMap::new();
-        for (i, (p, yaw, st)) in spots.iter().enumerate() {
+        // Продавцов лавок проверяет `shops::tests` (за каменным прилавком своей лавки);
+        // здесь — что чужие прилавки на них не налезают.
+        for (i, (p, yaw, st)) in spots.iter().enumerate().take(MERCHANTS.len()) {
             let d = &MERCHANTS[i];
             let place = crate::level::place(d.place)
                 .unwrap_or_else(|| panic!("{}: нет места {}", d.key, d.place));
@@ -2350,7 +2401,7 @@ mod tests {
                         && other.iter().all(|o| !o.aabb().overlaps(&t.aabb()))),
                     "прилавок {} налезает на {}",
                     d.key,
-                    MERCHANTS[j].key
+                    merchants()[j].key
                 );
             }
         }
@@ -2364,7 +2415,7 @@ mod tests {
         level.set_extra(spots.iter().flat_map(|(p, yaw, st)| stall_solids(*p, *yaw, st)).collect());
         let body = crate::collision::Body::STANDING;
         for (i, (p, yaw, st)) in spots.iter().enumerate() {
-            let key = MERCHANTS[i].key;
+            let key = merchants()[i].key;
             assert!(level.body_is_free(&body, *p), "{key}: торговец зажат своим прилавком");
             let forward = Quat::from_rotation_y(*yaw) * Vec3::NEG_Z;
             if st.iter().all(|b| b.felt) {
@@ -2406,6 +2457,8 @@ mod tests {
                     thefts: vec![],
                     stall: stall_layout(false, true),
                     dead: false,
+                    hours: None,
+                    closed: false,
                     market: [1.0; Category::COUNT],
                     supply: [1.0; Category::COUNT],
                 };

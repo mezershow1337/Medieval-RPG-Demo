@@ -1105,8 +1105,9 @@ fn wall_point(r: Rect, s: Side, y: f32) -> Vec3 {
     }
 }
 
-/// Обставить лавку: прилавок уже стоит; добавить товар, мешки, корзины, весы и лавочника.
-pub fn shop_extras(b: &mut Builder, r: Rect, taken: &[Rect], keeper: bool, rng: &mut Rng) {
+/// Обставить лавку: прилавок уже стоит; добавить мешки, корзины, ларь и безмен на прилавке
+/// в точке `scale`. Торгует за прилавком торговец (`shops.rs`), не житель.
+pub fn shop_extras(b: &mut Builder, r: Rect, taken: &[Rect], scale: Vec3, rng: &mut Rng) {
     let mut room = Room::new(b, r.inset(0.05));
     for t in taken {
         room.reserve(t.inset(-0.1));
@@ -1123,14 +1124,11 @@ pub fn shop_extras(b: &mut Builder, r: Rect, taken: &[Rect], keeper: bool, rng: 
     if let Some((f, _)) = room.take(1.0, 0.6, &all, rng) {
         chest(b, f, "Ларь лавочника");
     }
-    // Безмен на прилавке.
-    let p = counter.center(1.0);
-    b.mesh(Mat::Bronze).beam(p + Vec3::new(-0.25, 0.25, 0.0), p + Vec3::new(0.25, 0.27, 0.0), 0.01, 0.01, Vec3::Y);
-    b.mesh(Mat::Bronze).lathe(p + Vec3::new(0.22, 0.02, 0.0), &[(0.0, 0.0), (0.07, 0.0), (0.07, 0.02)], 8);
-    if keeper {
-        let behind = r.center(0.0);
-        room.resident(b, behind, counter.center(0.0), Role::Shopkeeper);
-    }
+    // Безмен на прилавке: коромысло вдоль прилавка, чашка под одним концом.
+    let along = if counter.w() >= counter.d() { Vec3::X } else { Vec3::Z };
+    let p = scale;
+    b.mesh(Mat::Bronze).beam(p - along * 0.22 + Vec3::Y * 0.25, p + along * 0.22 + Vec3::Y * 0.27, 0.01, 0.01, Vec3::Y);
+    b.mesh(Mat::Bronze).lathe(p + along * 0.19 + Vec3::Y * 0.02, &[(0.0, 0.0), (0.07, 0.0), (0.07, 0.02)], 8);
 }
 
 /// Обитатели и сундуки общественного здания или мастерской: `chests` — подписи сундуков
