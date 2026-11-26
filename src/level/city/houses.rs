@@ -1032,15 +1032,21 @@ pub fn garden(b: &mut Builder, r: Rect, seed: u32) {
             continue;
         }
         b.at(p.cx(), p.cz());
-        let mut kind = rng.int(9);
+        // Огород чаще всего, сад реже, виноградник — у немногих.
+        let pick = |k: usize| match k {
+            0..=5 => 0,
+            6..=9 => 1,
+            _ => 2,
+        };
+        let mut kind = pick(rng.int(12));
         // Соседние участки разные.
-        if kind / 3 == last / 3 {
-            kind = (kind + 3) % 9;
+        if kind == last {
+            kind = (kind + 1 + rng.int(2)) % 3;
         }
         last = kind;
         match kind {
-            0..=2 => kitchen_garden(b, inner, &inside, &mut rng),
-            3..=5 => orchard(b, inner, &inside, &mut rng),
+            0 => kitchen_garden(b, inner, &inside, &mut rng),
+            1 => orchard(b, inner, &inside, &mut rng),
             _ => {
                 if !hut && inner.w() > 6.0 && inner.d() > 7.0 {
                     hut = true;
@@ -1123,7 +1129,8 @@ fn kitchen_garden(b: &mut Builder, r: Rect, inside: &impl Fn(f32, f32) -> bool, 
         let hgt = rng.range(0.1, 0.17);
         b.mesh(Mat::Earth).cuboid(bed.min3(0.0), bed.max3(hgt));
         let crop = rng.int(6);
-        let n = ((s1 - s0) / 0.5) as usize;
+        // Шаг посадки ~0,55 м; меш скромный — огородов много, а кадр должен держать 60 FPS.
+        let n = ((s1 - s0) / 0.55) as usize;
         let at = |k: usize, rng: &mut Rng| {
             let u = s0 + 0.3 + (s1 - s0 - 0.6) * (k as f32 + rng.range(0.3, 0.7)) / n.max(1) as f32;
             let v = t + wdt * rng.range(0.3, 0.7);
@@ -1138,31 +1145,34 @@ fn kitchen_garden(b: &mut Builder, r: Rect, inside: &impl Fn(f32, f32) -> bool, 
                     }
                     let p = at(k, rng);
                     let s = rng.range(0.7, 1.25);
-                    b.mesh(Mat::HerbGreen).lathe(p, &[(0.0, 0.0), (0.2 * s, 0.05 * s), (0.17 * s, 0.2 * s), (0.0, 0.26 * s)], 7);
+                    b.mesh(Mat::HerbGreen).lathe(p, &[(0.0, 0.0), (0.21 * s, 0.09 * s), (0.0, 0.26 * s)], 6);
                 }
             }
             // Лук и чеснок: пучки тонких перьев.
             2 => {
-                for k in 0..n * 2 {
-                    let p = at(k / 2, rng) + Vec3::new(rng.range(-0.15, 0.15), 0.0, rng.range(-0.15, 0.15));
+                for k in 0..n {
+                    let p = at(k, rng) + Vec3::new(rng.range(-0.15, 0.15), 0.0, rng.range(-0.15, 0.15));
                     let m = b.mesh(Mat::HerbGreen);
-                    for q in 0..3 {
-                        let a = q as f32 * 2.1 + rng.range(0.0, 1.0);
+                    for q in 0..2 {
+                        let a = q as f32 * 3.1 + rng.range(0.0, 1.0);
                         m.beam(p, p + Vec3::new(a.cos() * 0.06, rng.range(0.25, 0.4), a.sin() * 0.06), 0.008, 0.008, Vec3::X);
                     }
                 }
             }
-            // Бобы на тычинах: колья шалашиком, обвитые зеленью.
+            // Бобы на тычинах: колья шалашиком, плети кое-где добрались до верха.
             3 => {
                 let m = (n / 2).max(2);
                 for k in 0..m {
                     let p = at(k * 2, rng);
-                    let top = p + Vec3::new(rng.range(-0.08, 0.08), rng.range(1.2, 1.5), rng.range(-0.08, 0.08));
+                    let top = p + Vec3::new(rng.range(-0.08, 0.08), rng.range(1.1, 1.4), rng.range(-0.08, 0.08));
                     for d in [-0.25f32, 0.25] {
                         let foot = p + if along_x { Vec3::new(0.0, 0.0, d) } else { Vec3::new(d, 0.0, 0.0) };
                         b.mesh(Mat::Wood).beam(foot, top, 0.015, 0.015, Vec3::Y);
                     }
-                    b.mesh(Mat::Leaves).lathe(p + Vec3::Y * 0.3, &[(0.0, 0.0), (0.22, 0.2), (0.2, 0.7), (0.08, 1.05), (0.0, 1.1)], 6);
+                    // Плети у тычин: куст пониже, кое-где побеги уже поднялись выше.
+                    if rng.chance(0.65) {
+                        kit::shrub(b, p, rng.range(0.6, 0.95));
+                    }
                 }
             }
             // Зелень и травы: низкие кустики разного цвета.
@@ -1170,7 +1180,7 @@ fn kitchen_garden(b: &mut Builder, r: Rect, inside: &impl Fn(f32, f32) -> bool, 
                 for k in 0..n {
                     let p = at(k, rng);
                     let mat = [Mat::HerbGreen, Mat::HerbSilver, Mat::HerbGreen][rng.int(3)];
-                    b.mesh(mat).lathe(p, &[(0.0, 0.0), (0.16, 0.03), (0.14, 0.14), (0.0, 0.2)], 6);
+                    b.mesh(mat).lathe(p, &[(0.0, 0.0), (0.16, 0.07), (0.0, 0.2)], 5);
                 }
             }
             // Вскопано под посев: бороздки.
@@ -1193,6 +1203,43 @@ fn kitchen_garden(b: &mut Builder, r: Rect, inside: &impl Fn(f32, f32) -> bool, 
         let q = p + Vec3::new(0.6, 0.0, 0.2);
         b.mesh(Mat::Wood).beam(q, q + Vec3::new(0.15, 1.2, 0.3), 0.02, 0.02, Vec3::X);
         b.mesh(Mat::Iron).beam(q + Vec3::new(-0.1, 0.02, 0.0), q + Vec3::new(0.1, 0.02, 0.0), 0.012, 0.08, Vec3::Z);
+    }
+}
+
+/// Ряд лозы на шпалере: кривые колья через 2–2,5 м, жердь поверху, лоза — сплошной
+/// неровной зелёной лентой (где гуще, где проредили), снизу — узловатые штамбы и грозди.
+fn vine_hedge(b: &mut Builder, a: Vec3, c: Vec3, h: f32, rng: &mut Rng) {
+    let len = a.distance(c);
+    let dir = (c - a) / len;
+    let side = Vec3::new(-dir.z, 0.0, dir.x);
+    // Колья и жердь.
+    let mut t = 0.0;
+    let mut posts = Vec::new();
+    while t <= len + 0.01 {
+        posts.push(a + dir * t.min(len) + side * rng.range(-0.05, 0.05));
+        t += rng.range(2.0, 2.6);
+    }
+    let m = b.mesh(Mat::Wood);
+    for p in &posts {
+        m.beam(*p, *p + Vec3::Y * (h + rng.range(-0.06, 0.08)) + side * rng.range(-0.05, 0.05), 0.03, 0.03, dir);
+    }
+    m.beam(a + Vec3::Y * h, c + Vec3::Y * h, 0.012, 0.012, Vec3::Y);
+    // Кусты лозы вдоль шпалеры — разной силы, где-то лоза выпала.
+    let mut t = rng.range(0.3, 0.8);
+    while t < len - 0.2 {
+        if !rng.chance(0.1) {
+            let p = a + dir * t + side * rng.range(-0.1, 0.1);
+            kit::shrub(b, p, h * rng.range(0.95, 1.15));
+        }
+        t += rng.range(2.0, 2.6);
+    }
+    // Грозди под листвой.
+    let n = (len / 1.6) as usize;
+    for _ in 0..n {
+        if rng.chance(0.5) {
+            let p = a + dir * rng.range(0.3, len - 0.3) + side * (if rng.chance(0.5) { 0.22 } else { -0.22 }) + Vec3::Y * (h * 0.55);
+            b.mesh(Mat::PetalPurple).lathe(p - Vec3::Y * 0.16, &[(0.0, 0.0), (0.05, 0.05), (0.07, 0.13), (0.0, 0.17)], 6);
+        }
     }
 }
 
@@ -1288,7 +1335,7 @@ fn vine_yard(b: &mut Builder, r: Rect, inside: &impl Fn(f32, f32) -> bool, hut: 
         }
         for (a, c) in pieces {
             if a.distance(c) > 1.6 && inside(a.x, a.z) && inside(c.x, c.z) {
-                kit::vine_row(b, a, c, rng.range(1.35, 1.7));
+                vine_hedge(b, a, c, rng.range(1.3, 1.6), rng);
             }
         }
         t += pitch;

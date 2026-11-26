@@ -370,9 +370,9 @@ pub fn iron_yard_counter() -> (Vec3, Vec3) {
     (Vec3::new(r.x0 + 2.45, 0.0, r.z0 + 8.0), Vec3::NEG_X)
 }
 
-/// Мешок с углём: холщовый, завязан или раскрыт (тогда сверху видно уголь).
+/// Мешок с углём: из грубой дерюги, почерневшей от угольной пыли; завязан или раскрыт (тогда сверху видно уголь).
 fn coal_sack(b: &mut Builder, p: Vec3, h: f32, open: bool) {
-    b.mesh(Mat::Canvas).lathe(p, &[(0.0, 0.0), (0.2, 0.0), (0.26, h * 0.35), (0.24, h * 0.8), (if open { 0.22 } else { 0.08 }, h), (0.0, h + 0.04)], 9);
+    b.mesh(Mat::Felt).lathe(p, &[(0.0, 0.0), (0.2, 0.0), (0.26, h * 0.35), (0.24, h * 0.8), (if open { 0.22 } else { 0.08 }, h), (0.0, h + 0.04)], 9);
     if open {
         b.mesh(Mat::Coals).lathe(p + Vec3::Y * (h - 0.04), &[(0.21, 0.0), (0.12, 0.06), (0.0, 0.09)], 8);
     }
@@ -542,7 +542,33 @@ pub fn iron_yard(b: &mut Builder, f: super::houses::Frame) {
     b.mesh(Mat::Iron).beam(lp + Vec3::new(-0.02, 0.0, -0.13), lp + Vec3::new(0.02, 0.0, 0.13), 0.12, 0.012, Vec3::Y);
     // Угольная пыль под ногами у навеса и у ворот.
     b.decor([shed.x0 - 1.5, 0.0, shed.z0], [shed.x1, 0.02, shed.z1], Mat::Soot);
-    // Хозяйский чулан у задней стены (сундук с выручкой).
-    let store = Rect::new(r.x0 + 0.9, r.z1 - 1.0, r.x0 + 1.9, r.z1 - 0.4);
-    super::interior::chest(b, store, "Сундук угольщика");
+    // Кладовая хозяина в юго-западном углу: двускатная крыша, дверь во двор; внутри — сундук
+    // с выручкой и мешки получше (каменный уголь не держат — только древесный).
+    let st = Rect::new(r.x0 + 1.4, r.z1 - 7.0, r.x0 + 8.2, r.z1 - 1.1);
+    let sh = 2.8;
+    kit::wall_x(b, st.x0, st.x1, st.z0 + 0.25, 0.5, sh, &[Op::Door { s: st.x0 + 4.6, w: 1.2, h: 2.2 }], Mat::Rubble);
+    kit::wall_x(b, st.x0, st.x1, st.z1 - 0.25, 0.5, sh, &[], Mat::Rubble);
+    kit::wall_z(b, st.z0 + 0.5, st.z1 - 0.5, st.x0 + 0.25, 0.5, sh, &[Op::Window { s: st.cz(), w: 0.5, sill: 1.6, top: 2.1 }], Mat::Rubble);
+    kit::wall_z(b, st.z0 + 0.5, st.z1 - 0.5, st.x1 - 0.25, 0.5, sh, &[], Mat::Rubble);
+    for (x, z) in [(st.x0, st.z0), (st.x1, st.z0)] {
+        let sx = if x > st.cx() { -1.0 } else { 1.0 };
+        kit::quoins(b, x + sx * 0.25, z + 0.25, sh, 0.5);
+    }
+    kit::gable_roof(b, st, sh, 1.1, false, 0.4, Mat::Rubble);
+    let inside = st.inset(0.5);
+    super::interior::chest(b, Rect::new(inside.x0 + 0.2, inside.z1 - 0.8, inside.x0 + 1.2, inside.z1 - 0.2), "Сундук угольщика");
+    for k in 0..4 {
+        coal_sack(b, Vec3::new(inside.x1 - 0.4, 0.0, inside.z0 + 0.6 + k as f32 * 0.55), rng.range(0.55, 0.65), false);
+    }
+    heap(b, Vec3::new(inside.x1 - 1.3, 0.0, inside.z1 - 1.0), 0.55, 0.35, Mat::Iron, 0.09, &mut rng);
+    // Во дворе у кладовой: второй воз (порожний, оглоблями к воротам) и угольные корзины.
+    cart(b, Vec3::new(r.x0 + 13.5, 0.0, r.z1 - 4.0), Vec3::new(-0.6, 0.0, -0.8).normalize(), &mut rng);
+    for (dx, dz) in [(9.4f32, -2.2f32), (9.9, -1.6), (10.5, -2.4)] {
+        let p = Vec3::new(r.x0 + dx, 0.0, r.z1 + dz);
+        b.mesh(Mat::Thatch).lathe(p, &[(0.22, 0.0), (0.3, 0.3), (0.33, 0.5), (0.0, 0.5)], 10);
+        b.mesh(Mat::Limonite).lathe(p + Vec3::Y * 0.45, &[(0.3, 0.0), (0.15, 0.1), (0.0, 0.14)], 8);
+        kit::hidden(b, p - Vec3::new(0.3, 0.0, 0.3), p + Vec3::new(0.3, 0.5, 0.3));
+    }
+    // Свежий привоз руды, ещё не перекидан под навес.
+    heap(b, Vec3::new(r.x0 + 15.5, 0.0, r.z0 + 9.5), 1.2, 0.7, Mat::Limonite, 0.08, &mut rng);
 }

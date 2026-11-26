@@ -839,9 +839,9 @@ fn charcoal_camp(b: &mut Builder) {
             let d = Vec3::new(rng.range(-1.0, 1.0), 0.0, rng.range(-1.0, 1.0)).normalize_or(Vec3::X);
             b.mesh(Mat::Soot).beam(q, q + d * rng.range(0.6, 1.1), 0.06, 0.05, Vec3::Y);
         }
-        for _ in 0..14 {
+        for _ in 0..30 {
             let a = rng.range(0.0, TAU);
-            let q = p + Vec3::new(a.cos(), 0.0, a.sin()) * rng.range(2.4, 3.6);
+            let q = p + Vec3::new(a.cos(), 0.0, a.sin()) * rng.range(1.8, 3.6);
             let q = g(q.x, q.z);
             let s = rng.range(0.025, 0.05);
             b.mesh(Mat::Coals).obox(q + Vec3::Y * s * 0.5, Vec3::new(s, s * 0.7, s * 0.9), rng.range(0.0, TAU));
@@ -880,9 +880,16 @@ fn charcoal_camp(b: &mut Builder) {
     let lp = g(c.x - 3.6, c.y + 9.6);
     let top = g(c.x - 1.0, c.y + 9.6) + Vec3::Y * 0.95;
     ladder(b, lp + Vec3::Y * 0.04, top, 0.48);
-    let rk = g(c.x + 0.5, c.y + 5.5);
-    b.mesh(Mat::Wood).beam(rk, rk + Vec3::new(0.3, 1.5, 0.5), 0.02, 0.02, Vec3::X);
-    b.mesh(Mat::Wood).beam(rk + Vec3::new(-0.25, 0.0, -0.05), rk + Vec3::new(0.25, 0.0, 0.05), 0.02, 0.05, Vec3::Y);
+    // Грабли (выгребать уголь из разобранной кучи) лежат зубьями вверх.
+    let rk = g(c.x + 0.5, c.y + 5.5) + Vec3::Y * 0.03;
+    let rd = Vec3::new(0.5, 0.0, 0.86);
+    b.mesh(Mat::Wood).beam(rk, rk + rd * 1.7, 0.02, 0.02, Vec3::Y);
+    let head = Vec3::new(rd.z, 0.0, -rd.x);
+    b.mesh(Mat::Wood).beam(rk - head * 0.28, rk + head * 0.28, 0.03, 0.025, Vec3::Y);
+    for k in 0..7 {
+        let q = rk + head * (-0.24 + k as f32 * 0.08);
+        b.mesh(Mat::Wood).beam(q, q + Vec3::Y * 0.12 - rd * 0.03, 0.008, 0.008, rd);
+    }
     campfire(b, g(c.x - 3.0, c.y - 3.5));
     // Дубовый лес вокруг поляны (уголь жгут там, где рубят), просвет — к тропе.
     let road = Vec2::new(6.0, -16.0).normalize();
@@ -931,31 +938,43 @@ fn charcoal_camp(b: &mut Builder) {
     }
 }
 
-/// Выжженный ток: чёрное ядро и бурая зола к краю, край неровный (не циркулем), всё по рельефу.
+/// Выжженный ток: чёрное ядро и бурая зола к краю. Края рваные и без чёткой границы: по
+/// переходу — пятна сажи, крошки угля; всё лежит по рельефу.
 fn burnt_patch(b: &mut Builder, c: Vec3, r: f32, rng: &mut Rng) {
-    let n = 28;
-    // Радиус по углу — сумма пары синусоид со случайной фазой: край рваный, но плавный.
-    let (p1, p2, p3) = (rng.range(0.0, TAU), rng.range(0.0, TAU), rng.range(0.0, TAU));
-    let edge = move |a: f32| r * (1.0 + 0.1 * (3.0 * a + p1).sin() + 0.07 * (5.0 * a + p2).sin() + 0.05 * (8.0 * a + p3).sin());
-    let at = |rr: f32, a: f32, lift: f32| {
-        let (x, z) = (c.x + a.cos() * rr, c.z + a.sin() * rr);
-        Vec3::new(x, ground_y(x, z) + lift, z)
-    };
-    for (mat, k0, k1, lift) in [(Mat::Soot, 0.0f32, 0.78f32, 0.035f32), (Mat::Earth, 0.72, 1.0, 0.03)] {
-        let rings = 3;
+    // Неровный многоугольник по рельефу: радиус по углу — сумма синусоид со случайной фазой.
+    fn blob(b: &mut Builder, mat: Mat, c: Vec3, r0: f32, r1: f32, amp: f32, lift: f32, rng: &mut Rng) {
+        let n = 26;
+        let ph: [f32; 4] = [rng.range(0.0, TAU), rng.range(0.0, TAU), rng.range(0.0, TAU), rng.range(0.0, TAU)];
+        let edge = move |rr: f32, a: f32| rr * (1.0 + amp * (0.5 * (2.0 * a + ph[0]).sin() + 0.3 * (3.0 * a + ph[1]).sin() + 0.25 * (5.0 * a + ph[2]).sin() + 0.15 * (9.0 * a + ph[3]).sin()));
+        let at = |rr: f32, a: f32| {
+            let (x, z) = (c.x + a.cos() * rr, c.z + a.sin() * rr);
+            Vec3::new(x, ground_y(x, z) + lift, z)
+        };
         let m = b.mesh(mat);
+        let rings = 2;
         for ring in 0..rings {
-            let t0 = k0 + (k1 - k0) * ring as f32 / rings as f32;
-            let t1 = k0 + (k1 - k0) * (ring + 1) as f32 / rings as f32;
+            let t0 = r0 + (r1 - r0) * ring as f32 / rings as f32;
+            let t1 = r0 + (r1 - r0) * (ring + 1) as f32 / rings as f32;
             for k in 0..n {
                 let (a0, a1) = (k as f32 / n as f32 * TAU, (k + 1) as f32 / n as f32 * TAU);
                 if t0 < 1e-3 {
-                    m.tri(at(0.0, 0.0, lift), at(edge(a1) * t1, a1, lift), at(edge(a0) * t1, a0, lift), Vec3::Y);
+                    m.tri(at(0.0, 0.0), at(edge(t1, a1), a1), at(edge(t1, a0), a0), Vec3::Y);
                 } else {
-                    m.quad([at(edge(a0) * t0, a0, lift), at(edge(a1) * t0, a1, lift), at(edge(a1) * t1, a1, lift), at(edge(a0) * t1, a0, lift)], Vec3::Y);
+                    m.quad([at(edge(t0, a0), a0), at(edge(t0, a1), a1), at(edge(t1, a1), a1), at(edge(t1, a0), a0)], Vec3::Y);
                 }
             }
         }
+    }
+    // Зола и пережжённая земля — шире, сажа — ядром.
+    blob(b, Mat::Earth, c, 0.0, r, 0.2, 0.028, rng);
+    blob(b, Mat::Soot, c, 0.0, r * 0.62, 0.3, 0.036, rng);
+    // По переходу — пятна сажи разной величины, чтобы край ядра не читался линией.
+    for _ in 0..16 {
+        let a = rng.range(0.0, TAU);
+        let d = r * rng.range(0.5, 0.95);
+        let q = c + Vec3::new(a.cos() * d, 0.0, a.sin() * d);
+        let s = rng.range(0.15, 0.45) * (1.2 - d / r);
+        blob(b, Mat::Soot, q, 0.0, s.max(0.08), 0.35, 0.04, rng);
     }
 }
 
