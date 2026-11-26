@@ -535,7 +535,7 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, m
         f.wall_v(b, w - OUTER_T / 4.0, FRONT_D, d - back_d, OUTER_T / 2.0, yard_wall_h, &[], mat);
         if !f.mirror {
             let top = f.rect(w - OUTER_T / 2.0, w + OUTER_T / 2.0, FRONT_D, d - back_d);
-            b.mesh(Mat::Tile).gable_roof_slopes(Vec2::new(top.x0 - 0.08, top.z0), Vec2::new(top.x1 + 0.08, top.z1), yard_wall_h, yard_wall_h + 0.22, !f.front.along_x());
+            b.roof(Mat::Tile, |m| m.gable_roof_slopes(Vec2::new(top.x0 - 0.08, top.z0), Vec2::new(top.x1 + 0.08, top.z1), yard_wall_h, yard_wall_h + 0.22, !f.front.along_x()));
         }
     } else {
         f.wall_v(b, w - OUTER_T / 2.0, FRONT_D, d - back_d, OUTER_T, yard_wall_h, &ops, mat);
@@ -544,7 +544,7 @@ fn house(b: &mut Builder, f: Frame, shops: bool, special: Shop, rng: &mut Rng, m
         }
         // Черепичный «гребень» по верху стены двора.
         let top = f.rect(w - OUTER_T, w, FRONT_D, d - back_d);
-        b.mesh(Mat::Tile).gable_roof_slopes(Vec2::new(top.x0 - 0.08, top.z0), Vec2::new(top.x1 + 0.08, top.z1), yard_wall_h, yard_wall_h + 0.22, !f.front.along_x());
+        b.roof(Mat::Tile, |m| m.gable_roof_slopes(Vec2::new(top.x0 - 0.08, top.z0), Vec2::new(top.x1 + 0.08, top.z1), yard_wall_h, yard_wall_h + 0.22, !f.front.along_x()));
     }
 
     // ---- Двор ----

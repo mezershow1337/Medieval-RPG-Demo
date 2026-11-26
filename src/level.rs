@@ -372,6 +372,9 @@ pub struct Layout {
     pub decor: HashMap<(Mat, Chunk), MeshBuilder>,
     /// Невидимые преграды (стёкла окон и т. п.).
     pub invisible: Vec<Aabb>,
+    /// Плиты-коллизии по скатам крыш, куполов и навесов (см. [`Builder::roof`]) и материал кровли
+    /// (для звука шагов): по крыше можно ходить, сквозь неё не пройти. Не рисуются.
+    pub roofs: Vec<Block>,
     /// Карта высот земли (если есть) и уровень воды.
     pub ground: Option<HeightField>,
     pub water_y: Option<f32>,
@@ -612,6 +615,8 @@ struct Builder {
     windows: Vec<Aabb>,
     decor: HashMap<(Mat, Chunk), MeshBuilder>,
     invisible: Vec<Aabb>,
+    /// Плиты по скатам крыш (см. [`Builder::roof`]).
+    roofs: Vec<Block>,
     ground: Option<HeightField>,
     water_y: Option<f32>,
     hearths: Vec<Vec3>,
@@ -650,6 +655,7 @@ impl Builder {
             windows: Vec::new(),
             decor: HashMap::new(),
             invisible: Vec::new(),
+            roofs: Vec::new(),
             ground: None,
             water_y: None,
             hearths: Vec::new(),
@@ -681,6 +687,7 @@ impl Builder {
             windows: self.windows,
             decor: self.decor,
             invisible: self.invisible,
+            roofs: self.roofs,
             ground: self.ground,
             water_y: self.water_y,
             hearths: self.hearths,
@@ -710,6 +717,7 @@ impl Builder {
         let shift = |a: Aabb| Aabb::new(a.min + offset, a.max + offset);
         self.blocks.extend(t.blocks.into_iter().map(|b| Block { aabb: shift(b.aabb), ..b }));
         self.invisible.extend(t.invisible.into_iter().map(shift));
+        self.roofs.extend(t.roofs.into_iter().map(|b| Block { aabb: shift(b.aabb), ..b }));
         self.windows.extend(t.windows.into_iter().map(shift));
         self.torches.extend(t.torches.into_iter().map(|x| Torch { pos: x.pos + offset, ..x }));
         self.lamps.extend(t.lamps.into_iter().map(|x| Lamp { pos: x.pos + offset, ..x }));
@@ -829,6 +837,91 @@ impl Builder {
     }
     fn invisible(&mut self, (min, max): (Vec3, Vec3)) {
         self.invisible.push(Aabb::new(min, max));
+    }
+
+    /// Крыша (скат, купол, шпиль, навес): `f` строит её верх в меш материала `mat`, а по всему, что
+    /// не стоит отвесно, ложатся невидимые плиты-коллизии (см. [`Builder::roof_cover`]).
+    fn roof(&mut self, mat: Mat, f: impl FnOnce(&mut MeshBuilder)) {
+        let mut m = MeshBuilder::default();
+        f(&mut m);
+        self.roof_cover(m.triangles(), mat);
+        self.mesh(mat).append(m);
+    }
+
+    /// Плиты-коллизии по треугольникам крыши. План крыши делится на клетки около [`ROOF_CELL`];
+    /// над клеткой, середину которой накрывает не отвесный треугольник, лежит плита толщиной
+    /// [`ROOF_SLAB`] с верхом на высоте самой низкой точки ската в клетке (берётся самый высокий скат).
+    /// Шаг между соседними плитами пологого ската меньше ступеньки — по крыше можно ходить; на
+    /// крутом шпиле ступени выше [`crate::collision::STEP_HEIGHT`] — туда не взойти. Под изнанку
+    /// кровли плита заходит не глубже одного шага, так что под крышей места не убавилось.
+    /// Соседние клетки с одной высотой сливаются в одну коробку (вдоль конька — полоса на всю крышу).
+    fn roof_cover(&mut self, tris: impl Iterator<Item = [Vec3; 3]>, mat: Mat) {
+        let tris: Vec<[Vec3; 3]> = tris
+            .filter(|t| {
+                let n = (t[1] - t[0]).cross(t[2] - t[0]);
+                n.length_squared() > 1e-10 && n.normalize().y.abs() > 0.05
+            })
+            .collect();
+        let Some(first) = tris.first() else { return };
+        let (mut lo, mut hi) = (first[0].xz(), first[0].xz());
+        for p in tris.iter().flatten() {
+            lo = lo.min(p.xz());
+            hi = hi.max(p.xz());
+        }
+        let size = hi - lo;
+        let nx = ((size.x / ROOF_CELL).ceil() as usize).max(1);
+        let nz = ((size.y / ROOF_CELL).ceil() as usize).max(1);
+        let cs = Vec2::new(size.x / nx as f32, size.y / nz as f32);
+        let mut h = vec![f32::NEG_INFINITY; nx * nz];
+        // Номер клетки, в которой лежит координата (по одной оси).
+        let at = |v: f32, o: f32, c: f32, n: usize| if c > 0.0 { (((v - o) / c).floor().max(0.0) as usize).min(n - 1) } else { 0 };
+        for t in &tris {
+            let (tl, th) = (t[0].xz().min(t[1].xz()).min(t[2].xz()), t[0].xz().max(t[1].xz()).max(t[2].xz()));
+            for iz in at(tl.y, lo.y, cs.y, nz)..=at(th.y, lo.y, cs.y, nz) {
+                for ix in at(tl.x, lo.x, cs.x, nx)..=at(th.x, lo.x, cs.x, nx) {
+                    let c = lo + Vec2::new((ix as f32 + 0.5) * cs.x, (iz as f32 + 0.5) * cs.y);
+                    if let Some(y) = tri_height_at(t, c) {
+                        // Самая низкая точка ската в клетке: тело-коробка стоит на верхнем по склону
+                        // краю своего следа, и с низа клетки оно меньше висит над черепицей.
+                        let k = iz * nx + ix;
+                        h[k] = h[k].max(y - tri_drop(t, cs));
+                    }
+                }
+            }
+        }
+        // Высота — в целых долях `ROOF_Q`: равные соседи сливаются.
+        let key = |v: f32| v.is_finite().then(|| (v / ROOF_Q).round() as i32);
+        let mut emit = |x0: usize, x1: usize, z0: usize, z1: usize, k: i32| {
+            let top = k as f32 * ROOF_Q;
+            let min = Vec3::new(lo.x + x0 as f32 * cs.x, top - ROOF_SLAB, lo.y + z0 as f32 * cs.y);
+            let max = Vec3::new(lo.x + (x1 + 1) as f32 * cs.x, top, lo.y + (z1 + 1) as f32 * cs.y);
+            self.roofs.push(Block { aabb: Aabb::new(min, max), mat, solid: true });
+        };
+        // Ряды по X; одинаковые отрезки соседних рядов продлеваем по Z. `open`: (x0, x1, высота) → первый ряд.
+        let mut open: std::collections::BTreeMap<(usize, usize, i32), usize> = Default::default();
+        for iz in 0..nz {
+            let mut next = std::collections::BTreeMap::new();
+            let mut ix = 0;
+            while ix < nx {
+                let Some(k) = key(h[iz * nx + ix]) else {
+                    ix += 1;
+                    continue;
+                };
+                let s = ix;
+                while ix + 1 < nx && key(h[iz * nx + ix + 1]) == Some(k) {
+                    ix += 1;
+                }
+                let run = (s, ix, k);
+                next.insert(run, open.remove(&run).unwrap_or(iz));
+                ix += 1;
+            }
+            for ((x0, x1, k), z0) in std::mem::replace(&mut open, next) {
+                emit(x0, x1, z0, iz - 1, k);
+            }
+        }
+        for ((x0, x1, k), z0) in open {
+            emit(x0, x1, z0, nz - 1, k);
+        }
     }
     fn torch(&mut self, x: f32, y: f32, z: f32, out: Vec3) {
         self.torches.push(Torch { pos: Vec3::new(x, y, z), out });
@@ -977,7 +1070,7 @@ impl Builder {
         // Восьмигранный шпиль с барабаном.
         let r = half * 0.72;
         self.mesh(Mat::DarkStone).prism(Vec3::new(cx, height, cz), r, 2.5, 8);
-        self.mesh(Mat::Roof).spire(Vec3::new(cx, height + 2.5, cz), r * 1.08, spire_h, 8);
+        self.roof(Mat::Roof, |m| m.spire(Vec3::new(cx, height + 2.5, cz), r * 1.08, spire_h, 8));
         self.mesh(Mat::Gold).prism(Vec3::new(cx, height + 2.5 + spire_h - 0.3, cz), 0.12, 1.6, 4);
         self.mesh(Mat::Gold).cuboid(Vec3::new(cx - 0.5, height + 2.5 + spire_h + 0.7, cz - 0.06), Vec3::new(cx + 0.5, height + 2.5 + spire_h + 0.85, cz + 0.06));
         // Пинакли по углам.
@@ -1005,7 +1098,7 @@ impl Builder {
         let m = self.mesh(Mat::DarkStone);
         m.prism(Vec3::new(cx, 0.0, cz), r, height, 8);
         self.mesh(Mat::Trim).prism(Vec3::new(cx, height - 0.4, cz), r + 0.2, 0.4, 8);
-        self.mesh(Mat::Roof).spire(Vec3::new(cx, height, cz), r + 0.25, spire_h, 8);
+        self.roof(Mat::Roof, |m| m.spire(Vec3::new(cx, height, cz), r + 0.25, spire_h, 8));
         self.mesh(Mat::Gold).prism(Vec3::new(cx, height + spire_h - 0.2, cz), 0.1, 1.0, 4);
     }
 
@@ -1218,6 +1311,36 @@ pub fn layout() -> Layout {
     (*shared_full()).clone()
 }
 
+/// Размер клетки плит-коллизий крыши (см. [`Builder::roof_cover`]), м.
+const ROOF_CELL: f32 = 0.25;
+/// Толщина плиты-коллизии крыши, м (чуть толще черепицы с обрешёткой).
+const ROOF_SLAB: f32 = 0.12;
+/// Шаг, с которым округляется высота плиты (соседние плиты одной высоты сливаются), м.
+const ROOF_Q: f32 = 0.02;
+
+/// Насколько скат треугольника опускается от середины клетки `cs` до её самого низкого угла.
+fn tri_drop(t: &[Vec3; 3], cs: Vec2) -> f32 {
+    let n = (t[1] - t[0]).cross(t[2] - t[0]);
+    if n.y.abs() < 1e-6 {
+        return 0.0;
+    }
+    ((n.x / n.y).abs() * cs.x + (n.z / n.y).abs() * cs.y) / 2.0
+}
+
+/// Высота треугольника над точкой плана `p` (x, z), если точка внутри его проекции.
+fn tri_height_at(t: &[Vec3; 3], p: Vec2) -> Option<f32> {
+    let (a, b, c) = (t[0].xz(), t[1].xz(), t[2].xz());
+    let d = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+    if d.abs() < 1e-9 {
+        return None;
+    }
+    let l1 = ((b.y - c.y) * (p.x - c.x) + (c.x - b.x) * (p.y - c.y)) / d;
+    let l2 = ((c.y - a.y) * (p.x - c.x) + (a.x - c.x) * (p.y - c.y)) / d;
+    let l3 = 1.0 - l1 - l2;
+    const E: f32 = -1e-5;
+    (l1 >= E && l2 >= E && l3 >= E).then(|| l1 * t[0].y + l2 * t[1].y + l3 * t[2].y)
+}
+
 /// Коллайдеры Херсонеса (для тестов других модулей: торговцы, лотки).
 #[cfg(test)]
 pub fn city_colliders() -> LevelColliders {
@@ -1232,6 +1355,7 @@ pub fn colliders(layout: impl std::borrow::Borrow<Layout>) -> LevelColliders {
     let layout = layout.borrow();
     let mut boxes: Vec<Aabb> = layout.blocks.iter().filter(|b| b.solid).map(|b| b.aabb).collect();
     boxes.extend(layout.invisible.iter().copied());
+    boxes.extend(layout.roofs.iter().map(|b| b.aabb));
     let doors = layout.doors.iter().map(|d| (d.closed_box(), d.open)).collect();
     let bodies = layout.residents.iter().map(Resident::body).collect();
     let mut switches = Vec::new();
@@ -1430,3 +1554,158 @@ pub fn spawn_level(
 }
 
 
+
+#[cfg(test)]
+mod roof_tests {
+    use super::*;
+    use crate::collision::Body;
+    use city::kit::{self, Rect};
+
+    /// Материалы кровли (те же, что считает крышей звук: черепица, сланец, солома, войлок).
+    fn roof_mat(m: Mat) -> bool {
+        matches!(m, Mat::Tile | Mat::Roof | Mat::Thatch | Mat::Felt)
+    }
+
+    /// Ноги тела, упавшего сверху в точку (x, z) с высоты `from`.
+    fn drop_at(level: &LevelColliders, x: f32, z: f32, from: f32) -> (Vec3, bool) {
+        let mut feet = Vec3::new(x, from, z);
+        let mut grounded = false;
+        for _ in 0..400 {
+            grounded = level.move_body(&Body::STANDING, &mut feet, Vec3::new(0.0, -0.1, 0.0), grounded).grounded;
+        }
+        (feet, grounded)
+    }
+
+    /// Дом 6 × 8 м под двускатной крышей: пол, крыша (скаты, свес 0,4 м), стен нет.
+    fn test_house(ridge_x: bool) -> (LevelColliders, Rect) {
+        let mut b = Builder::new();
+        b.solid([-30.0, -1.0, -30.0], [30.0, 0.0, 30.0], Mat::Stone);
+        let r = Rect::new(-3.0, -4.0, 3.0, 4.0);
+        kit::gable_roof(&mut b, r, 3.0, 1.6, ridge_x, 0.4, Mat::Rubble);
+        (colliders(b.finish()), r)
+    }
+
+    #[test]
+    fn stands_on_gable_roof_and_walks_to_ridge() {
+        for ridge_x in [true, false] {
+            let (level, r) = test_house(ridge_x);
+            // Высота ската над точкой (по наружным граням стен — `r`, свес — дальше).
+            let half = if ridge_x { r.d() / 2.0 } else { r.w() / 2.0 };
+            let surface = |x: f32, z: f32| {
+                let off = if ridge_x { (z - r.cz()).abs() } else { (x - r.cx()).abs() };
+                3.0 + 1.6 * (1.0 - off / half)
+            };
+            for (x, z) in [(0.0, 0.0), (1.0, -3.2), (-2.4, 2.5), (2.9, 0.7), (-1.5, -1.5)] {
+                let (feet, grounded) = drop_at(&level, x, z, 12.0);
+                assert!(grounded, "не стоит на крыше в ({x}, {z})");
+                // Тело-коробка (полширины 0,3 м) опирается на скат в самой высокой точке своего следа;
+                // плита клетки лежит по её низу — ниже не больше чем на подъём ската по клетке (0,4 × 0,25 м).
+                // На коньке — ряд калиптеров, он на 0,1 м выше скатов.
+                let up = (0..=6).flat_map(|i| (0..=6).map(move |k| (x - 0.3 + i as f32 * 0.1, z - 0.3 + k as f32 * 0.1))).map(|(a, c)| surface(a, c)).fold(f32::MIN, f32::max).min(4.6);
+                assert!(feet.y > up - 0.4 * ROOF_CELL - ROOF_Q - 0.01 && feet.y < up + if up > 4.5 { 0.12 } else { 0.02 }, "в ({x}, {z}) стоит на {}, скат под телом до {up}", feet.y);
+            }
+            // От карниза вверх по скату — до конька (шаг между плитами меньше ступеньки).
+            let (start, dir) = if ridge_x { (Vec3::new(0.0, 0.0, r.z0 + 0.1), Vec3::Z) } else { (Vec3::new(r.x0 + 0.1, 0.0, 0.0), Vec3::X) };
+            let (mut feet, mut grounded) = drop_at(&level, start.x, start.z, 6.0);
+            for _ in 0..200 {
+                grounded = level.move_body(&Body::STANDING, &mut feet, dir * 0.05 + Vec3::Y * -0.1, grounded).grounded;
+                if feet.dot(dir) >= 0.0 {
+                    break;
+                }
+            }
+            assert!(feet.dot(dir) >= -0.05 && feet.y > 4.4, "не дошёл до конька: {feet}");
+        }
+    }
+
+    #[test]
+    fn steps_on_roof_sound_like_tiles() {
+        let mut b = Builder::new();
+        b.solid([-30.0, -1.0, -30.0], [30.0, 0.0, 30.0], Mat::Stone);
+        kit::gable_roof(&mut b, Rect::new(-3.0, -4.0, 3.0, 4.0), 3.0, 1.6, true, 0.4, Mat::Rubble);
+        let layout = b.finish();
+        let (feet, _) = drop_at(&colliders(&layout), 0.5, -2.0, 10.0);
+        let map = crate::audio::surface::SurfaceMap::build(&layout);
+        assert_eq!(map.surface_at(feet), crate::audio::surface::Surface::Tile, "на крыше {feet}");
+    }
+
+    #[test]
+    fn roof_does_not_shrink_the_room_below() {
+        let (level, r) = test_house(true);
+        // Под крышей (у самых стен — где скат ниже всего) человек ходит и прыгает, не задевая плит.
+        for z in [r.z0 + 0.6, r.cz(), r.z1 - 0.6] {
+            let mut feet = Vec3::new(r.x0 + 0.5, 0.0, z);
+            for _ in 0..200 {
+                level.move_body(&Body::STANDING, &mut feet, Vec3::new(0.05, -0.01, 0.0), true);
+            }
+            assert!(feet.x > r.x1 + 3.0, "упёрся под крышей: {feet}");
+        }
+        assert!(level.body_is_free(&Body::STANDING, Vec3::new(0.0, 1.0, r.z0 + 0.6)), "прыжок у стены упирается в крышу");
+        // Плиты одной высоты слиты: по полосе на ряд клеток, а не по коробке на клетку.
+        assert!(level.0.len() < 2 + 2 * (8.8f32 / ROOF_CELL).ceil() as usize + 2, "плит {}", level.0.len());
+    }
+
+    /// Каждая крыша уровня (черепица, сланец, солома, войлок — всё, что не отвесно и не мелочь)
+    /// держит человека: прямо под её поверхностью твердь. Готовые дома на стройках — тоже.
+    #[test]
+    fn every_roof_has_collision() {
+        for (layout, enough) in [(city::city_layout(), 10_000), (castle::castle_layout(), 300)] {
+            let level = colliders(&layout);
+            let mut decor: Vec<(Mat, &MeshBuilder)> = layout.decor.iter().map(|((m, _), mb)| (*m, mb)).collect();
+            for (g, group) in layout.switches.iter().enumerate() {
+                if let SwitchKey::Site { stage, .. } = group.key {
+                    level.set_switch(g, stage == crate::towns::SITE_DONE);
+                    if stage == crate::towns::SITE_DONE {
+                        decor.extend(group.decor.iter().map(|(m, mb)| (*m, mb)));
+                    }
+                }
+            }
+            let (mut checked, mut missing) = (0, Vec::new());
+            for (mat, mb) in decor {
+                if !roof_mat(mat) {
+                    continue;
+                }
+                for t in mb.triangles() {
+                    let n = (t[1] - t[0]).cross(t[2] - t[0]);
+                    let area = n.length() / 2.0;
+                    // Мелочь (корзины, горшки, кошмы на полу) — не крыша.
+                    if area < 0.15 || n.normalize().y < 0.05 {
+                        continue;
+                    }
+                    let ny = n.normalize().y;
+                    let tan = (1.0 - ny * ny).sqrt() / ny;
+                    for p in [(t[0] + t[1] + t[2]) / 3.0, t[0].lerp(t[1], 0.5).lerp(t[2], 0.2), t[1].lerp(t[2], 0.5).lerp(t[0], 0.2), t[2].lerp(t[0], 0.5).lerp(t[1], 0.2)] {
+                        // Верх плиты — самая низкая точка ската в её клетке: ниже точки не больше чем на клетку по склону.
+                        let (hi, lo) = (p + Vec3::Y * 0.03, p - Vec3::Y * (ROOF_SLAB + 0.05 + 2.0 * ROOF_CELL * tan));
+                        checked += 1;
+                        // Коробка под точкой — в пределах полклетки в плане: у края купола или конуса середина
+                        // крайней клетки может выйти за обрез, и щель там уже́ любого тела.
+                        let r = ROOF_CELL / 2.0 + 0.01;
+                        let probe = crate::collision::Aabb::new(Vec3::new(p.x - r, lo.y, p.z - r), Vec3::new(p.x + r, hi.y, p.z + r));
+                        // Кошмы и подстилки на земле (до полуметра над ней) — не крыша.
+                        if level.boxes_touching(probe).next().is_none() && level.ground_height(p.x, p.z) < p.y - 0.5 {
+                            missing.push((mat, p));
+                        }
+                    }
+                }
+            }
+            assert!(checked > enough, "проверено {checked}");
+            let mut clusters: std::collections::BTreeMap<(String, i32, i32), (usize, Vec3)> = Default::default();
+            for (m, p) in &missing {
+                let e = clusters.entry((format!("{m:?}"), (p.x / 4.0).floor() as i32, (p.z / 4.0).floor() as i32)).or_insert((0, *p));
+                e.0 += 1;
+            }
+            let show: Vec<String> = clusters.iter().map(|((m, _, _), (n, p))| format!("{m} ×{n} около {p:.1}")).collect();
+            assert!(missing.is_empty(), "без коллизий {} точек крыш из {checked}:\n{}", missing.len(), show.join("\n"));
+        }
+    }
+
+    /// Плит немного: столкновения по-прежнему дешёвые (держим 60 FPS). Сейчас их около 22 тыс.
+    /// при 33 тыс. прочих коробок; шаг тела и луч видимости дорожают в пределах шума замера.
+    #[test]
+    fn roof_slabs_are_few() {
+        let layout = city::city_layout();
+        let n = layout.roofs.len();
+        assert!(n > 5_000, "крыш почти нет: {n}");
+        assert!(n < 40_000, "слишком много плит: {n}");
+    }
+}

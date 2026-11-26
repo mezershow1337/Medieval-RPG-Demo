@@ -290,10 +290,7 @@ pub fn gable_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32, ridge_x: bool,
     let drop = rise / ((if ridge_x { r.d() } else { r.w() }) / 2.0) * over;
     let e = eave - drop;
     let top = eave + rise;
-    {
-        let m = b.mesh(Mat::Tile);
-        m.gable_roof_slopes(Vec2::new(ro.x0, ro.z0), Vec2::new(ro.x1, ro.z1), e, top, ridge_x);
-    }
+    b.roof(Mat::Tile, |m| m.gable_roof_slopes(Vec2::new(ro.x0, ro.z0), Vec2::new(ro.x1, ro.z1), e, top, ridge_x));
     {
         let m = b.mesh(Mat::Wood);
         let mut under = MeshBuilder::default();
@@ -307,7 +304,7 @@ pub fn gable_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32, ridge_x: bool,
     let slope = Vec2::new((c1 - c0) / 2.0, top - e).length();
     roof_edges(b.mesh(Mat::Tile), &w, (a0, a1), [(c0, -1.0), (c1, 1.0)], e, top, cm, slope);
     // Конёк — ряд полукруглых калиптеров на растворе.
-    b.mesh(Mat::Tile).ridge_pipe(w(a0 - 0.04, top - 0.03, cm), w(a1 + 0.04, top - 0.03, cm), 0.13, 8);
+    b.roof(Mat::Tile, |m| m.ridge_pipe(w(a0 - 0.04, top - 0.03, cm), w(a1 + 0.04, top - 0.03, cm), 0.13, 8));
     // Фронтоны — с обеих сторон: изнутри дома на их месте иначе видно небо.
     let m = b.mesh(gable_mat);
     if ridge_x {
@@ -386,7 +383,7 @@ pub fn lean_roof(b: &mut Builder, r: Rect, high: Side, y_high: f32, y_low: f32, 
         Side::W => ([Vec3::new(r.x0 - 0.25, yh, ro.z0), Vec3::new(r.x0 - 0.25, yh, ro.z1)], [Vec3::new(r.x1 + over, yl, ro.z0), Vec3::new(r.x1 + over, yl, ro.z1)]),
         Side::E => ([Vec3::new(r.x1 + 0.25, yh, ro.z0), Vec3::new(r.x1 + 0.25, yh, ro.z1)], [Vec3::new(r.x0 - over, yl, ro.z0), Vec3::new(r.x0 - over, yl, ro.z1)]),
     };
-    b.mesh(Mat::Tile).lean_roof(hi, lo);
+    b.roof(Mat::Tile, |m| m.lean_roof(hi, lo));
     let down = Vec3::Y * -ROOF_T;
     let mut under = MeshBuilder::default();
     under.lean_roof([hi[0] + down, hi[1] + down], [lo[0] + down, lo[1] + down]);
@@ -488,16 +485,17 @@ pub fn lean_gable(b: &mut Builder, mat: Mat, a: Vec3, c: Vec3, rise_at_a: f32, f
 /// Пирамидальная черепичная крыша (башни).
 pub fn hip_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32) {
     let c = r.center(eave);
-    let m = b.mesh(Mat::Tile);
     let pts = [Vec3::new(r.x0, eave, r.z0), Vec3::new(r.x1, eave, r.z0), Vec3::new(r.x1, eave, r.z1), Vec3::new(r.x0, eave, r.z1)];
     let apex = c + Vec3::Y * rise;
-    for i in 0..4 {
-        let (a, bb) = (pts[i], pts[(i + 1) % 4]);
-        let out = ((a + bb) / 2.0 - c).normalize() + Vec3::Y * 0.5;
-        let w = a.distance(bb);
-        let sl = ((a + bb) / 2.0).distance(apex);
-        m.quad_uv([a, bb, apex, apex], [Vec2::new(0.0, sl), Vec2::new(w, sl), Vec2::new(w / 2.0, 0.0), Vec2::new(w / 2.0, 0.0)], out);
-    }
+    b.roof(Mat::Tile, |m| {
+        for i in 0..4 {
+            let (a, bb) = (pts[i], pts[(i + 1) % 4]);
+            let out = ((a + bb) / 2.0 - c).normalize() + Vec3::Y * 0.5;
+            let w = a.distance(bb);
+            let sl = ((a + bb) / 2.0).distance(apex);
+            m.quad_uv([a, bb, apex, apex], [Vec2::new(0.0, sl), Vec2::new(w, sl), Vec2::new(w / 2.0, 0.0), Vec2::new(w / 2.0, 0.0)], out);
+        }
+    });
 }
 
 /// Лестница вдоль X или Z из ступеней 0.4 × 0.6 м, от `start` в сторону `dir`, до высоты `h`.
@@ -750,9 +748,12 @@ pub fn awning(b: &mut Builder, a: Vec3, c: Vec3, out: Vec3, depth: f32, h: f32) 
 pub fn awning_of(b: &mut Builder, a: Vec3, c: Vec3, out: Vec3, depth: f32, h: f32, cloth: Mat) {
     let low = h - 0.5;
     let p = [a + Vec3::Y * h, c + Vec3::Y * h, c + out * depth + Vec3::Y * low, a + out * depth + Vec3::Y * low];
+    // Полотно натянуто — по нему, как по крыше, не провалиться.
+    b.roof(cloth, |m| {
+        m.quad(p, Vec3::Y + out * 0.3);
+        m.quad(p, -Vec3::Y - out * 0.3);
+    });
     let m = b.mesh(cloth);
-    m.quad(p, Vec3::Y + out * 0.3);
-    m.quad(p, -Vec3::Y - out * 0.3);
     // Подзор: полотно свисает с переднего края полосой с вырезами-«языками».
     let drop = Vec3::Y * -0.24;
     let edge = p[2] - p[3];

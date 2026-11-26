@@ -107,6 +107,15 @@ impl SurfaceMap {
                 }
             }
         }
+        // Плиты по скатам крыш: на крыше шаг звучит черепицей (соломой, войлоком).
+        for b in &layout.roofs {
+            let Some(surface) = Surface::of(b.mat) else { continue };
+            let (min, max) = (Vec2::new(b.aabb.min.x, b.aabb.min.z), Vec2::new(b.aabb.max.x, b.aabb.max.z));
+            let top = Top { min, max, y: b.aabb.max.y, surface };
+            for c in cells(min, max) {
+                tops.entry(c).or_default().push(top);
+            }
+        }
         let mut roofs: HashMap<(i32, i32), Vec<RoofTri>> = HashMap::new();
         for ((mat, _), mb) in &layout.decor {
             if !matches!(mat, Mat::Tile | Mat::Roof | Mat::Thatch | Mat::Felt) {

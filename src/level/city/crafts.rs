@@ -464,7 +464,7 @@ pub fn iron_yard(b: &mut Builder, f: super::houses::Frame) {
     let mut rng = Rng::new(6202);
     let h = 2.4;
     let coping = |b: &mut Builder, top: Rect, y: f32, ridge_x: bool| {
-        b.mesh(Mat::Tile).gable_roof_slopes(Vec2::new(top.x0 - 0.08, top.z0 - 0.08), Vec2::new(top.x1 + 0.08, top.z1 + 0.08), y, y + 0.2, ridge_x);
+        b.roof(Mat::Tile, |m| m.gable_roof_slopes(Vec2::new(top.x0 - 0.08, top.z0 - 0.08), Vec2::new(top.x1 + 0.08, top.z1 + 0.08), y, y + 0.2, ridge_x));
     };
     // Ограда: на улицу — широкие ворота у западного угла; к кузнице (запад) — проезд для телег.
     let (gn0, gn1) = (r.x0 + 4.5, r.x0 + 8.0);

@@ -791,8 +791,8 @@ fn charcoal_camp(b: &mut Builder) {
         let foot = hp + Vec3::new(a.cos() * 2.0, -0.1, a.sin() * 2.0);
         b.mesh(Mat::Wood).beam(foot, hp + Vec3::Y * 3.4, 0.05, 0.05, Vec3::Y);
     }
-    b.mesh(Mat::Earth).lathe(hp - Vec3::Y * 0.05, &[(2.05, 0.0), (1.55, 1.0), (0.85, 2.2), (0.25, 3.0), (0.0, 3.05)], 12);
-    b.mesh(Mat::Thatch).lathe(hp + Vec3::Y * 2.2, &[(0.9, 0.0), (0.3, 0.8), (0.0, 0.85)], 10);
+    b.roof(Mat::Earth, |m| m.lathe(hp - Vec3::Y * 0.05, &[(2.05, 0.0), (1.55, 1.0), (0.85, 2.2), (0.25, 3.0), (0.0, 3.05)], 12));
+    b.roof(Mat::Thatch, |m| m.lathe(hp + Vec3::Y * 2.2, &[(0.9, 0.0), (0.3, 0.8), (0.0, 0.85)], 10));
     // Тёмный вход (лаз) к стану.
     let a: f32 = 1.0;
     let door = hp + Vec3::new(a.cos() * 1.95, 0.0, a.sin() * 1.95);
