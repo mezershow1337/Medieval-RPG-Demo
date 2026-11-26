@@ -15,6 +15,7 @@ use crate::player::LocalPlayer;
 use crate::protocol::{decode, encode};
 use crate::smithing::*;
 use crate::smithing_net::*;
+use crate::smithing_quick::{self as quick, Mark, QuickForge};
 use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
 use bevy_renet::RenetClient;
@@ -27,7 +28,8 @@ impl Plugin for SmithingClientPlugin {
         app.insert_resource(SmithState::default())
             .add_systems(Startup, setup_smith_ui.after(crate::inventory_ui::setup_fonts))
             .add_plugins(crate::smithing_fx::SmithFxPlugin)
-            .add_systems(Update, (receive_smith, smith_input, smith_buttons, predict, rebuild_panel, update_live, update_prompt).chain().in_set(SmithSet));
+            .add_systems(Update, (receive_smith, smith_input, smith_buttons, predict, rebuild_panel, update_live, update_prompt).chain().in_set(SmithSet))
+            .add_systems(Update, shot_quick_forge.before(SmithSet));
     }
 }
 
@@ -37,6 +39,8 @@ pub struct SmithSet;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Tab {
+    /// Ковка на удачу: простое дело без горы материалов.
+    Quick,
     Forge,
     Cast,
     Other,
@@ -77,6 +81,8 @@ pub struct SmithState {
     others: Vec<PieceView>,
     /// Свой номер клиента.
     pub(crate) me: u64,
+    /// Клейма мастера и заказ (ковка на удачу).
+    guild: GuildView,
 }
 
 impl Default for SmithState {
@@ -94,7 +100,7 @@ impl Default for SmithState {
             pump_q: 0.0,
             swing_t: 0.0,
             last_strike: -10.0,
-            tab: Tab::Forge,
+            tab: Tab::Quick,
             steel: true,
             metals: [3, 2, 0, 0, 0],
             ore: 6,
@@ -105,6 +111,7 @@ impl Default for SmithState {
             fx_queue: Vec::new(),
             others: Vec::new(),
             me: 0,
+            guild: GuildView::default(),
         }
     }
 }
@@ -168,7 +175,9 @@ fn receive_smith(
                 state.fires.insert(station, (fuel, blast));
             }
             SmithServerMessage::Work(w) => {
-                let changed = state.work.as_ref().map(|x| std::mem::discriminant(&x.job)) != w.as_ref().map(|x| std::mem::discriminant(&x.job)) || state.work.is_some() != w.is_some();
+                // Ковка на удачу меняется только от ударов — окно перестраиваем после каждого.
+                let quick = matches!(w.as_ref().map(|x| &x.job), Some(Job::Quick(_)));
+                let changed = quick || state.work.as_ref().map(|x| std::mem::discriminant(&x.job)) != w.as_ref().map(|x| std::mem::discriminant(&x.job)) || state.work.is_some() != w.is_some();
                 state.pred = w.as_ref().map(|w| w.job.clone());
                 state.work = w;
                 if changed {
@@ -181,6 +190,10 @@ fn receive_smith(
             }
             SmithServerMessage::Fx { station, player, fx } => state.fx_queue.push((station, player, fx)),
             SmithServerMessage::Pieces(v) => state.others = v,
+            SmithServerMessage::Guild(g) => {
+                state.guild = g;
+                state.rev += 1;
+            }
         }
     }
 }
@@ -195,6 +208,7 @@ fn smith_input(
     mut loot: ResMut<LootState>,
     mut client: Option<ResMut<RenetClient>>,
     player: Query<&Transform, With<LocalPlayer>>,
+    knowledge: Res<MyKnowledge>,
     time: Res<Time>,
 ) {
     let Ok(tf) = player.single() else { return };
@@ -231,7 +245,11 @@ fn smith_input(
     // Мехи: качать пробелом в такт. Каждый качок дует, пока мехи выдыхают; держать
     // пробел бесполезно, частить тоже — мехи не успевают набрать воздух.
     let now = time.elapsed_secs();
-    if state.open && state.work.is_some() && keys.just_pressed(KeyCode::Space) {
+    let quick = matches!(state.pred, Some(Job::Quick(_)));
+    if state.open && quick && keys.just_pressed(KeyCode::Space) {
+        quick_strike(&mut state, client, &knowledge, now);
+    }
+    if state.open && state.work.is_some() && !quick && keys.just_pressed(KeyCode::Space) {
         let gap = now - state.last_pump;
         state.last_pump = now;
         let q = if gap > 3.0 { 0.6 } else if gap < 0.4 { 0.0 } else { (1.0 - (gap / PUMP_PERIOD).ln().abs() / 2.2f32.ln()).clamp(0.0, 1.0) };
@@ -286,6 +304,11 @@ enum Act {
     Ore(i8),
     Coal(i8),
     OpenMould,
+    /// Ковка на удачу: удар молотом.
+    QuickStrike,
+    BuyMark(Mark),
+    Deliver,
+    NewOrder,
 }
 
 #[derive(Component)]
@@ -386,6 +409,10 @@ fn smith_buttons(
             Act::Metal(k, d) => state.metals[k] = (state.metals[k] as i16 + d as i16).clamp(0, 12) as u8,
             Act::Ore(d) => state.ore = (state.ore as i16 + d as i16).clamp(3, 12) as u8,
             Act::Coal(d) => state.charcoal = (state.charcoal as i16 + d as i16).clamp(0, 20) as u8,
+            Act::QuickStrike => quick_strike(&mut state, client, &knowledge, now),
+            Act::BuyMark(m) => send(client, &SmithClientMessage::BuyMark(m)),
+            Act::Deliver => send(client, &SmithClientMessage::Deliver),
+            Act::NewOrder => send(client, &SmithClientMessage::NewOrder),
         }
         state.rev += 1;
     }
@@ -643,7 +670,9 @@ fn rebuild_panel(
         let forge = station
             .as_ref()
             .is_none_or(|s| s.kind == StationKind::Forge);
-        if forge {
+        // На удачу куют у горна мастера: уголь и мехи не нужны.
+        let quick_view = matches!(st.pred, Some(Job::Quick(_))) || (st.pred.is_none() && st.tab == Tab::Quick);
+        if forge && !quick_view {
             row(p).with_children(|r| {
                 r.spawn((label(fonts, "", 13.0, TEXT, false), Live::Fuel));
                 button(r, fonts, &format!("Подсыпать уголь ({})", have(&loot, CHARCOAL)), Act::Fuel, false);
@@ -702,12 +731,14 @@ fn begin_menu(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
         return;
     }
     row(p).with_children(|r| {
+        button(r, fonts, "На удачу", Act::Tab(Tab::Quick), st.tab == Tab::Quick);
         button(r, fonts, "Ковка", Act::Tab(Tab::Forge), st.tab == Tab::Forge);
         button(r, fonts, "Литьё", Act::Tab(Tab::Cast), st.tab == Tab::Cast);
         button(r, fonts, "Цементация и ремонт", Act::Tab(Tab::Other), st.tab == Tab::Other);
         button(r, fonts, "Стрелы", Act::Tab(Tab::Fletch), st.tab == Tab::Fletch);
     });
     match st.tab {
+        Tab::Quick => quick_menu(p, fonts, st, loot),
         Tab::Forge => {
             row(p).with_children(|r| {
                 r.spawn(label(fonts, format!("Железных полос: {}, стальных: {}, лома: {}, криц: {}", have(loot, IRON), have(loot, STEEL), have(loot, SCRAP), have(loot, BLOOM)), 13.0, DIM, false));
@@ -848,6 +879,10 @@ fn begin_menu(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
 }
 
 fn swing_bar(p: &mut ChildSpawnerCommands, fonts: &UiFonts) {
+    swing_bar_hint(p, fonts, "ЛКМ — лёгкий молот, ПКМ — тяжёлый");
+}
+
+fn swing_bar_hint(p: &mut ChildSpawnerCommands, fonts: &UiFonts, hint: &str) {
     row(p).with_children(|r| {
         r.spawn(label(fonts, "Замах:", 13.0, DIM, false));
         r.spawn((
@@ -883,17 +918,15 @@ fn swing_bar(p: &mut ChildSpawnerCommands, fonts: &UiFonts) {
                 Live::Swing,
             ));
         });
-        r.spawn(label(
-            fonts,
-            "ЛКМ — лёгкий молот, ПКМ — тяжёлый",
-            12.0,
-            DIM,
-            false,
-        ));
+        r.spawn(label(fonts, hint, 12.0, DIM, false));
     });
 }
 
 fn work_panel(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, loot: &LootState, k: &crate::lore::Knowledge, job: &Job) {
+    if let Job::Quick(q) = job {
+        quick_panel(p, fonts, st, loot, q);
+        return;
+    }
     // Цвет металла.
     row(p).with_children(|r| {
         r.spawn((Node { width: px(70), height: px(26), border: UiRect::all(px(1)), ..default() }, BorderColor::all(BORDER), BackgroundColor(Color::BLACK), Live::HeatSwatch));
@@ -1161,6 +1194,7 @@ fn work_panel(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, lo
                 false,
             );
         }
+        Job::Quick(_) => {}
     }
     let _ = st;
 }
@@ -1360,4 +1394,286 @@ fn update_prompt(state: Res<SmithState>, mut text: Single<&mut Text, With<SmithP
 #[allow(dead_code)]
 pub fn quality_word(q: Quality) -> &'static str {
     q.name()
+}
+
+// ---------------------------------------------------------------------------
+// Ковка на удачу
+// ---------------------------------------------------------------------------
+
+/// Удар молотом по заготовке: точность — по маятнику в миг нажатия.
+fn quick_strike(state: &mut SmithState, client: &mut RenetClient, knowledge: &MyKnowledge, now: f32) {
+    if now - state.last_strike < quick::QUICK_GAP {
+        return;
+    }
+    if !matches!(&state.pred, Some(Job::Quick(q)) if !q.shattered) {
+        return;
+    }
+    state.last_strike = now;
+    let acc = accuracy(swing_pos(state.swing_t, false), knowledge.0.skill(Skill::Smithing));
+    send(client, &SmithClientMessage::Strike { zone: 0, heavy: false, acc });
+    // Маятник начинает новый замах.
+    state.swing_t = SWING_PERIOD[0] * 0.25;
+}
+
+fn money(n: u32) -> String {
+    crate::economy::format_money(n)
+}
+
+fn quality_color(q: Quality) -> Color {
+    let c = q.color();
+    Color::srgb(c[0], c[1], c[2])
+}
+
+/// Цена кованой вещи такого качества (вся стопка — у наконечников дюжина).
+fn quick_price(p: Pattern, q: Quality) -> u32 {
+    let info = p.info();
+    let base = crate::items::ItemBaseId::find(info.product).map_or(0, crate::economy::base_price);
+    crate::economy::round_price(base as f32 * crate::economy::quality_price(q)) * info.count.max(1) as u32
+}
+
+fn product_label(p: Pattern) -> String {
+    let info = p.info();
+    if info.count > 1 { format!("{} ×{}", info.product, info.count) } else { info.product.to_string() }
+}
+
+fn measures(n: u32) -> &'static str {
+    crate::economy::plural(n, "мера", "меры", "мер")
+}
+
+/// Сколько в сумке кованых вещей не хуже `min` (только того вида, если `only`). Стопка — одна вещь,
+/// как и считает мастер.
+fn count_products(loot: &LootState, min: Quality, only: Option<&str>) -> u32 {
+    loot.inventory.as_ref().map_or(0, |inv| {
+        inv.grid
+            .items
+            .iter()
+            .filter(|p| quick::is_quick_product(p.item.info().name) && p.item.quality >= min && only.is_none_or(|o| o == p.item.info().name))
+            .count() as u32
+    })
+}
+
+fn section(p: &mut ChildSpawnerCommands, fonts: &UiFonts, title: &str, about: &str) {
+    theme().divider(p);
+    p.spawn(label(fonts, title, 17.0, TITLE, true));
+    if !about.is_empty() {
+        p.spawn(label(fonts, about, 12.0, DIM, false));
+    }
+}
+
+/// Вкладка «На удачу»: что сковать, заказ мастера, клейма.
+fn quick_menu(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, loot: &LootState) {
+    let units = quick::iron_units(|n| have(loot, n));
+    p.spawn(label(
+        fonts,
+        "Заготовку греет мастер — вам только бить в такт. Удар поднимает цену вещи, но копит напряжение: следующий может расколоть металл. Снимите вещь вовремя.",
+        13.0,
+        TEXT,
+        false,
+    ));
+    p.spawn(label(fonts, format!("Железа в сумке: {units} {} · полоса или крица — мера, лом и руда — две штуки на меру", measures(units)), 13.0, if units > 0 { ink::GOLD } else { BAD }, false));
+    for pat in quick::QUICK_PATTERNS {
+        let need = quick::iron_needed(pat) as u32;
+        let ok = units >= need;
+        row(p).with_children(|r| {
+            r.spawn(Node { width: px(190), ..default() }).with_children(|c| {
+                button(c, fonts, &product_label(pat), Act::Begin(Plan::Quick { pattern: pat }), ok);
+            });
+            r.spawn(label(fonts, format!("{need} {} · от {} до {}", measures(need), money(quick_price(pat, Quality::Poor)), money(quick_price(pat, Quality::Legendary))), 12.0, if ok { TEXT } else { DIM }, false));
+        });
+    }
+    section(p, fonts, "Заказ мастера", "Мастер платит за заказ больше, чем дал бы торговец. Сдали — он придумает следующий, строже.");
+    if let Some(o) = st.guild.order {
+        let product = o.pattern.info().product;
+        let has = count_products(loot, o.min, Some(product)) > 0;
+        row(p).with_children(|r| {
+            r.spawn(label(fonts, format!("{} не хуже «{}»", product_label(o.pattern), o.min.name().to_lowercase()), 14.0, quality_color(o.min), true));
+            r.spawn(label(fonts, format!("плата {}", money(o.reward)), 14.0, ink::GOLD, true));
+        });
+        row(p).with_children(|r| {
+            button(r, fonts, "Сдать заказ", Act::Deliver, has);
+            button(r, fonts, "Другой заказ", Act::NewOrder, false);
+            r.spawn(label(fonts, if has { "нужная вещь есть в сумке".to_string() } else { format!("сдано заказов: {}", st.guild.delivered) }, 12.0, if has { ink::GOOD } else { DIM }, false));
+        });
+    } else {
+        p.spawn(label(fonts, "Мастер думает над заказом…", 12.0, DIM, false));
+    }
+    section(p, fonts, "Клейма мастера", "Мастер выбивает клеймо на вашем молоте в обмен на кованые вещи. Клейма действуют на каждую заготовку.");
+    let m = &st.guild.marks;
+    for mark in Mark::ALL {
+        let (n, min) = mark.cost();
+        let owned = mark.owned(m);
+        let can = !owned && count_products(loot, min, None) >= n as u32;
+        row(p).with_children(|r| {
+            r.spawn(Node { width: px(165), ..default() }).with_children(|c| {
+                let name = if mark == Mark::Ward { format!("{} {}/{}", mark.name(), m.wards, quick::WARDS_MAX) } else { mark.name().to_string() };
+                c.spawn(label(fonts, name, 14.0, if owned { ink::GOOD } else { TEXT }, true));
+            });
+            let cost = if n == 1 { "цена: 1 любая кованая вещь".to_string() } else { format!("цена: {n} вещи не хуже «{}»", min.name().to_lowercase()) };
+            r.spawn(Node { width: px(250), flex_direction: FlexDirection::Column, ..default() }).with_children(|c| {
+                c.spawn(label(fonts, mark.about(), 12.0, TEXT, false));
+                c.spawn(label(fonts, cost, 11.0, DIM, false));
+            });
+            if owned && mark != Mark::Ward {
+                r.spawn(label(fonts, "есть", 13.0, ink::GOOD, true));
+            } else {
+                button(r, fonts, "Выменять", Act::BuyMark(mark), can);
+            }
+        });
+    }
+}
+
+/// Заготовка на наковальне: цена, риск, раж, маятник и молот.
+fn quick_panel(p: &mut ChildSpawnerCommands, fonts: &UiFonts, st: &SmithState, loot: &LootState, q: &QuickForge) {
+    let _ = loot;
+    let quality = q.quality();
+    p.spawn(label(fonts, format!("{} · ковка на удачу · ударов {}", product_label(q.pattern), q.strikes), 16.0, TITLE, true));
+    // Цена сейчас и путь до следующего качества.
+    row(p).with_children(|r| {
+        r.spawn(label(fonts, "Сейчас:", 14.0, DIM, false));
+        r.spawn(label(fonts, quality.name(), 20.0, quality_color(quality), true));
+        r.spawn(label(fonts, format!("цена около {}", money(quick_price(q.pattern, quality))), 15.0, ink::GOLD, true));
+    });
+    row(p).with_children(|r| {
+        match q.next_quality() {
+            Some((next, k)) => {
+                r.spawn((label(fonts, format!("до «{}»", next.name().to_lowercase()), 13.0, DIM, false), Node { width: px(150), ..default() }));
+                theme().bar(r, Node { width: px(300), height: px(18), ..default() }, k, quality_color(next), ());
+                r.spawn(label(fonts, format!("{:.0}%", k * 100.0), 13.0, TEXT, false));
+            }
+            None => {
+                r.spawn(label(fonts, "Выше не бывает — снимайте!", 14.0, quality_color(Quality::Legendary), true));
+            }
+        }
+    });
+    // Риск — или раж.
+    row(p).with_children(|r| {
+        if q.raging() {
+            r.spawn(label(fonts, format!("РАЖ! Ещё {} {} — металл не треснет, цена растёт быстрее", q.rage, crate::economy::plural(q.rage as u32, "удар", "удара", "ударов")), 16.0, Color::srgb(1.0, 0.62, 0.2), true));
+        } else {
+            let risk = q.risk;
+            let col = if risk < 0.12 { ink::GOOD } else if risk < 0.3 { ink::GOLD } else { BAD };
+            r.spawn((label(fonts, "Риск трещины", 13.0, DIM, false), Node { width: px(150), ..default() }));
+            theme().bar(r, Node { width: px(300), height: px(18), ..default() }, risk / quick::RISK_MAX, col, ());
+            r.spawn(label(fonts, format!("{:.0}%", risk * 100.0), 15.0, col, true));
+        }
+    });
+    row(p).with_children(|r| {
+        if !q.raging() {
+            // Серия точных ударов: зажжённые угольки — сколько уже есть.
+            r.spawn(label(fonts, "Точных подряд до ража:", 13.0, DIM, false));
+            for i in 0..q.rage_need() {
+                let lit = i < q.streak;
+                r.spawn((
+                    Node { width: px(14), height: px(14), border: UiRect::all(px(2)), border_radius: BorderRadius::all(px(7)), ..default() },
+                    BorderColor::all(Color::srgb(1.0, 0.62, 0.2)),
+                    BackgroundColor(if lit { Color::srgb(1.0, 0.62, 0.2) } else { Color::srgba(0.0, 0.0, 0.0, 0.35) }),
+                ));
+            }
+        }
+        if q.marks.wards > 0 {
+            r.spawn(label(fonts, format!("Оберегов наковальни: {}", q.marks.wards), 13.0, ink::GOOD, false));
+        }
+    });
+    swing_bar_hint(p, fonts, "бейте, когда черта в зелёной середине");
+    p.spawn(Node { justify_content: JustifyContent::Center, padding: UiRect::vertical(px(4)), ..default() }).with_children(|c| {
+        theme().button_sized(c, "Ударить молотом  (пробел)", 20.0, (SmithButton(Act::QuickStrike), FocusPolicy::Block), true).insert(Node {
+            padding: UiRect::axes(px(28), px(10)),
+            min_height: px(46),
+            min_width: px(360),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        });
+    });
+    if let Some(h) = q.last {
+        let col = match h {
+            quick::Hit::Rage => Color::srgb(1.0, 0.62, 0.2),
+            quick::Hit::Glancing | quick::Hit::RageLost => BAD,
+            quick::Hit::Saved => ink::GOOD,
+            _ => TEXT,
+        };
+        p.spawn(label(fonts, quick::hit_text(h), 13.0, col, false));
+    }
+    row(p).with_children(|r| {
+        button(r, fonts, &format!("Снять с наковальни — {}", quality.name().to_lowercase()), Act::Finish(false), q.strikes > 0);
+        button(r, fonts, "Бросить (в лом)", Act::Abandon, false);
+    });
+    if let Some(o) = st.guild.order {
+        p.spawn(label(fonts, format!("Заказ мастера: {} не хуже «{}» — {}", product_label(o.pattern), o.min.name().to_lowercase(), money(o.reward)), 12.0, DIM, false));
+    }
+}
+
+/// Снимок окна (`MRPG_SHOT_UI=quick`, `quick:rage`, `quick:risk`, `quick:menu`): окно «на удачу»
+/// у горна без сервера — горн с карты, заготовка и заказ придуманы.
+fn shot_quick_forge(
+    mut commands: Commands,
+    mut state: ResMut<SmithState>,
+    mut loot: ResMut<LootState>,
+    panel: Query<Entity, With<SmithPanel>>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    let Ok(want) = std::env::var("MRPG_SHOT_UI") else {
+        *done = true;
+        return;
+    };
+    let Some(rest) = want.strip_prefix("quick") else {
+        *done = true;
+        return;
+    };
+    let Ok(entity) = panel.single() else { return };
+    *done = true;
+    // Снимок прячет окна без метки — это окно оставить (и вернуть, если уже спрятано).
+    commands.entity(entity).insert((crate::civil_client::ShotKeep, Visibility::Visible));
+    let sid: u32 = std::env::var("MRPG_SHOT_FORGE").ok().and_then(|s| s.parse().ok()).unwrap_or(1);
+    state.demo(sid, None, 0.2);
+    state.near = Some(sid);
+    state.open = true;
+    state.tab = Tab::Quick;
+    loot.ui_open = true;
+    // Сумка: руда с шахты, пара кованых вещей.
+    let mut inv = crate::inventory::Inventory::new((10, 8));
+    let mut uids = crate::items::UidGen(9000);
+    for (name, q, n) in [(ORE, Quality::Common, 10), (IRON, Quality::Common, 1), ("Спата", Quality::Uncommon, 1), ("Кинжал", Quality::Common, 2)] {
+        if let Some(base) = crate::items::ItemBaseId::find(name) {
+            let _ = inv.place(crate::items::plain_item(base, q, n, &mut uids), crate::inventory::Target::Auto);
+        }
+    }
+    loot.inventory = Some(inv);
+    loot.rev += 1;
+    let marks = quick::Marks { steady: true, wards: 1, ..Default::default() };
+    state.guild = GuildView { marks, order: Some(quick::Order::new(Pattern::Spatha, Quality::Uncommon)), delivered: 2 };
+    let mut q = QuickForge::new(Pattern::Spatha, 0.18, marks);
+    match rest.trim_start_matches(':') {
+        "menu" => {}
+        // Низ вкладки: заказ и клейма мастера.
+        "marks" => {
+            commands.entity(entity).insert(ScrollPosition(Vec2::new(0.0, 330.0)));
+        }
+        mode => {
+            // Удары с заданной точностью, пока не выйдет нужное состояние.
+            let mut rng = crate::items::Rng::new(11);
+            let plan: &[f32] = match mode {
+                "rage" => &[0.6, 0.9, 0.95, 0.9, 0.85],
+                "risk" => &[0.8, 0.5, 0.9, 0.4, 0.6, 0.5, 0.7, 0.5, 0.6, 0.55],
+                _ => &[0.9, 0.6, 0.85, 0.5, 0.7, 0.8],
+            };
+            for a in plan {
+                let before = q.clone();
+                q.strike(*a, 20.0, &mut rng);
+                if q.shattered {
+                    // Для снимка — без раскола: тот же удар, но удачный.
+                    q = before;
+                    q.risk = 0.0;
+                    q.strike(*a, 20.0, &mut rng);
+                }
+            }
+            let job = Job::Quick(q);
+            state.work = Some(WorkView { station: sid, job: job.clone(), bellows: false });
+            state.pred = Some(job);
+        }
+    }
+    state.rev += 1;
 }

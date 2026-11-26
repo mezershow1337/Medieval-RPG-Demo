@@ -88,6 +88,7 @@ mod smithing;
 mod smithing_client;
 mod smithing_fx;
 mod smithing_net;
+mod smithing_quick;
 mod smithing_server;
 mod sky;
 mod smoke;
