@@ -16,11 +16,8 @@ use std::f32::consts::{FRAC_PI_2, PI, TAU};
 use terrain::{balka_x, ground_y};
 
 pub(crate) mod mines;
-<<<<<<< HEAD
 pub(crate) mod fishing;
-=======
 pub(crate) mod village;
->>>>>>> 17d516f8f7c012f0542cd59171d9be0419201630
 
 const ROAD_W: f32 = 4.0;
 
