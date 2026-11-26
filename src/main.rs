@@ -103,6 +103,7 @@ mod trade_net;
 mod trade_server;
 mod trade_thumbs;
 mod trade_ui;
+mod ui_cursor;
 mod ui_theme;
 mod vegetation;
 mod weight;
