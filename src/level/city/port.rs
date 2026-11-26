@@ -6,6 +6,7 @@
 use super::kit::{self, Op, Rect, Rng, Side};
 use super::public::{column, peristyle, stall};
 use super::*;
+use super::ships;
 use super::interior::{self, extras};
 use crate::items::LootTableId as L;
 use crate::level::Role;
@@ -16,6 +17,8 @@ pub const QUAY_TOP: f32 = 0.0;
 pub const PIER_Z: [f32; 3] = [-70.0, 30.0, 110.0];
 const PIER_LEN: f32 = 38.0;
 const PIER_W: f32 = 4.0;
+/// Сходни: причал, сторона (−1 — к меньшему z), отступ от края набережной.
+const GANGWAYS: [(f32, f32, f32); 4] = [(PIER_Z[1], -1.0, 16.0), (PIER_Z[1], 1.0, 18.0), (PIER_Z[0], 1.0, 18.0), (PIER_Z[2], -1.0, 17.0)];
 
 pub fn port(b: &mut Builder) {
     quay(b);
@@ -70,19 +73,19 @@ fn quay(b: &mut Builder) {
             }
             x += 3.0;
         }
-        b.invisible.push(Aabb::new(Vec3::new(r.x0, 0.0, r.z0 - 0.3), Vec3::new(r.x1, 1.3, r.z0)));
-        b.invisible.push(Aabb::new(Vec3::new(r.x0, 0.0, r.z1), Vec3::new(r.x1, 1.3, r.z1 + 0.3)));
+        // Ограждение краёв причала — с проходами к сходням.
+        for (dir, z0, z1) in [(-1.0f32, r.z0 - 0.3, r.z0), (1.0, r.z1, r.z1 + 0.3)] {
+            let mut x = r.x0;
+            for gx in GANGWAYS.iter().filter(|g| g.0 == pz && g.1 == dir).map(|g| edge + g.2) {
+                b.invisible.push(Aabb::new(Vec3::new(x, 0.0, z0), Vec3::new(gx - 0.45, 1.3, z1)));
+                x = gx + 0.45;
+            }
+            b.invisible.push(Aabb::new(Vec3::new(x, 0.0, z0), Vec3::new(r.x1, 1.3, z1)));
+        }
         b.invisible.push(Aabb::new(Vec3::new(r.x1, 0.0, r.z0), Vec3::new(r.x1 + 0.3, 1.3, r.z1)));
         b.torch(r.x1 - 0.5, 1.6, r.z0 + 0.3, Vec3::ZERO);
     }
-    // Торговый корабль у среднего причала и лодки.
-    b.at(edge + 20.0, PIER_Z[1]);
-    merchant_ship(b, Vec3::new(edge + 19.0, -1.2, PIER_Z[1] - PIER_W / 2.0 - 3.4), 0.0);
-    b.at(edge + 20.0, PIER_Z[0]);
-    boat(b, Vec3::new(edge + 12.0, -1.2, PIER_Z[0] + PIER_W / 2.0 + 1.6), 0.05);
-    boat(b, Vec3::new(edge + 24.0, -1.2, PIER_Z[0] - PIER_W / 2.0 - 1.6), -0.08);
-    b.at(edge + 20.0, PIER_Z[2]);
-    boat(b, Vec3::new(edge + 16.0, -1.2, PIER_Z[2] + PIER_W / 2.0 + 1.6), 0.0);
+    moored_ships(b, edge);
     // Грузовая стрела у портовых ворот.
     b.at(edge - 4.0, 14.0);
     crane(b, Vec3::new(edge - 2.5, QUAY_TOP, 14.0));
@@ -121,127 +124,53 @@ fn quay(b: &mut Builder) {
     }
 }
 
-/// Торговое судно: корпус из шпангоутов, палуба, камбуз, мачта с реей и подобранным парусом.
-pub fn merchant_ship(b: &mut Builder, waterline: Vec3, yaw: f32) {
-    let len = 20.0;
-    let beam = 5.2;
-    let depth = 2.6;
-    let (s, c) = yaw.sin_cos();
-    let fwd = Vec3::new(c, 0.0, s);
-    let side = Vec3::new(-s, 0.0, c);
-    let keel_y = waterline.y - 1.4;
-    let n = 16;
-    let m = 6;
-    // Точка корпуса: t — от кормы (0) к носу (1), u — от киля (0) к планширю (1), sd — борт.
-    let pt = |t: f32, u: f32, sd: f32| -> Vec3 {
-        let x = (t - 0.5) * len;
-        let fullness = (1.0 - (2.0 * t - 1.0).abs().powf(2.2)).max(0.0).sqrt();
-        let half = beam / 2.0 * fullness * (u.powf(0.6)).min(1.0);
-        let sheer = 0.6 * (2.0 * t - 1.0).powi(2);
-        let y = keel_y + depth * u + sheer * u;
-        waterline + fwd * x + side * (half * sd) + Vec3::Y * (y - waterline.y)
-    };
-    let hull = b.mesh(Mat::Wood);
-    for sd in [-1.0f32, 1.0] {
-        for i in 0..n {
-            for j in 0..m {
-                let (t0, t1) = (i as f32 / n as f32, (i + 1) as f32 / n as f32);
-                let (u0, u1) = (j as f32 / m as f32, (j + 1) as f32 / m as f32);
-                let q = [pt(t0, u0, sd), pt(t1, u0, sd), pt(t1, u1, sd), pt(t0, u1, sd)];
-                let out = side * sd + Vec3::NEG_Y * (1.0 - u0) * 0.5;
-                hull.quad(q, out);
-                hull.quad(q, -out);
-            }
+/// Суда у причалов и на рейде; сходни с причалов на палубы.
+fn moored_ships(b: &mut Builder, edge: f32) {
+    let w = terrain::WATER_Y;
+    let gap = 0.7;
+    // Средний причал: с юга — навикулярий из Синопы, с севера — большой александриец с отданным парусом.
+    let nav = ships::NAVICULARIUS;
+    let z = PIER_Z[1] - PIER_W / 2.0 - gap - nav.beam / 2.0;
+    let m = ships::ship(b, &nav, Vec3::new(edge + 19.0, w, z), 0.0);
+    board(b, &m, PIER_Z[1] - PIER_W / 2.0, -1.0);
+    let alx = ships::ALEXANDRIAN;
+    let z = PIER_Z[1] + PIER_W / 2.0 + gap + alx.beam / 2.0;
+    let m = ships::ship(b, &alx, Vec3::new(edge + 21.0, w, z), 0.0);
+    board(b, &m, PIER_Z[1] + PIER_W / 2.0, 1.0);
+    // Южный причал: кондура с Боспора и лодки.
+    let kon = ships::KONDURA;
+    let z = PIER_Z[0] + PIER_W / 2.0 + gap + kon.beam / 2.0;
+    let m = ships::ship(b, &kon, Vec3::new(edge + 21.0, w, z), 0.0);
+    board(b, &m, PIER_Z[0] + PIER_W / 2.0, 1.0);
+    ships::skiff(b, Vec3::new(edge + 6.0, w, PIER_Z[0] + PIER_W / 2.0 + 1.6), 0.05);
+    ships::skiff(b, Vec3::new(edge + 24.0, w, PIER_Z[0] - PIER_W / 2.0 - 1.4), -0.06);
+    // Северный причал: лазский купец из Трапезунта с подобранным парусом и лодка.
+    let laz = ships::Ship { len: 17.0, beam: 4.8, depth: 2.7, draft: 1.25, stripe: Mat::Cloth, cargo: 3, ..ships::NAVICULARIUS };
+    let z = PIER_Z[2] - PIER_W / 2.0 - gap - laz.beam / 2.0;
+    let m = ships::ship(b, &laz, Vec3::new(edge + 20.0, w, z), 0.0);
+    board(b, &m, PIER_Z[2] - PIER_W / 2.0, -1.0);
+    ships::skiff(b, Vec3::new(edge + 16.0, w, PIER_Z[2] + PIER_W / 2.0 + 1.5), 0.0);
+    // Моряки на причалах у своих судов: чинят сети, перекатывают грузы (дальше — по распорядку дня).
+    for &(pz, dir, gx) in &GANGWAYS {
+        for dx in [-6.0f32, 7.0] {
+            let p = Vec3::new(edge + gx + dx, QUAY_TOP, pz + dir * 1.1);
+            let look = Vec3::new(edge + gx, QUAY_TOP, pz + dir * 3.0);
+            let d = look - p;
+            b.resident(p, (-d.x).atan2(-d.z), Role::Sailor);
         }
     }
-    // Палуба и планширь.
-    let deck_y = keel_y + depth * 0.86;
-    let deck = b.mesh(Mat::Wood);
-    for i in 0..n {
-        let (t0, t1) = (i as f32 / n as f32, (i + 1) as f32 / n as f32);
-        let a0 = pt(t0, 0.86, -1.0);
-        let a1 = pt(t1, 0.86, -1.0);
-        let b1 = pt(t1, 0.86, 1.0);
-        let b0 = pt(t0, 0.86, 1.0);
-        let fix = |p: Vec3| Vec3::new(p.x, deck_y, p.z);
-        deck.quad([fix(a0), fix(a1), fix(b1), fix(b0)], Vec3::Y);
-    }
-    // Штевни.
-    let stem = waterline + fwd * (len / 2.0);
-    deck.beam(stem + Vec3::Y * (keel_y - waterline.y), stem + Vec3::Y * (depth + 1.3) + fwd * 0.6, 0.12, 0.12, side);
-    let stern = waterline - fwd * (len / 2.0);
-    deck.beam(stern + Vec3::Y * (keel_y - waterline.y), stern + Vec3::Y * (depth + 1.4) - fwd * 0.8, 0.12, 0.12, side);
-    // Мачта, рея (латинская — наискосок), подобранный парус.
-    let mast = waterline + fwd * 2.0 + Vec3::Y * (deck_y - waterline.y);
-    b.mesh(Mat::Wood).lathe(mast, &[(0.17, 0.0), (0.12, 10.0), (0.0, 10.2)], 8);
-    let ya = mast + Vec3::Y * 9.0 + fwd * 6.5;
-    let yb = mast + Vec3::Y * 3.2 - fwd * 6.0;
-    b.mesh(Mat::Wood).beam(ya, yb, 0.08, 0.08, side);
-    b.mesh(Mat::Canvas).beam(ya - Vec3::Y * 0.25 - (ya - yb).normalize() * 0.6, yb - Vec3::Y * 0.25 + (ya - yb).normalize() * 0.8, 0.22, 0.3, side);
-    // Снасти.
-    for p in [stem + Vec3::Y * (depth + 1.0), stern + Vec3::Y * (depth + 1.0), pt(0.6, 1.0, 1.0), pt(0.6, 1.0, -1.0)] {
-        b.mesh(Mat::Wood).beam(mast + Vec3::Y * 9.8, p, 0.012, 0.012, Vec3::Y);
-    }
-    // Камбуз на корме с черепичной крышей.
-    let g = waterline - fwd * 6.5 + Vec3::Y * (deck_y - waterline.y);
-    let yaw_box = yaw;
-    b.mesh(Mat::Wood).obox(g + Vec3::Y * 0.9, Vec3::new(1.6, 0.9, 1.5), yaw_box);
-    b.mesh(Mat::Tile).obox(g + Vec3::Y * 1.9, Vec3::new(1.8, 0.12, 1.7), yaw_box);
-    // Рулевые вёсла.
-    for sd in [-1.0f32, 1.0] {
-        let top = pt(0.06, 1.0, sd) + side * sd * 0.3 + Vec3::Y * 0.5;
-        let blade = top - Vec3::Y * 3.6 - fwd * 1.2 + side * sd * 0.2;
-        b.mesh(Mat::Wood).beam(top, blade, 0.08, 0.08, side);
-        b.mesh(Mat::Wood).obox(blade + Vec3::Y * 0.6, Vec3::new(0.6, 0.7, 0.05), yaw);
-    }
-    // Груз на палубе: амфоры.
-    for i in 0..5 {
-        for k in 0..2 {
-            let p = waterline + fwd * (-2.0 + i as f32 * 0.6) + side * (-0.4 + k as f32 * 0.8) + Vec3::Y * (deck_y - waterline.y);
-            kit::amphora(b, p, 1.0, 0);
-        }
-    }
-    // Корпус — преграда (коллизия по ватерлинии до палубы).
-    let c0 = waterline - fwd * (len / 2.0) - side * (beam / 2.0);
-    let c1 = waterline + fwd * (len / 2.0) + side * (beam / 2.0);
-    b.invisible.push(Aabb::new(Vec3::new(c0.x.min(c1.x), keel_y, c0.z.min(c1.z)), Vec3::new(c0.x.max(c1.x), deck_y, c0.z.max(c1.z))));
+    // На рейде: дромон флота на якоре, вдоль набережной, и рыбаки в лодках.
+    ships::ship(b, &ships::DROMON, Vec3::new(edge + 62.0, w, 62.0), FRAC_PI_2);
+    ships::skiff(b, Vec3::new(edge + 48.0, w, -28.0), 0.9);
+    ships::skiff(b, Vec3::new(edge + 55.0, w, 150.0), -2.2);
 }
 
-/// Рыбацкая лодка с вёслами.
-pub fn boat(b: &mut Builder, waterline: Vec3, yaw: f32) {
-    let len = 6.0;
-    let beam = 1.7;
-    let (s, c) = yaw.sin_cos();
-    let fwd = Vec3::new(c, 0.0, s);
-    let side = Vec3::new(-s, 0.0, c);
-    let pt = |t: f32, u: f32, sd: f32| -> Vec3 {
-        let x = (t - 0.5) * len;
-        let fullness = (1.0 - (2.0 * t - 1.0).abs().powf(2.0)).max(0.0).sqrt();
-        let half = beam / 2.0 * fullness * u.powf(0.5);
-        let y = -0.45 + 0.85 * u + 0.25 * (2.0 * t - 1.0).powi(2) * u;
-        waterline + fwd * x + side * (half * sd) + Vec3::Y * y
-    };
-    let m = b.mesh(Mat::Wood);
-    for sd in [-1.0f32, 1.0] {
-        for i in 0..10 {
-            for j in 0..3 {
-                let (t0, t1) = (i as f32 / 10.0, (i + 1) as f32 / 10.0);
-                let (u0, u1) = (j as f32 / 3.0, (j + 1) as f32 / 3.0);
-                let q = [pt(t0, u0, sd), pt(t1, u0, sd), pt(t1, u1, sd), pt(t0, u1, sd)];
-                m.quad(q, side * sd);
-                m.quad(q, -side * sd);
-            }
-        }
-    }
-    for k in 0..2 {
-        let p = waterline + fwd * (-0.8 + k as f32 * 1.6) + Vec3::Y * 0.2;
-        m.beam(p - side * 0.75, p + side * 0.75, 0.12, 0.03, fwd);
-    }
-    for sd in [-1.0f32, 1.0] {
-        let a = waterline + side * sd * 0.7 + Vec3::Y * 0.4;
-        m.beam(a - fwd * 0.4, a + side * sd * 1.6 - Vec3::Y * 0.6 + fwd * 0.6, 0.03, 0.03, Vec3::Y);
-    }
-    let _ = FRAC_PI_2;
+/// Сходни с края причала `pier_z` на палубу судна, которое лежит по `dir` от причала.
+fn board(b: &mut Builder, m: &ships::Moored, pier_z: f32, dir: f32) {
+    let x = GANGWAYS.iter().find(|g| g.0 == pier_z.round() - dir * (PIER_W / 2.0) && g.1 == dir).map_or(m.mid.x - 3.0, |g| terrain::QUAY_EDGE + g.2);
+    let from = Vec3::new(x, QUAY_TOP, pier_z - dir * 0.6);
+    let to = Vec3::new(x, m.deck_y + 0.45, pier_z + dir * 1.5);
+    ships::gangway(b, from, to);
 }
 
 /// Грузовая стрела: две наклонные ноги, растяжка, блок с канатом и подвешенной амфорой в сетке.
@@ -343,6 +272,17 @@ pub fn market_stalls() -> [(Vec3, Vec3); 4] {
         (Vec3::new(e, 0.0, z0), Vec3::NEG_X),
         (Vec3::new(w, 0.0, z1), Vec3::X),
         (Vec3::new(e, 0.0, z1), Vec3::NEG_X),
+    ]
+}
+
+/// Прилавки навклиров на набережной у корней причалов, спиной к морю, лицом к городу:
+/// александриец, лаз и боспорец — каждый у своего корабля. Отступы по Z — между тумбами.
+pub fn quay_stalls() -> [(Vec3, Vec3); 3] {
+    let x = terrain::QUAY_EDGE - 1.0 - super::super::places::SELLER_BEHIND;
+    [
+        (Vec3::new(x, QUAY_TOP, PIER_Z[1] + 4.5), Vec3::NEG_X),
+        (Vec3::new(x, QUAY_TOP, PIER_Z[2] - 5.5), Vec3::NEG_X),
+        (Vec3::new(x, QUAY_TOP, PIER_Z[0] + 5.0), Vec3::NEG_X),
     ]
 }
 
