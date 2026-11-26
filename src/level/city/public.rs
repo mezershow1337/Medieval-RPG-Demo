@@ -294,10 +294,11 @@ pub fn stall(b: &mut Builder, p: Vec3, facing: Vec3, kind: usize, rng: &mut Rng)
     for (u, v) in [(-1.4, -1.1), (1.4, -1.1), (-1.4, 0.8), (1.4, 0.8)] {
         m.beam(w(u, 0.0, v), w(u, 2.4, v), 0.035, 0.035, right);
     }
-    let c = b.mesh(Mat::Canvas);
     let q = [w(-1.55, 2.5, -1.25), w(1.55, 2.5, -1.25), w(1.55, 2.25, 0.95), w(-1.55, 2.25, 0.95)];
-    c.quad(q, Vec3::Y);
-    c.quad(q, Vec3::NEG_Y);
+    b.roof(Mat::Canvas, |c| {
+        c.quad(q, Vec3::Y);
+        c.quad(q, Vec3::NEG_Y);
+    });
     let top = p + Vec3::Y * 0.85;
     // Товар раскладывается вдоль стола.
     let along = |u: f32, y: f32, v: f32| right * u + facing * v + Vec3::Y * y;
@@ -420,7 +421,7 @@ pub fn basilica(b: &mut Builder) {
     b.mesh(Mat::Plaster).lathe_arc(ac, &[(ar, 0.0), (ar, 8.0)], -FRAC_PI_2, FRAC_PI_2, 14, true);
     b.mesh(wall_mat).lathe_arc(ac + Vec3::Y * 8.0, &[(ar + t, 0.0), (ar, 0.0)], -FRAC_PI_2, FRAC_PI_2, 14, false);
     b.mesh(Mat::Plaster).dome(ac + Vec3::Y * 8.0, ar, -FRAC_PI_2, FRAC_PI_2, 12, 0.0);
-    b.mesh(Mat::Tile).dome(ac + Vec3::Y * 8.0, ar + t + 0.1, -FRAC_PI_2, FRAC_PI_2, 12, 0.05);
+    b.roof(Mat::Tile, |m| m.dome(ac + Vec3::Y * 8.0, ar + t + 0.1, -FRAC_PI_2, FRAC_PI_2, 12, 0.05));
     for k in 0..8 {
         let a = -FRAC_PI_2 + PI * (k as f32 + 0.5) / 8.0;
         let q = ac + Vec3::new(a.cos() * (ar + t / 2.0), 0.0, a.sin() * (ar + t / 2.0));
@@ -442,7 +443,7 @@ pub fn basilica(b: &mut Builder) {
         column(b, alt + Vec3::new(dx, 0.35, dz), 3.0, 0.12, Mat::Marble);
     }
     b.mesh(Mat::Marble).cuboid(alt + Vec3::new(-1.5, 3.35, -1.6), alt + Vec3::new(1.5, 3.7, 1.6));
-    b.mesh(Mat::Tile).spire(alt + Vec3::Y * 3.7, 2.0, 1.4, 4);
+    b.roof(Mat::Tile, |m| m.spire(alt + Vec3::Y * 3.7, 2.0, 1.4, 4));
     // Алтарная преграда (темплон): низкие мраморные плиты на столбиках, проход посередине.
     let tx = alt.x - 4.0;
     for (z0, z1) in [(nz0 + 0.4, n.cz() - 1.0), (n.cz() + 1.0, nz1 - 0.4)] {
@@ -518,12 +519,12 @@ pub fn basilica(b: &mut Builder) {
     // Переход из нефа к баптистерию.
     kit::wall_z(b, bp.z1, n.z0, bp.cx() - 1.2, 0.5, 3.4, &[], wall_mat);
     kit::wall_z(b, bp.z1, n.z0, bp.cx() + 1.2, 0.5, 3.4, &[], wall_mat);
-    b.mesh(Mat::Tile).gable_roof_slopes(Vec2::new(bp.cx() - 1.6, bp.z1), Vec2::new(bp.cx() + 1.6, n.z0), 3.4, 4.2, false);
+    b.roof(Mat::Tile, |m| m.gable_roof_slopes(Vec2::new(bp.cx() - 1.6, bp.z1), Vec2::new(bp.cx() + 1.6, n.z0), 3.4, 4.2, false));
     let dc = bp.center(5.5);
     b.mesh(wall_mat).lathe(dc, &[(3.0, 0.0), (3.0, 1.2)], 16);
     b.mesh(Mat::Plaster).dome(dc + Vec3::Y * 1.2, 2.9, 0.0, std::f32::consts::TAU, 16, 0.0);
-    b.mesh(Mat::Tile).dome(dc + Vec3::Y * 1.2, 3.1, 0.0, std::f32::consts::TAU, 16, 0.0);
-    b.mesh(Mat::Tile).cuboid(Vec3::new(bp.x0 - 0.2, 5.5, bp.z0 - 0.2), Vec3::new(bp.x1 + 0.2, 5.7, bp.z1 + 0.2));
+    b.roof(Mat::Tile, |m| m.dome(dc + Vec3::Y * 1.2, 3.1, 0.0, std::f32::consts::TAU, 16, 0.0));
+    b.roof(Mat::Tile, |m| m.cuboid(Vec3::new(bp.x0 - 0.2, 5.5, bp.z0 - 0.2), Vec3::new(bp.x1 + 0.2, 5.7, bp.z1 + 0.2)));
     b.decor([bp.x0 + 0.7, 0.0, bp.z0 + 0.7], [bp.x1 - 0.7, 0.03, bp.z1 - 0.7], Mat::Marble);
     let c = bp.center(0.0);
     for (min, max) in [(Vec3::new(-1.4, 0.0, -0.5), Vec3::new(1.4, 0.5, 0.5)), (Vec3::new(-0.5, 0.0, -1.4), Vec3::new(0.5, 0.5, 1.4))] {
@@ -1108,7 +1109,7 @@ pub fn west_church(b: &mut Builder) {
     b.mesh(Mat::Plaster).lathe_arc(ac, &[(1.8, 0.0), (1.8, 4.5)], -FRAC_PI_2, FRAC_PI_2, 10, true);
     // Конха изнутри оштукатурена (как в базилике): иначе из апсиды видна изнанка черепицы.
     b.mesh(Mat::Plaster).dome(ac + Vec3::Y * 4.5, 2.4, -FRAC_PI_2, FRAC_PI_2, 10, 0.0);
-    b.mesh(Mat::Tile).dome(ac + Vec3::Y * 4.5, 2.5, -FRAC_PI_2, FRAC_PI_2, 10, 0.0);
+    b.roof(Mat::Tile, |m| m.dome(ac + Vec3::Y * 4.5, 2.5, -FRAC_PI_2, FRAC_PI_2, 10, 0.0));
     for k in 0..5 {
         let a = -FRAC_PI_2 + PI * (k as f32 + 0.5) / 5.0;
         let q = ac + Vec3::new(a.cos() * 2.1, 0.0, a.sin() * 2.1);

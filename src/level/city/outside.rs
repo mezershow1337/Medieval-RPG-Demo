@@ -163,23 +163,24 @@ pub fn thatch_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32, ridge_x: bool
     let half = if ridge_x { r.d() / 2.0 } else { r.w() / 2.0 };
     let e = eave - rise / half * over;
     let top = eave + rise;
-    b.mesh(Mat::Thatch).gable_roof_slopes(Vec2::new(ro.x0, ro.z0), Vec2::new(ro.x1, ro.z1), e, top, ridge_x);
+    b.roof(Mat::Thatch, |m| m.gable_roof_slopes(Vec2::new(ro.x0, ro.z0), Vec2::new(ro.x1, ro.z1), e, top, ridge_x));
     let mut under = crate::level::geom::MeshBuilder::default();
     under.gable_roof_slopes(Vec2::new(ro.x0, ro.z0), Vec2::new(ro.x1, ro.z1), e - 0.25, top - 0.25, ridge_x);
     b.mesh(Mat::Thatch).append(under.flipped());
-    // Толстый срез кровли по свесу и конёк, прижатый жердями.
-    let m = b.mesh(Mat::Thatch);
-    if ridge_x {
-        for z in [ro.z0, ro.z1] {
-            m.beam(Vec3::new(ro.x0, e - 0.12, z), Vec3::new(ro.x1, e - 0.12, z), 0.12, 0.13, Vec3::Y);
+    // Толстый срез кровли по свесу и конёк, прижатый жердями (по ним тоже можно ступить).
+    b.roof(Mat::Thatch, |m| {
+        if ridge_x {
+            for z in [ro.z0, ro.z1] {
+                m.beam(Vec3::new(ro.x0, e - 0.12, z), Vec3::new(ro.x1, e - 0.12, z), 0.12, 0.13, Vec3::Y);
+            }
+            m.beam(Vec3::new(ro.x0, top, r.cz()), Vec3::new(ro.x1, top, r.cz()), 0.25, 0.12, Vec3::Y);
+        } else {
+            for x in [ro.x0, ro.x1] {
+                m.beam(Vec3::new(x, e - 0.12, ro.z0), Vec3::new(x, e - 0.12, ro.z1), 0.12, 0.13, Vec3::Y);
+            }
+            m.beam(Vec3::new(r.cx(), top, ro.z0), Vec3::new(r.cx(), top, ro.z1), 0.25, 0.12, Vec3::Y);
         }
-        m.beam(Vec3::new(ro.x0, top, r.cz()), Vec3::new(ro.x1, top, r.cz()), 0.25, 0.12, Vec3::Y);
-    } else {
-        for x in [ro.x0, ro.x1] {
-            m.beam(Vec3::new(x, e - 0.12, ro.z0), Vec3::new(x, e - 0.12, ro.z1), 0.12, 0.13, Vec3::Y);
-        }
-        m.beam(Vec3::new(r.cx(), top, ro.z0), Vec3::new(r.cx(), top, ro.z1), 0.25, 0.12, Vec3::Y);
-    }
+    });
     let m = b.mesh(gable);
     if ridge_x {
         for (x, s) in [(r.x0, -1.0f32), (r.x1, 1.0)] {
@@ -317,7 +318,7 @@ fn memorial_chapel(b: &mut Builder, c: Vec2) {
         t.mesh(Mat::Plaster).lathe_arc(ap, &[(1.5, 0.0), (1.5, h - 0.6)], -FRAC_PI_2, FRAC_PI_2, 8, true);
         // Конха изнутри оштукатурена: иначе из апсиды видна изнанка черепицы.
         t.mesh(Mat::Plaster).dome(ap + Vec3::Y * (h - 0.6), 2.0, -FRAC_PI_2, FRAC_PI_2, 8, 0.0);
-        t.mesh(Mat::Tile).dome(ap + Vec3::Y * (h - 0.6), 2.1, -FRAC_PI_2, FRAC_PI_2, 8, 0.1);
+        t.roof(Mat::Tile, |m| m.dome(ap + Vec3::Y * (h - 0.6), 2.1, -FRAC_PI_2, FRAC_PI_2, 8, 0.1));
         for k in 0..6 {
             let a = -FRAC_PI_2 + PI * (k as f32 + 0.5) / 6.0;
             let q = ap + Vec3::new(a.cos() * 1.8, 0.0, a.sin() * 1.8);
@@ -509,7 +510,7 @@ fn goth_village(b: &mut Builder) {
     low_wall(b, Vec2::new(pen.x0, pen.z0), Vec2::new(pen.x0, pen.z0 + 5.0));
     low_wall(b, Vec2::new(pen.x0, pen.z1 - 5.0), Vec2::new(pen.x0, pen.z1));
     let hay = g(pen.x1 - 3.0, pen.z1 - 3.0);
-    b.mesh(Mat::Thatch).lathe(hay - Vec3::Y * 0.2, &[(1.3, 0.0), (1.4, 0.8), (1.0, 1.8), (0.0, 2.4)], 10);
+    b.roof(Mat::Thatch, |m| m.lathe(hay - Vec3::Y * 0.2, &[(1.3, 0.0), (1.4, 0.8), (1.0, 1.8), (0.0, 2.4)], 10));
     kit::hidden(b, hay - Vec3::new(1.0, 0.2, 1.0), hay + Vec3::new(1.0, 2.0, 1.0));
 }
 
@@ -612,7 +613,7 @@ fn yurt(b: &mut Builder, p: Vec2, r: f32, door_yaw: f32, rng: &mut Rng) {
         let t = k as f32 / 6.0;
         (r + 0.1 - t * (r - 0.45), wall_h + (1.0 - (1.0 - t).powi(2)) * r * 0.55)
     }).collect();
-    b.mesh(Mat::Felt).lathe(base, &roof, 18);
+    b.roof(Mat::Felt, |m| m.lathe(base, &roof, 18));
     b.mesh(Mat::Wood).lathe(base + Vec3::Y * (roof[6].1 - 0.05), &[(0.5, 0.0), (0.5, 0.15), (0.38, 0.15), (0.38, 0.0)], 10);
     // Обвязка волосяными арканами.
     for hh in [0.6, 1.3] {
@@ -684,14 +685,15 @@ fn wagon(b: &mut Builder, p: Vec2, yaw: f32, covered: bool) {
             let a = k as f32 / 8.0 * PI;
             Vec3::Y * (bed_y + 0.5 + a.sin() * 1.0) + side * a.cos() * hw
         }).collect();
-        let felt = b.mesh(Mat::Felt);
-        for w in arch.windows(2) {
-            let (a, c) = (w[0], w[1]);
-            let out = ((a + c) / 2.0 - Vec3::Y * (bed_y + 0.5)).normalize();
-            felt.quad([base + a - fwd * hl, base + c - fwd * hl, base + c + fwd * hl, base + a + fwd * hl], out);
-            felt.quad([base + a - fwd * hl, base + c - fwd * hl, base + c + fwd * hl, base + a + fwd * hl], -out);
-        }
-        felt.polygon(&arch.iter().map(|q| base + *q + fwd * hl).collect::<Vec<_>>(), &arch.iter().map(|q| Vec2::new(q.x, q.y)).collect::<Vec<_>>(), fwd);
+        b.roof(Mat::Felt, |felt| {
+            for w in arch.windows(2) {
+                let (a, c) = (w[0], w[1]);
+                let out = ((a + c) / 2.0 - Vec3::Y * (bed_y + 0.5)).normalize();
+                felt.quad([base + a - fwd * hl, base + c - fwd * hl, base + c + fwd * hl, base + a + fwd * hl], out);
+                felt.quad([base + a - fwd * hl, base + c - fwd * hl, base + c + fwd * hl, base + a + fwd * hl], -out);
+            }
+        });
+        b.mesh(Mat::Felt).polygon(&arch.iter().map(|q| base + *q + fwd * hl).collect::<Vec<_>>(), &arch.iter().map(|q| Vec2::new(q.x, q.y)).collect::<Vec<_>>(), fwd);
     }
     let ext = (fwd * hl).abs() + (side * (hw + 0.3)).abs();
     kit::hidden(b, base + Vec3::new(-ext.x, 0.0, -ext.z), base + Vec3::new(ext.x, bed_y + 0.6, ext.z));
@@ -765,7 +767,8 @@ fn cone_tent(b: &mut Builder, p: Vec2, r: f32, door_yaw: f32) {
     b.at(p.x, p.y);
     let h = r * 1.5;
     let gap = 0.35;
-    b.mesh(Mat::Felt).lathe_arc(base - Vec3::Y * 0.4, &[(r * 1.08, 0.0), (r, 0.4), (0.12, h)], door_yaw + gap, door_yaw + TAU - gap, 14, false);
+    // Покрышка — и крыша, и стена: внутри тесно ровно настолько, насколько она клонится.
+    b.roof(Mat::Felt, |m| m.lathe_arc(base - Vec3::Y * 0.4, &[(r * 1.08, 0.0), (r, 0.4), (0.12, h)], door_yaw + gap, door_yaw + TAU - gap, 14, false));
     b.mesh(Mat::Felt).lathe_arc(base - Vec3::Y * 0.4, &[(r * 1.08 - 0.06, 0.0), (r - 0.06, 0.4), (0.06, h - 0.1)], door_yaw + gap, door_yaw + TAU - gap, 14, true);
     let m = b.mesh(Mat::Wood);
     for k in 0..7 {

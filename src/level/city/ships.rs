@@ -263,14 +263,15 @@ pub fn ship(b: &mut Builder, s: &Ship, at: Vec3, yaw: f32) -> Moored {
         let hw = (f.half(t, DECK_U) - 0.3).min(1.6);
         b.mesh(Mat::Wood).obox(g + Vec3::Y * 0.95, Vec3::new(1.4, 0.95, hw), yaw);
         // Двускатная крыша.
-        let r = b.mesh(Mat::Tile);
-        for sd in [-1.0f32, 1.0] {
-            let e0 = g + Vec3::Y * 1.85 + side * sd * (hw + 0.25);
-            let ridge = g + Vec3::Y * 2.45;
-            let a = fwd * 1.65;
-            r.quad([e0 - a, e0 + a, ridge + a, ridge - a], Vec3::Y + side * sd);
-            r.quad([e0 - a, e0 + a, ridge + a, ridge - a], -(Vec3::Y + side * sd));
-        }
+        b.roof(Mat::Tile, |r| {
+            for sd in [-1.0f32, 1.0] {
+                let e0 = g + Vec3::Y * 1.85 + side * sd * (hw + 0.25);
+                let ridge = g + Vec3::Y * 2.45;
+                let a = fwd * 1.65;
+                r.quad([e0 - a, e0 + a, ridge + a, ridge - a], Vec3::Y + side * sd);
+                r.quad([e0 - a, e0 + a, ridge + a, ridge - a], -(Vec3::Y + side * sd));
+            }
+        });
         // Фронтоны.
         for e in [-1.0f32, 1.0] {
             let c = g + fwd * (1.4 * e);

@@ -355,7 +355,7 @@ fn tavern(b: &mut Builder, rng: &mut Rng) {
         for x in [a.x0 + 0.2, a.x1 - 0.2] {
             t.solid([x - 0.1, 0.0, a.z0 - 0.1], [x + 0.1, 2.4, a.z0 + 0.1], Mat::Wood);
         }
-        t.mesh(Mat::Thatch).lean_roof([Vec3::new(a.x0 - 0.2, 2.75, -4.0), Vec3::new(a.x1 + 0.2, 2.75, -4.0)], [Vec3::new(a.x0 - 0.2, 2.35, a.z0 - 0.3), Vec3::new(a.x1 + 0.2, 2.35, a.z0 - 0.3)]);
+        t.roof(Mat::Thatch, |m| m.lean_roof([Vec3::new(a.x0 - 0.2, 2.75, -4.0), Vec3::new(a.x1 + 0.2, 2.75, -4.0)], [Vec3::new(a.x0 - 0.2, 2.35, a.z0 - 0.3), Vec3::new(a.x1 + 0.2, 2.35, a.z0 - 0.3)]));
         t.mesh(Mat::Wood).beam(Vec3::new(a.x0, 2.4, a.z0), Vec3::new(a.x1, 2.4, a.z0), 0.08, 0.08, Vec3::Y);
         kit::table(t, Rect::new(-5.6, -5.3, -3.6, -4.6), 0.78);
         kit::bench(t, Rect::new(-5.6, -5.9, -3.6, -5.6));
@@ -514,7 +514,7 @@ fn threshing_floor(b: &mut Builder) {
 
 fn haystack(b: &mut Builder, p: Vec3, r: f32) {
     b.at(p.x, p.z);
-    b.mesh(Mat::Thatch).lathe(p - Vec3::Y * 0.2, &[(r, 0.0), (r * 1.08, r * 0.6), (r * 0.75, r * 1.3), (0.0, r * 1.75)], 12);
+    b.roof(Mat::Thatch, |m| m.lathe(p - Vec3::Y * 0.2, &[(r, 0.0), (r * 1.08, r * 0.6), (r * 0.75, r * 1.3), (0.0, r * 1.75)], 12));
     b.mesh(Mat::Wood).beam(p + Vec3::Y * (r * 1.5), p + Vec3::Y * (r * 2.1), 0.04, 0.04, Vec3::X);
     kit::hidden(b, p - Vec3::new(r * 0.8, 0.2, r * 0.8), p + Vec3::new(r * 0.8, r * 1.5, r * 0.8));
 }
@@ -653,7 +653,7 @@ fn sheep_fold(b: &mut Builder) {
         for x in [-2.5f32, 2.5] {
             t.solid([x - 0.1, -0.2, 0.9], [x + 0.1, 1.9, 1.1], Mat::Wood);
         }
-        t.mesh(Mat::Thatch).lean_roof([Vec3::new(-2.8, 2.2, -1.4), Vec3::new(2.8, 2.2, -1.4)], [Vec3::new(-2.8, 1.8, 1.3), Vec3::new(2.8, 1.8, 1.3)]);
+        t.roof(Mat::Thatch, |m| m.lean_roof([Vec3::new(-2.8, 2.2, -1.4), Vec3::new(2.8, 2.2, -1.4)], [Vec3::new(-2.8, 1.8, 1.3), Vec3::new(2.8, 1.8, 1.3)]));
         t.mesh(Mat::Wood).beam(Vec3::new(-2.6, 1.9, 1.0), Vec3::new(2.6, 1.9, 1.0), 0.07, 0.07, Vec3::Y);
     });
     haystack(b, g(pen.x0 + 3.0, pen.z1 - 3.0), 1.3);
