@@ -2186,9 +2186,11 @@ mod tests {
         assert!(with_rounds * 4 >= town.home_cell.iter().filter(|c| c.is_some()).count(), "отлучаются только {with_rounds}");
         assert!(kinds.contains_key(&Act::Stoke) && kinds.contains_key(&Act::Fetch), "{kinds:?}");
         assert!(bad.len() < 10, "сквозь стены или не вернулись: {:?}", &bad[..bad.len().min(10)]);
-        // За час работы кузнец успевает и к горну, и обратно к наковальне.
+        // За утро работы кузнец успевает и к горну, и обратно к наковальне. Отлучки выбираются
+        // по жребию на каждый отрезок, поэтому смотрим несколько часов, а не один: иначе тест
+        // зависит от того, каким по счёту житель оказался после правок расстановки города.
         let smith = plans.people.iter().position(|p| p.state(10.0 * 3600.0).is_some_and(|s| s.act == Act::Hammer)).expect("кузнец за работой");
-        let acts: std::collections::HashSet<Act> = (0..180).filter_map(|k| plans.people[smith].state(9.5 * 3600.0 + k as f64 * 20.0 * 1.0).map(|s| s.act)).collect();
+        let acts: std::collections::HashSet<Act> = (0..720).filter_map(|k| plans.people[smith].state(8.0 * 3600.0 + k as f64 * 20.0).map(|s| s.act)).collect();
         assert!(acts.contains(&Act::Hammer) && acts.contains(&Act::Stoke), "кузнец: {acts:?}");
     }
 
