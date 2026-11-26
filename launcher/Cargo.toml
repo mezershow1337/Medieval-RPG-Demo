@@ -1,0 +1,29 @@
+[package]
+name = "medieval_rpg_launcher"
+version = "0.1.0"
+edition = "2024"
+description = "Лаунчер Medieval RPG: сам ставит и обновляет игру из GitHub Releases"
+
+# Отдельный проект, не часть игры: свой Cargo.lock и своя папка target.
+[workspace]
+
+[[bin]]
+name = "MedievalRPGLauncher"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+ureq = { version = "3", features = ["json", "platform-verifier"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+crc32fast = "1"
+sha2 = "0.10"
+
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

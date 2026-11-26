@@ -1,6 +1,7 @@
 # Готовая сборка для Windows: MedievalRPG.exe + assets в zip-архиве.
 # На каждый PR — проверка, что всё собирается и тесты проходят.
-# На каждый push в main — ещё и релиз с архивом (Releases → Latest).
+# На каждый push в main — ещё и релиз с архивом (Releases → Latest) и лаунчером
+# MedievalRPGLauncher.exe, который сам ставит и обновляет игру из этого релиза.
 name: Windows build
 
 on:
@@ -34,6 +35,10 @@ jobs:
         run: rustup update stable && rustup default stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            launcher -> target
 
       - name: Тесты
         run: cargo test --release
@@ -41,12 +46,20 @@ jobs:
       - name: Сборка
         run: cargo build --release
 
+      # Лаунчер — отдельный маленький проект: ставит и обновляет игру из Releases.
+      - name: Лаунчер
+        run: |
+          cargo test --release --manifest-path launcher/Cargo.toml
+          cargo build --release --manifest-path launcher/Cargo.toml
+
       - name: Упаковка
         shell: pwsh
         run: |
           $dir = "MedievalRPG"
           New-Item -ItemType Directory -Force $dir | Out-Null
           Copy-Item target/release/medieval_rpg.exe "$dir/MedievalRPG.exe"
+          Copy-Item launcher/target/release/MedievalRPGLauncher.exe "$dir/MedievalRPGLauncher.exe"
+          Copy-Item launcher/target/release/MedievalRPGLauncher.exe MedievalRPGLauncher.exe
           Copy-Item -Recurse assets "$dir/assets"
           Copy-Item "dist/README-Как-играть.txt" "$dir/"
           Compress-Archive -Path $dir -DestinationPath MedievalRPG-windows.zip -CompressionLevel Optimal
@@ -55,7 +68,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: MedievalRPG-windows
-          path: MedievalRPG-windows.zip
+          path: |
+            MedievalRPG-windows.zip
+            MedievalRPGLauncher.exe
           compression-level: 0
 
       # Что нового с прошлой сборки: PR со ссылками и пункты «для игрока»
@@ -79,7 +94,9 @@ jobs:
           tag_name: build-${{ github.run_number }}
           name: Сборка для Windows №${{ github.run_number }}
           body_path: release-notes.md
-          files: MedievalRPG-windows.zip
+          files: |
+            MedievalRPG-windows.zip
+            MedievalRPGLauncher.exe
           make_latest: true
 
       # Дописывает описание прошлым сборкам, у которых его ещё нет.
