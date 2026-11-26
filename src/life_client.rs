@@ -76,6 +76,8 @@ pub enum Prop {
     /// Восковая табличка ученика и стиль.
     Tablet,
     Stylus,
+    /// Клещи с раскалённой заготовкой.
+    HotIron,
 }
 
 /// Что из предмета куда смотрит: точка хвата — начало координат, ось рукояти — +Y.
@@ -158,6 +160,15 @@ fn setup_props(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mat
         PropParts(vec![(m(Cuboid::new(0.26, 0.018, 0.17).into()), wood.clone(), Transform::IDENTITY), (m(Cuboid::new(0.23, 0.006, 0.14).into()), wax, at(0.011))]),
     );
     parts.insert(Prop::Stylus, PropParts(vec![(m(Cylinder::new(0.004, 0.14).into()), bronze, at(0.04))]));
+    // Клещи и в губках — светящаяся полоса железа.
+    let hot = mats.add(StandardMaterial { base_color: Color::srgb(1.0, 0.45, 0.12), emissive: LinearRgba::rgb(7.0, 1.8, 0.25), ..default() });
+    parts.insert(
+        Prop::HotIron,
+        PropParts(vec![
+            (m(Cuboid::new(0.02, 0.5, 0.03).into()), iron.clone(), at(0.15)),
+            (m(Cuboid::new(0.028, 0.2, 0.028).into()), hot, at(0.47)),
+        ]),
+    );
     commands.insert_resource(PropKit { parts });
 }
 
@@ -216,8 +227,27 @@ fn look_for(me: usize, role: Role, s: &NpcState, t: f32, phase: f32, night: bool
             i.right_grip = grip(0.26, 1.0, -0.12);
             i.right_axis = Some(Vec3::Y);
             props[0] = Some(Prop::Spear);
+        } else if s.act == Act::Sweep {
+            // Метёт на ходу: метла ходит из стороны в сторону перед ногами.
+            let k = (tt * 1.4).sin();
+            i.lean = -0.18;
+            i.pitch = -0.45;
+            i.twist = 0.15 * k;
+            let r = Vec3::new(0.12 + 0.1 * k, 0.95, -0.2);
+            let l = Vec3::new(0.04 + 0.08 * k, 1.28, -0.14);
+            i.right_grip = Some(r);
+            i.left_grip = Some(l);
+            let axis = (l - r).normalize();
+            i.right_axis = Some(axis);
+            i.left_axis = Some(axis);
+            props[0] = Some(Prop::Broom);
+        } else if matches!(s.act, Act::Stoke | Act::Quench) {
+            // Несёт клещами раскалённую заготовку от горна к наковальне или к корыту.
+            i.left_grip = grip(-0.14, 1.0, -0.42);
+            i.left_axis = Some(Vec3::new(0.15, 0.25, -1.0).normalize());
+            props[1] = Some(Prop::HotIron);
         }
-        if night && !s.carry {
+        if night && !s.carry && props[1].is_none() && s.act != Act::Sweep {
             i.left_grip = grip(-0.22, 1.28, -0.3);
             i.left_axis = Some(Vec3::new(0.0, 1.0, -0.2).normalize());
             props[1] = Some(Prop::Torch);
@@ -399,6 +429,48 @@ fn look_for(me: usize, role: Role, s: &NpcState, t: f32, phase: f32, night: bool
             i.right_axis = Some(axis);
             i.left_axis = Some(axis);
             props[0] = Some(Prop::Hoe);
+        }
+        Act::Fetch => {
+            // Присел у сундука или пифоса: перебирает, достаёт, укладывает.
+            let k = (tt * 0.9).sin();
+            let reach = ((tt * 0.45).sin() * 1.4).clamp(0.0, 1.0);
+            i.crouch = 0.7;
+            i.lean = -0.3;
+            i.pitch = -0.65;
+            i.twist = 0.1 * k;
+            i.right_grip = Some(Vec3::new(0.12, 0.62, -0.32).lerp(Vec3::new(0.08 + 0.05 * k, 0.42, -0.56), reach));
+            i.left_grip = Some(Vec3::new(-0.12, 0.6, -0.36).lerp(Vec3::new(-0.08, 0.44, -0.54), reach * 0.7));
+        }
+        Act::Tend => {
+            // У очага на корточках: подкладывает полено, ворошит угли.
+            let p = (tt / 3.2).fract();
+            let put = if p < 0.5 { p / 0.5 } else { 1.0 - (p - 0.5) / 0.5 };
+            i.crouch = 0.9;
+            i.lean = -0.18;
+            i.pitch = -0.55;
+            i.right_grip = Some(Vec3::new(0.16, 0.52, -0.3).lerp(Vec3::new(0.06, 0.36, -0.62), put));
+            i.left_grip = grip(-0.2, 0.5, -0.2);
+        }
+        Act::Stoke => {
+            // Левой держит клещами заготовку в углях, правой качает мехи.
+            let pump = ((tt * 1.7).sin() * 0.5 + 0.5).powf(1.3);
+            i.lean = -0.16;
+            i.pitch = -0.5;
+            i.twist = -0.08;
+            i.left_grip = grip(-0.1, 0.98, -0.5);
+            i.left_axis = Some(Vec3::new(0.1, -0.35, -1.0).normalize());
+            i.right_grip = Some(Vec3::new(0.34, 1.12, -0.22).lerp(Vec3::new(0.34, 0.86, -0.26), pump));
+            props[1] = Some(Prop::HotIron);
+        }
+        Act::Quench => {
+            // Опускает поковку в корыто и водит в воде.
+            let k = (tt * 2.4).sin();
+            i.lean = -0.3;
+            i.pitch = -0.7;
+            i.left_grip = grip(-0.08 + 0.03 * k, 0.72, -0.5);
+            i.left_axis = Some(Vec3::new(0.0, -1.0, -0.35).normalize());
+            i.right_grip = grip(0.2, 0.9, -0.2);
+            props[1] = Some(Prop::HotIron);
         }
         Act::Cower => {
             i.crouch = 1.0;

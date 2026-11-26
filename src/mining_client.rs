@@ -767,17 +767,79 @@ enum Job {
     Crank,
     /// Носит корзину / полено между двумя точками.
     Haul,
+    /// Несёт полено в охапке (идёт) / кладёт его в штабель (стоит).
+    Lug,
     /// Перебирает руду, присев.
     Sort,
+    /// Присел: набирает руду или землю в корзину, подбирает поленья.
+    Pick,
     /// Шурует шестом (кострище, отдушины кучи).
     Poke,
+    /// Греет руки у огня, присев.
+    Warm,
     Eat,
     Idle,
     /// Спит в землянке или шалаше — не виден.
     Away,
 }
 
-#[derive(Clone, Copy, Debug)]
+/// Отлучка от основного дела: дойти по `pts`, сделать `job` и вернуться той же дорогой.
+#[derive(Clone, Debug)]
+struct Trip {
+    pts: Vec<Vec3>,
+    cum: Vec<f32>,
+    /// Куда смотрит на месте.
+    look: Vec3,
+    job: Job,
+    secs: f32,
+    /// С чем идёт туда и обратно (`Haul` — корзина на плече, `Lug` — полено, `Idle` — налегке).
+    there: Job,
+    back: Job,
+}
+
+impl Trip {
+    fn len(&self) -> f32 {
+        *self.cum.last().unwrap_or(&0.0)
+    }
+
+    /// Настоящих секунд на всю отлучку.
+    fn secs_total(&self) -> f32 {
+        2.0 * self.len() / TRIP_SPEED + self.secs
+    }
+
+    /// Точка в `d` метрах от начала и куда там смотрит идущий вперёд.
+    fn at(&self, d: f32) -> (Vec3, Vec3, Vec3) {
+        let j = self.cum.partition_point(|c| *c <= d).clamp(1, self.pts.len() - 1);
+        let (a, b) = (self.pts[j - 1], self.pts[j]);
+        let seg = (self.cum[j] - self.cum[j - 1]).max(1e-4);
+        (a.lerp(b, ((d - self.cum[j - 1]) / seg).clamp(0.0, 1.0)), a, b)
+    }
+}
+
+/// Шаг работника на отлучке, м/с.
+const TRIP_SPEED: f32 = 1.05;
+
+/// Дорога по точкам `way`: через каждые полметра, по земле (`ground`) или как есть (двор рудника).
+fn trip_path(way: &[Vec3], ground: bool) -> (Vec<Vec3>, Vec<f32>) {
+    let mut pts = vec![way[0]];
+    for w in way.windows(2) {
+        let n = (w[0].distance(w[1]) / 0.5).ceil().max(1.0) as usize;
+        for k in 1..=n {
+            let mut p = w[0].lerp(w[1], k as f32 / n as f32);
+            if ground {
+                p.y = crate::level::ground_y(p.x, p.z);
+            }
+            pts.push(p);
+        }
+    }
+    let mut cum = vec![0.0];
+    for w in pts.windows(2) {
+        cum.push(cum.last().unwrap() + w[0].distance(w[1]));
+    }
+    (pts, cum)
+}
+
+#[derive(Clone, Debug)]
 struct Shift {
     /// С какого часа.
     from: f32,
@@ -785,6 +847,8 @@ struct Shift {
     at: Vec3,
     /// Куда смотрит; для переноски — вторая точка.
     to: Vec3,
+    /// Отлучки по ходу дела (подбросить дров, обойти кучу, отнести корзину).
+    trips: Vec<Trip>,
 }
 
 struct WorkerDef {
@@ -795,85 +859,202 @@ struct WorkerDef {
 
 /// Распорядок всех работников (одинаков у всех клиентов: зависит только от часа мира).
 fn worker_defs(w: &WorkSpots) -> Vec<WorkerDef> {
-    let s = |from: f32, job: Job, at: Vec3, to: Vec3| Shift { from, job, at, to };
+    let s = |from: f32, job: Job, at: Vec3, to: Vec3| Shift { from, job, at, to, trips: Vec::new() };
     let ahead = |p: Vec3, dx: f32, dz: f32| p + Vec3::new(dx, 0.0, dz);
-    let fire = |p: Vec3, k: f32| p + Vec3::new((k * 2.1).cos() * 1.6, 0.0, (k * 2.1).sin() * 1.6);
-    let day = |job: Job, at: Vec3, to: Vec3, fire_at: Vec3, k: f32, hut: Vec3| {
+    let g = |p: Vec3| Vec3::new(p.x, crate::level::ground_y(p.x, p.z), p.z);
+    let fire = |p: Vec3, k: f32| g(p + Vec3::new((k * 2.1).cos() * 1.6, 0.0, (k * 2.1).sin() * 1.6));
+    // Сходить по точкам `way` (первая — рабочее место), сделать `job` лицом к `look` и вернуться.
+    let trip = |way: &[Vec3], look: Vec3, job: Job, secs: f32, there: Job, back: Job, ground: bool| {
+        let (pts, cum) = trip_path(way, ground);
+        Trip { pts, cum, look, job, secs, there, back }
+    };
+    // Обойти кучу по кругу (от места `at` на угол `turn`) и сделать там `job` лицом к середине.
+    let around = |at: Vec3, center: Vec3, turn: f32, job: Job, secs: f32| {
+        let r = Vec2::new(at.x - center.x, at.z - center.z);
+        let (rad, a0) = (r.length(), r.y.atan2(r.x));
+        let n = (turn.abs() / 0.3).ceil().max(1.0) as usize;
+        let way: Vec<Vec3> = (0..=n)
+            .map(|k| {
+                let a = a0 + turn * k as f32 / n as f32;
+                g(Vec3::new(center.x + rad * a.cos(), 0.0, center.z + rad * a.sin()))
+            })
+            .collect();
+        trip(&way, center, job, secs, Job::Idle, Job::Idle, true)
+    };
+    let with = |mut sh: Shift, trips: Vec<Trip>| {
+        sh.trips = trips;
+        sh
+    };
+    let day = |job: Job, at: Vec3, to: Vec3, fire_at: Vec3, k: f32, hut: Vec3, trips: Vec<Trip>| {
         vec![
             s(0.0, Job::Away, hut, hut),
-            s(5.5, Job::Idle, fire(fire_at, k), fire_at),
-            s(6.0, job, at, to),
+            s(5.5, Job::Warm, fire(fire_at, k), fire_at),
+            with(s(6.0, job, at, to), trips.clone()),
             s(12.0, Job::Eat, fire(fire_at, k), fire_at),
-            s(13.0, job, at, to),
+            with(s(13.0, job, at, to), trips),
             s(19.0, Job::Eat, fire(fire_at, k), fire_at),
             s(20.5, Job::Away, hut, hut),
         ]
     };
+    // Рудник: двор ровный (точки уже на полу двора), стан и болото — по склону.
+    let flat = false;
+    let sort_to = ahead(w.sorting, 0.0, -1.0);
+    let roast_side = ahead(w.roast, -1.7, 0.0);
+    let clamp = |k: usize| match k {
+        0 => ahead(w.clamps[0], -3.6, 0.0),
+        1 => ahead(w.clamps[1], 3.6, 0.0),
+        _ => ahead(w.clamps[2], 0.0, -3.6),
+    };
+    let warm_at = |k: f32| fire(w.camp_fire, k);
     let mut v = vec![
-        // Забойщики: в штольне и на выходе жилы.
-        WorkerDef { shifts: day(Job::Hew, w.face, ahead(w.face, 0.0, 2.0), w.mine_fire, 0.0, w.mine_hut), role: Role::Craftsman, seed: 501 },
-        WorkerDef { shifts: day(Job::Hew, w.outcrops[0], ahead(w.outcrops[0], 0.0, 2.0), w.mine_fire, 1.0, w.mine_hut), role: Role::Farmer, seed: 502 },
+        // Забойщики: в штольне и на выходе жилы. Набирают отбитое в корзину, выносят на разборку.
+        WorkerDef {
+            shifts: day(
+                Job::Hew,
+                w.face,
+                ahead(w.face, 0.0, 2.0),
+                w.mine_fire,
+                0.0,
+                w.mine_hut,
+                vec![trip(&[w.face, ahead(w.face, 0.0, -0.9)], ahead(w.face, 0.0, -2.0), Job::Pick, 6.0, Job::Idle, Job::Idle, flat)],
+            ),
+            role: Role::Craftsman,
+            seed: 501,
+        },
+        WorkerDef {
+            shifts: day(
+                Job::Hew,
+                w.outcrops[0],
+                ahead(w.outcrops[0], 0.0, 2.0),
+                w.mine_fire,
+                1.0,
+                w.mine_hut,
+                vec![
+                    trip(&[w.outcrops[0], ahead(w.outcrops[0], 0.6, -0.8)], ahead(w.outcrops[0], 0.6, 0.6), Job::Pick, 6.0, Job::Idle, Job::Idle, flat),
+                    trip(&[w.outcrops[0], sort_to], w.sorting, Job::Haul, 3.0, Job::Haul, Job::Idle, true),
+                ],
+            ),
+            role: Role::Farmer,
+            seed: 502,
+        },
         // Воротовый над шурфом.
-        WorkerDef { shifts: day(Job::Crank, w.windlass, ahead(w.windlass, 1.0, 0.0), w.mine_fire, 2.0, w.mine_hut), role: Role::Servant, seed: 503 },
+        WorkerDef {
+            shifts: day(
+                Job::Crank,
+                w.windlass,
+                ahead(w.windlass, 1.0, 0.0),
+                w.mine_fire,
+                2.0,
+                w.mine_hut,
+                // Подняв бадью, пересыпает руду в корзины у шурфа (оттуда её уносят вниз).
+                vec![trip(&[w.windlass, g(ahead(w.windlass, 1.6, 1.4))], g(ahead(w.windlass, 2.4, 2.0)), Job::Haul, 4.0, Job::Haul, Job::Idle, true)],
+            ),
+            role: Role::Servant,
+            seed: 503,
+        },
         // Носильщик: из штольни в отвал и на разборку.
-        WorkerDef { shifts: day(Job::Haul, ahead(w.face, 0.0, -1.0), w.sorting, w.mine_fire, 3.0, w.mine_hut), role: Role::Servant, seed: 504 },
-        // Разборщик руды.
-        WorkerDef { shifts: day(Job::Sort, w.sorting, ahead(w.sorting, 0.0, 1.5), w.mine_fire, 4.0, w.mine_hut), role: Role::Farmer, seed: 505 },
-        // Обжигальщик у кострища.
-        WorkerDef { shifts: day(Job::Poke, w.roast, ahead(w.roast, -1.7, 0.0), w.mine_fire, 5.0, w.mine_hut), role: Role::Craftsman, seed: 506 },
-        // Дровосек стана: колет, носит к штабелю.
+        WorkerDef { shifts: day(Job::Haul, ahead(w.face, 0.0, -1.0), w.sorting, w.mine_fire, 3.0, w.mine_hut, Vec::new()), role: Role::Servant, seed: 504 },
+        // Разборщик руды: отобранное несёт к обжигу.
         WorkerDef {
-            shifts: vec![
-                s(0.0, Job::Away, w.camp_hut, w.camp_hut),
-                s(6.0, Job::Chop, w.woodlot[0], ahead(w.woodlot[0], 0.0, -1.0)),
-                s(9.0, Job::Haul, w.woodlot[0], w.stack),
-                s(10.0, Job::Chop, w.woodlot[1], ahead(w.woodlot[1], 0.0, -1.0)),
-                s(12.0, Job::Eat, fire(w.camp_fire, 0.0), w.camp_fire),
-                s(13.0, Job::Chop, w.woodlot[1], ahead(w.woodlot[1], 0.0, -1.0)),
-                s(16.0, Job::Haul, w.woodlot[1], w.stack),
-                s(18.5, Job::Eat, fire(w.camp_fire, 0.0), w.camp_fire),
-                s(20.0, Job::Away, w.camp_hut, w.camp_hut),
-            ],
+            shifts: day(
+                Job::Sort,
+                w.sorting,
+                ahead(w.sorting, 0.0, 1.5),
+                w.mine_fire,
+                4.0,
+                w.mine_hut,
+                vec![trip(&[w.sorting, ahead(w.roast, 0.0, -1.4)], ahead(w.roast, -1.7, -0.2), Job::Haul, 3.0, Job::Haul, Job::Idle, true)],
+            ),
             role: Role::Farmer,
-            seed: 507,
+            seed: 505,
         },
-        // Углежоги: двое, по очереди всю ночь при куче (горит и ночью).
+        // Обжигальщик у кострища: ворошит с разных сторон, подкладывает дрова.
         WorkerDef {
-            shifts: vec![
-                s(0.0, Job::Poke, w.clamps[0], ahead(w.clamps[0], -3.6, 0.0)),
-                s(4.0, Job::Idle, fire(w.camp_fire, 1.5), w.camp_fire),
-                s(6.0, Job::Away, w.camp_hut, w.camp_hut),
-                s(13.0, Job::Eat, fire(w.camp_fire, 1.5), w.camp_fire),
-                s(14.0, Job::Dig, w.clamps[1], ahead(w.clamps[1], 3.6, 0.0)),
-                s(18.0, Job::Poke, w.clamps[0], ahead(w.clamps[0], -3.6, 0.0)),
-            ],
-            role: Role::Farmer,
-            seed: 508,
-        },
-        WorkerDef {
-            shifts: vec![
-                s(0.0, Job::Away, w.camp_hut, w.camp_hut),
-                s(5.0, Job::Poke, w.clamps[0], ahead(w.clamps[0], -3.6, 0.0)),
-                s(12.0, Job::Eat, fire(w.camp_fire, 3.0), w.camp_fire),
-                s(13.0, Job::Haul, w.stack, ahead(w.clamps[1], 2.0, 0.0)),
-                s(16.0, Job::Poke, w.clamps[0], ahead(w.clamps[0], -3.6, 0.0)),
-                s(19.0, Job::Eat, fire(w.camp_fire, 3.0), w.camp_fire),
-                s(21.0, Job::Idle, fire(w.camp_fire, 3.0), w.camp_fire),
-                s(23.0, Job::Away, w.camp_hut, w.camp_hut),
-            ],
-            role: Role::Farmer,
-            seed: 509,
+            shifts: day(
+                Job::Poke,
+                w.roast,
+                roast_side,
+                w.mine_fire,
+                5.0,
+                w.mine_hut,
+                vec![around(w.roast, roast_side, 1.6, Job::Poke, 12.0), around(w.roast, roast_side, -1.4, Job::Pick, 5.0)],
+            ),
+            role: Role::Craftsman,
+            seed: 506,
         },
     ];
-    // Копатели болотной руды (готы из селения): только днём.
+    // Дровосек стана: колет, носит поленья в штабель.
+    let (w0, w1) = (w.woodlot[0], w.woodlot[1]);
+    // Наколотое относит в поленницу у делянки (в общий штабель стана носит потом корзинами).
+    let to_stack = |from: Vec3| {
+        let pile = g(ahead(from, 2.4, 1.6));
+        trip(&[from, pile], ahead(pile, 0.8, 0.6), Job::Lug, 3.0, Job::Lug, Job::Idle, true)
+    };
+    v.push(WorkerDef {
+        shifts: vec![
+            s(0.0, Job::Away, w.camp_hut, w.camp_hut),
+            with(s(6.0, Job::Chop, w0, ahead(w0, 0.0, -1.0)), vec![to_stack(w0)]),
+            s(9.0, Job::Haul, w0, w.stack),
+            with(s(10.0, Job::Chop, w1, ahead(w1, 0.0, -1.0)), vec![to_stack(w1)]),
+            s(12.0, Job::Eat, warm_at(0.0), w.camp_fire),
+            with(s(13.0, Job::Chop, w1, ahead(w1, 0.0, -1.0)), vec![to_stack(w1)]),
+            s(16.0, Job::Haul, w1, w.stack),
+            s(18.5, Job::Eat, warm_at(0.0), w.camp_fire),
+            s(20.0, Job::Away, w.camp_hut, w.camp_hut),
+        ],
+        role: Role::Farmer,
+        seed: 507,
+    });
+    // Углежоги: кучу обходят по кругу, проверяют отдушины шестом, засыпают прогары землёй,
+    // носят дрова к новой куче; ночной сторож отходит погреться к костру.
+    let c0 = clamp(0);
+    let c1 = clamp(1);
+    let watch = |extra: Vec<Trip>| {
+        let mut t = vec![around(w.clamps[0], c0, 1.3, Job::Poke, 12.0), around(w.clamps[0], c0, -1.1, Job::Dig, 9.0), around(w.clamps[0], c0, 2.4, Job::Poke, 10.0)];
+        t.extend(extra);
+        t
+    };
+    let warm_trip = |k: f32| trip(&[w.clamps[0], warm_at(k)], w.camp_fire, Job::Warm, 12.0, Job::Idle, Job::Idle, true);
+    let wood_trip = trip(&[w.clamps[1], ahead(w.stack, 0.0, 1.0)], w.stack, Job::Pick, 4.0, Job::Idle, Job::Lug, true);
+    v.push(WorkerDef {
+        shifts: vec![
+            with(s(0.0, Job::Poke, w.clamps[0], c0), watch(vec![warm_trip(1.5)])),
+            s(4.0, Job::Warm, warm_at(1.5), w.camp_fire),
+            s(6.0, Job::Away, w.camp_hut, w.camp_hut),
+            s(13.0, Job::Eat, warm_at(1.5), w.camp_fire),
+            with(s(14.0, Job::Dig, w.clamps[1], c1), vec![around(w.clamps[1], c1, 1.2, Job::Dig, 10.0), wood_trip.clone()]),
+            with(s(18.0, Job::Poke, w.clamps[0], c0), watch(vec![warm_trip(1.5)])),
+        ],
+        role: Role::Farmer,
+        seed: 508,
+    });
+    v.push(WorkerDef {
+        shifts: vec![
+            s(0.0, Job::Away, w.camp_hut, w.camp_hut),
+            with(s(5.0, Job::Poke, w.clamps[0], c0), watch(Vec::new())),
+            s(12.0, Job::Eat, warm_at(3.0), w.camp_fire),
+            s(13.0, Job::Haul, w.stack, ahead(w.clamps[1], 2.0, 0.0)),
+            with(s(16.0, Job::Poke, w.clamps[0], c0), watch(Vec::new())),
+            s(19.0, Job::Eat, warm_at(3.0), w.camp_fire),
+            s(21.0, Job::Warm, warm_at(3.0), w.camp_fire),
+            s(23.0, Job::Away, w.camp_hut, w.camp_hut),
+        ],
+        role: Role::Farmer,
+        seed: 509,
+    });
+    // Копатели болотной руды (готы из селения): только днём; накопанное ссыпают в кучу рядом.
     for (k, p) in w.bog.iter().enumerate() {
         let home = *p + Vec3::new(0.0, 0.0, -60.0);
+        let side = if k == 0 { -1.0 } else { 1.0 };
+        let look = *p + Vec3::new(side, 0.0, 0.3);
+        let heap = g(*p + Vec3::new(-side * 2.6, 0.0, 1.2));
+        let dig = vec![trip(&[*p, heap], heap + Vec3::new(-side, 0.0, 0.4), Job::Haul, 3.0, Job::Haul, Job::Idle, true)];
         v.push(WorkerDef {
             shifts: vec![
                 s(0.0, Job::Away, home, home),
-                s(7.0 + k as f32 * 0.5, Job::Dig, *p, *p + Vec3::new(if k == 0 { -1.0 } else { 1.0 }, 0.0, 0.3)),
+                with(s(7.0 + k as f32 * 0.5, Job::Dig, *p, look), dig.clone()),
                 s(12.0, Job::Idle, *p + Vec3::new(1.2, 0.0, 1.2), *p),
-                s(13.0, Job::Dig, *p, *p + Vec3::new(if k == 0 { -1.0 } else { 1.0 }, 0.0, 0.3)),
+                with(s(13.0, Job::Dig, *p, look), dig),
                 s(17.5, Job::Away, home, home),
             ],
             role: Role::Farmer,
@@ -883,31 +1064,72 @@ fn worker_defs(w: &WorkSpots) -> Vec<WorkerDef> {
     v
 }
 
-/// Где работник и чем занят в час `h` (реальное время `t` — для переноски туда-обратно).
+/// Где работник и чем занят в час `h` (реальное время `t` — для переноски и отлучек).
 fn worker_state(def: &WorkerDef, h: f32, t: f32) -> (Vec3, f32, Job, bool, f32) {
-    let sh = def.shifts.iter().rev().find(|s| s.from <= h).copied().unwrap_or(def.shifts[def.shifts.len() - 1]);
+    let i = def.shifts.iter().rposition(|s| s.from <= h).unwrap_or(def.shifts.len() - 1);
+    let sh = &def.shifts[i];
     let yaw_to = crate::daily_life::yaw_to;
     if sh.job == Job::Haul {
-        // Туда — пауза — обратно — пауза.
+        // Набрать — туда — ссыпать — обратно.
         let len = sh.at.distance(sh.to).max(0.5);
         let walk = len / 1.1;
-        let cycle = walk * 2.0 + 8.0;
+        let cycle = walk * 2.0 + 10.0;
         let phase = (t + def.seed as f32 * 3.7) % cycle;
-        let (pos, yaw, walking, carry) = if phase < walk {
+        // Обе точки на склоне (стан) — идёт по земле; из штольни на ровный двор — как есть.
+        let on_slope = |p: Vec3| (crate::level::ground_y(p.x, p.z) - p.y).abs() < 0.3;
+        let slope = on_slope(sh.at) && on_slope(sh.to);
+        let ground = |p: Vec3| if slope { Vec3::new(p.x, crate::level::ground_y(p.x, p.z), p.z) } else { p };
+        let (pos, yaw, walking, job) = if phase < walk {
             let k = phase / walk;
-            (sh.at.lerp(sh.to, k), yaw_to(sh.at, sh.to), true, true)
+            (ground(sh.at.lerp(sh.to, k)), yaw_to(sh.at, sh.to), true, Job::Haul)
         } else if phase < walk + 4.0 {
-            (sh.to, yaw_to(sh.at, sh.to), false, true)
+            (sh.to, yaw_to(sh.at, sh.to), false, Job::Haul)
         } else if phase < walk * 2.0 + 4.0 {
             let k = (phase - walk - 4.0) / walk;
-            (sh.to.lerp(sh.at, k), yaw_to(sh.to, sh.at), true, false)
+            (ground(sh.to.lerp(sh.at, k)), yaw_to(sh.to, sh.at), true, Job::Idle)
         } else {
-            (sh.at, yaw_to(sh.to, sh.at), false, false)
+            // Набирает новую корзину, присев.
+            (sh.at, yaw_to(sh.to, sh.at), false, Job::Pick)
         };
         let walked = if walking { (phase % walk) * 1.1 } else { 0.0 };
-        return (pos, yaw, if carry { Job::Haul } else { Job::Idle }, walking, walked);
+        return (pos, yaw, job, walking, walked);
     }
-    (sh.at, yaw_to(sh.at, sh.to), sh.job, false, 0.0)
+    let base = (sh.at, yaw_to(sh.at, sh.to), sh.job, false, 0.0);
+    if sh.trips.is_empty() {
+        return base;
+    }
+    // Время делится на отрезки: в начале — основное дело, в конце — одна из отлучек.
+    let slot = 42.0 + 24.0 * crate::world_clock::unit(def.seed, 0x7219);
+    let local = t + def.seed as f32 * 5.3;
+    let n = (local / slot).floor();
+    let k_slot = local - n * slot;
+    let pick = crate::world_clock::hash(def.seed, n as u64);
+    if pick % 4 == 0 {
+        return base;
+    }
+    let tr = &sh.trips[((pick / 4) % sh.trips.len() as u64) as usize];
+    let total = tr.secs_total();
+    let start = slot - total;
+    // Смена кончится раньше, чем вернётся (час мира — 180 настоящих секунд), — не уходит.
+    let next = def.shifts.get(i + 1).map_or(24.0, |s| s.from);
+    let left = (next - h) * 3600.0 / crate::world_clock::TIME_SCALE as f32;
+    if start < slot * 0.3 || k_slot < start || slot - k_slot > left {
+        return base;
+    }
+    let k = k_slot - start;
+    let len = tr.len();
+    let walk = len / TRIP_SPEED;
+    if k < walk {
+        let (pos, a, b) = tr.at(k * TRIP_SPEED);
+        (pos, yaw_to(a, b), tr.there, true, k * TRIP_SPEED)
+    } else if k < walk + tr.secs {
+        let at = *tr.pts.last().unwrap();
+        (at, yaw_to(at, tr.look), tr.job, false, 0.0)
+    } else {
+        let back = ((k - walk - tr.secs) * TRIP_SPEED).min(len);
+        let (pos, a, b) = tr.at(len - back);
+        (pos, yaw_to(b, a), tr.back, true, len + back)
+    }
 }
 
 #[derive(Component)]
@@ -965,6 +1187,12 @@ fn worker_pose(job: Job, tt: f32, walking: bool, walked: f32) -> (PoseInput, [Op
             i.left_grip = Some(Vec3::new(0.1, 1.38, -0.16));
             i.lean = -0.08;
             props[0] = Some(Tool2::Basket);
+        } else if job == Job::Lug {
+            // Полено в охапке перед грудью.
+            i.right_grip = Some(Vec3::new(0.05, 1.06, -0.32));
+            i.left_grip = Some(Vec3::new(-0.24, 1.04, -0.3));
+            i.lean = 0.05;
+            props[0] = Some(Tool2::Log);
         }
         return (i, props);
     }
@@ -1031,6 +1259,37 @@ fn worker_pose(job: Job, tt: f32, walking: bool, walked: f32) -> (PoseInput, [Op
             let k = (tt * 1.1).sin();
             i.right_grip = Some(Vec3::new(0.15 + 0.08 * k, 0.48, -0.5));
             i.left_grip = Some(Vec3::new(-0.14, 0.5 + 0.04 * k, -0.48));
+        }
+        Job::Lug => {
+            // Кладёт полено в штабель: наклон, руки вниз.
+            let p = (tt / 3.0).fract();
+            let down = if p < 0.5 { p / 0.5 } else { 1.0 };
+            i.lean = -0.1 - 0.3 * down;
+            i.pitch = -0.5;
+            i.right_grip = Some(Vec3::new(0.05, 1.06, -0.32).lerp(Vec3::new(0.05, 0.62, -0.5), down));
+            i.left_grip = Some(Vec3::new(-0.24, 1.04, -0.3).lerp(Vec3::new(-0.24, 0.6, -0.48), down));
+            if p < 0.5 {
+                props[0] = Some(Tool2::Log);
+            }
+        }
+        Job::Pick => {
+            // Присел: набирает в корзину, корзина у ног.
+            let k = (tt * 1.6).sin();
+            i.crouch = 0.8;
+            i.lean = -0.32;
+            i.pitch = -0.7;
+            i.right_grip = Some(Vec3::new(0.14 + 0.06 * k, 0.42 + 0.06 * k.abs(), -0.5));
+            i.left_grip = Some(Vec3::new(-0.2, 0.5, -0.3));
+            props[1] = Some(Tool2::Basket);
+        }
+        Job::Warm => {
+            // Присел у огня, протянул руки, потирает ладони.
+            let k = (tt * 2.2).sin();
+            i.crouch = 0.85;
+            i.lean = -0.08;
+            i.pitch = -0.3;
+            i.right_grip = Some(Vec3::new(0.1 + 0.03 * k, 0.78, -0.42));
+            i.left_grip = Some(Vec3::new(-0.1 + 0.03 * k, 0.8, -0.42));
         }
         Job::Poke => {
             // Шест вперёд-вниз: ворошит руду или проверяет отдушины.
@@ -1212,14 +1471,36 @@ mod tests {
         let spots = mine_work_spots().expect("рудник есть в Херсоне");
         let defs = worker_defs(&spots);
         assert!(defs.len() >= 9);
-        // Ночью рудник спит, а у угольной кучи кто-то сторожит.
-        let night: Vec<Job> = defs.iter().map(|d| worker_state(d, 2.0, 0.0).2).collect();
+        // Ночью рудник спит, а у угольной кучи кто-то сторожит (по расписанию смен: в сам
+        // миг проверки работник может быть и на отлучке).
+        let job = |d: &WorkerDef, h: f32| d.shifts.iter().rev().find(|s| s.from <= h).map_or(Job::Away, |s| s.job);
+        let night: Vec<Job> = defs.iter().map(|d| job(d, 2.0)).collect();
         assert_eq!(night[0], Job::Away);
         assert!(night.contains(&Job::Poke));
-        let noon: Vec<Job> = defs.iter().map(|d| worker_state(d, 12.5, 0.0).2).collect();
+        let noon: Vec<Job> = defs.iter().map(|d| job(d, 12.5)).collect();
         assert!(noon.iter().filter(|j| **j == Job::Eat).count() >= 6);
-        let work: Vec<Job> = defs.iter().map(|d| worker_state(d, 9.5, 0.0).2).collect();
+        let work: Vec<Job> = defs.iter().map(|d| job(d, 9.5)).collect();
         assert!(work.contains(&Job::Hew) && work.contains(&Job::Crank));
+    }
+
+    #[test]
+    fn workers_step_away_between_jobs() {
+        // Углежог у кучи не стоит столбом: обходит её, засыпает прогары, греется у костра.
+        let spots = mine_work_spots().unwrap();
+        let defs = worker_defs(&spots);
+        for (k, d) in defs.iter().enumerate() {
+            // Носильщик и так ходит туда-сюда; углежог 508 — ночной сторож.
+            let h = match k {
+                3 => continue,
+                7 => 2.0,
+                _ => 9.5,
+            };
+            let states: Vec<(Vec3, Job, bool)> = (0..400).map(|k| worker_state(d, h, k as f32 * 0.5)).map(|(p, _, j, w, _)| (p, j, w)).collect();
+            let far = states.iter().map(|s| s.0.distance(states[0].0)).fold(0.0, f32::max);
+            let jobs: std::collections::HashSet<_> = states.iter().map(|s| format!("{:?}", s.1)).collect();
+            eprintln!("работник {}: отходит на {far:.1} м, дела {jobs:?}", d.seed);
+            assert!(far > 0.8 && states.iter().any(|s| s.2), "работник {} стоит на месте", d.seed);
+        }
     }
 
     /// Где что (для снимков): `cargo test print_mine_spots -- --ignored --nocapture`.
