@@ -7,6 +7,8 @@ use super::{
 const BRONZE: Rgba = rgb(150, 98, 52);
 const BRONZE_LIGHT: Rgba = rgb(196, 136, 78);
 const BRONZE_DARK: Rgba = rgb(98, 62, 32);
+const SILVER: Rgba = rgb(200, 204, 210);
+const SILVER_DARK: Rgba = rgb(118, 122, 132);
 const CLAY: Rgba = rgb(176, 104, 62);
 const CLAY_LIGHT: Rgba = rgb(206, 138, 92);
 const CLAY_DARK: Rgba = rgb(122, 68, 38);
@@ -32,15 +34,6 @@ fn coin(c: &mut Canvas, x: f32, y: f32, r: f32, face: Rgba, edge: Rgba, light: R
     c.circle(x, y - r * 0.08, r * 0.82, face);
     c.ring(x, y - r * 0.08, r * 0.55, r * 0.66, edge);
     c.circle(x - r * 0.3, y - r * 0.38, r * 0.14, light);
-}
-
-/// Буква «M» фоллиса.
-fn letter_m(c: &mut Canvas, x: f32, y: f32, s: f32, col: Rgba) {
-    let w = s * 0.12;
-    c.line(x - s * 0.4, y + s * 0.4, x - s * 0.4, y - s * 0.4, w, col);
-    c.line(x - s * 0.4, y - s * 0.4, x, y + s * 0.1, w, col);
-    c.line(x, y + s * 0.1, x + s * 0.4, y - s * 0.4, w, col);
-    c.line(x + s * 0.4, y - s * 0.4, x + s * 0.4, y + s * 0.4, w, col);
 }
 
 /// Амфора: узкое горло, две ручки, яйцевидное тело и острый носик (тип LRA).
@@ -138,20 +131,18 @@ fn hide(c: &mut Canvas, body: Rgba, dark: Rgba) {
 /// Рисует предмет торговли. false — не наш предмет.
 pub fn draw(name: &str, c: &mut Canvas) -> bool {
     match name {
-        "Тремисс" => {
+        // Запасные плоские иконки монет (основные — рендер 3D-моделей).
+        "Золотая монета" => {
             coin(c, 0.62, 0.66, 0.24, GOLD, GOLD_DARK, WHITE);
-            coin(c, 0.4, 0.4, 0.24, GOLD, GOLD_DARK, WHITE);
+            coin(c, 0.4, 0.4, 0.28, GOLD, GOLD_DARK, WHITE);
         }
-        "Фоллис" => {
+        "Серебряная монета" => {
+            coin(c, 0.62, 0.66, 0.24, SILVER, SILVER_DARK, WHITE);
+            coin(c, 0.4, 0.4, 0.28, SILVER, SILVER_DARK, WHITE);
+        }
+        "Медная монета" => {
             coin(c, 0.62, 0.7, 0.24, BRONZE, BRONZE_DARK, BRONZE_LIGHT);
             coin(c, 0.45, 0.45, 0.33, BRONZE, BRONZE_DARK, BRONZE_LIGHT);
-            letter_m(c, 0.45, 0.42, 0.28, BRONZE_DARK);
-        }
-        "Декануммий" => {
-            for (x, y) in [(0.3, 0.7), (0.7, 0.7), (0.5, 0.42)] {
-                coin(c, x, y, 0.2, BRONZE, BRONZE_DARK, BRONZE_LIGHT);
-                c.line(x, y - 0.12, x, y + 0.08, 0.05, BRONZE_DARK);
-            }
         }
         "Амфора вина" => amphora(c, WINE),
         "Амфора оливкового масла" => amphora(c, OIL),

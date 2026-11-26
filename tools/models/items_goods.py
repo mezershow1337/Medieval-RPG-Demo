@@ -341,38 +341,6 @@ def scroll(length=0.2, r=0.016, paper="papyrus", rod="wood", tag=None, tie="cord
         K.mesh_obj("tag", t, tag, bevel=0.0005)
 
 
-def coin_pile(mat, r, t, n, relief="bust", seed=3):
-    rnd = random.Random(seed)
-
-    def coin(x, y, z, tx, ty, rz):
-        c = K.lathe([(0, 0.0001), (0, r * 0.82), (0.0002, r * 0.86), (0.00012, r * 0.9), (0.0, r * 0.98), (0.0004, r), (t - 0.0004, r), (t, r * 0.98), (t - 0.00012, r * 0.9), (t - 0.0002, r * 0.86), (t, r * 0.82), (t, 0.0001)], 40, cap_top=False, cap_bot=False)
-        if relief == "M":
-            # Большая «M» — знак 40 нуммиев на фоллисе.
-            def m(v):
-                if v.z < t * 0.5:
-                    return v
-                u, w = v.x / r, v.y / r
-                strokes = [abs(u + 0.32) < 0.07 and abs(w) < 0.4, abs(u - 0.32) < 0.07 and abs(w) < 0.4, abs((u + 0.32) * 0.75 - (w - 0.4) * -0.4) < 0.05 and -0.32 < u < 0 and w > -0.05, abs((u - 0.32) * 0.75 + (w - 0.4) * -0.4) < 0.05 and 0 < u < 0.32 and w > -0.05]
-                return Vector((v.x, v.y, v.z + (0.00035 if any(strokes) else 0)))
-
-            K.deform(c, m)
-        else:
-            K.deform(c, lambda v: (v.x, v.y, v.z + (0.0002 * math.exp(-((v.x + r * 0.1) ** 2 + (v.y - r * 0.1) ** 2) / (r * r * 0.18)) if v.z > t * 0.5 else 0)))
-        K.rot(c, "Z", rz)
-        K.rot(c, "X", tx)
-        K.rot(c, "Y", ty)
-        K.move(c, x, y, z)
-        K.mesh_obj("coin", c, mat, smooth_angle=50)
-
-    z = 0.0
-    for i in range(n):
-        coin(rnd.uniform(-r * 0.12, r * 0.12), rnd.uniform(-r * 0.12, r * 0.12), z, rnd.uniform(-2, 2), rnd.uniform(-2, 2), rnd.uniform(0, 360))
-        z += t * 1.02
-    for k, (dx, dy) in enumerate(((1.8, -0.6), (-1.6, -0.9), (0.3, -1.85))):
-        coin(dx * r, dy * r, 0.0, 0, 0, rnd.uniform(0, 360))
-    coin(-1.1 * r, 1.1 * r, t * 2.5, 25, -10, 20)
-
-
 def amphora(dipinto=(150, 40, 30), stopper="resin"):
     """Амфора LRA 1 (Киликия, Кипр — «винная» и «масляная» тара VI в.): рифлёное тело,
     две ручки, короткая ножка."""
@@ -387,27 +355,7 @@ def amphora(dipinto=(150, 40, 30), stopper="resin"):
     K.mesh_obj("stopper", K.lathe([(0.53, 0.031), (0.552, 0.036), (0.56, 0.0001)], 24), stopper, subsurf=1)
 
 
-# =========================================================================== монеты и товары
-
-
-@item("tremissis", (1, 1), name="Тремисс", pose="upright", azimuth=24, elevation=32, margin=0.88)
-def tremissis():
-    M()
-    coin_pile("gold", 0.0075, 0.001, 5, seed=7)
-
-
-@item("follis", (1, 1), name="Фоллис", pose="upright", azimuth=24, elevation=32, margin=0.88)
-def follis():
-    M()
-    K.metal_mat("follis_bronze", (176, 120, 70), (110, 70, 40), rough=(0.4, 0.6), dirt=0.9, tarnish=((70, 96, 74), 0.9))
-    coin_pile("follis_bronze", 0.0145, 0.0022, 5, relief="M", seed=8)
-
-
-@item("decanummium", (1, 1), name="Декануммий", pose="upright", azimuth=24, elevation=32, margin=0.88)
-def decanummium():
-    M()
-    K.metal_mat("small_bronze", (170, 118, 72), (100, 66, 40), rough=(0.45, 0.65), dirt=0.9, tarnish=((70, 96, 74), 0.9))
-    coin_pile("small_bronze", 0.009, 0.0014, 6, seed=9)
+# =========================================================================== товары
 
 
 @item("amphora_wine", (2, 3), name="Амфора вина", pose="flat", azimuth=20, elevation=8, margin=0.92)

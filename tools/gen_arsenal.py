@@ -56,7 +56,7 @@ def arsenal_rs():
     out.append("    pub weld: bool,")
     out.append("    pub needs: Option<Technique>,")
     out.append("    pub parts: &'static [(&'static str, u16)],")
-    out.append("    /// Цена обычного качества, нуммии.")
+    out.append("    /// Цена обычного качества, в долях (медная монета — 10).")
     out.append("    pub price: u32,")
     out.append("    pub kg: f32,")
     out.append("    pub desc: &'static str,")
