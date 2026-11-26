@@ -478,6 +478,14 @@ pub enum Act {
     Hoe,
     /// Моется в термах (стоит в тепле без дела).
     Bathe,
+    /// Присел у сундука, пифоса или полки: достаёт или укладывает припасы.
+    Fetch,
+    /// Присел у очага: подкладывает дрова, ворошит угли.
+    Tend,
+    /// У горна: держит заготовку клещами в углях и качает мехи.
+    Stoke,
+    /// Закаляет поковку в корыте.
+    Quench,
     /// Присел и закрыл голову: рядом драка.
     Cower,
 }
@@ -510,6 +518,10 @@ impl Act {
             Act::Guard => "на посту",
             Act::Hoe => "мотыжит",
             Act::Bathe => "в банях",
+            Act::Fetch => "достаёт припасы",
+            Act::Tend => "подкладывает дрова",
+            Act::Stoke => "греет заготовку в горне",
+            Act::Quench => "закаляет поковку",
             Act::Cower => "прячется",
         }
     }
@@ -531,6 +543,8 @@ pub struct Stay {
     pub partner: Option<u16>,
     /// Лежит в постели: её середина (`pos` — место у постели).
     pub lie: Option<Vec3>,
+    /// Дела по соседству, на которые житель отходит от основного (к горну, в кладовую…).
+    pub rounds: Option<Arc<Rounds>>,
 }
 
 #[derive(Clone, Debug)]
@@ -589,20 +603,122 @@ impl Plan {
         }
         let i = self.segs.partition_point(|s| s.t0() <= t).saturating_sub(1);
         Some(match &self.segs[i] {
-            Seg::Stay(s) => NpcState { pos: s.pos, yaw: s.yaw, act: s.act, walking: false, walked: 0.0, carry: false, patrol: false, partner: s.partner, lie: s.lie },
+            Seg::Stay(s) => {
+                let base = NpcState { pos: s.pos, yaw: s.yaw, act: s.act, walking: false, walked: 0.0, carry: false, patrol: false, partner: s.partner, lie: s.lie };
+                s.rounds.as_ref().and_then(|r| r.state(s, t, &base)).unwrap_or(base)
+            }
             Seg::Walk(w) => {
                 let total = *w.cum.last().unwrap_or(&0.0);
                 let k = ((t - w.t0) / (w.t1 - w.t0).max(1e-3)).clamp(0.0, 1.0) as f32;
                 let d = total * k;
-                let j = w.cum.partition_point(|c| *c <= d).clamp(1, w.pts.len() - 1);
-                let (a, b) = (w.pts[j - 1], w.pts[j]);
-                let seg = (w.cum[j] - w.cum[j - 1]).max(1e-4);
-                let pos = a.lerp(b, ((d - w.cum[j - 1]) / seg).clamp(0.0, 1.0));
+                let (pos, a, b) = along(&w.pts, &w.cum, d);
                 NpcState { pos, yaw: yaw_to(a, b), act: if w.carry { Act::Carry } else { Act::Idle }, walking: k < 1.0, walked: d, carry: w.carry, patrol: w.patrol, partner: None, lie: None }
             }
         })
     }
 
+}
+
+/// Точка на ломаной `pts` в `d` метрах от начала (`cum` — накопленные длины) и её отрезок.
+fn along(pts: &[Vec3], cum: &[f32], d: f32) -> (Vec3, Vec3, Vec3) {
+    if pts.len() < 2 {
+        let p = pts.first().copied().unwrap_or(Vec3::ZERO);
+        return (p, p, p);
+    }
+    let j = cum.partition_point(|c| *c <= d).clamp(1, pts.len() - 1);
+    let (a, b) = (pts[j - 1], pts[j]);
+    let seg = (cum[j] - cum[j - 1]).max(1e-4);
+    (a.lerp(b, ((d - cum[j - 1]) / seg).clamp(0.0, 1.0)), a, b)
+}
+
+/// Чем занят по дороге: несёт ли что-то и что делает руками (метёт на ходу, несёт поковку).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Way {
+    pub carry: bool,
+    pub act: Act,
+}
+
+impl Way {
+    const EMPTY: Way = Way { carry: false, act: Act::Idle };
+    const LOADED: Way = Way { carry: true, act: Act::Carry };
+}
+
+/// Отлучка от рабочего места: дойти до `pts.last()`, сделать там `act` и вернуться той же дорогой.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Errand {
+    pub pts: Vec<Vec3>,
+    pub cum: Vec<f32>,
+    /// Куда смотрит на месте.
+    pub yaw: f32,
+    pub act: Act,
+    /// Сколько настоящих секунд занят на месте.
+    pub secs: f32,
+    /// Скорость шага, м за настоящую секунду.
+    pub speed: f32,
+    pub there: Way,
+    pub back: Way,
+}
+
+impl Errand {
+    fn len(&self) -> f32 {
+        *self.cum.last().unwrap_or(&0.0)
+    }
+
+    /// Сколько настоящих секунд на всю отлучку.
+    fn secs_total(&self) -> f32 {
+        2.0 * self.len() / self.speed + self.secs
+    }
+}
+
+/// Дела по соседству с основным: время делится на отрезки по `slot` настоящих секунд;
+/// в конце отрезка житель отлучается по одному из дел (выбор — от номера отрезка), в начале —
+/// за основным делом. Всё — чистая функция времени: сервер и клиенты видят одно и то же.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Rounds {
+    pub errands: Vec<Errand>,
+    pub slot: f32,
+    pub seed: u64,
+}
+
+impl Rounds {
+    fn state(&self, s: &Stay, t: f64, base: &NpcState) -> Option<NpcState> {
+        if self.errands.is_empty() || t < s.t0 {
+            return None;
+        }
+        let real = ((t - s.t0) / TIME_SCALE) as f32;
+        let n = (real / self.slot).floor();
+        // Отлучка не должна застать уход дальше по плану: последний неполный отрезок — дома.
+        if s.t0 + ((n + 1.0) * self.slot) as f64 * TIME_SCALE > s.t1 {
+            return None;
+        }
+        let h = hash(self.seed, n as u64);
+        // Каждый пятый отрезок — целиком за основным делом.
+        if h % 5 == 0 {
+            return None;
+        }
+        let e = &self.errands[((h / 5) % self.errands.len() as u64) as usize];
+        let total = e.secs_total();
+        let start = self.slot - total;
+        let k = real - n * self.slot - start;
+        if start < self.slot * 0.3 || k < 0.0 {
+            return None;
+        }
+        let len = e.len();
+        let walk = len / e.speed;
+        let mut st = NpcState { partner: None, lie: None, ..*base };
+        if k < walk {
+            let d = k * e.speed;
+            let (pos, a, b) = along(&e.pts, &e.cum, d);
+            st = NpcState { pos, yaw: yaw_to(a, b), act: e.there.act, walking: true, walked: d, carry: e.there.carry, ..st };
+        } else if k < walk + e.secs {
+            st = NpcState { pos: *e.pts.last()?, yaw: e.yaw, act: e.act, walking: false, walked: 0.0, carry: false, ..st };
+        } else {
+            let back = ((k - walk - e.secs) * e.speed).min(len);
+            let (pos, a, b) = along(&e.pts, &e.cum, len - back);
+            st = NpcState { pos, yaw: yaw_to(b, a), act: e.back.act, walking: true, walked: len + back, carry: e.back.carry, ..st };
+        }
+        Some(st)
+    }
 }
 
 /// Планы всех жителей на один день.
@@ -635,6 +751,100 @@ pub struct Town {
     street: Vec<Spot>,
     /// Ближайшее к дому жителя место на улице.
     street_of: Vec<Option<usize>>,
+    /// Места по соседству с рабочим местом каждого жителя: кладовая, очаг, горн, корыто.
+    stations: Vec<Vec<Station>>,
+}
+
+/// Что стоит у места, куда житель отходит от основного дела.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    /// Сундук, пифос, полка с припасами.
+    Store,
+    Hearth,
+    /// Угли кузнечного горна.
+    Fire,
+    /// Корыто для закалки.
+    Trough,
+    /// Пара шагов в сторону (пройтись, подмести дальше, оглядеться).
+    Pace,
+}
+
+/// Место по соседству: откуда идти (`from` — рабочее место), где встать и куда смотреть.
+#[derive(Clone, Debug)]
+struct Station {
+    from: Vec3,
+    kind: Kind,
+    yaw: f32,
+    pts: Vec<Vec3>,
+    cum: Vec<f32>,
+}
+
+/// Проходимая клетка у предмета в `target` на полу высоты `floor_y`: не вплотную и не дальше `reach` м.
+fn stand_near(nav: &Nav, target: Vec3, floor_y: f32, reach: f32) -> Option<Vec3> {
+    let (ci, ck) = (((target.x - nav.x0) / CELL).floor() as i32, ((target.z - nav.z0) / CELL).floor() as i32);
+    let n = (reach / CELL).ceil() as i32;
+    let mut best: Option<(f32, usize)> = None;
+    for dk in -n..=n {
+        for di in -n..=n {
+            let Some(c) = nav.idx(ci + di, ck + dk) else { continue };
+            if !nav.walkable(c) || (nav.floor[c] - floor_y).abs() > 0.45 {
+                continue;
+            }
+            let p = nav.point(c);
+            let d = Vec2::new(p.x - target.x, p.z - target.z).length();
+            if !(0.45..=reach).contains(&d) {
+                continue;
+            }
+            if best.is_none_or(|(b, _)| d < b) {
+                best = Some((d, c));
+            }
+        }
+    }
+    best.map(|(_, c)| nav.point(c))
+}
+
+/// Дорога от рабочего места `from` к месту `stand` (короткая, без обходов через соседний дом).
+fn errand_path(nav: &Nav, from: Vec3, stand: Vec3, max_len: f32) -> Option<(Vec<Vec3>, Vec<f32>)> {
+    let direct = from.distance(stand);
+    if !(0.3..=max_len).contains(&direct) {
+        return None;
+    }
+    let pts = if nav.straight(from, stand) { vec![from, stand] } else { nav.local_path(from, stand, 3.0)? };
+    let mut cum = vec![0.0];
+    for w in pts.windows(2) {
+        cum.push(cum.last().unwrap() + w[0].distance(w[1]));
+    }
+    let len = *cum.last().unwrap();
+    (len <= max_len && len <= direct * 1.8 + 1.5).then_some((pts, cum))
+}
+
+impl Station {
+    fn new(nav: &Nav, from: Vec3, target: Vec3, kind: Kind) -> Option<Station> {
+        // Угли горна — в глубине кладки: к ним тянутся клещами с края.
+        let reach = if kind == Kind::Fire { 2.3 } else { 1.6 };
+        let stand = stand_near(nav, target, from.y, reach)?;
+        // К горну — хоть шаг; к остальному ближе метра не «ходят»: и так под рукой.
+        if kind != Kind::Fire && from.distance(stand) < 0.9 {
+            return None;
+        }
+        let (pts, cum) = errand_path(nav, from, stand, 12.0)?;
+        Some(Station { from, kind, yaw: yaw_to(stand, target), pts, cum })
+    }
+
+    /// Пара шагов в сторону: открытая клетка в 2–3,5 м по прямой.
+    fn pace(nav: &Nav, from: Vec3, seed: u64) -> Option<Station> {
+        (0..12).find_map(|k| {
+            let a = (unit(seed, k) + k as f32 / 12.0) * std::f32::consts::TAU;
+            let r = 2.0 + 1.5 * unit(seed, k + 50);
+            let q = from + Vec3::new(a.cos(), 0.0, a.sin()) * r;
+            let c = nav.cell_at(q.x, q.z).filter(|c| nav.walkable(*c) && (nav.floor[*c] - from.y).abs() < 0.3)?;
+            let q = nav.point(c);
+            nav.straight(from, q).then(|| {
+                let d = from.distance(q);
+                Station { from, kind: Kind::Pace, yaw: yaw_to(from, q), pts: vec![from, q], cum: vec![0.0, d] }
+            })
+        })
+    }
 }
 
 static TOWN: OnceLock<Town> = OnceLock::new();
@@ -734,6 +944,9 @@ impl Town {
         let residents = layout.residents.clone();
         let beds = layout.beds.clone();
         let anvils: Vec<Vec3> = layout.forges.iter().map(|f| f.anvil).collect();
+        let forges = layout.forges.clone();
+        let stores: Vec<Vec3> = layout.containers.iter().map(|c| c.pos).collect();
+        let hearths = layout.hearths.clone();
         let (min, max) = nav_bounds(&residents);
         let level = crate::level::colliders(layout);
         level.set_all_doors(true);
@@ -831,7 +1044,112 @@ impl Town {
                 near.into_iter().take(3).map(|(_, k)| k).find(|k| nav.local_path(r.pos, street[*k].pos, 10.0).is_some())
             })
             .collect();
-        Town { nav, residents, home_cell, bed, anvil, job, fields, spots, fishing, street, street_of }
+        // Места по соседству: ближайшие сундуки и пифосы, очаг, пара шагов в сторону; у кузнецов —
+        // угли горна и корыто для закалки.
+        let stations = residents
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let mut v = Vec::new();
+                if home_cell[i].is_none() {
+                    return v;
+                }
+                let home = r.pos;
+                let near = |pts: &[Vec3], max: f32| -> Vec<Vec3> {
+                    let mut c: Vec<(f32, Vec3)> = pts.iter().map(|p| (Vec2::new(p.x - home.x, p.z - home.z).length(), *p)).filter(|(d, p)| *d < max && (p.y - home.y).abs() < 1.4).collect();
+                    c.sort_by(|a, b| a.0.total_cmp(&b.0));
+                    c.into_iter().map(|(_, p)| p).collect()
+                };
+                v.extend(near(&stores, 9.0).into_iter().filter_map(|p| Station::new(&nav, home, p, Kind::Store)).take(2));
+                v.extend(near(&hearths, 9.0).into_iter().filter_map(|p| Station::new(&nav, home, p, Kind::Hearth)).take(1));
+                v.extend(Station::pace(&nav, home, hash(i as u64, 0x9ACE)));
+                if let Some((side, a)) = anvil[i]
+                    && let Some(f) = forges.iter().find(|f| f.anvil.distance(a) < 0.05)
+                {
+                    // Заготовку греет тот из двоих, кто стоит ближе к горну: второй не ходит сквозь него.
+                    let mate = anvil.iter().enumerate().any(|(j, x)| j != i && x.is_some_and(|(s2, a2)| a2.distance(a) < 0.05 && s2.distance(f.fire) < side.distance(f.fire)));
+                    if !mate {
+                        v.extend(Station::new(&nav, side, f.fire, Kind::Fire));
+                    }
+                    v.extend(Station::new(&nav, side, f.trough, Kind::Trough));
+                    v.extend(near(&stores, 9.0).into_iter().filter_map(|p| Station::new(&nav, side, p, Kind::Store)).take(1));
+                }
+                v
+            })
+            .collect();
+        Town { nav, residents, home_cell, bed, anvil, job, fields, spots, fishing, street, street_of, stations }
+    }
+
+    /// Чем житель занят по соседству с основным делом `act` на месте `pos` (у места `dest`).
+    fn rounds_for(&self, i: usize, act: Act, pos: Vec3, dest: Option<Dest>, day: u32, k: usize) -> Option<Arc<Rounds>> {
+        use Act::*;
+        let role = self.residents[i].role;
+        let here = |kind: Kind| self.stations[i].iter().filter(move |s| s.kind == kind && s.from.distance(pos) < 0.05);
+        let go = |s: &Station, act: Act, secs: f32, there: Way, back: Way, speed: f32| Errand { pts: s.pts.clone(), cum: s.cum.clone(), yaw: s.yaw, act, secs, speed, there, back };
+        let tongs = Way { carry: false, act: Stoke };
+        let sweep = Way { carry: false, act: Sweep };
+        let mut v: Vec<Errand> = Vec::new();
+        match act {
+            Hammer => {
+                v.extend(here(Kind::Fire).map(|s| go(s, Stoke, 10.0, Way::EMPTY, tongs, 1.1)));
+                v.extend(here(Kind::Fire).map(|s| go(s, Stoke, 7.0, Way::EMPTY, tongs, 1.1)));
+                v.extend(here(Kind::Trough).map(|s| go(s, Quench, 5.0, tongs, Way::EMPTY, 1.1)));
+                v.extend(here(Kind::Store).map(|s| go(s, Fetch, 4.0, Way::EMPTY, Way::LOADED, 1.1)));
+            }
+            Work | Weave | Write | Treat if dest.is_none() && role != Role::Student => {
+                v.extend(here(Kind::Store).map(|s| go(s, Fetch, 5.0, Way::EMPTY, if act == Work { Way::LOADED } else { Way::EMPTY }, 1.1)));
+                if matches!(act, Work) {
+                    v.extend(here(Kind::Hearth).map(|s| go(s, Tend, 6.0, Way::EMPTY, Way::EMPTY, 1.1)));
+                }
+            }
+            Stir if dest.is_none() => {
+                v.extend(here(Kind::Hearth).map(|s| go(s, Stir, 18.0, Way::EMPTY, Way::EMPTY, 1.0)));
+                v.extend(here(Kind::Hearth).map(|s| go(s, Stir, 24.0, Way::EMPTY, Way::EMPTY, 1.0)));
+                v.extend(here(Kind::Hearth).map(|s| go(s, Tend, 6.0, Way::EMPTY, Way::EMPTY, 1.0)));
+                v.extend(here(Kind::Store).map(|s| go(s, Fetch, 4.0, Way::EMPTY, Way::LOADED, 1.0)));
+            }
+            Arrange if dest.is_none() => {
+                v.extend(here(Kind::Store).map(|s| go(s, Fetch, 4.0, Way::EMPTY, Way::LOADED, 1.1)));
+                v.extend(here(Kind::Pace).map(|s| go(s, Arrange, 8.0, Way::EMPTY, Way::EMPTY, 1.0)));
+            }
+            Sweep if dest.is_none() => {
+                // Метёт на ходу: медленно до края двора и обратно.
+                v.extend(here(Kind::Pace).map(|s| go(s, Sweep, 5.0, sweep, sweep, 0.45)));
+                v.extend(here(Kind::Store).map(|s| go(s, Fetch, 4.0, Way::EMPTY, Way::LOADED, 1.0)));
+            }
+            Idle if dest.is_none() && role == Role::Child => {
+                // Дети не сидят на месте: бегают туда-сюда.
+                v.extend(here(Kind::Pace).map(|s| go(s, Idle, 4.0, Way::EMPTY, Way::EMPTY, 2.4)));
+            }
+            Idle if dest.is_none() && role != Role::Patient => {
+                v.extend(here(Kind::Store).map(|s| go(s, Fetch, 4.0, Way::EMPTY, Way::EMPTY, 1.0)));
+                v.extend(here(Kind::Hearth).map(|s| go(s, Tend, 5.0, Way::EMPTY, Way::EMPTY, 1.0)));
+                v.extend(here(Kind::Pace).map(|s| go(s, Idle, 7.0, Way::EMPTY, Way::EMPTY, 0.9)));
+            }
+            Guard => {
+                // Часовой не стоит столбом: проходит пару шагов вдоль поста и возвращается.
+                let st = Station::pace(&self.nav, pos, hash(i as u64, 0x6A7D ^ k as u64));
+                v.extend(st.iter().map(|s| go(s, Guard, 8.0, Way::EMPTY, Way::EMPTY, 0.8)));
+            }
+            Browse if dest.is_some() => {
+                // На рынке переходит от прилавка к прилавку (к соседним местам площади).
+                let spots = dest.and_then(|d| self.spots.get(&d)).map(Vec::as_slice).unwrap_or(&[]);
+                let mut near: Vec<&Spot> = spots.iter().filter(|s| (3.0..10.0).contains(&s.pos.distance(pos)) && (s.pos.y - pos.y).abs() < 0.4).collect();
+                near.sort_by_key(|s| hash(day as u64 ^ (i as u64) << 8, (s.pos.x * 4.0) as i64 as u64));
+                for sp in near.into_iter().take(2) {
+                    if let Some((pts, cum)) = errand_path(&self.nav, pos, sp.pos, 11.0) {
+                        v.push(Errand { pts, cum, yaw: sp.yaw, act: Browse, secs: 14.0, speed: 1.0, there: Way::EMPTY, back: Way::EMPTY });
+                    }
+                }
+            }
+            _ => {}
+        }
+        if v.is_empty() {
+            return None;
+        }
+        let longest = v.iter().map(Errand::secs_total).fold(0.0, f32::max);
+        let slot = (40.0 + 30.0 * unit(i as u64, 0x5107 ^ k as u64)).max(longest / 0.6);
+        Some(Arc::new(Rounds { errands: v, slot, seed: hash(i as u64 ^ (day as u64) << 24, k as u64) }))
     }
 
     /// Путь от точки `from` к месту `d` (через поле), заканчивая в `to` (место у цели).
@@ -883,7 +1201,7 @@ impl Town {
     pub fn plan_day(&self, day: u32) -> DayPlans {
         let wishes: Vec<Vec<Wish>> = (0..self.residents.len()).map(|i| self.wishes(i, day)).collect();
         let places = self.allocate(day, &wishes);
-        let people = (0..self.residents.len()).map(|i| self.build_plan(i, &wishes[i], &places[i])).collect();
+        let people = (0..self.residents.len()).map(|i| self.build_plan(i, day, &wishes[i], &places[i])).collect();
         DayPlans { day, people }
     }
 
@@ -955,7 +1273,7 @@ impl Town {
         out
     }
 
-    fn build_plan(&self, i: usize, wishes: &[Wish], places: &[Option<(Spot, Option<u16>)>]) -> Plan {
+    fn build_plan(&self, i: usize, day: u32, wishes: &[Wish], places: &[Option<(Spot, Option<u16>)>]) -> Plan {
         let r = &self.residents[i];
         let mut segs = Vec::new();
         let home = r.pos;
@@ -976,7 +1294,7 @@ impl Town {
                     (Act::Sleep, None) => (home, r.yaw, Act::Away, None),
                     _ => (home, r.yaw, if act == Act::Lie { Act::Idle } else { act }, None),
                 };
-                segs.push(Seg::Stay(Stay { t0, t1, pos, yaw, act, partner: None, lie }));
+                segs.push(Seg::Stay(Stay { t0, t1, pos, yaw, act, partner: None, lie, rounds: None }));
             }
             return Plan { segs };
         };
@@ -1050,7 +1368,10 @@ impl Town {
             }
             let t1 = next_t.max(t + 1.0).min(DAY);
             if t1 > t {
-                segs.push(Seg::Stay(Stay { t0: t, t1, pos, yaw, act, partner, lie }));
+                let rounds = if lie.is_some() || partner.is_some() { None } else { self.rounds_for(i, act, pos, dest, day, k) };
+                // Котёл — на очаге: мешать ходят туда, а на своём месте режут и месят.
+                let act = if act == Act::Stir && rounds.as_ref().is_some_and(|r| r.errands.iter().any(|e| e.act == Act::Stir)) { Act::Work } else { act };
+                segs.push(Seg::Stay(Stay { t0: t, t1, pos, yaw, act, partner, lie, rounds }));
                 t = t1;
             }
             at_pos = pos;
@@ -1061,7 +1382,7 @@ impl Town {
         }
         if let Some(Seg::Walk(_)) = segs.first() {
             // День всегда начинается на месте (на случай, если первым шагом оказалась дорога).
-            segs.insert(0, Seg::Stay(Stay { t0: 0.0, t1: 0.0, pos: home, yaw: r.yaw, act: Act::Idle, partner: None, lie: None }));
+            segs.insert(0, Seg::Stay(Stay { t0: 0.0, t1: 0.0, pos: home, yaw: r.yaw, act: Act::Idle, partner: None, lie: None, rounds: None }));
         }
         Plan { segs }
     }
@@ -1829,6 +2150,51 @@ mod tests {
     }
 
     #[test]
+    fn people_step_away_on_errands_and_come_back() {
+        // Рядом с игроком люди не стоят столбом: отходят к горну, в кладовую, к очагу,
+        // метут двор на ходу — и возвращаются на рабочее место по проходимой земле.
+        let town = test_town();
+        let plans = town.plan_day(4);
+        let with_rounds = plans.people.iter().filter(|p| p.segs.iter().any(|s| matches!(s, Seg::Stay(x) if x.rounds.is_some()))).count();
+        let mut kinds: HashMap<Act, usize> = HashMap::new();
+        let mut bad = Vec::new();
+        for (i, p) in plans.people.iter().enumerate() {
+            for s in &p.segs {
+                let Seg::Stay(st) = s else { continue };
+                let Some(r) = &st.rounds else { continue };
+                for e in &r.errands {
+                    *kinds.entry(e.act).or_default() += 1;
+                    assert!(e.pts[0].distance(st.pos) < 0.05, "житель {i}: отлучка начинается не с рабочего места");
+                    assert!(e.secs_total() <= r.slot * 0.7 + 1e-3, "житель {i}: отлучка {:?} не помещается в отрезок", e.act);
+                    let mut d = 0.0;
+                    while d < e.len() {
+                        let (q, _, _) = along(&e.pts, &e.cum, d);
+                        if town.nav.cell_at(q.x, q.z).is_none_or(|c| !town.nav.walkable(c)) && town.nav.nearest(q, 0.5).is_none() {
+                            bad.push((i, q));
+                        }
+                        d += 0.4;
+                    }
+                }
+                // К концу пребывания — на месте (дальше по плану идёт оттуда).
+                let end = p.state(st.t1 - 1.0).unwrap();
+                if st.t1 - st.t0 > 2.0 && end.pos.distance(st.pos) > 0.05 {
+                    bad.push((i, end.pos));
+                }
+            }
+        }
+        eprintln!("с отлучками {with_rounds} из {}; дела: {kinds:?}", plans.people.len());
+        assert!(with_rounds * 4 >= town.home_cell.iter().filter(|c| c.is_some()).count(), "отлучаются только {with_rounds}");
+        assert!(kinds.contains_key(&Act::Stoke) && kinds.contains_key(&Act::Fetch), "{kinds:?}");
+        assert!(bad.len() < 10, "сквозь стены или не вернулись: {:?}", &bad[..bad.len().min(10)]);
+        // За утро работы кузнец успевает и к горну, и обратно к наковальне. Отлучки выбираются
+        // по жребию на каждый отрезок, поэтому смотрим несколько часов, а не один: иначе тест
+        // зависит от того, каким по счёту житель оказался после правок расстановки города.
+        let smith = plans.people.iter().position(|p| p.state(10.0 * 3600.0).is_some_and(|s| s.act == Act::Hammer)).expect("кузнец за работой");
+        let acts: std::collections::HashSet<Act> = (0..720).filter_map(|k| plans.people[smith].state(8.0 * 3600.0 + k as f64 * 20.0).map(|s| s.act)).collect();
+        assert!(acts.contains(&Act::Hammer) && acts.contains(&Act::Stoke), "кузнец: {acts:?}");
+    }
+
+    #[test]
     fn smith_hammers_and_priest_serves() {
         let town = test_town();
         let plans = town.plan_day(4);
@@ -1878,5 +2244,47 @@ mod shot_tests {
             }
         }
         println!("TOUR={}", out.join(";"));
+    }
+}
+
+
+#[cfg(test)]
+mod errand_shots {
+    use super::*;
+
+    /// Виды для снимков отлучек: `cargo test errand_tour -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn errand_tour() {
+        let town = test_town();
+        let plans = town.plan_day(0);
+        for want in [Act::Stoke, Act::Sweep, Act::Fetch, Act::Tend, Act::Browse, Act::Guard] {
+            let mut n = 0;
+            for (i, p) in plans.people.iter().enumerate() {
+                if n >= 2 {
+                    break;
+                }
+                for s in &p.segs {
+                    let Seg::Stay(st) = s else { continue };
+                    let Some(r) = &st.rounds else { continue };
+                    if !(6.0 * 3600.0..16.0 * 3600.0).contains(&st.t0) || !r.errands.iter().any(|e| e.act == want) {
+                        continue;
+                    }
+                    // Первая минута игрового времени, когда житель на месте отлучки с этим делом.
+                    let t = (0..4000).map(|k| st.t0 + k as f64 * 20.0).find(|t| p.state(*t).is_some_and(|x| x.act == want && !x.walking));
+                    let Some(t) = t else { continue };
+                    let e = r.errands.iter().find(|e| e.act == want).unwrap();
+                    let (a, b) = (st.pos, *e.pts.last().unwrap());
+                    let mid = (a + b) * 0.5;
+                    let fwd = (b - a).normalize_or(Vec3::X);
+                    let side = Vec3::new(fwd.z, 0.0, -fwd.x);
+                    let cam = [side * 4.5, -side * 4.5, side * 3.0 - fwd * 2.0, -side * 3.0 + fwd * 2.0].into_iter().map(|o| mid + o).find(|c| town.nav.nearest(*c, 0.3).is_some() && town.nav.straight(mid, *c));
+                    let Some(cam) = cam else { continue };
+                    println!("{want:?} житель {i} {:?} база {a} место {b} время {:.3} ч  TOUR {:.1},{:.1},{:.1},{:.1},{:.1},{:.1}", town.residents[i].role, t / 3600.0, cam.x, cam.y + 1.7, cam.z, mid.x, mid.y + 0.9, mid.z);
+                    n += 1;
+                    break;
+                }
+            }
+        }
     }
 }
