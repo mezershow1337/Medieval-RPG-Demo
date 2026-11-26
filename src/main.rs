@@ -108,6 +108,7 @@ mod trade_ui;
 mod ui_cursor;
 mod ui_theme;
 mod vegetation;
+mod swim;
 mod water;
 mod weight;
 mod work;

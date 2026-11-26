@@ -290,9 +290,10 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         // Луч из воды в воздух: окно Снелла (≈ 97°), за ним — полное внутреннее отражение.
         let tr = refract(-v, n_down, 1.333);
         var col: vec3<f32>;
-        let scatter = water.deep.rgb * (0.35 + 0.65 * max(water.sky.sun.y, 0.0)) * 2.0;
+        // Цвет толщи снизу — как дымка под водой (swim.rs), иначе на стыке видна граница.
+        let scatter = vec3<f32>(0.05, 0.22, 0.24) * (0.25 + 0.75 * smoothstep(-0.05, 0.4, water.sky.sun.y)) * (1.0 - 0.6 * clamp(water.sky.extra.x, 0.0, 1.0));
         if dot(tr, tr) < 1e-4 {
-            col = scatter * 0.7;
+            col = scatter;
         } else {
             let cos_t = max(dot(-v, n_down), 0.0);
             let fres = 0.02 + 0.98 * pow(1.0 - cos_t, 5.0);
@@ -303,7 +304,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
                 let uv = screen_uv(in.position.xy) + (tr.xz - (-v).xz) * 0.05;
                 above = scene_color(uv);
             }
-            col = mix(above, scatter * 0.7, clamp(fres * 1.6, 0.0, 1.0));
+            col = mix(above, scatter, clamp(fres * 1.6, 0.0, 1.0));
         }
         pbr_input.material.base_color = vec4<f32>(0.0, 0.0, 0.0, 1.0);
         pbr_input.material.reflectance = vec3<f32>(0.0);

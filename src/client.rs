@@ -49,7 +49,7 @@ pub struct RemoteActor {
 
 /// Скелет с телом (дочерняя сущность бойца или тела на земле).
 #[derive(Component)]
-struct BodyRig;
+pub(crate) struct BodyRig;
 
 /// Тело падает навзничь после смерти.
 #[derive(Component)]
@@ -179,7 +179,7 @@ pub fn run(start: crate::menu::Start) {
         .add_plugins((RenetClientPlugin, NetcodeClientPlugin, PlayerPlugin, fight::FightPlugin, crate::self_body::SelfBodyPlugin, hud::HudPlugin, graphics::GraphicsPlugin, crate::textures::TexturesPlugin))
         .add_plugins(rig::RigPlugin)
         .add_plugins(crate::vegetation::VegetationPlugin)
-        .add_plugins(crate::water::WaterPlugin)
+        .add_plugins((crate::water::WaterPlugin, crate::swim::SwimPlugin))
         .add_plugins(crate::static_bounds::StaticBoundsPlugin)
         .add_plugins(crate::loot_client::LootClientPlugin)
         .add_plugins(crate::doors::DoorClientPlugin)
