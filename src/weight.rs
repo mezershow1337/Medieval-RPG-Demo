@@ -235,6 +235,9 @@ pub fn unit_weight(base: ItemBaseId) -> f32 {
     if let Some(a) = crate::arsenal::of_base(base) {
         return a.kg;
     }
+    if let Some(w) = crate::fishing::weight(name) {
+        return w;
+    }
     WEIGHTS.iter().find(|(n, _)| *n == name).map(|(_, w)| *w).unwrap_or_else(|| estimate(base))
 }
 

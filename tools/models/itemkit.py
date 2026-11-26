@@ -473,7 +473,13 @@ class Nodes:
         """Яркость фото-материала ambientCG (CC0) в кубической проекции, ~1 в среднем.
         stretch — растяжение по осям объекта (волокна дерева вдоль оси)."""
         import photo as ph
-        path, mean = ph.color_path(asset)
+        try:
+            path, mean = ph.color_path(asset)
+        except Exception as e:  # нет сети до ambientCG и пустой кэш: процедурная замена фото
+            print(f"[itemkit] фото {asset} недоступно ({e.__class__.__name__}), шум вместо него")
+            vec = self.coord(tuple(1.0 / (scale_m * s) for s in stretch))
+            n = self.noise(6.0, 8, 0.62, vec, dist=0.4)
+            return self.math("ADD", self.math("MULTIPLY", self.math("SUBTRACT", n, 0.5), 0.9 * contrast), 1.0)
         name = "photo_" + asset
         img = bpy.data.images.get(name) or bpy.data.images.load(path)
         img.name = name

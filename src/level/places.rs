@@ -203,6 +203,7 @@ fn city_places() -> Vec<Place> {
         p("clay_pit", "Глиняный карьер", "—", ClayPit, on_ground(mines::CLAY_PIT.x, mines::CLAY_PIT.y - 6.5), 8.0),
         p("sand_beach", "Песок у Песочной бухты", "—", Beach, on_ground(mines::SAND_BEACH.x + 2.0, mines::SAND_BEACH.y + 3.0), 10.0),
         p("quarry", "Каменоломня за бухтой", "λατομεῖον", Quarry, on_ground(mines::QUARRY.x, mines::QUARRY.y - 9.0), 14.0),
+        p("fish_hut", "Рыбацкая лачуга у Песочной бухты", "καλύβη", Quay, city::outside::fishing::trader_point(), 8.0),
     ]
 }
 

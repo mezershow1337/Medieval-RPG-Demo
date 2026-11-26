@@ -16,6 +16,7 @@ use std::f32::consts::{FRAC_PI_2, PI, TAU};
 use terrain::{balka_x, ground_y};
 
 pub(crate) mod mines;
+pub(crate) mod fishing;
 pub(crate) mod village;
 
 const ROAD_W: f32 = 4.0;
@@ -42,6 +43,7 @@ pub fn outside(b: &mut Builder) {
     brigand_camps(b);
     herbs(b);
     mines::mines(b);
+    fishing::fishing_hut(b);
     wilderness(b, &roads);
     // Село — последним: его усадьба на продажу идёт в конце списка (сохранения не сдвигаются).
     village::village(b);

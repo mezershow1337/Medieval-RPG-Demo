@@ -206,6 +206,9 @@ pub fn base_price(base: ItemBaseId) -> u32 {
     if let Some(a) = crate::arsenal::of_base(base) {
         return a.price;
     }
+    if let Some(p) = crate::fishing::price(info.name) {
+        return p;
+    }
     if let Some(p) = PRICE_LIST
         .iter()
         .find(|(n, _)| *n == info.name)

@@ -653,6 +653,22 @@ pub const ITEM_BASES: &[ItemBase] = &[
     base!("Заступ", "Заступ", None, (1, 3), None, 1, &[], Sh::Polearm, false),
     base!("Топор дровосека", "Топор др.", None, (1, 3), None, 1, &[], Sh::Polearm, false),
     base!("Феофраст. Исследование о растениях", "Феофр.раст", None, (1, 2), None, 1, &[], Sh::Small, false),
+    // -----------------------------------------------------------------------
+    // Рыбалка (fishing.rs): удочки, крючки, наживка и рыба Чёрного моря.
+    // -----------------------------------------------------------------------
+    base!("Тростниковая удочка", "Удочка", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 4.0)), 1, &[], Sh::Polearm, false),
+    base!("Можжевеловая удочка", "Удочка мож.", Some(S::MainHand), (1, 5), Some((Stat::WeaponDamage, 6.0)), 1, &[], Sh::Polearm, false),
+    base!("Бронзовые крючки", "Крючки", None, (1, 1), None, 20, &[], Sh::Small, false),
+    base!("Морские черви", "Черви", None, (1, 1), None, 30, &[], Sh::Small, false),
+    base!("Креветки", "Креветки", None, (1, 1), None, 30, &[], Sh::Small, false),
+    base!("Хамса", "Хамса", None, (1, 1), None, 20, &[], Sh::Small, false),
+    base!("Ставрида", "Ставрида", None, (1, 2), None, 6, &[], Sh::Small, false),
+    base!("Барабулька", "Барабулька", None, (1, 1), None, 8, &[], Sh::Small, false),
+    base!("Кефаль", "Кефаль", None, (1, 3), None, 3, &[], Sh::Small, false),
+    base!("Морской ёрш", "Ёрш", None, (1, 2), None, 4, &[], Sh::Small, false),
+    base!("Луфарь", "Луфарь", None, (1, 3), None, 2, &[], Sh::Small, false),
+    base!("Калкан", "Калкан", None, (2, 2), None, 1, &[], Sh::Small, false),
+    base!("Осётр", "Осётр", None, (2, 4), None, 1, &[], Sh::Small, false),
 ];
 
 /// Старое название → новое (предметы переименованы под VI век).

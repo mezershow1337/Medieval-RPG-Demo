@@ -6,7 +6,7 @@ use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendTyp
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_0028;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_0029;
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -100,6 +100,14 @@ pub fn connection_config() -> ConnectionConfig {
     };
     config.server_channels_config.push(mine.clone());
     config.client_channels_config.push(mine);
+    // Канал 15 — рыбалка: заброс, поклёвка, вываживание (см. fishing_net.rs).
+    let fish = ChannelConfig {
+        channel_id: crate::fishing_net::CH_FISH,
+        max_memory_usage_bytes: 256 * 1024,
+        send_type: SendType::ReliableOrdered { resend_time: std::time::Duration::from_millis(300) },
+    };
+    config.server_channels_config.push(fish.clone());
+    config.client_channels_config.push(fish);
     config
 }
 
