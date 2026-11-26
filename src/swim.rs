@@ -33,9 +33,10 @@ const SWIM_SPRINT: f32 = 3.6;
 const DIVE_SPEED: f32 = 2.1;
 
 /// Голова под водой: одно правило для клиента (полоска дыхания) и сервера (удушье).
-/// По среднему уровню моря, без волн: сервер волн не считает.
+/// По среднему уровню моря, без волн (сервер волн не считает), с запасом на впадину волны:
+/// пловец на поверхности, качаясь на зыби, не задыхается.
 pub fn head_underwater(feet: Vec3, eye_height: f32) -> bool {
-    crate::water::is_water(feet.x, feet.z) && feet.y + eye_height < WATER_Y - 0.08
+    crate::water::is_water(feet.x, feet.z) && feet.y + eye_height < WATER_Y - 0.5
 }
 
 /// Запас дыхания за кадр: под водой тратится, на воздухе восстанавливается за ~6 с.
@@ -56,7 +57,8 @@ impl Plugin for SwimPlugin {
             .add_systems(Startup, spawn_breath_bar.after(crate::inventory_ui::setup_fonts))
             .add_systems(Update, (swim_state.before(crate::player::PlayerMoveSet), (track_breath, show_breath_bar).chain().after(crate::player::PlayerMoveSet)))
             .add_systems(Update, pose_swimmers.after(crate::rig::PoseSet).before(crate::rig::ApplyPoseSet))
-            .add_systems(PostUpdate, underwater_view)
+            .add_systems(Startup, spawn_backdrop)
+            .add_systems(PostUpdate, underwater_view.before(bevy::transform::TransformSystems::Propagate))
             .add_systems(Update, dev_swim_shot.run_if(crate::settings::env_flag("MRPG_SWIM_SHOT")))
             .add_systems(Update, dev_swim_body.in_set(crate::rig::PoseSet).run_if(crate::settings::env_flag("MRPG_SWIM_BODY")));
     }
@@ -268,11 +270,59 @@ fn drown(time: Res<Time>, mut world: ResMut<crate::server::GameWorld>, mut breat
 
 /// Камера под водой: густая зелёная дымка вместо воздушной (дальше 20–30 м не видно), а над
 /// головой — изнанка волн. Воздушную дымку возвращаем, как только голова над водой.
-fn underwater_view(time: Res<Time>, mood: Option<Res<crate::daylight::CurrentMood>>, mut cams: Query<(Entity, &GlobalTransform, &mut DistanceFog), With<Camera3d>>, mut saved: Local<std::collections::HashMap<Entity, DistanceFog>>) {
+/// Стенка-«задник» вокруг камеры под водой. Дно и поверхность конечны, и у самого горизонта
+/// между ними просвечивало бы небо, которое туман не красит. Стенка ниже поверхности, так что
+/// окно Снелла (небо сквозь воду вверху) она не закрывает; туман целиком красит её в цвет воды.
+#[derive(Component)]
+struct Backdrop;
+
+fn spawn_backdrop(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
+    const N: usize = 48;
+    let mut pos = Vec::new();
+    let mut idx = Vec::new();
+    for i in 0..=N {
+        let a = i as f32 / N as f32 * std::f32::consts::TAU;
+        pos.push([a.cos(), 0.0, a.sin()]);
+        pos.push([a.cos(), -1.0, a.sin()]);
+    }
+    for i in 0..N as u32 {
+        let (a, b) = (i * 2, i * 2 + 2);
+        idx.extend([a, a + 1, b, b, a + 1, b + 1]);
+    }
+    let center = pos.len() as u32;
+    pos.push([0.0, -1.0, 0.0]);
+    for i in 0..N as u32 {
+        idx.extend([center, i * 2 + 1, i * 2 + 3]);
+    }
+    let normals = vec![[0.0, 1.0, 0.0]; pos.len()];
+    let mesh = Mesh::new(bevy::mesh::PrimitiveTopology::TriangleList, default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+        .with_inserted_indices(bevy::mesh::Indices::U32(idx));
+    let mat = StandardMaterial { base_color: Color::linear_rgb(0.05, 0.22, 0.24), unlit: true, cull_mode: None, ..default() };
+    commands.spawn((
+        Backdrop,
+        Mesh3d(meshes.add(mesh)),
+        MeshMaterial3d(mats.add(mat)),
+        Transform::from_scale(Vec3::new(90.0, 60.0, 90.0)),
+        Visibility::Hidden,
+        bevy::light::NotShadowCaster,
+        bevy::camera::visibility::NoFrustumCulling,
+    ));
+}
+
+fn underwater_view(
+    time: Res<Time>,
+    mood: Option<Res<crate::daylight::CurrentMood>>,
+    mut cams: Query<(Entity, &GlobalTransform, &Camera, &mut DistanceFog), With<Camera3d>>,
+    mut backdrop: Query<(&mut Transform, &mut Visibility), With<Backdrop>>,
+    mut saved: Local<std::collections::HashMap<Entity, DistanceFog>>,
+) {
+    let mut wall = None;
     let t = time.elapsed_secs_wrapped();
     let (light, night) = mood.as_ref().map_or((1.0, 0.0), |m| (m.0.lux / 100_000.0, m.0.night));
     let light = light.clamp(0.02, 1.0).sqrt() * (1.0 - 0.6 * night);
-    for (e, gt, mut fog) in &mut cams {
+    for (e, gt, cam, mut fog) in &mut cams {
         let p = gt.translation();
         let under = crate::water::is_water(p.x, p.z) && p.y < crate::water::surface_y(p.x, p.z, t) - 0.03;
         if !under {
@@ -282,6 +332,9 @@ fn underwater_view(time: Res<Time>, mood: Option<Res<crate::daylight::CurrentMoo
             continue;
         }
         saved.entry(e).or_insert_with(|| fog.clone());
+        if cam.is_active {
+            wall = Some(p);
+        }
         // Чем глубже, тем темнее и синее.
         let depth = (WATER_Y - p.y).max(0.0);
         let dim = (-depth * 0.09).exp();
@@ -292,6 +345,14 @@ fn underwater_view(time: Res<Time>, mood: Option<Res<crate::daylight::CurrentMoo
             directional_light_exponent: 8.0,
             falloff: FogFalloff::from_visibility(26.0),
         };
+    }
+    if let Ok((mut tf, mut vis)) = backdrop.single_mut() {
+        if let Some(p) = wall {
+            tf.translation = Vec3::new(p.x, WATER_Y - 0.4, p.z);
+            vis.set_if_neq(Visibility::Inherited);
+        } else {
+            vis.set_if_neq(Visibility::Hidden);
+        }
     }
 }
 
