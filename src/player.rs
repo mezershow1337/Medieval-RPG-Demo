@@ -137,17 +137,22 @@ fn movement(
     keys: Res<ButtonInput<KeyCode>>,
     level: Res<LevelColliders>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
-    mut player: Query<(&mut LocalPlayer, &mut Transform, Option<&mut crate::fight::LocalFighter>)>,
+    mut player: Query<(&mut LocalPlayer, &mut Transform, Option<&mut crate::fight::LocalFighter>, Option<&crate::swim::Swimming>)>,
     others: Query<&Transform, (With<crate::client::RemoteActor>, Without<LocalPlayer>)>,
     dev: Option<Res<crate::console::DevMove>>,
 ) {
     let dt = time.delta_secs().min(1.0 / 20.0);
     let controls = cursor_locked(&cursor);
     let cheats = dev.map(|d| d.cheats).unwrap_or_default();
-    for (mut p, mut transform, mut fighter) in &mut player {
+    for (mut p, mut transform, mut fighter, swimming) in &mut player {
         let pressed = |k| controls && keys.pressed(k);
         if cheats.fly {
             fly(&mut p, &mut transform, &level, cheats, dt, pressed);
+            continue;
+        }
+        // В воде — плывём (см. swim.rs).
+        if swimming.is_some() {
+            crate::swim::swim_move(&mut p, &mut transform, &level, fighter.as_deref_mut(), dt, time.elapsed_secs_wrapped(), pressed);
             continue;
         }
         let mut wish = Vec3::ZERO;

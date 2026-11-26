@@ -352,7 +352,7 @@ fn animate_view_sword(
     time: Res<Time>,
     assets: Res<CharacterAssets>,
     shake: Res<Shake>,
-    local: Query<(&LocalPlayer, &LocalFighter)>,
+    local: Query<(&LocalPlayer, &LocalFighter, Has<crate::swim::Swimming>)>,
     mut camera: Query<&mut Transform, (With<PlayerCamera>, Without<ViewSword>)>,
     mut sword: Query<(&mut Transform, &mut Visibility, &Children), (With<ViewSword>, Without<PlayerCamera>)>,
     mut blades: Query<(&Blade, &mut MeshMaterial3d<StandardMaterial>)>,
@@ -366,7 +366,7 @@ fn animate_view_sword(
     mut smoothed: Local<Option<(Vec3, Quat)>>,
     (work, fishing, mut rod_view): (Option<Res<crate::work_client::MyWork>>, Option<Res<crate::fishing_client::FishingHands>>, Option<ResMut<crate::fishing_client::RodView>>),
 ) {
-    let Ok((p, f)) = local.single() else { return };
+    let Ok((p, f, swimming)) = local.single() else { return };
     let dt = time.delta_secs();
     // Камера идёт за ударом (плечи и голова двигаются вместе с клинком), плюс тряска.
     let target = swing_camera(&f.fighter.action, f.fighter.weapon);
@@ -378,7 +378,8 @@ fn animate_view_sword(
         cam.rotation = Quat::from_rotation_y(m.y) * Quat::from_rotation_x(p.pitch + m.x + (t.sin() * s)) * Quat::from_rotation_z(m.z + (t * 1.3).cos() * s);
     }
     let Ok((mut st, mut vis, children)) = sword.single_mut() else { return };
-    *vis = if f.fighter.is_dead() || crate::work_client::hands_busy(work.as_deref()) { Visibility::Hidden } else { Visibility::Inherited };
+    // Вплавь руки гребут — оружия в кадре нет.
+    *vis = if f.fighter.is_dead() || swimming || crate::work_client::hands_busy(work.as_deref()) { Visibility::Hidden } else { Visibility::Inherited };
     let (hilt, dir) = combat::view_weapon_pose(&f.fighter.action, f.fighter.weapon, time.elapsed_secs());
     // Удар в мире наклонён на 0.6 от взгляда, а камера — на весь взгляд; компенсируем разницу.
     let fix = Quat::from_rotation_x(-p.pitch * 0.4);

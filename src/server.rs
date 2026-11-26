@@ -186,6 +186,7 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .add_plugins(crate::fishing_server::FishingServerPlugin)
         .add_plugins(crate::towns_server::TownServerPlugin)
         .add_plugins(crate::console_server::ConsoleServerPlugin)
+        .add_plugins(crate::swim::SwimServerPlugin)
         .add_systems(Update, (receive_client_messages, run_npcs, combat_tick, respawns, send_snapshots).chain());
     run_in_one_thread(&mut app);
     info!("Сервер слушает {addr}");

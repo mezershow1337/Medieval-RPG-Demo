@@ -433,6 +433,7 @@ fn tick_fishing(
     mut rod: ResMut<RodView>,
 ) {
     let dt = time.delta_secs();
+    let wt = time.elapsed_secs_wrapped();
     state.clock += dt;
     let clock = state.clock;
     if let Some(cam) = eye(&cams) {
@@ -460,7 +461,6 @@ fn tick_fishing(
         let flat = Vec3::new(f.x, 0.0, f.z).normalize_or_zero();
         c.translation() + flat * 1.05 + c.right().as_vec3() * 0.12 - Vec3::Y * 0.1
     });
-    let wave = |p: Vec3, t: f32| 0.025 * (t * 1.7 + p.x * 0.4).sin() + 0.015 * (t * 2.3 + p.z * 0.5).sin();
     let mut ripple = false;
     let tip = state.tip;
     let bait = state.bait;
@@ -515,8 +515,8 @@ fn tick_fishing(
                 dip = 0.0;
             }
             state.dip += (dip - state.dip) * (1.0 - (-dt * 14.0).exp());
-            let base = Vec3::new(state.bobber.x, crate::level::WATER_Y, state.bobber.z);
-            state.bobber = base + Vec3::Y * (wave(base, clock) - state.dip * 0.12);
+            let base = Vec3::new(state.bobber.x, crate::water::surface_y(state.bobber.x, state.bobber.z, wt), state.bobber.z);
+            state.bobber = base + Vec3::Y * (0.008 * (clock * 2.3).sin() - state.dip * 0.12);
         }
         Phase::Fighting { fight, dir, origin, offset, .. } => {
             // Рыба уходит в сторону — поплавок (леса) уводит туда же.
@@ -525,7 +525,7 @@ fn tick_fishing(
             *offset += (want - *offset) * (1.0 - (-dt * 1.5).exp());
             let p = *origin + *dir * fight.distance + side * *offset;
             let burst = fight.burst > 0.0;
-            let y = crate::level::WATER_Y - 0.06 + if burst { 0.05 * (clock * 25.0).sin() } else { 0.0 };
+            let y = crate::water::surface_y(p.x, p.z, wt) - 0.06 + if burst { 0.05 * (clock * 25.0).sin() } else { 0.0 };
             state.bobber = Vec3::new(p.x, y, p.z);
             state.dip = 1.0;
             if burst && (clock * 3.0).fract() < dt * 3.0 {
@@ -552,7 +552,7 @@ fn tick_fishing(
     }
     if ripple && let Some(a) = assets.as_ref() {
         state.ripple = clock;
-        let p = Vec3::new(state.bobber.x, crate::level::WATER_Y + 0.02, state.bobber.z);
+        let p = Vec3::new(state.bobber.x, crate::water::surface_y(state.bobber.x, state.bobber.z, wt) + 0.02, state.bobber.z);
         commands.spawn((Ripple, Mesh3d(a.ring.clone()), MeshMaterial3d(a.ring_mat.clone()), Transform::from_translation(p).with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)).with_scale(Vec3::splat(0.05)), bevy::light::NotShadowCaster));
     }
     let _ = loot;
