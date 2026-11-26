@@ -227,6 +227,7 @@ pub fn stall_slots(id: &str) -> Vec<StallSlot> {
     match id {
         "agora" => public::agora_stalls().into_iter().map(behind).collect(),
         "port_market" => port::market_stalls().into_iter().map(behind).collect(),
+        "quay" => port::quay_stalls().into_iter().map(behind).collect(),
         "apothecary_agora" => vec![behind(houses::shop_counter(17, -2, Side::S))],
         "apothecary_port" => vec![behind(houses::shop_counter(17, 1, Side::N))],
         "iron_yard" => vec![behind(crafts::iron_yard_counter())],
