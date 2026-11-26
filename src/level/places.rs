@@ -192,7 +192,7 @@ fn city_places() -> Vec<Place> {
         p("alan_camp", "Аланский стан", "—", AlanCamp, on_ground(ALAN_CAMP.x, ALAN_CAMP.z + 3.0), 25.0),
         p("goth_smithy", "Кузница готов", "—", Smithy, smith_point(gs, 1.6, 1.4), 6.0),
         p("goth_bloomery", "Сыродутный горн готов", "—", Smithy, smith_point(gb, 1.6, -1.6), 4.0),
-        p("phocas_village", "Село Святого Фоки", "κώμη", Village, city::outside::village::stall_point(), 40.0),
+        p("phocas_village", "Село Святого Фоки", "κώμη", Village, city::outside::village::stall_point(), 56.0),
         p("phocas_tavern", "Корчма в селе Святого Фоки", "καπηλεῖον", Tavern, city::outside::village::tavern_point(), 4.0),
         p("phocas_pottery", "Сельский гончар", "κεραμεῖον", Pottery, city::outside::village::potter_point(), 6.0),
         p("steppe_forge", "Горн кочевого кузнеца", "—", Smithy, smith_point(sf, 1.6, 1.4), 4.0),

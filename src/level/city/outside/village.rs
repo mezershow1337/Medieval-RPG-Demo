@@ -120,6 +120,7 @@ pub fn village(b: &mut Builder) {
     fields(b, &mut rng);
     sheep_fold(b);
     vineyard(b, &mut rng);
+    greenery(b, &mut rng);
 }
 
 /// Площадка под постройку, как [`terrace`], но с частыми низкими ступенями (по 0,3 м):
@@ -135,6 +136,105 @@ fn pad(b: &mut Builder, r: Rect, mat: Mat) -> f32 {
         b.solid([r.x0 - e, lo - 0.8, r.z0 - e], [r.x1 + e, y - 0.3 * i as f32, r.z1 + e], Mat::Earth);
     }
     y
+}
+
+// ---------------- зелень ----------------
+
+/// Сад, кипарисы у церкви, кусты по межам и вдоль дороги, деревья вокруг села:
+/// село стоит в зелени, а не на голом плато.
+fn greenery(b: &mut Builder, rng: &mut Rng) {
+    let c = VILLAGE;
+    // Фруктовый сад за церковью (груши, яблони — лиственный вид) рядами.
+    for i in 0..6 {
+        for j in 0..3 {
+            let x = c.x - 13.0 + i as f32 * 5.0 + rng.range(-0.6, 0.6);
+            let z = c.z - 30.0 - j as f32 * 5.5 + rng.range(-0.6, 0.6);
+            b.at(x, z);
+            kit::oak(b, g(x, z) - Vec3::Y * 0.1, rng.range(4.0, 5.5), rng);
+        }
+    }
+    // Кипарисы по сторонам от входа в церковь.
+    for dz in [-3.6f32, 3.6] {
+        let p = g(c.x - 9.0, c.z - 18.0 + dz);
+        b.at(p.x, p.z);
+        kit::cypress(b, p - Vec3::Y * 0.1, 8.5);
+    }
+    // Деревья и кусты в просветах между дворами вдоль улицы.
+    for x in [-38.0f32, -26.0, 13.0, 25.0, 37.0] {
+        for (z, k) in [(-(STREET + 2.4), 0), (STREET + 2.4, 1)] {
+            let p = g(c.x + x, c.z + z);
+            b.at(p.x, p.z);
+            if (x as i32 + k).rem_euclid(2) == 0 {
+                kit::fig_tree(b, p - Vec3::Y * 0.05, rng.range(3.5, 4.5), rng);
+            } else {
+                kit::shrub(b, p - Vec3::Y * 0.05, rng.range(1.2, 1.8));
+            }
+        }
+    }
+    // Кусты по межам пашни.
+    let mut x = c.x - 56.0;
+    while x <= c.x + 40.0 {
+        let mut z = c.z + 25.0;
+        while z < c.z + 50.0 {
+            if rng.chance(0.45) {
+                let p = g(x + rng.range(-0.3, 0.3), z);
+                b.at(p.x, p.z);
+                kit::shrub(b, p - Vec3::Y * 0.05, rng.range(0.9, 1.6));
+            }
+            z += rng.range(4.0, 7.0);
+        }
+        x += 12.0;
+    }
+    // Вдоль дороги в село — дикие груши и шиповник.
+    let road = &village_roads()[0];
+    for w in road.windows(2) {
+        let (a, e) = (w[0], w[1]);
+        let len = a.distance(e);
+        let dir = (e - a) / len;
+        let side = Vec2::new(-dir.y, dir.x);
+        let mut t = 6.0;
+        while t < len - 4.0 {
+            let q = a + dir * t;
+            let inside = (q.x - c.x).abs() < 62.0 && (q.y - c.z).abs() < 25.0;
+            if !inside {
+                let s = if rng.chance(0.5) { 1.0 } else { -1.0 };
+                let p = q + side * s * rng.range(4.5, 7.0);
+                b.at(p.x, p.y);
+                if rng.chance(0.35) {
+                    kit::oak(b, g(p.x, p.y) - Vec3::Y * 0.1, rng.range(5.0, 7.5), rng);
+                } else {
+                    kit::shrub(b, g(p.x, p.y) - Vec3::Y * 0.05, rng.range(1.0, 1.9));
+                }
+            }
+            t += rng.range(7.0, 13.0);
+        }
+    }
+    // Кольцо деревьев вокруг села: дубы, можжевельник, кусты — кроме пашни, дорог и построек.
+    let roads = super::roads();
+    let fields = Rect::new(c.x - 58.0, c.z + 21.0, c.x + 42.0, c.z + 53.0);
+    for k in 0..90 {
+        let a = k as f32 / 90.0 * TAU + rng.range(-0.03, 0.03);
+        let r = rng.range(1.0, 1.35);
+        let p = Vec2::new(c.x + 5.0 + a.cos() * 78.0 * r, c.z + 4.0 + a.sin() * 54.0 * r);
+        let in_fields = p.x > fields.x0 && p.x < fields.x1 && p.y > fields.z0 && p.y < fields.z1;
+        if in_fields || super::road_distance(&roads, p) < 6.0 || rng.chance(0.25) {
+            continue;
+        }
+        b.at(p.x, p.y);
+        let q = g(p.x, p.y) - Vec3::Y * 0.1;
+        let roll = rng.f();
+        if roll < 0.35 {
+            kit::oak(b, q, rng.range(6.0, 9.5), rng);
+        } else if roll < 0.65 {
+            kit::juniper(b, q, rng.range(2.5, 4.5), rng);
+        } else {
+            kit::shrub(b, q, rng.range(1.0, 2.0));
+        }
+        if rng.chance(0.5) {
+            let s = Vec2::new(p.x + rng.range(-3.0, 3.0), p.y + rng.range(-3.0, 3.0));
+            kit::shrub(b, g(s.x, s.y) - Vec3::Y * 0.05, rng.range(0.8, 1.5));
+        }
+    }
 }
 
 // ---------------- площадь ----------------

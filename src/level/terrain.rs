@@ -194,7 +194,22 @@ fn land(x: f32, z: f32) -> f32 {
     };
     let east = (-((x - balka_x(z)) / 26.0).powi(2)).exp();
     let r = ravine(-480.0, -0.25, 30.0) * 12.0 + east * smoothstep(320.0, 420.0, z) * 10.0;
-    k * (hills + rise - r - 4.0 + knoll(x, z) + quarry_rise(x, z)).max(-k * 2.0) + (1.0 - k) * 0.0
+    let l = k * (hills + rise - r - 4.0 + knoll(x, z) + quarry_rise(x, z)).max(-k * 2.0) + (1.0 - k) * 0.0;
+    village_flat(x, z, l)
+}
+
+/// Под селом Святого Фоки земля выровнена (селяне веками срывали бугры и засыпали ямы под дворы):
+/// пологая площадка с лёгким уклоном к югу, края плавно сходят в плато.
+fn village_flat(x: f32, z: f32, l: f32) -> f32 {
+    let c = crate::level::places::PHOCAS_VILLAGE;
+    let (cx, cz) = (c.x - 3.0, c.z - 2.0);
+    let e = (((x - cx) / 80.0).powi(2) + ((z - cz) / 32.0).powi(2)).sqrt();
+    if e > 1.7 {
+        return l;
+    }
+    let w = 1.0 - smoothstep(1.0, 1.7, e);
+    let flat = 7.0 + (z - cz) * 0.03 + (x - cx) * 0.004;
+    l + (flat - l) * w
 }
 
 /// Аналитическая высота земли.
