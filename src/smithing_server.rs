@@ -15,6 +15,7 @@ use crate::protocol::{decode, encode};
 use crate::server::GameWorld;
 use crate::smithing::*;
 use crate::smithing_net::*;
+use crate::smithing_quick::{self as quick, Hit, Mark, Order, QuickForge};
 use bevy::prelude::*;
 use bevy_renet::{RenetServer, RenetServerEvent, renet::ServerEvent};
 use std::collections::HashMap;
@@ -61,11 +62,13 @@ pub struct SmithWorld {
     /// С последней рассылки раскалённых поковок (с); было ли что слать.
     pieces_t: f32,
     pieces_any: bool,
+    /// Клейма мастера и заказы игроков (ковка на удачу).
+    pub guild: HashMap<u64, GuildView>,
 }
 
 impl Default for SmithWorld {
     fn default() -> Self {
-        Self { stations: HashMap::new(), works: HashMap::new(), rng: Rng::from_time(), pieces_t: 0.0, pieces_any: false }
+        Self { stations: HashMap::new(), works: HashMap::new(), rng: Rng::from_time(), pieces_t: 0.0, pieces_any: false, guild: HashMap::new() }
     }
 }
 
@@ -104,6 +107,20 @@ fn sync_knowledge(server: &mut RenetServer, k: &Knowledge, player: u64) {
     server.send_message(player, CH_LORE, encode(&LoreServerMessage::Knowledge(k.clone())));
 }
 
+/// Клейма и заказ игрока; заказа ещё нет — мастер его придумает.
+fn guild_of<'a>(guild: &'a mut HashMap<u64, GuildView>, rng: &mut Rng, player: u64) -> &'a mut GuildView {
+    let g = guild.entry(player).or_default();
+    if g.order.is_none() {
+        g.order = Some(Order::roll(rng, g.delivered));
+    }
+    g
+}
+
+fn send_guild(server: &mut RenetServer, world: &mut SmithWorld, player: u64) {
+    let view = guild_of(&mut world.guild, &mut world.rng, player).clone();
+    send(server, player, &SmithServerMessage::Guild(view));
+}
+
 fn send_work(server: &mut RenetServer, world: &SmithWorld, player: u64) {
     let view = world.works.get(&player).map(|w| WorkView { station: w.station, job: w.job.clone(), bellows: w.bellows });
     send(server, player, &SmithServerMessage::Work(view));
@@ -128,9 +145,11 @@ fn on_connection(event: On<RenetServerEvent>, mut server: ResMut<RenetServer>, m
             for (id, st) in &world.stations {
                 send(&mut server, *client_id, &SmithServerMessage::Fire { station: *id, fuel: st.fuel, blast: st.blast });
             }
+            send_guild(&mut server, &mut world, *client_id);
         }
         ServerEvent::ClientDisconnected { client_id, .. } => {
             // Незаконченная вещь при ремонте возвращается владельцу... если он ещё здесь.
+            world.guild.remove(client_id);
             if let Some(w) = world.works.remove(client_id)
                 && let Job::Repair { item, .. } = w.job
                 && let Some(inv) = loot.inventories.get_mut(client_id)
@@ -208,6 +227,7 @@ fn give_named(commands: &mut Commands, loot: &mut LootWorld, player: u64, name: 
 fn begin(world: &mut SmithWorld, loot: &mut LootWorld, k: &Knowledge, pid: u64, station: u32, plan: Plan) -> Result<String, String> {
     let st = world.stations.get(&station).ok_or("Нет такого горна")?;
     let kind = st.kind;
+    let marks = world.guild.get(&pid).map(|g| g.marks).unwrap_or_default();
     let inv = loot.inventories.get_mut(&pid).ok_or("Нет сумки")?;
     let mut taken: Vec<(String, u16)> = Vec::new();
     let job = match plan {
@@ -433,6 +453,21 @@ fn begin(world: &mut SmithWorld, loot: &mut LootWorld, k: &Knowledge, pid: u64, 
             }
             Job::Fletch { what, progress: 0.0, acc: 0.0, strokes: 0, head, sinew }
         }
+        Plan::Quick { pattern } => {
+            if kind != StationKind::Forge {
+                return Err("Ковать можно только у горна с наковальней".into());
+            }
+            if !quick::QUICK_PATTERNS.contains(&pattern) {
+                return Err("Этого на удачу не скуёшь".into());
+            }
+            let need = quick::iron_needed(pattern);
+            let picked = quick::pick_iron(need, |n| count_named(inv, n)).ok_or_else(|| format!("Нужно железа: {need} мер (полоса или крица — мера, лом и руда — две штуки на меру)"))?;
+            for (name, n) in &picked {
+                take_named(inv, name, *n);
+                taken.push((name.to_string(), *n as u16));
+            }
+            Job::Quick(QuickForge::new(pattern, quick::start_score(&picked), marks))
+        }
     };
     let verb = match &job {
         Job::Forge(f) => format!("Работа: {}", f.pattern.name().to_lowercase()),
@@ -443,6 +478,7 @@ fn begin(world: &mut SmithWorld, loot: &mut LootWorld, k: &Knowledge, pid: u64, 
         },
         Job::Repair { item, .. } => format!("Ремонт: {}", item.info().name.to_lowercase()),
         Job::Fletch { what, .. } => format!("Верстак: {}", what.verb().to_lowercase()),
+        Job::Quick(q) => format!("Заготовка раскалена: {}. Бейте в такт — и решайте, когда хватит", q.pattern.info().product.to_lowercase()),
     };
     world.works.insert(pid, Work { station, job, bellows: false, taken, since_view: 0.0 });
     Ok(verb)
@@ -542,6 +578,69 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                     sync_inventory(&mut server, &loot, pid);
                     send_work(&mut server, world, pid);
                 }
+                SmithClientMessage::BuyMark(mark) => {
+                    if !world.stations.values().any(|s| near(feet, s)) {
+                        notice(&mut server, pid, "Клейма даёт мастер у горна: подойдите к кузнице");
+                        continue;
+                    }
+                    let Some(inv) = loot.inventories.get_mut(&pid) else { continue };
+                    match buy_mark(&mut world.guild, &mut world.rng, inv, pid, mark) {
+                        Ok(text) => {
+                            // Новое клеймо действует и на заготовку, что уже на наковальне.
+                            let marks = world.guild.get(&pid).map(|g| g.marks).unwrap_or_default();
+                            if let Some(Work { job: Job::Quick(q), .. }) = world.works.get_mut(&pid) {
+                                q.marks = marks;
+                            }
+                            notice(&mut server, pid, text);
+                        }
+                        Err(e) => notice(&mut server, pid, e),
+                    }
+                    sync_inventory(&mut server, &loot, pid);
+                    send_guild(&mut server, world, pid);
+                    send_work(&mut server, world, pid);
+                }
+                SmithClientMessage::Deliver => {
+                    if !world.stations.values().any(|s| near(feet, s)) {
+                        notice(&mut server, pid, "Заказ сдают мастеру у горна");
+                        continue;
+                    }
+                    let l = &mut *loot;
+                    let Some(inv) = l.inventories.get_mut(&pid) else { continue };
+                    match deliver(&mut world.guild, &mut world.rng, inv, &mut l.uids, pid) {
+                        Ok((text, coins)) => {
+                            for c in coins {
+                                if let Some(inv) = loot.inventories.get_mut(&pid) {
+                                    give(&mut commands, inv, c, feet);
+                                }
+                            }
+                            if let Some(k) = know.players.get_mut(&pid) {
+                                k.practice(Skill::Smithing, 0.8);
+                                sync_knowledge(&mut server, k, pid);
+                            }
+                            notice(&mut server, pid, text);
+                        }
+                        Err(e) => notice(&mut server, pid, e),
+                    }
+                    sync_inventory(&mut server, &loot, pid);
+                    send_guild(&mut server, world, pid);
+                }
+                SmithClientMessage::NewOrder => {
+                    let g = guild_of(&mut world.guild, &mut world.rng, pid);
+                    let done = g.delivered;
+                    let old = g.order;
+                    // Другой заказ — не тот же самый.
+                    let mut next = Order::roll(&mut world.rng, done);
+                    for _ in 0..4 {
+                        if Some(next) != old {
+                            break;
+                        }
+                        next = Order::roll(&mut world.rng, done);
+                    }
+                    if let Some(g) = world.guild.get_mut(&pid) {
+                        g.order = Some(next);
+                    }
+                    send_guild(&mut server, world, pid);
+                }
                 other => {
                     let stations = &world.stations;
                     let Some(w) = world.works.get_mut(&pid) else { continue };
@@ -551,6 +650,7 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                     }
                     let mut events: Vec<SmithEvent> = Vec::new();
                     let mut fxs: Vec<Fx> = Vec::new();
+                    let mut guild_changed = false;
                     match (&mut w.job, other) {
                         (Job::Forge(f), SmithClientMessage::Move(spot)) => {
                             if spot == Spot::Ashes && f.temp < 650.0 {
@@ -652,6 +752,29 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                             fxs.push(Fx::Grind);
                             *progress += 0.1 * (0.3 + 0.7 * acc.clamp(0.0, 1.0));
                         }
+                        (Job::Quick(q), SmithClientMessage::Strike { acc, .. }) => {
+                            if q.ready() {
+                                let hit = q.strike(acc, skill, rng);
+                                match hit {
+                                    Hit::Shattered => fxs.push(Fx::Crack),
+                                    Hit::Rage => {
+                                        fxs.push(Fx::Strike { heavy: true, temp: q.temp() });
+                                        fxs.push(Fx::Burn);
+                                    }
+                                    _ => fxs.push(Fx::Strike { heavy: q.raging(), temp: q.temp() }),
+                                }
+                                if hit == Hit::Saved {
+                                    if let Some(g) = world.guild.get_mut(&pid) {
+                                        g.marks.wards = q.marks.wards;
+                                    }
+                                    guild_changed = true;
+                                }
+                                // Обычный удар подписывать незачем: цена и риск видны в окне.
+                                if !matches!(hit, Hit::Good(_)) {
+                                    events.push(SmithEvent::Note(quick::hit_text(hit).into()));
+                                }
+                            }
+                        }
                         (Job::Fletch { what, progress, acc: avg, strokes, .. }, SmithClientMessage::Grind { acc }) => {
                             let acc = acc.clamp(0.0, 1.0);
                             *avg = (*avg * *strokes as f32 + acc) / (*strokes as f32 + 1.0);
@@ -708,6 +831,18 @@ fn receive_smith_messages(mut commands: Commands, mut server: ResMut<RenetServer
                         notice(&mut server, pid, format!("Готово: {} ×{n}", name.to_lowercase()));
                         sync_inventory(&mut server, &loot, pid);
                     }
+                    if guild_changed {
+                        send_guild(&mut server, world, pid);
+                    }
+                    // Заготовка раскололась: работа кончилась, навык всё равно чуть вырос.
+                    let shattered = matches!(world.works.get(&pid).map(|w| &w.job), Some(Job::Quick(q)) if q.shattered);
+                    if shattered {
+                        world.works.remove(&pid);
+                        if let Some(k) = know.players.get_mut(&pid) {
+                            k.practice(Skill::Smithing, 0.4);
+                            sync_knowledge(&mut server, k, pid);
+                        }
+                    }
                     send_work(&mut server, world, pid);
                 }
             }
@@ -740,6 +875,10 @@ fn abandon(commands: &mut Commands, loot: &mut LootWorld, pid: u64, w: Work, fee
             }
         }
         Job::Soak(_) => {}
+        // Недокованная заготовка — в лом: по куску на меру железа.
+        Job::Quick(q) => {
+            give_named(commands, loot, pid, SCRAP, Quality::Common, quick::iron_needed(q.pattern) as u16, feet);
+        }
         // Со верстака всё возвращается, кроме клея.
         Job::Fletch { what, head, .. } => {
             for (name, n) in what.inputs() {
@@ -930,10 +1069,108 @@ fn finish(commands: &mut Commands, world: &mut SmithWorld, loot: &mut LootWorld,
                 }
             }
         }
+        Job::Quick(q) => {
+            if q.strikes == 0 {
+                return Err("Заготовка ещё не тронута молотом: хотя бы раз ударьте".into());
+            }
+            let q = q.clone();
+            world.works.remove(&pid);
+            let info = q.pattern.info();
+            let quality = q.quality();
+            let base = ItemBaseId::find(info.product).ok_or("Нет такого предмета")?;
+            let make = quick_make(&q, &smith_name(pid), base);
+            let mut item = plain_item(base, quality, info.count, &mut loot.uids);
+            item.affixes = crafted_affixes(info.kind, &make, quality);
+            item.make = Some(Box::new(make));
+            let value = crate::economy::item_value(&item);
+            if let Some(inv) = loot.inventories.get_mut(&pid) {
+                give(commands, inv, item, feet);
+            }
+            k.practice(Skill::Smithing, 0.6 + q.strikes as f32 * 0.12 + q.score * 1.5);
+            if q.score > 0.6 {
+                learn_by_doing(k, Technique::Forging, 0.2, rng, &mut msgs);
+            }
+            msgs.insert(0, format!("Снято с наковальни: {} — {} (цена около {})", info.product.to_lowercase(), quality.name().to_lowercase(), crate::economy::format_money(value)));
+        }
         Job::Repair { .. } => return Err("Доправьте вещь на наковальне или точиле".into()),
         Job::Fletch { .. } => return Err("Доделайте работу на верстаке".into()),
     }
     Ok(msgs.join(". "))
+}
+
+/// Что за вещь вышла из ковки на удачу: чем выше цена, тем чище работа.
+fn quick_make(q: &QuickForge, smith: &str, base: ItemBaseId) -> Make {
+    let s = q.score.clamp(0.0, 1.0);
+    let info = q.pattern.info();
+    let dur_max = (crate::items::base_durability(base.base()) * (0.55 + 0.6 * s)).round();
+    let edge = if info.harden { (0.25 + 0.7 * s).min(1.0) } else { 0.0 };
+    let mut flaws = Vec::new();
+    if s < 0.3 {
+        flaws.push(Flaw::Dented);
+    }
+    Make { smith: smith.to_string(), finish: (0.2 + 0.8 * s).min(1.0), edge, balance: (1.0 - s) * 0.25, flaws, dur: dur_max, dur_max, carbon: 0.0 }
+}
+
+/// Готовые вещи для клейма или заказа: сначала худшие из годных.
+fn pick_products(inv: &Inventory, n: u8, min: Quality, only: Option<&str>) -> Option<Vec<ItemUid>> {
+    let mut list: Vec<&Item> = inv.grid.items.iter().map(|p| &p.item).filter(|i| quick::is_quick_product(i.info().name) && i.quality >= min && only.is_none_or(|o| o == i.info().name)).collect();
+    list.sort_by_key(|i| (i.quality, crate::economy::item_value(i)));
+    let mut out = Vec::new();
+    let mut left = n as u32;
+    for i in list {
+        if left == 0 {
+            break;
+        }
+        out.push(i.uid);
+        left = left.saturating_sub(1);
+    }
+    (left == 0).then_some(out)
+}
+
+/// Отдать одну вещь (из стопки — одну штуку; наконечники — всю дюжину).
+fn take_one(inv: &mut Inventory, uid: ItemUid) -> Option<Item> {
+    let (mut item, loc) = inv.take(uid)?;
+    // Одна вещь — это одна штука, а у наконечников — дюжина, как их и куют.
+    let one = if item.info().name == "Наконечники стрел" { item.count.min(12) } else { 1 };
+    if item.count > one {
+        let mut rest = item.clone();
+        rest.count -= one;
+        item.count = one;
+        let target = match loc {
+            crate::inventory::Loc::Grid { x, y } => Target::Grid { x, y },
+            crate::inventory::Loc::Equip(s) => Target::Equip(s),
+        };
+        if let Err(r) = inv.place(rest, target) {
+            let _ = inv.place(r, Target::Auto);
+        }
+    }
+    Some(item)
+}
+
+fn buy_mark(guild: &mut HashMap<u64, GuildView>, rng: &mut Rng, inv: &mut Inventory, pid: u64, mark: Mark) -> Result<String, String> {
+    let g = guild_of(guild, rng, pid);
+    if mark.owned(&g.marks) {
+        return Err(if mark == Mark::Ward { format!("Оберегов и так полный запас ({})", quick::WARDS_MAX) } else { "Это клеймо у вас уже есть".into() });
+    }
+    let (n, min) = mark.cost();
+    let uids = pick_products(inv, n, min, None).ok_or_else(|| format!("Мастер просит {n} кованых вещей не хуже «{}» (ножи, наконечники, копья, топоры, булавы, спаты)", min.name().to_lowercase()))?;
+    for uid in uids {
+        take_one(inv, uid);
+    }
+    mark.grant(&mut g.marks);
+    Ok(format!("Мастер выбил клеймо «{}»: {}", mark.name(), mark.about()))
+}
+
+fn deliver(guild: &mut HashMap<u64, GuildView>, rng: &mut Rng, inv: &mut Inventory, uids: &mut crate::items::UidGen, pid: u64) -> Result<(String, Vec<Item>), String> {
+    let g = guild_of(guild, rng, pid);
+    let Some(order) = g.order else { return Err("Заказа нет".into()) };
+    let product = order.pattern.info().product;
+    let uid = pick_products(inv, 1, order.min, Some(product)).ok_or_else(|| format!("Нужно: {} не хуже «{}»", product.to_lowercase(), order.min.name().to_lowercase()))?;
+    let item = take_one(inv, uid[0]).ok_or("Нет вещи")?;
+    g.delivered += 1;
+    g.order = Some(Order::roll(rng, g.delivered));
+    let coins = crate::economy::mint(order.reward, uids);
+    Ok((format!("Заказ сдан: {} ({}). Мастер заплатил {}", item.info().name.to_lowercase(), item.quality.name().to_lowercase(), crate::economy::format_money(order.reward)), coins))
 }
 
 trait Cracked {
@@ -968,7 +1205,8 @@ fn tick_works(time: Res<Time>, mut server: ResMut<RenetServer>, game: Res<GameWo
             Job::Forge(f) => matches!(f.spot, Spot::Fire | Spot::Temper),
             Job::Cast(c) => c.spot == Spot::Fire,
             Job::Soak(s) => matches!(s.kind, SoakKind::Carburize) && !s.done(),
-            Job::Repair { .. } | Job::Fletch { .. } => false,
+            // На удачу куют у горна мастера: его уголь, не свой.
+            Job::Repair { .. } | Job::Fletch { .. } | Job::Quick(_) => false,
         };
         if hot {
             burning.insert(w.station, true);
@@ -993,6 +1231,10 @@ fn tick_works(time: Res<Time>, mut server: ResMut<RenetServer>, game: Res<GameWo
                 s.bellows = w.bellows;
                 s.step(dt, st.fuel > 0.0)
             }
+            Job::Quick(q) => {
+                q.step(dt);
+                Vec::new()
+            }
             Job::Repair { .. } | Job::Fletch { .. } => Vec::new(),
         };
         for e in events {
@@ -1007,7 +1249,7 @@ fn tick_works(time: Res<Time>, mut server: ResMut<RenetServer>, game: Res<GameWo
             Job::Forge(f) => f.temp > 60.0 || f.spot == Spot::Fire,
             Job::Cast(c) => c.temp > 60.0 || c.spot == Spot::Fire || c.pouring,
             Job::Soak(s) => !s.done() || s.temp > 60.0,
-            Job::Repair { .. } | Job::Fletch { .. } => false,
+            Job::Repair { .. } | Job::Fletch { .. } | Job::Quick(_) => false,
         };
         if lively && w.since_view > 0.12 {
             w.since_view = 0.0;
@@ -1165,5 +1407,77 @@ fn smith_kit(mut server: ResMut<RenetServer>, mut loot: ResMut<LootWorld>, mut k
             sync_knowledge(&mut server, k, id);
         }
         sync_inventory(&mut server, &loot, id);
+    }
+}
+
+#[cfg(test)]
+mod quick_tests {
+    use super::*;
+    use bevy::ecs::world::CommandQueue;
+
+    fn kit(loot: &mut LootWorld, pid: u64, items: &[(&str, Quality, u16)]) {
+        let mut inv = Inventory::new((10, 8));
+        for (name, q, n) in items {
+            let item = plain_item(ItemBaseId::find(name).unwrap(), *q, *n, &mut loot.uids);
+            inv.place(item, Target::Auto).unwrap();
+        }
+        loot.inventories.insert(pid, inv);
+    }
+
+    fn forge_world() -> SmithWorld {
+        let mut w = SmithWorld::default();
+        w.stations.insert(1, Station { name: "Кузня".into(), kind: StationKind::Forge, fire: Vec3::ZERO, anvil: Vec3::ZERO, trough: Vec3::ZERO, grind: Vec3::ZERO, fuel: 100.0, blast: 0.0, sent: (0.0, 0.0) });
+        w
+    }
+
+    /// Из руды — заготовка, удары, снять: в сумке кованый кинжал, руда потрачена.
+    #[test]
+    fn ore_to_dagger() {
+        let mut world = forge_world();
+        let mut loot = LootWorld::default();
+        kit(&mut loot, 7, &[(ORE, Quality::Common, 3)]);
+        let k = Knowledge::default();
+        assert!(begin(&mut world, &mut loot, &k, 7, 1, Plan::Quick { pattern: Pattern::Spatha }).is_err(), "на спату руды мало");
+        begin(&mut world, &mut loot, &k, 7, 1, Plan::Quick { pattern: Pattern::Knife }).unwrap();
+        assert_eq!(count_named(&loot.inventories[&7], ORE), 1);
+        let Some(Work { job: Job::Quick(q), .. }) = world.works.get_mut(&7) else { panic!() };
+        let mut rng = Rng::new(1);
+        q.strike(1.0, 0.0, &mut rng);
+        q.strike(1.0, 0.0, &mut rng);
+        let bevy_world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &bevy_world);
+        let mut kn = Knowledge::default();
+        let text = finish(&mut commands, &mut world, &mut loot, &mut kn, 7, false, Vec3::ZERO).unwrap();
+        assert!(text.contains("кинжал"), "{text}");
+        assert!(world.works.is_empty());
+        let inv = &loot.inventories[&7];
+        let dagger = inv.all_items().find(|i| i.info().name == "Кинжал").expect("кинжал в сумке");
+        assert!(dagger.make.is_some());
+        assert!(kn.base_skill(Skill::Smithing) > 0.0);
+    }
+
+    /// Заказ: вещь уходит, монеты приходят, заказ сменился. Клеймо съедает вещи.
+    #[test]
+    fn order_and_marks() {
+        let mut world = forge_world();
+        let mut loot = LootWorld::default();
+        kit(&mut loot, 3, &[("Кинжал", Quality::Rare, 1), ("Спата", Quality::Common, 1), ("Спата", Quality::Uncommon, 1)]);
+        world.guild.insert(3, GuildView { order: Some(Order::new(Pattern::Spatha, Quality::Uncommon)), ..Default::default() });
+        let inv = loot.inventories.get_mut(&3).unwrap();
+        let (text, coins) = deliver(&mut world.guild, &mut world.rng, inv, &mut loot.uids, 3).unwrap();
+        assert!(text.contains("спата"), "{text}");
+        let paid: u32 = coins.iter().map(crate::economy::item_value).sum();
+        assert_eq!(paid, Order::new(Pattern::Spatha, Quality::Uncommon).reward);
+        let inv = loot.inventories.get_mut(&3).unwrap();
+        // Обычная спата в заказ на добротную не годится — ушла именно добротная.
+        assert_eq!(inv.all_items().filter(|i| i.info().name == "Спата").count(), 1);
+        assert_eq!(world.guild[&3].delivered, 1);
+        // «Твёрдая рука»: две вещи не хуже обычной.
+        let t = buy_mark(&mut world.guild, &mut world.rng, inv, 3, Mark::Steady).unwrap();
+        assert!(t.contains("Твёрдая рука"));
+        assert!(world.guild[&3].marks.steady);
+        assert_eq!(inv.all_items().filter(|i| quick::is_quick_product(i.info().name)).count(), 0);
+        assert!(buy_mark(&mut world.guild, &mut world.rng, inv, 3, Mark::Ward).is_err(), "вещей больше нет");
     }
 }
