@@ -32,10 +32,13 @@ pub struct TradeUiPlugin;
 
 impl Plugin for TradeUiPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(BuiltRev::default()).add_systems(
+        app.insert_resource(BuiltRev::default()).init_resource::<KeptScroll>().add_systems(
             Update,
-            (rebuild, click_buttons, scroll_lists, tick_order_timers).chain(),
+            (rebuild, restore_scroll, click_buttons, scroll_lists, tick_order_timers).chain(),
         );
+        if std::env::var_os("MRPG_TRADE_SHOT").is_some() {
+            app.add_systems(Update, trade_shot.after(tick_order_timers));
+        }
     }
 }
 
@@ -55,6 +58,8 @@ enum Act {
     PayFine,
     Donate(u32),
     Repair(ItemUid),
+    /// «Всё» — отдать всю стопку разом (то же, что Shift+ЛКМ по «Отдать»).
+    SellAll(ItemUid),
     Close,
     P2pAdd(ItemUid),
     P2pRemove(ItemUid),
@@ -69,8 +74,19 @@ struct Enabled(bool);
 #[derive(Component)]
 struct TradeRoot;
 
-#[derive(Component)]
-struct Scroll;
+/// Прокручиваемый список окна. Окно перестраивается после каждого клика, а прокрутка
+/// списка остаётся там, где была (раньше после «Отдать» список прыгал наверх).
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+enum Scroll {
+    Shelf,
+    MerchantBag,
+    P2pBag,
+    Factions,
+}
+
+/// Прокрутка списков до перестройки окна; сбрасывается, когда окно открывают заново.
+#[derive(Resource, Default)]
+struct KeptScroll(Vec<(Scroll, Vec2)>);
 
 /// Текст отсчёта готовности заказа.
 #[derive(Component)]
@@ -127,9 +143,9 @@ fn panel<'a>(root: &'a mut ChildSpawnerCommands, width: f32) -> EntityCommands<'
 }
 
 /// Прокручиваемый список (колесо мыши).
-fn scroll_list<'a>(p: &'a mut ChildSpawnerCommands, max_h: f32) -> EntityCommands<'a> {
+fn scroll_list<'a>(p: &'a mut ChildSpawnerCommands, max_h: f32, key: Scroll) -> EntityCommands<'a> {
     p.spawn((
-        Scroll,
+        key,
         Interaction::default(),
         FocusPolicy::Pass,
         ScrollPosition::default(),
@@ -191,6 +207,8 @@ fn item_row(
                     height: px(h as f32 * k),
                     ..default()
                 },
+                // Длинные копья и мечи в такой клетке пропадают: подменяем миниатюрой.
+                crate::trade_thumbs::RowIcon { base: item.base, side: 26.0 },
             ));
         });
         let name = if count > 1 {
@@ -248,6 +266,8 @@ fn rebuild(
     party: Option<Res<crate::map::Party>>,
     mut built: ResMut<BuiltRev>,
     roots: Query<Entity, With<TradeRoot>>,
+    lists: Query<(&Scroll, &ScrollPosition)>,
+    mut kept: ResMut<KeptScroll>,
 ) {
     let want = BuiltRev(state.rev, loot.rev, state.window_open());
     if *built == want {
@@ -255,6 +275,8 @@ fn rebuild(
     }
     let opening = !built.2 && want.2;
     *built = want;
+    // Запоминаем, докуда прокручены списки: новое окно встанет на то же место.
+    kept.0 = if opening { Vec::new() } else { lists.iter().map(|(k, pos)| (*k, pos.0)).collect() };
     for e in &roots {
         commands.entity(e).despawn();
     }
@@ -348,7 +370,7 @@ fn merchant_window(
                 "Прилавок"
             },
         );
-        scroll_list(p, 300.0).with_children(|list| {
+        scroll_list(p, 300.0, Scroll::Shelf).with_children(|list| {
             if view.shelf.is_empty() {
                 list.spawn(text(fonts, "Пусто — приходите позже", 13.0, DIM, false));
             }
@@ -471,7 +493,11 @@ fn merchant_window(
                     let money = if l.paid {
                         format!("плата {}", format_money_short(l.money))
                     } else {
-                        format!("платят {}", format_money_short(l.money))
+                        format!(
+                            "платят {} · {}",
+                            format_money_short(l.money),
+                            crate::factions::work_reward_label(view.faction)
+                        )
                     };
                     let started = if l.done > 0.0 {
                         format!(" · начато {:.0}%", l.done * 100.0)
@@ -764,7 +790,7 @@ fn merchant_window(
             DIM,
             false,
         ));
-        scroll_list(p, 560.0).with_children(|list| {
+        scroll_list(p, 560.0, Scroll::MerchantBag).with_children(|list| {
             let Some(inv) = inv else { return };
             let mut items: Vec<&Item> = inv.grid.items.iter().map(|pl| &pl.item).collect();
             items.sort_by_key(|i| (i.base.0, i.uid));
@@ -797,6 +823,10 @@ fn merchant_window(
                             Act::Sell(item.uid),
                             !refused && left > 0,
                         );
+                        // Стопку (10 руды и т. п.) — одним нажатием.
+                        if left > 1 && !is_coin {
+                            button(r, fonts, "Всё", Act::SellAll(item.uid), !refused);
+                        }
                     }
                     None => {
                         r.spawn(text(fonts, "не нужно", 12.0, DIM, false));
@@ -903,7 +933,7 @@ fn p2p_window(
     panel(root, 360.0).with_children(|p| {
         p.spawn(theme().title("Ваша сумка", 28.0));
         theme().divider(p);
-        scroll_list(p, 560.0).with_children(|list| {
+        scroll_list(p, 560.0, Scroll::P2pBag).with_children(|list| {
             let Some(inv) = inv else { return };
             for pl in &inv.grid.items {
                 let item = &pl.item;
@@ -941,7 +971,7 @@ fn reputation_window(root: &mut ChildSpawnerCommands, fonts: &UiFonts, state: &T
             p.spawn(text(fonts, "…", 14.0, DIM, false));
             return;
         };
-        scroll_list(p, 620.0).with_children(|list| {
+        scroll_list(p, 620.0, Scroll::Factions).with_children(|list| {
             for f in Faction::ALL {
                 let v = rep.get(f);
                 let s = Standing::of(v);
@@ -993,7 +1023,8 @@ fn click_buttons(
                 let add = if shift { s.item.count - have } else { 1 };
                 bump(&mut state.basket_buy, uid, add as i32, s.item.count);
             }
-            Act::Sell(uid) => {
+            Act::Sell(uid) | Act::SellAll(uid) => {
+                let all = shift || matches!(*act, Act::SellAll(_));
                 let Some(item) = loot
                     .inventory
                     .as_ref()
@@ -1009,7 +1040,7 @@ fn click_buttons(
                 } else {
                     1
                 };
-                let add = if shift { item.count - have } else { step };
+                let add = if all { item.count - have } else { step };
                 bump(&mut state.basket_sell, uid, add as i32, item.count);
             }
             Act::Unbuy(uid) => bump(
@@ -1104,6 +1135,15 @@ fn bump(lines: &mut Vec<Line>, uid: ItemUid, delta: i32, max: u16) {
     }
 }
 
+/// Новые списки окна встают на прежнюю прокрутку (Bevy сам подрежет её по длине списка).
+fn restore_scroll(kept: Res<KeptScroll>, mut lists: Query<(&Scroll, &mut ScrollPosition), Added<Scroll>>) {
+    for (key, mut pos) in &mut lists {
+        if let Some((_, was)) = kept.0.iter().find(|(k, _)| k == key) {
+            pos.0 = *was;
+        }
+    }
+}
+
 fn scroll_lists(
     scroll: Res<AccumulatedMouseScroll>,
     mut lists: Query<(&Interaction, &mut ScrollPosition, &ComputedNode), With<Scroll>>,
@@ -1146,5 +1186,113 @@ fn tick_order_timers(
     // Заказ дозрел — перестроить окно, чтобы кнопка «Забрать» ожила.
     if became_ready {
         state.rev += 1;
+    }
+}
+
+/// Снимки окна продажи для проверки: `MRPG_TRADE_SHOT=папка` (вместе с `MRPG_BACKGROUND=1`).
+/// Выдаёт разных вещей, подходит к торговцу (`MRPG_TRADE_SHOT_MERCHANT` — часть имени или
+/// ремесла, по умолчанию кузнец), открывает лавку, прокручивает сумку до низа и «нажимает»
+/// «Отдать» у нижней вещи: на снимке после этого список должен остаться внизу.
+#[allow(clippy::too_many_arguments)]
+fn trade_shot(
+    mut commands: Commands,
+    mut state: ResMut<TradeState>,
+    loot: Res<LootState>,
+    mut client: Option<ResMut<RenetClient>>,
+    mut console: ResMut<crate::console::Console>,
+    me: Query<&Transform, With<crate::player::LocalPlayer>>,
+    mut lists: Query<(&Scroll, &mut ScrollPosition)>,
+    mut step: Local<(u32, u32)>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let dir = std::env::var("MRPG_TRADE_SHOT").unwrap_or_else(|_| ".".into());
+    let shot = |commands: &mut Commands, name: &str| {
+        info!("снимок торговли: {name}");
+        commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(format!("{dir}/{name}.png")));
+    };
+    let (stage, frames) = &mut *step;
+    *frames += 1;
+    let want = std::env::var("MRPG_TRADE_SHOT_MERCHANT").unwrap_or_else(|_| "кузнец".into()).to_lowercase();
+    let merchant = state.merchants.iter().find(|m| m.name.to_lowercase().contains(&want) || m.title.to_lowercase().contains(&want)).or(state.merchants.first()).cloned();
+    match *stage {
+        0 => {
+            let (Some(m), Ok(_)) = (merchant, me.single()) else { return };
+            if loot.inventory.is_none() || *frames < 30 {
+                return;
+            }
+            for g in ["give «Железная руда» 10", "give «Древесный уголь» 10", "give «Отрез льна» 3", "give «Отрез шерсти» 3", "give «Болотная руда» 6", "give «Обожжённая руда» 4", "give «Засапожный нож»", "give «Охотничий нож»", "give «Боевой нож»", "give «Семиспата»", "give «Солдатская спата»", "give «Франкская спата»", "give «Медный котелок»", "give «Готская спата с кольцом»", "give «Гепидская спата»", "give «Вандальская спата»", "give «Лангобардская спата»", "give «Герульская спата»", "give «Узколезвийный топор»", "give «Плотничий топор»"] {
+                console.push(g);
+            }
+            let p = Vec3::from_array(m.pos.0) + Vec3::new(m.yaw.sin(), 0.0, m.yaw.cos()) * 1.3;
+            console.push(format!("tp {:.2} {:.2} {:.2}", p.x, p.y + 0.1, p.z));
+            *stage = 1;
+            *frames = 0;
+        }
+        1 if *frames > 40 => {
+            let (Some(m), Some(c)) = (merchant, client.as_mut()) else { return };
+            send(c, &TradeClientMessage::Open { merchant: m.id });
+            *stage = 2;
+            *frames = 0;
+        }
+        2 if state.view.is_some() && *frames > 20 => {
+            for (key, mut pos) in &mut lists {
+                if *key == Scroll::MerchantBag {
+                    pos.0.y = 10_000.0;
+                }
+            }
+            *stage = 3;
+            *frames = 0;
+        }
+        3 if *frames > 10 => {
+            shot(&mut commands, "trade_1_bag_scrolled_down");
+            *stage = 4;
+            *frames = 0;
+        }
+        4 if *frames > 10 => {
+            // Как клик по «Отдать» у нижней продаваемой вещи сумки.
+            let (Some(view), Some(inv)) = (&state.view, loot.inventory.as_ref()) else { return };
+            let mut items: Vec<&Item> = inv.grid.items.iter().map(|pl| &pl.item).collect();
+            items.sort_by_key(|i| (i.base.0, i.uid));
+            let last = items.iter().rev().find(|i| crate::economy::coin_value(i.base).is_none() && view.bids.iter().any(|b| b.uid == i.uid && b.price.is_some())).map(|i| (i.uid, i.count));
+            if let Some((uid, count)) = last {
+                bump(&mut state.basket_sell, uid, 1, count);
+                state.rev += 1;
+            }
+            *stage = 5;
+            *frames = 0;
+        }
+        5 if *frames > 10 => {
+            shot(&mut commands, "trade_2_after_sell_still_down");
+            *stage = 6;
+            *frames = 0;
+        }
+        6 if *frames > 20 => {
+            exit.write(AppExit::Success);
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Окно перестроили после «Отдать» — список сумки остаётся на прежней прокрутке.
+    #[test]
+    fn rebuilt_list_keeps_scroll() {
+        let mut app = App::new();
+        app.insert_resource(KeptScroll(vec![(Scroll::MerchantBag, Vec2::new(0.0, 420.0))])).add_systems(Update, restore_scroll);
+        let bag = app.world_mut().spawn((Scroll::MerchantBag, ScrollPosition::default())).id();
+        let shelf = app.world_mut().spawn((Scroll::Shelf, ScrollPosition::default())).id();
+        app.update();
+        assert_eq!(app.world().get::<ScrollPosition>(bag).unwrap().0.y, 420.0);
+        assert_eq!(app.world().get::<ScrollPosition>(shelf).unwrap().0.y, 0.0);
+    }
+
+    #[test]
+    fn sell_all_takes_whole_stack() {
+        let mut lines = Vec::new();
+        bump(&mut lines, 7, 10, 10);
+        assert_eq!(count_in(&lines, 7), 10);
     }
 }

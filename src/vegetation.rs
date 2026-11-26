@@ -568,7 +568,12 @@ pub fn grass_allowed(x: f32, z: f32, y: f32, colliders: &crate::collision::Level
     if crate::level::inside_city(x, z) || crate::level::city_wall_distance(x, z) < 4.0 {
         return false;
     }
-    if y < crate::level::WATER_Y + 0.7 || crate::level::road_distance(x, z) < 2.6 {
+    if y < crate::level::WATER_Y + 0.7 || crate::level::road_distance(x, z) < 2.6 || crate::level::bare_ground(x, z) {
+        return false;
+    }
+    // В вырезе рельефа (рудник, шурф, землянка) своя земля может лежать ниже карты высот:
+    // трава растёт, только если прямо под ней твердь, иначе висела бы в воздухе (в землянке).
+    if colliders.in_ground_hole(x, z) && !colliders.point_solid(Vec3::new(x, y - 0.08, z)) {
         return false;
     }
     !colliders.point_solid(Vec3::new(x, y + 0.06, z)) && !colliders.point_solid(Vec3::new(x, y + 0.6, z))

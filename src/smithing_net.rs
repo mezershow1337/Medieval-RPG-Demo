@@ -3,6 +3,7 @@
 use crate::items::{Item, ItemUid};
 use crate::protocol::NetPos;
 use crate::smithing::{CastMetal, CastPiece, Casting, Forging, Pattern, Quench, Soak, Spot};
+use crate::smithing_quick::{Mark, Marks, Order, QuickForge};
 use serde::{Deserialize, Serialize};
 
 /// Номер канала renet (надёжный, по порядку). Настроен в `protocol::connection_config`.
@@ -84,6 +85,8 @@ pub enum Plan {
     Repair { uid: ItemUid },
     /// Верстак у кузни: древки или сборка стрел.
     Fletch(crate::archery::Fletch),
+    /// Ковка на удачу: заготовка из любого железа, бить, пока не страшно.
+    Quick { pattern: Pattern },
 }
 
 /// Работа у горна.
@@ -96,6 +99,8 @@ pub enum Job {
     Repair { item: Item, progress: f32 },
     /// Стрельное дело на верстаке. `acc` — средняя аккуратность, `head` — качество наконечников.
     Fletch { what: crate::archery::Fletch, progress: f32, acc: f32, strokes: u16, head: crate::items::Quality, sinew: bool },
+    /// Ковка на удачу ([`crate::smithing_quick`]).
+    Quick(QuickForge),
 }
 
 /// Клиент -> сервер.
@@ -119,9 +124,15 @@ pub enum SmithClientMessage {
     WarmMould(bool),
     Pour(bool),
     OpenMould,
-    /// Собрать вещь (`fitting` — с бронзовым навершием).
+    /// Собрать вещь (`fitting` — с бронзовым навершием). В ковке на удачу — снять с наковальни.
     Finish { fitting: bool },
     Abandon,
+    /// Выменять клеймо мастера на готовые вещи.
+    BuyMark(Mark),
+    /// Сдать вещь в заказ мастера.
+    Deliver,
+    /// Попросить у мастера другой заказ.
+    NewOrder,
 }
 
 /// Сервер -> клиент.
@@ -136,6 +147,16 @@ pub enum SmithServerMessage {
     Fx { station: u32, player: u64, fx: Fx },
     /// Все раскалённые поковки и тигли (несколько раз в секунду, пока что-то есть).
     Pieces(Vec<PieceView>),
+    /// Свои клейма мастера и заказ.
+    Guild(GuildView),
+}
+
+/// Что мастер кузни знает об игроке: клейма, заказ, сколько сдано.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct GuildView {
+    pub marks: Marks,
+    pub order: Option<Order>,
+    pub delivered: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -151,6 +172,7 @@ impl PieceView {
         match job {
             Job::Forge(f) => Some(Self { player, station, spot: f.spot, temp: f.temp, pattern: Some(f.pattern), drawn: f.drawn(), pouring: false }),
             Job::Cast(c) if !c.opened => Some(Self { player, station, spot: c.spot, temp: c.temp, pattern: None, drawn: c.poured, pouring: c.pouring }),
+            Job::Quick(q) if !q.shattered => Some(Self { player, station, spot: Spot::Anvil, temp: q.temp(), pattern: Some(q.pattern), drawn: q.drawn(), pouring: false }),
             _ => None,
         }
     }

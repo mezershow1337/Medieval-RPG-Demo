@@ -1143,7 +1143,17 @@ pub const MERCHANTS: &[MerchantDef] = &[
         vigilance: 0.9,
         cash: 7200 * 6,
         orders: &[],
-        lessons: &[],
+        // Общественные работы (opera publica): берут любого, даже кто только что уплатил штраф.
+        // Знаний не дают (hours = 0) — только кормят и возвращают доброе имя у гарнизона (+10–20).
+        lessons: &[LessonDef {
+            title: "Общественные работы: носить камень на починку стен",
+            teacher: TeacherKind::Miner,
+            mode: LessonMode::Apprentice,
+            hours: 0.0,
+            secs: 120.0,
+            money: 12,
+            min: Standing::Hostile,
+        }],
         services: &[Service::Fines],
         look: Look {
             tunic: [0.55, 0.12, 0.1],
@@ -1738,6 +1748,35 @@ pub const MERCHANTS: &[MerchantDef] = &[
             helmet: true,
         },
     },
+    // ---------------- Угольный и железный двор напротив кузницы ----------------
+    MerchantDef {
+        key: "nikephoros",
+        name: "Никифор-угольщик",
+        title: "уголь, крицы и железо для кузниц",
+        faction: Faction::Citizens,
+        place: "iron_yard",
+        greeting: "Уголь дубовый, от готов из леса, крицы с рудника, прутки — хоть сейчас под молот. Филипп напротив берёт у меня, и ты бери: до горна десять шагов.",
+        stock: &[
+            s("Древесный уголь", 20, 60, 1.0),
+            s("Железная полоса", 4, 12, 1.1),
+            s("Стальная полоса", 1, 4, 1.15),
+            s("Железный лом", 6, 20, 1.0),
+            s("Крица", 2, 6, 1.1),
+            s("Железная руда", 4, 12, 1.15),
+        ],
+        buys: &[(Category::Material, 0.75)],
+        money: MoneyPolicy::Coins,
+        vigilance: 0.6,
+        cash: 40 * 400,
+        orders: &[],
+        lessons: &[],
+        services: &[],
+        look: Look {
+            tunic: [0.3, 0.27, 0.24],
+            trousers: [0.22, 0.2, 0.18],
+            helmet: false,
+        },
+    },
 ];
 
 #[allow(dead_code)]
@@ -1858,6 +1897,30 @@ pub fn stall_obbs(pos: bevy::math::Vec3, yaw: f32, boxes: &[StallBox]) -> Vec<cr
         .iter()
         .map(|b| crate::props::Obb { center: pos + rot * bevy::math::Vec3::from_array(b.center), rot, half: bevy::math::Vec3::from_array(b.half) })
         .collect()
+}
+
+/// Жерди навеса над городским прилавком (в системе торговца): по ним ставится и сам навес.
+pub const STALL_POSTS: [(f32, f32); 4] = [(-1.05, -1.35), (1.05, -1.35), (-1.05, 0.45), (1.05, 0.45)];
+/// Половина толщины жерди навеса для столкновений (сама жердь — 10 см).
+const STALL_POST_HALF: f32 = 0.06;
+/// Высота жердей навеса.
+pub const STALL_POST_HEIGHT: f32 = 2.4;
+
+/// Во что упирается человек у прилавка: столы и жерди навеса (войлок на земле не мешает).
+/// Торговцы стоят по сторонам света, так что коробки по осям совпадают со столами.
+pub fn stall_solids(pos: bevy::math::Vec3, yaw: f32, boxes: &[StallBox]) -> Vec<crate::collision::Aabb> {
+    use bevy::math::Vec3;
+    let tables: Vec<StallBox> = boxes.iter().filter(|b| !b.felt).copied().collect();
+    let mut out: Vec<_> = stall_obbs(pos, yaw, &tables).iter().map(|o| o.aabb()).collect();
+    if !tables.is_empty() {
+        let rot = bevy::math::Quat::from_rotation_y(yaw);
+        let h = Vec3::new(STALL_POST_HALF, 0.0, STALL_POST_HALF);
+        for (x, z) in STALL_POSTS {
+            let c = pos + rot * Vec3::new(x, 0.0, z);
+            out.push(crate::collision::Aabb::new(c - h, c + h + Vec3::Y * STALL_POST_HEIGHT));
+        }
+    }
+    out
 }
 
 /// Продажа оружия и доспехов варварам запрещена законом.

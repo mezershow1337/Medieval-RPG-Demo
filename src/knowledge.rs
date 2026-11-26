@@ -1175,6 +1175,19 @@ fn apprentice_chore_for(teacher: Teacher, can_write: bool) -> &'static str {
     }
 }
 
+/// На кого работает подмастерье у учителя (не из лавок торговли): писец — при церкви,
+/// знахарка — в готской деревне, школа, нотарий и прочие — городские.
+fn teacher_faction(teacher: Teacher) -> crate::factions::Faction {
+    use crate::factions::Faction;
+    match teacher {
+        Teacher::Scribe => Faction::Church,
+        Teacher::Wisewoman | Teacher::GothSmith | Teacher::CharcoalBurner => Faction::Goths,
+        Teacher::SteppeHealer | Teacher::SteppeSmith => Faction::Nomads,
+        Teacher::Armourer => Faction::Garrison,
+        _ => Faction::Citizens,
+    }
+}
+
 /// Грязная работа подмастерья.
 fn apprentice_chore(teacher: Teacher) -> &'static str {
     match teacher {
@@ -1201,6 +1214,7 @@ fn tick_activities(
     mut loot: ResMut<LootWorld>,
     mut bodies: ResMut<Bodies>,
     mut mines: Option<ResMut<MineWorld>>,
+    mut trade: Option<ResMut<crate::trade_server::TradeWorld>>,
 ) {
     let dt = time.delta_secs();
     let mut ended: Vec<(u64, bool)> = Vec::new();
@@ -1379,6 +1393,15 @@ fn tick_activities(
                         notice(&mut server, pid, format!("Работали {}. Вам дали {}", crate::work::quality_word(q), format_money(wage)));
                     }
                     sync_inventory(&mut server, loot, pid);
+                }
+                // Отработанная смена в городе поднимает репутацию у тех, на кого работали (+10–15).
+                if mode == LessonMode::Apprentice
+                    && let Some(t) = trade.as_deref_mut()
+                {
+                    let faction = teacher_faction(teacher);
+                    let gain = crate::factions::work_reward(faction, q);
+                    t.change_rep(pid, faction, gain);
+                    notice(&mut server, pid, format!("{}: репутация +{:.0}", faction.name(), gain));
                 }
                 // Сам урок: то же, что событие Lesson.
                 let Some(k) = world.players.get_mut(&pid) else { continue };

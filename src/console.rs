@@ -65,7 +65,7 @@ pub struct Console {
     /// Мышь была захвачена до открытия — вернуть при закрытии.
     was_locked: bool,
     ctrl: bool,
-    queue: Vec<String>,
+    pub(crate) queue: Vec<String>,
     dirty: bool,
 }
 

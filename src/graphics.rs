@@ -510,6 +510,7 @@ const P_MOSAIC: f32 = 17.0;
 const P_EARTH: f32 = 18.0;
 const P_TERRAIN: f32 = 19.0;
 const P_THATCH: f32 = 20.0;
+const P_LOG: f32 = 21.0;
 const P_PLAIN: f32 = 30.0;
 
 fn lin(c: Color) -> Vec4 {
@@ -573,6 +574,8 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         Mat::Limonite => (Color::srgb(0.33, 0.2, 0.1), Color::srgb(0.2, 0.11, 0.06), P_RUBBLE, 1.0, 0.35, 1.2, 0.9, 0.0, 0.0, 0.3, 0.0),
         Mat::Soot => (Color::srgb(0.075, 0.068, 0.062), Color::srgb(0.03, 0.03, 0.03), P_EARTH, 1.0, 0.3, 0.7, 0.95, 0.0, 0.0, 0.0, 0.0),
         Mat::Shingle => (Color::srgb(0.52, 0.48, 0.4), Color::srgb(0.4, 0.37, 0.31), P_EARTH, 1.0, 0.3, 0.8, 0.9, 0.0, 0.0, 0.0, 0.0),
+        // Окорённое бревно: серо-бурое, обветренное; второй цвет — светлый торец.
+        Mat::Timber => (Color::srgb(0.36, 0.27, 0.19), Color::srgb(0.62, 0.5, 0.36), P_LOG, 1.0, 0.35, 0.8, 0.85, 0.0, 0.0, 0.0, 0.0),
     };
     let photo = photo_layers(mat);
     let tex = surface_textures();
@@ -608,7 +611,7 @@ fn wet_capacity(mat: Mat) -> f32 {
         Mat::Terrain => 0.7,
         Mat::Marble => 0.6,
         Mat::Limestone | Mat::Stone | Mat::DarkStone | Mat::Rubble | Mat::Trim | Mat::OpusMixtum | Mat::Brick => 0.5,
-        Mat::Grass | Mat::Wood | Mat::Thatch => 0.45,
+        Mat::Grass | Mat::Wood | Mat::Timber | Mat::Thatch => 0.45,
         Mat::Plaster | Mat::Signinum => 0.3,
         _ => 0.0,
     }
@@ -628,7 +631,7 @@ pub fn depth_rank(mat: Mat) -> f32 {
         Mat::Ochre => 7,
         Mat::Paving | Mat::Floor | Mat::Cobble => 7,
         Mat::Plaster | Mat::Trim => 6,
-        Mat::Wood => 5,
+        Mat::Wood | Mat::Timber => 5,
         Mat::Marble => 4,
         Mat::OpusMixtum | Mat::Brick | Mat::Tile | Mat::Roof => 3,
         Mat::Limestone | Mat::Stone | Mat::DarkStone => 2,
@@ -690,6 +693,8 @@ fn photo_layers(mat: Mat) -> Option<(u32, u32, f32, f32)> {
         Mat::Limonite => (L_SOIL, L_ROCK, 0.85, 1.0),
         Mat::Soot => (L_SOIL, L_SOIL, 0.95, 0.9),
         Mat::Shingle => (L_GRAVEL, L_GRAVEL, 0.45, 0.9),
+        // Дерево без швов: волокна идут вдоль бревна (по развёртке, см. шейдер).
+        Mat::Timber => (L_BEAM, L_BEAM, 0.75, 1.0),
         _ => return None,
     })
 }

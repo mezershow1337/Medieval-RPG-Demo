@@ -194,9 +194,11 @@ pub fn run(start: crate::menu::Start) {
         .add_plugins((crate::lore_client::LoreClientPlugin, crate::lore_client::DevShotPlugin, crate::medicine_client::MedicineClientPlugin, crate::brewing_client::BrewingClientPlugin, crate::alchemy_fx::AlchemyFxPlugin))
         .add_plugins(crate::smithing_client::SmithingClientPlugin)
         .add_plugins(crate::mining_client::MiningClientPlugin)
+        .add_plugins(crate::rep_demo::RepDemoPlugin)
         .add_plugins(crate::audio::GameAudioPlugin)
         .add_plugins(crate::towns_client::TownClientPlugin)
         .add_plugins(crate::ui_theme::UiThemePlugin)
+        .add_plugins(crate::ui_cursor::UiCursorPlugin)
         .add_plugins((crate::skill_book::SkillBookPlugin, crate::hints::HintsPlugin, crate::school_client::SchoolClientPlugin, crate::tablet_view::TabletViewPlugin))
         .add_plugins(crate::work_client::WorkClientPlugin)
         .add_plugins(crate::console::ConsolePlugin)
@@ -249,7 +251,7 @@ pub struct WaitingCamera;
 fn hide_ui_for_shots(mut roots: Query<(&mut Visibility, Has<crate::civil_client::ShotKeep>), (With<Node>, Without<ChildOf>)>) {
     // Снимок окна стражи (`MRPG_LAW_DEMO`): его окна оставляем.
     // И окна школы/табличка (`MRPG_SHOT_UI=school…`, `MRPG_WORK_DEMO`).
-    let law = std::env::var_os("MRPG_LAW_DEMO").is_some() || std::env::var_os("MRPG_WORK_DEMO").is_some() || std::env::var("MRPG_SHOT_UI").is_ok_and(|s| s.starts_with("school"));
+    let law = std::env::var_os("MRPG_LAW_DEMO").is_some() || std::env::var_os("MRPG_WORK_DEMO").is_some() || std::env::var("MRPG_SHOT_UI").is_ok_and(|s| s.starts_with("school") || s.starts_with("quick"));
     for (mut v, keep) in &mut roots {
         if !(law && keep) {
             *v = Visibility::Hidden;

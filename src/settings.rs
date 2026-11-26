@@ -592,10 +592,13 @@ fn detail_ranges(
     let end = settings.detail_distance();
     let far = settings.people_distance();
     let range = |end: f32| VisibilityRange { start_margin: 0.0..0.0, end_margin: end..end + 8.0, use_aabb: false };
+    // Мелочь меряем до середины рамки: у мешей уровня (утварь, инструмент, светильники)
+    // своя точка в начале координат, и по ней вдали от города они пропадали вовсе.
+    let detail = |end: f32| VisibilityRange { use_aabb: true, ..range(end) };
     for (e, aabb, gt) in &fresh {
         let size = Vec3::from(aabb.half_extents) * 2.0 * gt.scale().abs();
         if size.max_element() < 2.5 {
-            commands.entity(e).insert((DetailRanged, range(end)));
+            commands.entity(e).insert((DetailRanged, detail(end)));
         } else {
             commands.entity(e).insert((DetailRanged,));
         }
@@ -605,7 +608,7 @@ fn detail_ranges(
     }
     if settings.is_changed() {
         for mut r in &mut ranged {
-            *r = range(end);
+            *r = detail(end);
         }
         for mut r in &mut people {
             *r = range(far);
