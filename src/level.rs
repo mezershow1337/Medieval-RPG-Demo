@@ -28,6 +28,11 @@ pub fn road_distance(x: f32, z: f32) -> f32 {
     city::outside::road_distance_at(Vec2::new(x, z))
 }
 
+/// Голая земля без травы: кострища и натоптанные тропы рудника.
+pub fn bare_ground(x: f32, z: f32) -> bool {
+    city::outside::mines::bare_ground(Vec2::new(x, z))
+}
+
 use crate::collision::{Aabb, HeightField, LevelColliders};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
@@ -120,6 +125,9 @@ pub enum Mat {
     Soot,
     /// Береговой песок с галькой и ракушкой.
     Shingle,
+    /// Круглый лес (окорённые брёвна крепи, срубов, воротов): волокна вдоль бревна по развёртке,
+    /// на торцах — годичные кольца.
+    Timber,
 }
 
 #[derive(Clone, Copy, Debug)]
