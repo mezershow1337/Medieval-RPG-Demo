@@ -1218,7 +1218,6 @@ pub fn spawn_level(
     mut surfaces: ResMut<Assets<crate::graphics::SurfaceMaterial>>,
     mut glass_mats: ResMut<Assets<crate::graphics::GlassMaterial>>,
     mut flame_mats: ResMut<Assets<crate::graphics::FlameMaterial>>,
-    mut water_mats: ResMut<Assets<crate::sky::WaterMaterial>>,
     mut smoke_mats: ResMut<Assets<crate::smoke::SmokeMaterial>>,
     mut window_mats: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -1237,13 +1236,9 @@ pub fn spawn_level(
     if let Some(ground) = &layout.ground {
         terrain::terrain_meshes(ground, &mut decor);
     }
-    // Море — свой материал (отражения неба, солнечная дорожка, пена у берега).
+    // Море — свой материал и своя сетка вокруг камеры (см. water.rs).
     if let Some(y) = layout.water_y {
-        let mut mb = MeshBuilder::default();
-        let r = 1200.0;
-        mb.quad([Vec3::new(-r, y, -r), Vec3::new(r, y, -r), Vec3::new(r, y, r), Vec3::new(-r, y, r)], Vec3::Y);
-        let mat = water_mats.add(crate::sky::water_material(&crate::graphics::mood()));
-        commands.spawn((Mesh3d(meshes.add(mb.build())), MeshMaterial3d(mat), Transform::IDENTITY, NotShadowCaster));
+        commands.insert_resource(crate::water::SeaLevel(y));
     }
     // Дым из очагов и горнов: над крышей, если очаг под черепицей.
     let roofs: Vec<[Vec3; 3]> = decor.iter().filter(|((m, _), _)| *m == Mat::Tile).flat_map(|(_, mb)| mb.triangles()).collect();

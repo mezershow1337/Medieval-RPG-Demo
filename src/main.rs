@@ -108,6 +108,7 @@ mod trade_ui;
 mod ui_cursor;
 mod ui_theme;
 mod vegetation;
+mod water;
 mod weight;
 mod work;
 mod work_client;

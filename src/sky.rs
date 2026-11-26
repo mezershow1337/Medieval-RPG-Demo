@@ -65,44 +65,73 @@ pub type WaterMaterial = ExtendedMaterial<StandardMaterial, WaterExt>;
 #[derive(ShaderType, Clone, Copy, Debug, Default, Reflect)]
 pub struct WaterUniform {
     pub sky: SkyUniform,
-    /// Цвет толщи (линейный), w — плотность, 1/м.
+    /// Цвет рассеяния в толще (линейный), w — множитель поглощения.
     pub deep: Vec4,
-    /// Цвет мелководья, w — сила пены.
+    /// Цвет мелководья (простая вода), w — сила пены.
     pub shallow: Vec4,
-    /// x — сила блика солнца, y — масштаб волн, z — есть ли глубина из предпрохода.
+    /// x — сила блика солнца, y — масштаб мелких волн, z — есть ли глубина из предпрохода,
+    /// w — 1 на простом качестве воды.
     pub params: Vec4,
+    /// x — высота волн (ветер), y — уровень моря, z — отражения трассировкой по кадру, w — запас.
+    pub waves: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
 pub struct WaterExt {
     #[uniform(100)]
     pub water: WaterUniform,
+    /// Глубина, сила волн и близость берега по всей карте (см. `water::water_map`).
+    #[texture(101)]
+    #[sampler(102)]
+    pub map: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for WaterExt {
+    fn vertex_shader() -> ShaderRef {
+        "embedded://medieval_rpg/shaders/water.wesl".into()
+    }
     fn fragment_shader() -> ShaderRef {
         "embedded://medieval_rpg/shaders/water.wesl".into()
+    }
+    // Поверхность видна и снизу (из-под воды).
+    fn specialize(
+        _pipeline: &bevy::pbr::MaterialExtensionPipeline,
+        descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
+        _layout: &bevy::mesh::MeshVertexBufferLayoutRef,
+        _key: bevy::pbr::MaterialExtensionKey<Self>,
+    ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
+        descriptor.primitive.cull_mode = None;
+        Ok(())
     }
 }
 
 /// Материал моря: тёмная зеленовато-синяя вода Понта, бирюзовое мелководье над галькой.
-pub fn water_material(m: &Mood) -> WaterMaterial {
+/// Полная вода читает копию кадра (преломление и отражения города), простая — прозрачный слой.
+pub fn water_material(m: &Mood, map: Option<Handle<Image>>, full: bool) -> WaterMaterial {
     ExtendedMaterial {
-        base: StandardMaterial {
-            base_color: Color::srgb(0.02, 0.06, 0.07),
-            perceptual_roughness: 0.25,
-            reflectance: 0.0,
-            alpha_mode: AlphaMode::Blend,
-            ..default()
-        },
+        base: water_base(full),
         extension: WaterExt {
             water: WaterUniform {
                 sky: m.sky_uniform(),
-                deep: Vec4::new(0.006, 0.028, 0.034, 0.55),
+                deep: Vec4::new(0.010, 0.040, 0.046, 1.25),
                 shallow: Vec4::new(0.09, 0.2, 0.17, 1.0),
-                params: Vec4::new(if m.day { 2.0 } else { 3.0 }, 1.0, 1.0, 0.0),
+                params: Vec4::new(if m.day { 2.0 } else { 3.0 }, 1.0, 1.0, if full { 0.0 } else { 1.0 }),
+                waves: Vec4::new(1.0, crate::level::WATER_Y, 1.0, 0.0),
             },
+            map,
         },
+    }
+}
+
+/// Основа материала моря: с пропусканием (копия кадра для преломления) или прозрачная.
+pub fn water_base(full: bool) -> StandardMaterial {
+    StandardMaterial {
+        base_color: Color::srgb(0.02, 0.06, 0.07),
+        perceptual_roughness: 0.25,
+        reflectance: 0.0,
+        alpha_mode: if full { AlphaMode::Opaque } else { AlphaMode::Blend },
+        specular_transmission: if full { 1.0 } else { 0.0 },
+        ..default()
     }
 }
 
