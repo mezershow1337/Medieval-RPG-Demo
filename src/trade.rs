@@ -629,8 +629,8 @@ pub const MERCHANTS: &[MerchantDef] = &[
         },
     },
     MerchantDef {
-        key: "zenon",
-        name: "Зинон-боспорец",
+        key: "herakleios",
+        name: "Ираклий-боспорец",
         title: "навклир кондуры, товары Боспора",
         faction: Faction::Merchants,
         place: "quay",
