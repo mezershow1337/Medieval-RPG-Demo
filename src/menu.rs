@@ -774,7 +774,7 @@ fn kit_body(p: &mut ChildSpawnerCommands, fonts: &UiFonts, kit: &StartKit) {
             small_button(r, fonts, "›", Act::KitStep(f, 1), 34.0);
         });
     }
-    label(p, fonts, "Всем в дорогу: кожаные сапоги, бинт, винный уксус промыть рану и 5 фоллисов.", 15.0, PARCHMENT);
+    label(p, fonts, "Всем в дорогу: кожаные сапоги, бинт, винный уксус промыть рану и 2 серебряные монеты.", 15.0, PARCHMENT);
     label(p, fonts, "Нищий старт: вещи простые, остальное — добыть, купить или заработать. Набор выдаётся при входе и после смерти.", 14.0, INK_SOFT);
     p.spawn(Node { flex_grow: 1.0, ..default() });
     button(p, fonts, "Готово", Act::Back);

@@ -217,7 +217,7 @@ fn purse_and_bag(loot: Option<Res<LootState>>, trade: Option<Res<crate::trade_cl
     let (Some(op), Some(oi)) = (old_purse, old_items) else { return };
     let trading = trade.is_some_and(|t| t.window_open());
     if purse != op {
-        let big = purse.abs_diff(op) >= crate::economy::NUMMI_PER_SOLIDUS / 4;
+        let big = purse.abs_diff(op) >= 18 * crate::economy::SILVER;
         out.write(Sfx::ui(if big || trading { "coins_pour" } else { "coin" }).gain(0.5));
     } else if items != oi {
         out.write(Sfx::ui("rustle").gain(0.4));
@@ -404,7 +404,7 @@ mod tests {
         for s in ["drop_metal", "drop_wood", "drop_ceramic", "drop_soft", "coin", "coins_pour", "rustle", "murmur_m", "murmur_f", "murmur_child", "ui_open", "door_open", "door_close", "hiss", "boil", "flame_burst", "glass_clink", "herb_pick", "mortar"] {
             assert!(names.contains(&s), "{s}");
         }
-        for (shape, name) in [(ItemShape::Blade, "Спата"), (ItemShape::Flask, "Склянка"), (ItemShape::Small, "Подорожник"), (ItemShape::Coins, "Фоллис")] {
+        for (shape, name) in [(ItemShape::Blade, "Спата"), (ItemShape::Flask, "Склянка"), (ItemShape::Small, "Подорожник"), (ItemShape::Coins, "Медная монета")] {
             assert!(names.contains(&drop_sound(shape, name)));
         }
     }

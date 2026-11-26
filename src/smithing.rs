@@ -1222,7 +1222,7 @@ pub fn repair(make: &mut Make, skill: f32) {
     make.dur = make.dur.round();
 }
 
-/// Цена ремонта у кузнеца (нуммии): чем больше сбито, тем дороже.
+/// Цена ремонта у кузнеца (в долях): чем больше сбито, тем дороже.
 pub fn repair_price(make: &Make, value: u32) -> u32 {
     if make.dur_max <= 0.0 {
         return 0;

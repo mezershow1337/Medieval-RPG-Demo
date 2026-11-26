@@ -429,7 +429,7 @@ pub fn finish(world: &mut MineWorld, k: &mut Knowledge, inv: &mut Inventory, uid
             k.practice(Skill::Smithing, 0.3);
             let mut msg = match s.kind {
                 SiteKind::Shaft => {
-                    // Поденная плата (нуммии) — сразу в сумку.
+                    // Поденная плата (в долях) — сразу в сумку.
                     let mut wage = shaft_wage(q);
                     if wage > 0 && give_money(inv, wage, uids).is_err() {
                         wage = 0;

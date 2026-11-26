@@ -2,35 +2,49 @@
 //!
 //! # Монеты
 //!
-//! После денежной реформы императора Анастасия (498 г.) в ходу:
-//! - **солид** (номисма) — золото, 1/72 римского фунта (≈4,5 г). Им платят жалованье, подати, крупные сделки;
-//! - **тремисс** — золотая треть солида;
-//! - **фоллис** — крупная медная монета с буквой «M» (40 нуммиев), повседневные расчёты;
-//! - **декануммий** — медь с буквой «I» (10 нуммиев), мелочь.
+//! В ходу три монеты с простым десятичным курсом:
+//! - **золотая монета** = 10 серебряных — жалованье, подати, дома, доспехи, книги;
+//! - **серебряная монета** = 10 медных — плата за день работы, оружие попроще, снадобья;
+//! - **медная монета** — хлеб, травы, баня, мелочь. Мельче медной монеты ничего нет.
 //!
-//! Курс в начале VI века — около 180 фоллисов за солид (7200 нуммиев), его и берём.
-//! Все цены в коде — в нуммиях (`u32`), так считать проще и без дробей.
+//! Все цены в коде — целые «доли» (`u32`): медная монета — 10 долей, серебряная — 100,
+//! золотая — 1000. Так в прейскуранте остаются прежние числа, а сумма раскладывается на монеты без дробей.
 //!
 //! Ориентиры (папирусы Египта VI века, Кодекс Юстиниана): поденщик зарабатывает
-//! около 1/30 солида в день (≈6 фоллисов), солдат-лимитаней — несколько солидов в год,
-//! хорошая кольчуга стоит пару солидов, переписанная книга — от одного до десятка солидов.
+//! около 2–3 серебряных в день, кольчуга стоит полтора десятка золотых, переписанная книга —
+//! от семи до сорока золотых.
+//!
+//! До этих монет были солиды, тремиссы, фоллисы и декануммии. Они остались только в старых
+//! сохранениях: [`legacy_coin_value`] переводит их в доли, и сундуки получают новые монеты
+//! на ту же сумму.
 
 use crate::inventory::{Inventory, Target};
 use crate::items::{ITEM_BASES, Item, ItemBaseId, ItemShape, Quality, UidGen};
 
-pub const NUMMI_PER_FOLLIS: u32 = 40;
-pub const NUMMI_PER_SOLIDUS: u32 = 7200;
+/// Медная монета, в долях.
+pub const COPPER: u32 = 10;
+/// Серебряная монета: 10 медных.
+pub const SILVER: u32 = 10 * COPPER;
+/// Золотая монета: 10 серебряных.
+pub const GOLD: u32 = 10 * SILVER;
 
-/// Монеты от крупной к мелкой: имя и стоимость в нуммиях.
-pub const DENOMINATIONS: [(&str, u32); 4] = [
-    ("Солид", NUMMI_PER_SOLIDUS),
-    ("Тремисс", 2400),
-    ("Фоллис", NUMMI_PER_FOLLIS),
-    ("Декануммий", 10),
-];
+pub const GOLD_COIN: &str = "Золотая монета";
+pub const SILVER_COIN: &str = "Серебряная монета";
+pub const COPPER_COIN: &str = "Медная монета";
+
+/// Монеты от крупной к мелкой: имя и стоимость в долях.
+pub const DENOMINATIONS: [(&str, u32); 3] = [(GOLD_COIN, GOLD), (SILVER_COIN, SILVER), (COPPER_COIN, COPPER)];
 
 /// Самая мелкая монета: цены округляются до неё.
-pub const SMALLEST_COIN: u32 = 10;
+pub const SMALLEST_COIN: u32 = COPPER;
+
+/// Монеты прежней системы (солид = 7200 долей и т. д.): только для старых сохранений.
+const LEGACY_COINS: [(&str, u32); 4] = [("Солид", 7200), ("Тремисс", 2400), ("Фоллис", 40), ("Декануммий", 10)];
+
+/// Сколько долей стоила монета прежней системы с таким названием (для старых сохранений).
+pub fn legacy_coin_value(name: &str) -> Option<u32> {
+    LEGACY_COINS.iter().find(|(n, _)| *n == name).map(|(_, v)| *v)
+}
 
 /// Стоимость одной монеты, если предмет — монета.
 pub fn coin_value(base: ItemBaseId) -> Option<u32> {
@@ -41,22 +55,22 @@ pub fn coin_value(base: ItemBaseId) -> Option<u32> {
         .map(|(_, v)| *v)
 }
 
-/// Золотая ли монета (кочевники и аланы берут только золото).
-pub fn is_gold_coin(base: ItemBaseId) -> bool {
-    coin_value(base).is_some_and(|v| v >= 2400)
+/// Золото или серебро: за стенами драгоценный металл ценят, а медь берут плохо или не берут вовсе.
+pub fn is_precious_coin(base: ItemBaseId) -> bool {
+    coin_value(base).is_some_and(|v| v >= SILVER)
 }
 
-/// Сколько денег в инвентаре (нуммии).
+/// Сколько денег в инвентаре (доли).
 pub fn purse(inv: &Inventory) -> u32 {
     inv.all_items()
         .filter_map(|i| coin_value(i.base).map(|v| v * i.count as u32))
         .sum()
 }
 
-/// Разложить сумму на монеты (жадно, от крупных). Остаток меньше декануммия пропадает.
-/// Возвращает стопки не больше `max_stack`.
+/// Разложить сумму на монеты (жадно, от крупных). Сумма сперва округляется до медной монеты
+/// ([`whole_coins`]). Возвращает стопки не больше `max_stack`.
 pub fn coins_for(nummi: u32) -> Vec<(ItemBaseId, u16)> {
-    let mut rest = nummi;
+    let mut rest = whole_coins(nummi);
     let mut out = Vec::new();
     for (name, value) in DENOMINATIONS {
         let Some(base) = ItemBaseId::find(name) else {
@@ -121,8 +135,10 @@ pub fn give_money(inv: &mut Inventory, nummi: u32, uids: &mut UidGen) -> Result<
 ///
 /// Сначала платим без сдачи, от крупных монет к мелким (ничего не переплачивая),
 /// а остаток покрываем одной монетой покрупнее и получаем сдачу — как на рынке.
+/// Сумма округляется до медной монеты, как её и показывают ([`whole_coins`]).
 /// При ошибке инвентарь не меняется.
 pub fn take_money(inv: &mut Inventory, nummi: u32, uids: &mut UidGen) -> Result<(), MoneyError> {
+    let nummi = whole_coins(nummi);
     if nummi == 0 {
         return Ok(());
     }
@@ -197,7 +213,7 @@ fn remove_coins(inv: &mut Inventory, base: ItemBaseId, count: u16) -> bool {
     true
 }
 
-/// Сколько стоит одна штука товара обычного качества (справочная цена Херсона, нуммии).
+/// Сколько стоит одна штука товара обычного качества (справочная цена Херсона, в долях).
 pub fn base_price(base: ItemBaseId) -> u32 {
     if let Some(v) = coin_value(base) {
         return v;
@@ -241,12 +257,18 @@ pub fn item_value(item: &Item) -> u32 {
         * item.count.max(1) as u32
 }
 
-/// Округлить до мелкой монеты (не меньше одного декануммия).
+/// Округлить до мелкой монеты (не меньше одной медной).
 pub fn round_price(nummi: f32) -> u32 {
     ((nummi / SMALLEST_COIN as f32).round().max(1.0) as u32) * SMALLEST_COIN
 }
 
-/// Склонение: 1 солид, 2 солида, 5 солидов.
+/// Сумма, которую можно отсчитать монетами: до ближайшей медной, но не меньше одной, если сумма не нулевая.
+/// Так платят, получают и показывают одинаково.
+pub fn whole_coins(nummi: u32) -> u32 {
+    if nummi == 0 { 0 } else { round_price(nummi as f32) }
+}
+
+/// Склонение: 1 монета, 2 монеты, 5 монет.
 pub fn plural<'a>(n: u32, one: &'a str, few: &'a str, many: &'a str) -> &'a str {
     let (n10, n100) = (n % 10, n % 100);
     if n10 == 1 && n100 != 11 {
@@ -258,60 +280,45 @@ pub fn plural<'a>(n: u32, one: &'a str, few: &'a str, many: &'a str) -> &'a str 
     }
 }
 
-/// «2 солида 15 фоллисов», «3 фоллиса 20 нуммиев», «ничего».
+/// Сколько золотых, серебряных и медных в сумме (как её отсчитают монетами).
+pub fn split_coins(nummi: u32) -> (u32, u32, u32) {
+    let n = whole_coins(nummi);
+    (n / GOLD, n % GOLD / SILVER, n % SILVER / COPPER)
+}
+
+/// «2 золотых 3 серебряных 5 медных», «1 серебряный», «ничего».
 pub fn format_money(nummi: u32) -> String {
-    let sol = nummi / NUMMI_PER_SOLIDUS;
-    let fol = nummi % NUMMI_PER_SOLIDUS / NUMMI_PER_FOLLIS;
-    let num = nummi % NUMMI_PER_FOLLIS;
+    let (g, s, c) = split_coins(nummi);
     let mut parts = Vec::new();
-    if sol > 0 {
-        parts.push(format!(
-            "{sol} {}",
-            plural(sol, "солид", "солида", "солидов")
-        ));
+    if g > 0 {
+        parts.push(format!("{g} {}", plural(g, "золотой", "золотых", "золотых")));
     }
-    if fol > 0 {
-        parts.push(format!(
-            "{fol} {}",
-            plural(fol, "фоллис", "фоллиса", "фоллисов")
-        ));
+    if s > 0 {
+        parts.push(format!("{s} {}", plural(s, "серебряный", "серебряных", "серебряных")));
     }
-    if num > 0 {
-        parts.push(format!(
-            "{num} {}",
-            plural(num, "нуммий", "нуммия", "нуммиев")
-        ));
+    if c > 0 {
+        parts.push(format!("{c} {}", plural(c, "медный", "медных", "медных")));
     }
-    if parts.is_empty() {
-        "ничего".to_string()
-    } else {
-        parts.join(" ")
-    }
+    if parts.is_empty() { "ничего".to_string() } else { parts.join(" ") }
 }
 
-/// Короткая запись для списков: «2 сол. 15 ф.», «20 н.».
+/// Короткая запись для списков: «2 зол. 3 сер. 5 мед.», «4 мед.».
 pub fn format_money_short(nummi: u32) -> String {
-    let sol = nummi / NUMMI_PER_SOLIDUS;
-    let fol = nummi % NUMMI_PER_SOLIDUS / NUMMI_PER_FOLLIS;
-    let num = nummi % NUMMI_PER_FOLLIS;
+    let (g, s, c) = split_coins(nummi);
     let mut parts = Vec::new();
-    if sol > 0 {
-        parts.push(format!("{sol} сол."));
+    if g > 0 {
+        parts.push(format!("{g} зол."));
     }
-    if fol > 0 {
-        parts.push(format!("{fol} ф."));
+    if s > 0 {
+        parts.push(format!("{s} сер."));
     }
-    if num > 0 {
-        parts.push(format!("{num} н."));
+    if c > 0 {
+        parts.push(format!("{c} мед."));
     }
-    if parts.is_empty() {
-        "0".to_string()
-    } else {
-        parts.join(" ")
-    }
+    if parts.is_empty() { "0".to_string() } else { parts.join(" ") }
 }
 
-/// Справочные цены за штуку, нуммии. Сюда же — предметы треда знаний и алхимии
+/// Справочные цены за штуку, в долях (медная монета — 10). Сюда же — предметы треда знаний и алхимии
 /// (их имена из /mnt/project-files/alchemy/items-and-api.md); пока предмета нет в игре, строка просто не используется.
 const PRICE_LIST: &[(&str, u32)] = &[
     // Оружие и доспехи. Железо в Херсоне привозное, кольчуга — целое состояние.
@@ -460,7 +467,7 @@ const PRICE_LIST: &[(&str, u32)] = &[
     ("Алембик", 4800),
     ("Стеклянная реторта", 3600),
     ("Керотакис", 3000),
-    // Книги: переписчик берёт за кодекс солиды.
+    // Книги: переписчик берёт за кодекс десятки золотых.
     ("Обрывок травника", 1200),
     ("Диоскорид. О лекарственных веществах", 28800),
     ("Иллюстрированный травник", 43200),
@@ -591,49 +598,83 @@ mod tests {
         (inv, uids)
     }
 
+    fn count(inv: &Inventory, name: &str) -> u32 {
+        inv.all_items().filter(|i| i.info().name == name).map(|i| i.count as u32).sum()
+    }
+
+    #[test]
+    fn exchange_rate_is_decimal() {
+        assert_eq!(GOLD, 10 * SILVER);
+        assert_eq!(SILVER, 10 * COPPER);
+        for (name, value) in DENOMINATIONS {
+            assert_eq!(coin_value(ItemBaseId::by_name(name)), Some(value), "{name}");
+            assert_eq!(base_price(ItemBaseId::by_name(name)), value);
+        }
+        assert!(is_precious_coin(ItemBaseId::by_name(GOLD_COIN)));
+        assert!(is_precious_coin(ItemBaseId::by_name(SILVER_COIN)));
+        assert!(!is_precious_coin(ItemBaseId::by_name(COPPER_COIN)));
+        // Старых монет в игре больше нет.
+        for (old, _) in LEGACY_COINS {
+            assert!(ItemBaseId::find(old).is_none(), "«{old}» ещё в таблице предметов");
+            assert!(legacy_coin_value(old).is_some());
+        }
+        assert_eq!(legacy_coin_value("Солид"), Some(7200));
+        assert_eq!(legacy_coin_value("Спата"), None);
+    }
+
     #[test]
     fn change_is_given() {
-        let (mut inv, mut uids) = wallet(&[("Солид", 1)]);
-        take_money(&mut inv, 40 * 25, &mut uids).unwrap();
-        assert_eq!(purse(&inv), 7200 - 1000);
-        // Солид разменяли: остались тремиссы и фоллисы.
-        assert!(!inv.all_items().any(|i| i.info().name == "Солид"));
+        let (mut inv, mut uids) = wallet(&[(GOLD_COIN, 1)]);
+        take_money(&mut inv, 250, &mut uids).unwrap();
+        assert_eq!(purse(&inv), 750);
+        // Золотой разменяли: сдача — 7 серебряных и 5 медных.
+        assert_eq!(count(&inv, GOLD_COIN), 0);
+        assert_eq!(count(&inv, SILVER_COIN), 7);
+        assert_eq!(count(&inv, COPPER_COIN), 5);
     }
 
     #[test]
     fn pays_exact_without_breaking_gold() {
-        let (mut inv, mut uids) = wallet(&[("Солид", 2), ("Фоллис", 30)]);
-        take_money(&mut inv, 40 * 12, &mut uids).unwrap();
-        assert_eq!(purse(&inv), 2 * 7200 + 18 * 40);
-        assert_eq!(
-            inv.all_items()
-                .filter(|i| i.info().name == "Солид")
-                .map(|i| i.count)
-                .sum::<u16>(),
-            2
-        );
+        let (mut inv, mut uids) = wallet(&[(GOLD_COIN, 2), (SILVER_COIN, 3), (COPPER_COIN, 30)]);
+        take_money(&mut inv, 120, &mut uids).unwrap();
+        assert_eq!(purse(&inv), 2 * GOLD + 3 * SILVER + 30 * COPPER - 120);
+        assert_eq!(count(&inv, GOLD_COIN), 2);
+    }
+
+    #[test]
+    fn odd_sums_are_paid_and_given_in_whole_copper() {
+        // 14 долей — одна медная, 15 — две; ноль — ничего, но 3 доли — всё же медная.
+        assert_eq!(whole_coins(14), 10);
+        assert_eq!(whole_coins(15), 20);
+        assert_eq!(whole_coins(3), 10);
+        assert_eq!(whole_coins(0), 0);
+        let (mut inv, mut uids) = wallet(&[(SILVER_COIN, 1)]);
+        take_money(&mut inv, 14, &mut uids).unwrap();
+        assert_eq!(purse(&inv), 90);
+        give_money(&mut inv, 26, &mut uids).unwrap();
+        assert_eq!(purse(&inv), 120);
+        // Показывают ту же сумму, что отсчитают.
+        assert_eq!(format_money(14), "1 медный");
+        assert_eq!(format_money(26), "3 медных");
     }
 
     #[test]
     fn not_enough_money_changes_nothing() {
-        let (mut inv, mut uids) = wallet(&[("Фоллис", 3)]);
+        let (mut inv, mut uids) = wallet(&[(SILVER_COIN, 1)]);
         let before = inv.clone();
-        assert_eq!(
-            take_money(&mut inv, 200, &mut uids),
-            Err(MoneyError::NotEnough)
-        );
+        assert_eq!(take_money(&mut inv, 200, &mut uids), Err(MoneyError::NotEnough));
         assert_eq!(inv, before);
     }
 
     #[test]
     fn change_needs_room() {
-        // Сумка 1×1 занята солидом: сдачу из разных монет положить некуда.
+        // Сумка 1×1 занята золотым: сдачу из разных монет положить некуда.
         let mut inv = Inventory::new((1, 1));
         let mut uids = UidGen::default();
         inv.place(
             Item {
                 uid: uids.next(),
-                base: ItemBaseId::by_name("Солид"),
+                base: ItemBaseId::by_name(GOLD_COIN),
                 quality: Quality::Common,
                 affixes: vec![],
                 count: 1,
@@ -643,49 +684,45 @@ mod tests {
         )
         .unwrap();
         let before = inv.clone();
-        assert_eq!(
-            take_money(&mut inv, 2410, &mut uids),
-            Err(MoneyError::NoSpace)
-        );
+        assert_eq!(take_money(&mut inv, 410, &mut uids), Err(MoneyError::NoSpace));
         assert_eq!(inv, before);
     }
 
     #[test]
     fn coins_split_into_stacks() {
-        let coins = coins_for(7200 * 3 + 40 * 250 + 30);
-        let folles: u32 = coins
-            .iter()
-            .filter(|(b, _)| b.base().name == "Фоллис")
-            .map(|(_, c)| *c as u32)
-            .sum();
+        let sum = 3 * GOLD + 250 * COPPER + 30;
+        let coins = coins_for(sum);
         assert!(coins.iter().all(|(b, c)| *c <= b.base().max_stack));
-        // 250 фоллисов = 1 солид (180) + 1 тремисс (60) + 10 фоллисов.
-        assert_eq!(folles, 10);
-        assert_eq!(
-            coins
-                .iter()
-                .map(|(b, c)| coin_value(*b).unwrap() * *c as u32)
-                .sum::<u32>(),
-            7200 * 3 + 40 * 250 + 30
-        );
+        let of = |name: &str| coins.iter().filter(|(b, _)| b.base().name == name).map(|(_, c)| *c as u32).sum::<u32>();
+        // 250 медных = 2 золотых + 5 серебряных; ещё 30 долей — 3 медных.
+        assert_eq!((of(GOLD_COIN), of(SILVER_COIN), of(COPPER_COIN)), (5, 5, 3));
+        assert_eq!(coins.iter().map(|(b, c)| coin_value(*b).unwrap() * *c as u32).sum::<u32>(), sum);
+        // Много золота — несколько стопок по 100.
+        let rich = coins_for(250 * GOLD);
+        assert_eq!(rich.iter().filter(|(b, _)| b.base().name == GOLD_COIN).count(), 3);
     }
 
     #[test]
     fn russian_money_words() {
-        assert_eq!(format_money(7200 * 2 + 40 * 15), "2 солида 15 фоллисов");
-        assert_eq!(format_money(40 + 20), "1 фоллис 20 нуммиев");
-        assert_eq!(format_money(7200 * 21 + 40 * 3), "21 солид 3 фоллиса");
+        assert_eq!(format_money(2 * GOLD + 3 * SILVER + 5 * COPPER), "2 золотых 3 серебряных 5 медных");
+        assert_eq!(format_money(GOLD + SILVER + COPPER), "1 золотой 1 серебряный 1 медный");
+        assert_eq!(format_money(21 * GOLD + 11 * COPPER), "21 золотой 1 серебряный 1 медный");
+        assert_eq!(format_money(11 * GOLD + 4 * SILVER), "11 золотых 4 серебряных");
         assert_eq!(format_money(0), "ничего");
+        assert_eq!(format_money_short(14_400), "14 зол. 4 сер.");
+        assert_eq!(format_money_short(40), "4 мед.");
+        assert_eq!(format_money_short(0), "0");
     }
 
     #[test]
     fn every_trade_good_is_priced() {
         // Свои товары и всё, что было до них, должны быть в прейскуранте.
         let missing = unpriced_items();
-        for name in ["Амфора вина", "Солёная рыба", "Спата", "Бинт"]
-        {
+        for name in ["Амфора вина", "Солёная рыба", "Спата", "Бинт"] {
             assert!(!missing.contains(&name), "нет цены у «{name}»");
         }
-        assert!(base_price(ItemBaseId::by_name("Солид")) == 7200);
+        for (coin, _) in DENOMINATIONS {
+            assert!(!missing.contains(&coin), "монета «{coin}» без цены");
+        }
     }
 }

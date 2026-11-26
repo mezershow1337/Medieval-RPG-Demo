@@ -107,6 +107,26 @@ struct SavedPlaced {
     placed: Placed,
 }
 
+/// Разложить сохранённые вещи сундука: вещи — по названиям, монеты прежней системы (солиды,
+/// фоллисы) — суммой в долях, чтобы положить вместо них новые монеты.
+fn restore_items(saved: Vec<SavedPlaced>, uids: &mut crate::items::UidGen) -> (Vec<Placed>, u32) {
+    let mut placed = Vec::new();
+    let mut legacy = 0u32;
+    for s in saved {
+        let Some(base) = ItemBaseId::find(&s.name) else {
+            if let Some(v) = crate::economy::legacy_coin_value(&s.name) {
+                legacy = legacy.saturating_add(v.saturating_mul(s.placed.item.count as u32));
+            }
+            continue;
+        };
+        let mut p = s.placed;
+        p.item.base = base;
+        p.item.uid = uids.next();
+        placed.push(p);
+    }
+    (placed, legacy)
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct SaveFile {
     version: u32,
@@ -371,17 +391,16 @@ fn setup_world(mut tw: ResMut<TownWorld>, mut locks: ResMut<Locks>, level: Res<L
             continue;
         }
         let id = CONTAINER_ID_BASE + c as u64;
-        let mut placed = Vec::new();
-        for s in items {
-            let Some(base) = ItemBaseId::find(&s.name) else { continue };
-            let mut p = s.placed;
-            p.item.base = base;
-            p.item.uid = loot.uids.next();
-            placed.push(p);
-        }
+        let (placed, legacy) = restore_items(items, &mut loot.uids);
+        let mut uids = loot.uids.clone();
         if let Some(inv) = loot.container_mut(id) {
             inv.grid.items = placed;
+            // Солиды и фоллисы из старого сохранения — новыми монетами на ту же сумму.
+            if legacy > 0 && give_money(inv, legacy, &mut uids).is_err() {
+                warn!("В сундуке {c} не хватило места для монет старого сохранения ({})", format_money(legacy));
+            }
         }
+        loot.uids = uids;
     }
     pin_sites(&mut tw.towns);
     apply_switches(&tw, &level, &mut locks);
@@ -899,6 +918,36 @@ fn save_world(time: Res<Time>, mut tw: ResMut<TownWorld>, loot: Res<LootWorld>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_coins_in_chests_become_new_coins() {
+        // Сундук из сохранения до новых монет: 2 солида, 5 фоллисов и спата.
+        let item = |count: u16| crate::items::Item {
+            uid: 1,
+            base: ItemBaseId(0),
+            quality: crate::items::Quality::Common,
+            affixes: vec![],
+            count,
+            make: None,
+        };
+        let saved = vec![
+            SavedPlaced { name: "Солид".into(), placed: Placed { item: item(2), x: 0, y: 0 } },
+            SavedPlaced { name: "Фоллис".into(), placed: Placed { item: item(5), x: 1, y: 0 } },
+            SavedPlaced { name: "Спата".into(), placed: Placed { item: item(1), x: 2, y: 0 } },
+            SavedPlaced { name: "Неведомая вещь".into(), placed: Placed { item: item(1), x: 3, y: 0 } },
+        ];
+        let mut uids = crate::items::UidGen::default();
+        let (placed, legacy) = restore_items(saved, &mut uids);
+        assert_eq!(placed.len(), 1);
+        assert_eq!(placed[0].item.info().name, "Спата");
+        assert_eq!(legacy, 2 * 7200 + 5 * 40);
+        let mut inv = crate::inventory::Inventory::new((6, 4));
+        inv.grid.items = placed;
+        give_money(&mut inv, legacy, &mut uids).unwrap();
+        // 14 600 долей = 14 золотых и 6 серебряных.
+        assert_eq!(crate::economy::purse(&inv), 14_600);
+        assert_eq!(crate::economy::format_money(crate::economy::purse(&inv)), "14 золотых 6 серебряных");
+    }
 
     #[test]
     fn locks_keep_strangers_out() {

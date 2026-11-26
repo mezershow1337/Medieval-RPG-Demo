@@ -89,7 +89,7 @@ pub struct CivCorpse {
     pub civ: crate::civilians::Civ,
     pub name: String,
     pub table: crate::items::LootTableId,
-    /// Деньги в кошеле, нуммии.
+    /// Деньги в кошеле, в долях.
     pub coins: u32,
 }
 

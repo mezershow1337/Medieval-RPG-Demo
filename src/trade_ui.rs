@@ -594,7 +594,7 @@ fn merchant_window(
                 ..default()
             })
             .with_children(|r| {
-                for (label, n) in [("1 фоллис", 40), ("10 фоллисов", 400), ("1 солид", 7200)]
+                for (label, n) in [("1 серебряный", crate::economy::SILVER), ("1 золотой", crate::economy::GOLD), ("5 золотых", 5 * crate::economy::GOLD)]
                 {
                     button(r, fonts, label, Act::Donate(n), !refused);
                 }
@@ -737,7 +737,7 @@ fn merchant_window(
         if barter {
             p.spawn(text(
                 fonts,
-                "За стенами платят товаром, а не монетой. Медь здесь не в чести, золото ценят.",
+                "За стенами платят товаром, а не монетой. Медь здесь не в чести, золото и серебро ценят.",
                 12.0,
                 DIM,
                 false,
@@ -885,11 +885,11 @@ fn p2p_window(
                 },
             ));
             for (label, d) in [
-                ("−1 сол.", -7200i64),
-                ("−1 ф.", -40),
-                ("+1 ф.", 40),
-                ("+10 ф.", 400),
-                ("+1 сол.", 7200),
+                ("−1 зол.", -(crate::economy::GOLD as i64)),
+                ("−1 сер.", -(crate::economy::SILVER as i64)),
+                ("+1 мед.", crate::economy::COPPER as i64),
+                ("+1 сер.", crate::economy::SILVER as i64),
+                ("+1 зол.", crate::economy::GOLD as i64),
             ] {
                 button(r, fonts, label, Act::P2pCoins(d), true);
             }

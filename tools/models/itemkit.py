@@ -971,10 +971,14 @@ def bake_and_export(key, pose, bake_size=BAKE_SIZE, squash=1.0):
         body = bpy.context.view_layer.objects.active
         body.name = key
         me = body.data
-        # UV для запекания.
+        # UV для запекания. Развёртку «relief» (рисунок чекана монет) материал читает при
+        # запекании — её убираем уже после него.
         for uv in list(me.uv_layers):
-            me.uv_layers.remove(uv)
-        me.uv_layers.new(name="UVMap")
+            if uv.name != "relief":
+                me.uv_layers.remove(uv)
+        bake_uv = me.uv_layers.new(name="UVMap")
+        me.uv_layers.active = bake_uv
+        bake_uv.active_render = True
         bpy.ops.object.mode_set(mode="EDIT")
         bpy.ops.mesh.select_all(action="SELECT")
         bpy.ops.uv.smart_project(angle_limit=math.radians(55), island_margin=0.006, area_weight=0.0, correct_aspect=True, scale_to_bounds=False)
@@ -1035,6 +1039,11 @@ def bake_and_export(key, pose, bake_size=BAKE_SIZE, squash=1.0):
         bpy.ops.object.bake(type="NORMAL", normal_space="TANGENT")
         for m, t in tex_nodes:
             m.node_tree.nodes.remove(t)
+        relief = me.uv_layers.get("relief")
+        if relief is not None:
+            me.uv_layers.remove(relief)
+            me.uv_layers.active = me.uv_layers["UVMap"]
+            me.uv_layers["UVMap"].active_render = True
 
         # Упаковка: ORM (G — шероховатость, B — металл) как ждёт glTF.
         import numpy as np
