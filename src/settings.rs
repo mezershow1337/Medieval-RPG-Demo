@@ -567,6 +567,8 @@ fn apply_water(settings: Res<Settings>, mut mats: ResMut<Assets<crate::sky::Wate
     for (_, m) in mats.iter_mut() {
         m.extension.water.params.z = if simple { 0.0 } else { 1.0 };
         m.extension.water.params.w = if simple { 1.0 } else { 0.0 };
+        // Полная вода — с преломлением и отражениями города (копия кадра), простая — прозрачный слой.
+        m.base = crate::sky::water_base(!simple);
     }
 }
 

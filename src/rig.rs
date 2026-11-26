@@ -1096,6 +1096,27 @@ pub fn dead_pose(seed: u64) -> RigPose {
     RigPose { pelvis: REST[0], rot, free: [false; 2] }
 }
 
+/// Плывёт брассом (тело при этом кладут в воду поворотом корня, см. `swim.rs`):
+/// руки вытянуты вперёд и разводятся гребком, ноги толкаются «лягушкой».
+pub fn swim_pose(t: f32) -> RigPose {
+    let s = (t * 2.2).sin();
+    let pull = 0.5 * (1.0 + s);
+    let kick = 0.5 * (1.0 + (t * 2.2 - 1.2).sin());
+    let mut rot = [Quat::IDENTITY; BONES];
+    rot[Bone::Head as usize] = Quat::from_rotation_x(0.95);
+    rot[Bone::UpperArmR as usize] = Quat::from_rotation_z(-0.15 - 0.55 * pull) * Quat::from_rotation_x(2.75 - 0.45 * pull);
+    rot[Bone::UpperArmL as usize] = Quat::from_rotation_z(0.15 + 0.55 * pull) * Quat::from_rotation_x(2.75 - 0.45 * pull);
+    rot[Bone::ForearmR as usize] = Quat::from_rotation_x(0.15 + 0.6 * pull);
+    rot[Bone::ForearmL as usize] = Quat::from_rotation_x(0.15 + 0.6 * pull);
+    rot[Bone::ThighR as usize] = Quat::from_rotation_z(0.25 * kick) * Quat::from_rotation_x(0.45 * kick);
+    rot[Bone::ThighL as usize] = Quat::from_rotation_z(-0.25 * kick) * Quat::from_rotation_x(0.45 * kick);
+    rot[Bone::ShinR as usize] = Quat::from_rotation_x(-1.1 * kick);
+    rot[Bone::ShinL as usize] = Quat::from_rotation_x(-1.1 * kick);
+    rot[Bone::FootR as usize] = Quat::from_rotation_x(0.6);
+    rot[Bone::FootL as usize] = Quat::from_rotation_x(0.6);
+    RigPose { pelvis: REST[0], rot, free: [true; 2] }
+}
+
 /// Смешивает две позы (k = 0 — первая, 1 — вторая).
 pub fn blend(a: &RigPose, b: &RigPose, k: f32) -> RigPose {
     let mut rot = a.rot;
@@ -1120,6 +1141,10 @@ pub struct RigPlugin;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PoseSet;
 
+/// Применение позы к суставам (после [`PoseSet`]): поправки позы ставятся между ними.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ApplyPoseSet;
+
 impl Plugin for RigPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BladeTints>()
@@ -1127,7 +1152,7 @@ impl Plugin for RigPlugin {
             .add_systems(Update, finish_models.run_if(resource_exists::<ModelsHandle>))
             .add_systems(PostUpdate, (apply_look_tints, keep_view_arm_drawn.before(crate::settings::SettingsSet)))
             .add_systems(Update, attach_rigs.run_if(resource_exists::<CharacterModels>).before(PoseSet))
-            .add_systems(Update, apply_poses.after(PoseSet));
+            .add_systems(Update, apply_poses.after(PoseSet).in_set(ApplyPoseSet));
     }
 }
 
