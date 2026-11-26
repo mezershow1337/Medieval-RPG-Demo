@@ -567,7 +567,7 @@ fn fragment(
     var emissive = vec3<f32>(0.0);
     var water = false;
 
-    if kind == 5 || kind == 6 || kind == 7 || kind == 8 || kind == 9 || kind == 12 || kind == 20 {
+    if kind == 5 || kind == 6 || kind == 7 || kind == 8 || kind == 9 || kind == 12 || kind == 20 || kind == 21 {
         // Узоры, завязанные на UV или особые.
         var uv = vec2<f32>(0.0);
         @if(VERTEX_UVS_A) {
@@ -669,6 +669,50 @@ fn fragment(
                 let tt = normalize(cross(n, vec3<f32>(0.0, 1.0, 0.0)) + vec3<f32>(1e-4, 0.0, 0.0));
                 let bb = cross(tt, n);
                 N = perturb(N, (tt * hu + bb * hv) / e, bump);
+            }
+            case 21: {
+                // Круглый лес: u — вдоль бревна (м), v — по окружности (м). Волокна фото идут
+                // вдоль u, поэтому у стоек, верхняков и жердей они всегда вдоль ствола, а не
+                // по мировым осям, как у досок. Торцы помечены u > 500: годичные кольца.
+                if uv.x > 500.0 {
+                    // Торец: u = 1000 + доля радиуса (0 — сердцевина, 1 — край), v — радиус бревна (м).
+                    let rn = uv.x - 1000.0;
+                    let r = rn * uv.y;
+                    let wob = (fbm(vec2<f32>(wp.x + wp.z, wp.y) * 9.0) - 0.5) * 0.7;
+                    let ring = fract(r * 30.0 + wob);
+                    let late = smoothstep(0.55, 0.9, ring);
+                    // Трещины усушки и тёмная заболонь с остатками коры у края.
+                    let crack = smoothstep(0.9, 0.97, fbm(vec2<f32>(wp.x - wp.z, wp.y) * 5.0));
+                    let rim = smoothstep(0.82, 0.97, rn);
+                    color = mix(base_b, base_b * vec3<f32>(0.7, 0.6, 0.48), late * 0.55);
+                    color = mix(color, base_a * 0.5, crack * 0.7);
+                    color = mix(color, base_a * 0.65, rim);
+                    // Старый срез сереет и темнеет пятнами.
+                    color *= 0.82 + 0.2 * fbm(vec2<f32>(wp.x + wp.z, wp.y) * 2.5);
+                    rough = 0.92;
+                    break;
+                }
+                if surface.photo.x >= 0.0 {
+                    let fr = uv_frame(n, dp_x, dp_y, duv_x, duv_y);
+                    let ph = photo_plane(i32(surface.photo.x + 0.5), uv * surface.photo.y, fr.t, fr.b, n, surface.photo_mean_b.w);
+                    color = retint(ph.albedo, surface.photo_mean.rgb, base_a, surface.photo_mean.w);
+                    // Каждое бревно своего тона, вдоль ствола — потёки и серые обветренные полосы.
+                    let streak = fbm(vec2<f32>(uv.x * 0.35, uv.y * 2.2) + wp.xz * 0.07);
+                    color *= 0.8 + 0.4 * streak;
+                    let grey = smoothstep(0.45, 0.8, fbm(vec2<f32>(uv.x * 0.8, uv.y * 0.6) + wp.zx * 0.11));
+                    color = mix(color, vec3<f32>(0.2, 0.19, 0.17), grey * 0.35 * variation * 2.0);
+                    rough = clamp(ph.rough * 0.6 + 0.4, 0.5, 1.0);
+                    N = normalize(ph.n);
+                    break;
+                }
+                // Без фото — волокна вдоль u.
+                let fr = uv_frame(n, dp_x, dp_y, duv_x, duv_y);
+                let g = fbm(vec2<f32>(uv.x * 0.8, uv.y * 30.0));
+                color = base_a * (0.75 + 0.5 * g);
+                rough = 0.85;
+                let e = 0.01;
+                let hv = fbm(vec2<f32>(uv.x * 0.8, (uv.y + e) * 30.0)) - g;
+                N = perturb(N, -fr.b * hv / e, bump);
             }
             case 20: {
                 let fr = uv_frame(n, dp_x, dp_y, duv_x, duv_y);

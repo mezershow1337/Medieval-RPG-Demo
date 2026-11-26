@@ -265,6 +265,11 @@ impl LevelColliders {
         self.1.ground.as_ref().map_or(f32::NEG_INFINITY, |g| g.height(x, z))
     }
 
+    /// Вырезана ли тут земля карты высот (уровень строит там свою землю из коробок).
+    pub fn in_ground_hole(&self, x: f32, z: f32) -> bool {
+        self.1.ground.as_ref().is_some_and(|g| g.in_hole(x, z))
+    }
+
     /// Коробки, которые могут пересекаться с `a`.
     fn near<'a>(&'a self, a: Aabb) -> impl Iterator<Item = &'a Aabb> + 'a {
         self.near_ids(a).map(move |i| &self.0[i])
