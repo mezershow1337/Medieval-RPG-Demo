@@ -324,7 +324,7 @@ fn update_door_prompt(
             let hour = clock.map_or(12.0, |c| c.hour());
             match (crate::shop_hours::shutter(id), feet) {
                 (Some(s), Some(feet)) if !crate::shops::is_open(s.hours, hour) && !s.shop.contains(feet, 0.25) => {
-                    format!("Лавка заперта на ночь · открыта с {}", crate::shops::hours_text(s.hours))
+                    format!("Лавка заперта на ночь · открыта {}", crate::shops::hours_text(s.hours))
                 }
                 _ => "[E] Открыть дверь".to_string(),
             }

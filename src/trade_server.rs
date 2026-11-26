@@ -339,7 +339,7 @@ impl TradeWorld {
         }
         if m.closed {
             let hours = m.hours.map(crate::shops::hours_text).unwrap_or_default();
-            return Some(format!("Лавка закрыта до утра: ставни заперты. {} торгует с {hours}.", def.name));
+            return Some(format!("Лавка закрыта до утра: ставни заперты. {} торгует {hours}.", def.name));
         }
         if m.grudges.get(&player).is_some_and(|t| *t > now) {
             return Some("«Я тебя запомнил, вор. Проваливай, пока стражу не кликнул».".into());

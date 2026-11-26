@@ -243,13 +243,13 @@ pub fn is_open(hours: [f32; 2], hour: f32) -> bool {
     hour >= hours[0] && hour < hours[1]
 }
 
-/// «6:30–20:00».
+/// «с 6:30 до 20:00».
 pub fn hours_text(hours: [f32; 2]) -> String {
     let hm = |h: f32| {
         let m = (h * 60.0).round() as u32;
         format!("{}:{:02}", m / 60, m % 60)
     };
-    format!("{}–{}", hm(hours[0]), hm(hours[1]))
+    format!("с {} до {}", hm(hours[0]), hm(hours[1]))
 }
 
 /// Продавец лавки.
@@ -386,7 +386,7 @@ mod tests {
                 assert!(is_open(h, 12.0) && !is_open(h, 23.0) && !is_open(h, 3.0) && !is_open(h, 5.5));
             }
         }
-        assert_eq!(hours_text([6.5, 20.0]), "6:30–20:00");
+        assert_eq!(hours_text([6.5, 20.0]), "с 6:30 до 20:00");
     }
 
     /// Каждая лавка главной улицы (кроме аптек со своими аптекарями) — с продавцом;

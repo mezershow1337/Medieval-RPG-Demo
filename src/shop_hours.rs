@@ -61,7 +61,7 @@ impl ShopShutters {
         let Some(&i) = self.by_door.get(&door) else { return Ok(()) };
         let s = &self.list[i];
         if self.locked[i] == Some(true) && !s.shop.contains(feet, 0.25) {
-            return Err(format!("Ставни лавки заперты на ночь. Лавка открыта с {}.", crate::shops::hours_text(s.hours)));
+            return Err(format!("Ставни лавки заперты на ночь. Лавка открыта {}.", crate::shops::hours_text(s.hours)));
         }
         Ok(())
     }
