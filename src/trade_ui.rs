@@ -1220,8 +1220,15 @@ fn trade_shot(
             if loot.inventory.is_none() || *frames < 30 {
                 return;
             }
-            for g in ["give «Железная руда» 10", "give «Древесный уголь» 10", "give «Отрез льна» 3", "give «Отрез шерсти» 3", "give «Болотная руда» 6", "give «Обожжённая руда» 4", "give «Засапожный нож»", "give «Охотничий нож»", "give «Боевой нож»", "give «Семиспата»", "give «Солдатская спата»", "give «Франкская спата»", "give «Медный котелок»", "give «Готская спата с кольцом»", "give «Гепидская спата»", "give «Вандальская спата»", "give «Лангобардская спата»", "give «Герульская спата»", "give «Узколезвийный топор»", "give «Плотничий топор»"] {
-                console.push(g);
+            // `MRPG_TRADE_SHOT_GIVE="give «Кефаль» 2;…"` — свой набор вещей в сумку.
+            if let Ok(list) = std::env::var("MRPG_TRADE_SHOT_GIVE") {
+                for g in list.split(';').map(str::trim).filter(|g| !g.is_empty()) {
+                    console.push(g);
+                }
+            } else {
+                for g in ["give «Железная руда» 10", "give «Древесный уголь» 10", "give «Отрез льна» 3", "give «Отрез шерсти» 3", "give «Болотная руда» 6", "give «Обожжённая руда» 4", "give «Засапожный нож»", "give «Охотничий нож»", "give «Боевой нож»", "give «Семиспата»", "give «Солдатская спата»", "give «Франкская спата»", "give «Медный котелок»", "give «Готская спата с кольцом»", "give «Гепидская спата»", "give «Вандальская спата»", "give «Лангобардская спата»", "give «Герульская спата»", "give «Узколезвийный топор»", "give «Плотничий топор»"] {
+                    console.push(g);
+                }
             }
             let p = Vec3::from_array(m.pos.0) + Vec3::new(m.yaw.sin(), 0.0, m.yaw.cos()) * 1.3;
             console.push(format!("tp {:.2} {:.2} {:.2}", p.x, p.y + 0.1, p.z));
@@ -1266,7 +1273,7 @@ fn trade_shot(
             *stage = 6;
             *frames = 0;
         }
-        6 if *frames > 20 => {
+        6 if *frames > 120 => {
             exit.write(AppExit::Success);
         }
         _ => {}

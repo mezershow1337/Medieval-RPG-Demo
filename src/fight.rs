@@ -245,9 +245,10 @@ fn combat_input(
     grab: Option<Res<crate::props_client::PropGrab>>,
     mut aim: ResMut<AttackAim>,
     work: Option<Res<crate::work_client::MyWork>>,
+    fishing: Option<Res<crate::fishing_client::FishingHands>>,
 ) {
-    // Во время работы руками ЛКМ — удар молотом по заготовке, а не мечом.
-    if !cursor_locked(&cursor) || crate::work_client::hands_busy(work.as_deref()) {
+    // Во время работы руками ЛКМ — удар молотом по заготовке, а не мечом; с удочкой — заброс.
+    if !cursor_locked(&cursor) || crate::work_client::hands_busy(work.as_deref()) || fishing.is_some_and(|f| f.0) {
         aim.motion = Vec2::ZERO;
         aim.pending = None;
         return;
@@ -363,7 +364,7 @@ fn animate_view_sword(
     hints: Res<CombatHints>,
     mut cam_motion: Local<CamMotion>,
     mut smoothed: Local<Option<(Vec3, Quat)>>,
-    work: Option<Res<crate::work_client::MyWork>>,
+    (work, fishing, mut rod_view): (Option<Res<crate::work_client::MyWork>>, Option<Res<crate::fishing_client::FishingHands>>, Option<ResMut<crate::fishing_client::RodView>>),
 ) {
     let Ok((p, f)) = local.single() else { return };
     let dt = time.delta_secs();
@@ -388,8 +389,16 @@ fn animate_view_sword(
     let look_down = ((-p.pitch - 0.6) / 0.7).clamp(0.0, 1.0);
     let lift = Quat::from_rotation_x(-0.6 * look_down);
     let lifted = |v: Vec3| VIEW_LIFT_PIVOT + lift * (v - VIEW_LIFT_PIVOT);
-    let want_pos = lifted(Vec3::new(-0.06, -0.25 + VIEW_LIFT, -0.04) + hilt);
-    let want_rot = lift * Quat::from_rotation_arc(Vec3::Y, dir);
+    let mut want_pos = lifted(Vec3::new(-0.06, -0.25 + VIEW_LIFT, -0.04) + hilt);
+    let mut want_rot = lift * Quat::from_rotation_arc(Vec3::Y, dir);
+    // Удочка: держим перед собой, вершиной к воде; наклон задаёт рыбалка.
+    let fishing = fishing.filter(|h| h.0).and(rod_view.as_deref_mut());
+    if let Some(rv) = &fishing {
+        let elev = (16.0 + 22.0 * rv.raise).to_radians();
+        let level = Vec3::new(0.05 + 0.35 * rv.side, elev.sin(), -elev.cos()).normalize();
+        want_pos = Vec3::new(0.15 + 0.05 * rv.side, -0.3, -0.45);
+        want_rot = Quat::from_rotation_x(-p.pitch) * Quat::from_rotation_arc(Vec3::Y, level);
+    }
     // Сглаживаем: смена фаз (комбо, отбитый удар, поправка сервера) без рывков.
     let k = 1.0 - (-35.0 * dt).exp();
     match *smoothed {
@@ -403,6 +412,11 @@ fn animate_view_sword(
         }
     }
     *smoothed = Some((st.translation, st.rotation));
+    if let Some(rv) = fishing {
+        rv.tip = Some(st.translation + st.rotation * Vec3::Y * crate::fishing_client::ROD_TIP);
+    } else if let Some(mut rv) = rod_view {
+        rv.tip = None;
+    }
     let riposte = matches!(f.fighter.action, Action::Windup { riposte: true, .. } | Action::Strike { riposte: true, .. });
     let _ = &assets;
     if let Ok((mut gt, mut gv)) = glow.single_mut() {

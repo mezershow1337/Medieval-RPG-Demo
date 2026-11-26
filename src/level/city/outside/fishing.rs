@@ -33,11 +33,6 @@ pub fn trader_point() -> Vec3 {
     g(HUT.x0 - 1.8, HUT.z0 + 1.7)
 }
 
-/// Высота пола лачуги.
-pub fn hut_floor() -> f32 {
-    terrace_levels(HUT.inset(-0.8)).1
-}
-
 pub fn fishing_hut(b: &mut Builder) {
     let mut rng = Rng::new(4021);
     hut(b);
@@ -405,5 +400,27 @@ fn path(b: &mut Builder, pts: &[Vec2]) {
     for p in &pts[1..pts.len() - 1] {
         b.at(p.x, p.y);
         b.mesh(Mat::Earth).disc(lift(*p) - Vec3::Y * 0.01, w / 2.0, 10, true);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fishing::{Water, rod};
+    use crate::fishing_server::{check_cast, water_depth};
+
+    #[test]
+    fn hut_jetty_reaches_deep_water_and_shore_is_shallow() {
+        let p = crate::level::place_pos("fish_hut").expect("нет места fish_hut");
+        assert!(water_depth(p.x, p.z) < 0.0, "торговец стоит на суше");
+        let r = rod("Можжевеловая удочка").unwrap();
+        let end = Vec3::new(JETTY_END + 0.6, JETTY_DECK, JETTY_Z);
+        let deep = check_cast(end, end - Vec3::X * 15.0, r).expect("с конца мостков — в воду");
+        assert!(Water::of_depth(deep) == Water::Deep, "с конца мостков глубоко: {deep}");
+        let start = Vec3::new(jetty_start() - 1.0, JETTY_DECK, JETTY_Z);
+        let shallow = check_cast(start, start - Vec3::X * 4.0, r).expect("у берега — тоже вода");
+        assert!(Water::of_depth(shallow) != Water::Deep, "у берега мелко: {shallow}");
+        assert!(check_cast(p, p + Vec3::X * 10.0, r).is_err(), "в сторону суши — не вода");
+        assert!(ground_y(HUT.cx(), HUT.cz()) > WATER_Y + 0.5, "лачуга на суше");
     }
 }
