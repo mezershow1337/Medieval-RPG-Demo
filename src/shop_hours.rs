@@ -67,6 +67,13 @@ impl ShopShutters {
     }
 }
 
+/// Ставни лавки по номеру двери (для подсказки у клиента: та же раскладка, что у сервера).
+pub fn shutter(door: u32) -> Option<Shutter> {
+    static ALL: std::sync::OnceLock<ShopShutters> = std::sync::OnceLock::new();
+    let all = ALL.get_or_init(|| ShopShutters::from_level(crate::level::shops()));
+    all.by_door.get(&door).map(|&i| all.list[i])
+}
+
 /// Сверяет ставни с часами: утром открыть, вечером (когда в лавке пусто) закрыть.
 fn tick_shutters(
     time: Res<Time>,
