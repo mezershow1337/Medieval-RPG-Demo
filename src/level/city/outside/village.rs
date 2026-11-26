@@ -129,9 +129,10 @@ fn pad(b: &mut Builder, r: Rect, mat: Mat) -> f32 {
     b.at(r.cx(), r.cz());
     b.solid([r.x0, lo - 0.8, r.z0], [r.x1, y, r.z1], mat);
     let levels = (((y - lo) / 0.3).ceil() as usize).saturating_sub(1).min(12);
+    // Ступени — утоптанная земля откоса (кладка — только сама площадка).
     for i in 1..=levels {
         let e = 0.45 * i as f32;
-        b.solid([r.x0 - e, lo - 0.8, r.z0 - e], [r.x1 + e, y - 0.3 * i as f32, r.z1 + e], mat);
+        b.solid([r.x0 - e, lo - 0.8, r.z0 - e], [r.x1 + e, y - 0.3 * i as f32, r.z1 + e], Mat::Earth);
     }
     y
 }
@@ -222,7 +223,7 @@ fn tavern(b: &mut Builder, rng: &mut Rng) {
         kit::quoins(t, r.x0 + wt / 2.0, r.z0 + wt / 2.0, h, wt);
         kit::quoins(t, r.x1 - wt / 2.0, r.z0 + wt / 2.0, h, wt);
         kit::gable_roof(t, r, h, 1.7, true, 0.45, Mat::Rubble);
-        t.decor([r.x0 + wt, 0.0, r.z0 + wt], [r.x1 - wt, 0.03, r.z1 - wt], Mat::Floor);
+        t.decor([r.x0 + wt, 0.0, r.z0 + wt], [r.x1 - wt, 0.04, r.z1 - wt], Mat::Earth);
         // Стойка корчмарки в восточной половине и пифосы за ней.
         kit::table(t, Rect::new(0.6, 0.9, 4.6, 1.5), 1.0);
         for k in 0..3 {
@@ -486,10 +487,18 @@ fn fields(b: &mut Builder, rng: &mut Rng) {
         let x1 = x + 12.0;
         b.at((x + x1) / 2.0, (z0 + z1) / 2.0);
         if k % 2 == 0 {
-            let mut z = z0 + 0.8;
-            while z < z1 - 0.6 {
-                ridge(b, g(x + 0.5, z), g(x1 - 0.5, z), 0.32, 0.16);
-                z += 0.9;
+            // Пашня — тёмная разрыхлённая земля, борозды поперёк полосы.
+            let lift = |px: f32, pz: f32| Vec3::new(px, ground_y(px, pz) + 0.05, pz);
+            let mut z = z0;
+            while z < z1 {
+                let zz = (z + 4.0).min(z1);
+                b.mesh(Mat::Earth).quad([lift(x + 0.4, z), lift(x1 - 0.4, z), lift(x1 - 0.4, zz), lift(x + 0.4, zz)], Vec3::Y);
+                z = zz;
+            }
+            let mut xx = x + 0.9;
+            while xx < x1 - 0.6 {
+                ridge(b, g(xx, z0 + 0.4), g(xx, z1 - 0.4), 0.16, 0.12);
+                xx += 0.8;
             }
         } else {
             // Стерня — светлая солома поверх земли.
@@ -507,10 +516,6 @@ fn fields(b: &mut Builder, rng: &mut Rng) {
                 stook(b, p, rng);
                 z += rng.range(5.0, 7.0);
             }
-        }
-        // Межа — камни, собранные с поля.
-        if k > 0 {
-            super::low_wall(b, Vec2::new(x, z0), Vec2::new(x, z1));
         }
         x = x1;
         k += 1;
