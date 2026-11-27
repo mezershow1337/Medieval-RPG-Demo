@@ -594,10 +594,10 @@ fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelCo
     let mut idx: Vec<u32> = Vec::new();
     // Цвета степи в конце лета: соломенный ковыль, оливковый типчак, сизая полынь, зелень у воды.
     // Тон подобран под фототекстуру земли — иначе трава читается тёмной щетиной на светлом склоне.
-    let straw = srgb(0.36, 0.36, 0.20);
-    let olive = srgb(0.21, 0.28, 0.12);
-    let green = srgb(0.15, 0.24, 0.09);
-    let sage = srgb(0.26, 0.31, 0.22);
+    let straw = srgb(0.31, 0.31, 0.21);
+    let olive = srgb(0.19, 0.26, 0.14);
+    let green = srgb(0.14, 0.24, 0.11);
+    let sage = srgb(0.22, 0.28, 0.21);
     let flowers = [srgb(0.90, 0.75, 0.20), srgb(0.88, 0.86, 0.78), srgb(0.52, 0.40, 0.62), srgb(0.75, 0.18, 0.12)];
     for iz in 0..n {
         for ix in 0..n {
@@ -636,7 +636,7 @@ fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelCo
                 let side = Vec3::new(face.cos(), 0.0, face.sin()) * w * 0.5;
                 let tint = 0.8 + hb(12) * 0.35;
                 // У корня темно: стебли затеняют друг друга — ковёр выглядит объёмным.
-                let bottom = base_col * 0.38 * tint;
+                let bottom = base_col * 0.5 * tint;
                 let top = base_col.lerp(straw, hb(13) * 0.35) * (1.0 + hb(13) * 0.15) * tint;
                 let start = pos.len() as u32;
                 let segs = if dense { 3 } else { 2 };

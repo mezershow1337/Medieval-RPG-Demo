@@ -522,7 +522,7 @@ fn lin(c: Color) -> Vec4 {
 pub fn surface_material(mat: Mat) -> SurfaceMaterial {
     // (основной цвет, второй цвет, узор, масштаб, разброс, рельеф, шероховатость, металл, мох, грязь, свечение)
     let (a, b, pattern, scale, var, bump, rough, metal, moss, grime, glow) = match mat {
-        Mat::Grass => (Color::srgb(0.13, 0.22, 0.08), Color::srgb(0.24, 0.26, 0.12), P_GRASS, 1.0, 0.5, 0.4, 0.95, 0.0, 0.0, 0.0, 0.0),
+        Mat::Grass => (Color::srgb(0.15, 0.21, 0.125), Color::srgb(0.24, 0.26, 0.15), P_GRASS, 1.0, 0.5, 0.4, 0.95, 0.0, 0.0, 0.0, 0.0),
         Mat::Cobble => (Color::srgb(0.36, 0.34, 0.32), Color::srgb(0.12, 0.11, 0.10), P_COBBLE, 1.0, 0.35, 1.0, 0.85, 0.0, 0.35, 0.0, 0.0),
         Mat::Stone => (Color::srgb(0.52, 0.51, 0.49), Color::srgb(0.22, 0.21, 0.20), P_ASHLAR, 0.8, 0.25, 1.0, 0.88, 0.0, 0.5, 0.6, 0.0),
         Mat::DarkStone => (Color::srgb(0.38, 0.37, 0.38), Color::srgb(0.14, 0.13, 0.14), P_ASHLAR, 0.9, 0.25, 1.0, 0.85, 0.0, 0.4, 0.6, 0.0),
@@ -546,7 +546,7 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         Mat::Marble => (Color::srgb(0.88, 0.87, 0.84), Color::srgb(0.52, 0.55, 0.60), P_MARBLE, 1.0, 0.1, 0.25, 0.3, 0.0, 0.0, 0.2, 0.0),
         Mat::Mosaic => (Color::srgb(0.85, 0.80, 0.70), Color::srgb(0.58, 0.18, 0.12), P_MOSAIC, 1.0, 0.1, 0.4, 0.55, 0.0, 0.0, 0.0, 0.0),
         Mat::Earth => (Color::srgb(0.48, 0.41, 0.32), Color::srgb(0.66, 0.62, 0.55), P_EARTH, 1.0, 0.3, 0.7, 0.95, 0.0, 0.0, 0.0, 0.0),
-        Mat::Terrain => (Color::srgb(0.30, 0.33, 0.15), Color::srgb(0.60, 0.57, 0.50), P_TERRAIN, 1.0, 0.3, 0.8, 0.95, 0.0, 0.0, 0.0, 0.0),
+        Mat::Terrain => (Color::srgb(0.26, 0.31, 0.215), Color::srgb(0.60, 0.57, 0.50), P_TERRAIN, 1.0, 0.3, 0.8, 0.95, 0.0, 0.0, 0.0, 0.0),
         Mat::Signinum => (Color::srgb(0.68, 0.45, 0.38), Color::srgb(0.50, 0.33, 0.28), P_PLASTER, 1.6, 0.25, 0.4, 0.8, 0.0, 0.1, 0.6, 0.0),
         Mat::Canvas => (Color::srgb(0.78, 0.72, 0.60), Color::srgb(0.6, 0.55, 0.45), P_PLAIN, 1.0, 0.15, 0.2, 0.95, 0.0, 0.0, 0.0, 0.0),
         Mat::Felt => (Color::srgb(0.62, 0.56, 0.47), Color::srgb(0.4, 0.34, 0.28), P_PLAIN, 1.0, 0.25, 0.4, 1.0, 0.0, 0.0, 0.4, 0.0),
@@ -1075,10 +1075,10 @@ pub fn color_grading(m: &Mood) -> ColorGrading {
     let section = |saturation: f32, contrast: f32| ColorGradingSection { saturation, contrast, ..default() };
     ColorGrading {
         // Ночью глаз привыкает к темноте, но краски уходят (сумеречное зрение).
-        global: ColorGradingGlobal { exposure: m.exposure, post_saturation: 1.0 - 0.3 * m.night - 0.15 * m.overcast, ..default() },
-        shadows: section(0.9, 1.0),
-        midtones: section(1.02, 1.14),
-        highlights: section(1.06, 1.0),
+        global: ColorGradingGlobal { exposure: m.exposure, post_saturation: 0.93 - 0.3 * m.night - 0.15 * m.overcast, ..default() },
+        shadows: section(0.86, 1.08),
+        midtones: section(0.94, 1.2),
+        highlights: section(1.04, 1.08),
     }
 }
 

@@ -212,8 +212,17 @@ fn opening(b: &mut Builder, f: WallFrame, o: Op, l: f32, r: f32, y0: f32, y1: f3
             b.mesh(trim).cuboid(a, c);
             let (a, c) = f.bounds((l - 0.15, r + 0.15), (top, top + 0.16), (d0 - 0.03, d1 + 0.03));
             b.mesh(Mat::Wood).cuboid(a, c);
-            // Деревянная решётка посередине толщины.
+            // Каменные откосы по бокам проёма (как у дверей), чуть выступают из стены.
+            for sd in [l, r] {
+                let (a, c) = f.bounds((sd - 0.1, sd + 0.1), (sill, top), (d0 - 0.025, d1 + 0.025));
+                b.mesh(trim).cuboid(a, c);
+            }
+            // Деревянная коробка окна и решётка посередине толщины.
             let m = b.mesh(Mat::Wood);
+            for (s0, s1, v0, v1) in [(l + 0.1, l + 0.16, sill, top), (r - 0.16, r - 0.1, sill, top), (l + 0.1, r - 0.1, sill, sill + 0.05), (l + 0.1, r - 0.1, top - 0.05, top)] {
+                let (a, c) = f.bounds((s0, s1), (v0, v1), (dm - 0.05, dm + 0.05));
+                m.cuboid(a, c);
+            }
             let bars = ((r - l) / 0.18).floor().max(1.0) as usize;
             for k in 1..=bars {
                 let s = l + (r - l) * k as f32 / (bars + 1) as f32;

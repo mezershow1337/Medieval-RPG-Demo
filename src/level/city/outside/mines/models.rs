@@ -930,14 +930,14 @@ pub(super) fn dugout(b: &mut Builder, h: Rect, hy: f32) {
                 log(t, Vec3::new(x, eave - 0.05, sz * ez), Vec3::new(x, ridge + 0.05, sz * 0.05), 0.06, 0.055, 6610 + i * 2 + (sz > 0.0) as u32);
             }
         }
-        // Дёрн: толстый слой поверх стропил, по краям видна земля.
+        // Камыш поверх стропил (был дёрн — зелёная крыша читалась как ошибка), по краям — обмазка.
         let th = 0.16;
         let (xa, xb) = (l.x0 - 0.55, l.x1 + 0.55);
         for sz in [-1.0f32, 1.0] {
             let (top0, top1) = (Vec3::new(xa, ridge + 0.12 + th, 0.0), Vec3::new(xb, ridge + 0.12 + th, 0.0));
             let (lo0, lo1) = (Vec3::new(xa, eave + th - 0.02, sz * (ez + 0.08)), Vec3::new(xb, eave + th - 0.02, sz * (ez + 0.08)));
             let up = Vec3::new(0.0, 1.0, sz * 0.9);
-            t.mesh(Mat::Terrain).quad([top0, top1, lo1, lo0], up);
+            t.mesh(Mat::Thatch).quad([top0, top1, lo1, lo0], up);
             let dn = Vec3::Y * th;
             t.mesh(Mat::Earth).quad([lo0, lo1, lo1 - dn, lo0 - dn], Vec3::new(0.0, -0.2, sz));
             for (p0, p1, out) in [(top0, lo0, Vec3::NEG_X), (top1, lo1, Vec3::X)] {
