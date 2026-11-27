@@ -46,7 +46,7 @@ pub fn quality_sampler(repeat: bool) -> ImageSampler {
 fn mip_model_images(mut events: MessageReader<AssetEvent<Image>>, server: Res<AssetServer>, mut images: ResMut<Assets<Image>>, mut pending: Local<Vec<(AssetId<Image>, bool, Task<Image>)>>) {
     for ev in events.read() {
         let AssetEvent::Added { id } = ev else { continue };
-        let from_models = server.get_path(*id).is_some_and(|p| p.path().starts_with("models"));
+        let from_models = server.get_path(*id).is_some_and(|p| p.path().starts_with("models") || p.path().starts_with("textures/library"));
         if !from_models || pending.iter().any(|p| p.0 == *id) {
             continue;
         }

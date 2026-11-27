@@ -203,6 +203,7 @@ pub fn run(start: crate::menu::Start) {
         .add_plugins(crate::ui_cursor::UiCursorPlugin)
         .add_plugins((crate::skill_book::SkillBookPlugin, crate::hints::HintsPlugin, crate::school_client::SchoolClientPlugin, crate::tablet_view::TabletViewPlugin))
         .add_plugins(crate::work_client::WorkClientPlugin)
+        .add_plugins(crate::library_client::LibraryClientPlugin)
         .add_plugins(crate::console::ConsolePlugin)
         .add_systems(Update, (hide_ui_for_shots, mute_player_camera_for_shots).run_if(crate::settings::env_flag("MRPG_CAM")))
         .add_systems(Update, shot_tour.run_if(crate::settings::env_flag("MRPG_TOUR")))
@@ -253,7 +254,7 @@ pub struct WaitingCamera;
 fn hide_ui_for_shots(mut roots: Query<(&mut Visibility, Has<crate::civil_client::ShotKeep>), (With<Node>, Without<ChildOf>)>) {
     // Снимок окна стражи (`MRPG_LAW_DEMO`): его окна оставляем.
     // И окна школы/табличка (`MRPG_SHOT_UI=school…`, `MRPG_WORK_DEMO`).
-    let law = std::env::var_os("MRPG_LAW_DEMO").is_some() || std::env::var_os("MRPG_WORK_DEMO").is_some() || std::env::var("MRPG_SHOT_UI").is_ok_and(|s| s.starts_with("school") || s.starts_with("quick"));
+    let law = std::env::var_os("MRPG_LAW_DEMO").is_some() || std::env::var_os("MRPG_WORK_DEMO").is_some() || std::env::var("MRPG_SHOT_UI").is_ok_and(|s| s.starts_with("school") || s.starts_with("quick") || s.starts_with("library"));
     for (mut v, keep) in &mut roots {
         if !(law && keep) {
             *v = Visibility::Hidden;

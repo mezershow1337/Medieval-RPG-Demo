@@ -218,11 +218,20 @@ fn talk(
     mut said: Local<u32>,
     lore: Option<Res<crate::lore_client::LoreView>>,
     mut school: Option<ResMut<crate::school_client::SchoolUi>>,
+    mut library: Option<ResMut<crate::library_client::LibraryUi>>,
 ) {
-    if loot.ui_open || !keys.just_pressed(KeyCode::KeyE) || school.as_ref().is_some_and(|s| s.open()) {
+    if loot.ui_open || !keys.just_pressed(KeyCode::KeyE) || school.as_ref().is_some_and(|s| s.open()) || library.as_ref().is_some_and(|l| l.open()) {
         return;
     }
     let Some((i, role)) = aim.0 else { return };
+    // Служители городской библиотеки: окно разговора (library_client.rs).
+    if let Some(lib) = library.as_mut() {
+        let act = acts.0.get(i).copied();
+        let ctx = crate::library_talk::Ctx { hour: clock.hour(), literate: false, asleep: act == Some(crate::daily_life::Act::Sleep), busy: act.is_some_and(|a| a != crate::daily_life::Act::Idle), ..Default::default() };
+        if lib.talk_to(i, ctx) {
+            return;
+        }
+    }
     // Учитель школы: окно с предметами (там же он скажет, если сейчас не учит).
     if let (Some(id), Some(school)) = (lore.as_ref().and_then(|l| l.master_of_resident(i)), school.as_mut()) {
         school.show(id);
@@ -300,13 +309,17 @@ fn update_speech(
     acts: Res<crate::life_client::LiveActs>,
     lore: Option<Res<crate::lore_client::LoreView>>,
     school: Option<Res<crate::school_client::SchoolUi>>,
+    mut library: Option<ResMut<crate::library_client::LibraryUi>>,
     mut text: Single<&mut Text, With<SpeechText>>,
 ) {
+    let library_line = aim.0.and_then(|(i, _)| library.as_mut().and_then(|l| l.prompt_for(i)));
     let teacher = aim.0.and_then(|(i, _)| lore.as_ref().and_then(|l| l.master_of_resident(i)).and_then(|id| l_master(lore.as_deref(), id)));
     let line = if time.elapsed_secs() < speech.until {
         speech.line.clone()
-    } else if school.is_some_and(|s| s.open()) {
+    } else if school.is_some_and(|s| s.open()) || library.as_ref().is_some_and(|l| l.open()) {
         String::new()
+    } else if let Some(l) = library_line {
+        l
     } else if let (Some((i, _)), Some(t)) = (aim.0, teacher) {
         let busy = acts.0.get(i).filter(|a| **a != crate::daily_life::Act::Idle).map(|a| format!(" ({})", a.name())).unwrap_or_default();
         format!("{}{busy}\n[E] Учиться: азбука, чтение, письмо, счёт", crate::school::tutor_title(t))

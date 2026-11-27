@@ -23,6 +23,7 @@ pub(crate) mod houses;
 pub(crate) mod cozy;
 pub(crate) mod interior;
 pub(crate) mod kit;
+pub(crate) mod library;
 pub(crate) mod outside;
 pub(crate) mod port;
 pub(crate) mod public;
@@ -103,6 +104,8 @@ pub enum Use {
     Winery,
     Reservoir,
     WestChurch,
+    /// Городская библиотека (library.rs).
+    Library,
     /// Пустырь, огороды (кварталы у стен, не влезающие целиком).
     Garden,
 }
@@ -128,6 +131,7 @@ pub fn block_use(i: i32, j: i32) -> Use {
         (9, 2) => Winery,
         (8, 3) => Reservoir,
         (1, -1) => WestChurch,
+        library::BLOCK => Library,
         _ => {
             if block_fits(i, j) {
                 Houses
@@ -192,6 +196,7 @@ pub fn city_layout() -> Layout {
     public::theatre(&mut b);
     public::reservoir(&mut b);
     public::west_church(&mut b);
+    library::library(&mut b);
     public::citadel(&mut b);
     crafts::fish_salting(&mut b, block(18, -3).union(&block(19, -3)), 1);
     crafts::fish_salting(&mut b, block(8, -3), 2);
