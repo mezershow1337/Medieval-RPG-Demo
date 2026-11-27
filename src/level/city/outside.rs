@@ -845,8 +845,31 @@ fn stems(b: &mut Builder, p: Vec3, n: usize, h: f32, spread: f32, flower: Mat, h
     }
 }
 
+/// Кустик травы: пучок узких листьев, расходящихся от корня и поникающих на концах
+/// (раньше был гладкий гранёный «холмик»). Раскладка листьев — от положения куста.
 fn mound(b: &mut Builder, p: Vec3, r: f32, h: f32, mat: Mat) {
-    b.mesh(mat).lathe(p, &[(0.0, 0.0), (r * 0.8, 0.0), (r, h * 0.45), (r * 0.6, h * 0.9), (0.0, h)], 7);
+    let hash = |k: f32| {
+        let v = ((p.x * 12.9898 + p.z * 78.233 + k * 37.719).sin() * 43758.547).abs();
+        v - v.floor()
+    };
+    let m = b.mesh(mat);
+    let n = 11;
+    for k in 0..n {
+        let f = k as f32;
+        let a = (f + hash(f)) / n as f32 * TAU * 1.9;
+        let dir = Vec3::new(a.cos(), 0.0, a.sin());
+        // Внутренние листья стоят круче и выше, наружные лежат шире.
+        let out = 0.35 + 0.65 * (f / n as f32);
+        let len = r * (0.75 + 0.5 * hash(f + 20.0)) * out;
+        let top = h * (1.15 - 0.55 * out) * (0.8 + 0.4 * hash(f + 40.0));
+        let root = p + dir * (r * 0.08);
+        let mid = root + dir * (len * 0.65) + Vec3::Y * top;
+        let tip = mid + dir * (len * 0.5) - Vec3::Y * (top * 0.3);
+        let w = (r * 0.11).clamp(0.015, 0.05);
+        let up = Vec3::Y.cross(dir).cross(mid - root).normalize_or(Vec3::Y);
+        m.beam(root, mid, w, 0.006, up);
+        m.beam(mid, tip, w * 0.6, 0.005, up);
+    }
 }
 
 /// Розетка прикорневых листьев (подорожник).

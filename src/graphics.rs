@@ -212,7 +212,7 @@ impl Key {
 const DAY: Key = Key {
     sun_color: Vec3::new(1.0, 0.93, 0.8),
     lux: 15_000.0,
-    ambient: (Vec3::new(0.55, 0.68, 0.95), 200.0),
+    ambient: (Vec3::new(0.55, 0.68, 0.95), 260.0),
     horizon: Vec3::new(0.62, 0.72, 0.86),
     horizon_sun: (Vec3::new(0.35, 0.28, 0.15), 8.0),
     zenith: Vec3::new(0.07, 0.2, 0.62),
@@ -1073,8 +1073,8 @@ pub fn color_grading(m: &Mood) -> ColorGrading {
     ColorGrading {
         // Ночью глаз привыкает к темноте, но краски уходят (сумеречное зрение).
         global: ColorGradingGlobal { exposure: m.exposure, post_saturation: 1.0 - 0.3 * m.night - 0.15 * m.overcast, ..default() },
-        shadows: section(0.9, 1.12),
-        midtones: section(1.02, 1.2),
+        shadows: section(0.9, 1.0),
+        midtones: section(1.02, 1.14),
         highlights: section(1.06, 1.0),
     }
 }
