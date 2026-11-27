@@ -459,6 +459,7 @@ fn shot_court(mut ui: ResMut<CourtUi>, acts: Res<crate::life_client::LiveActs>, 
     };
     let act = acts.0.get(i).copied().unwrap_or(Act::Idle);
     let x = ui.ctx(c, act, clock.as_deref());
+    info!("снимок разговора: {c:?}, {:.2} ч, день {}, {act:?}, приём: {}", x.hour, x.day, x.audience());
     ui.show(c, i, &x);
     if let Some(k) = parts.next().and_then(|k| k.parse::<usize>().ok()) {
         ui.met.insert(c, 1);

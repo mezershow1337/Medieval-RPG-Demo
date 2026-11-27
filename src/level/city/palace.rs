@@ -1264,11 +1264,12 @@ fn pergola(b: &mut Builder, x0: f32, x1: f32, z0: f32, z1: f32, rng: &mut Rng) {
         m.cuboid(Vec3::new(x0 - 0.3, h + 0.14, z - 0.025), Vec3::new(x1 + 0.3, h + 0.19, z + 0.025));
     }
     // Листва лозы — неровными купами по обрешётке, грозди свисают между балками.
-    let leaves = ((x1 - x0) * 3.2) as usize;
+    let leaves = ((x1 - x0) * 7.0) as usize;
     for _ in 0..leaves {
-        let p = Vec3::new(rng.range(x0 - 0.2, x1 + 0.2), h + 0.2 + rng.range(0.0, 0.12), rng.range(z0 - 0.3, z1 + 0.3));
-        let r = rng.range(0.28, 0.5);
-        b.mesh(Mat::Leaves).lathe(p, &[(0.0, -0.05), (r, 0.02), (r * 0.8, 0.12), (0.0, 0.16)], 7);
+        let p = Vec3::new(rng.range(x0 - 0.2, x1 + 0.2), h + 0.12 + rng.range(0.0, 0.2), rng.range(z0 - 0.3, z1 + 0.3));
+        let r = rng.range(0.2, 0.38);
+        let mat = if rng.chance(0.7) { Mat::Leaves } else { Mat::HerbGreen };
+        b.mesh(mat).lathe(p, &[(0.0, -0.09), (r * 0.7, -0.06), (r, 0.02), (r * 0.85, 0.11), (r * 0.45, 0.17), (0.0, 0.19)], 9);
     }
     // Грозди: каждая — несколько ягод-шариков, книзу уже.
     for _ in 0..((x1 - x0) * 1.4) as usize {
