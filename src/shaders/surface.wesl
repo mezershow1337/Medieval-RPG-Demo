@@ -136,7 +136,7 @@ fn photo_plane(layer: i32, uv0: vec2<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f
                 let hh = photo_height(uv + to_sun * (1.0 - h0) * f, layer, lod);
                 occ = max(occ, (hh - ray_h) * (1.3 - f));
             }
-            shade = 1.0 - clamp(occ * 8.0, 0.0, 1.0) * 0.7 * smoothstep(0.35, 0.6, pom_k);
+            shade = 1.0 - clamp(occ * 8.0, 0.0, 1.0) * 0.55 * smoothstep(0.35, 0.6, pom_k);
         }
     }
     o.albedo = textureSampleGrad(photo_albedo, photo_sampler, uv, layer, dx, dy).rgb * shade;
@@ -943,8 +943,11 @@ fn fragment(
             let rock = photo_triplanar(side, side, surface.photo.w, surface.photo.w, wp * 0.5, n, relief);
             let gravel = photo_top(18, 0.5, wp, n, relief, 1.0);
             let dry = smoothstep(0.42, 0.7, fbm(wp.xz * 0.045) + fbm(wp.xz * 0.4) * 0.25);
-            let g_col = retint(grass.albedo, mean, base_a, tint) * mix(vec3<f32>(1.0), vec3<f32>(1.25, 1.05, 0.7), smoothstep(0.3, 0.8, fbm(wp.xz * 0.02)));
-            ph.albedo = mix(g_col, soil.albedo, dry);
+            let g_col = retint(grass.albedo, mean, base_a, tint) * mix(vec3<f32>(1.0), vec3<f32>(1.1, 1.02, 0.82), smoothstep(0.3, 0.8, fbm(wp.xz * 0.02)));
+            // Сухая почва под травой — тёмная, с прозеленью: светлая соломенная земля спорила
+            // с зелёной травой и пересвечивала кадр.
+            let soil_c = mix(soil.albedo * vec3<f32>(0.5, 0.54, 0.46), g_col, 0.4);
+            ph.albedo = mix(g_col, soil_c, dry);
             ph.n = normalize(mix(grass.n, soil.n, dry));
             ph.rough = mix(grass.rough, soil.rough, dry);
             let rk = smoothstep(0.38, 0.62, slope + (fbm(wp.xz * 0.08) - 0.5) * 0.35);
