@@ -1155,6 +1155,32 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
         }
         z += 7.0;
     }
+    // Ёлки на уступах обрывов бухты: невысокие, редко — без них стена через бухту читалась
+    // голой лентой, а на референсе лес спускается по скалам к самой воде. Свой счётчик.
+    let mut rng = Rng::new(6203);
+    let mut z = 140.0;
+    while z < 480.0 {
+        let mut x = 270.0;
+        while x < 540.0 {
+            let p = Vec2::new(x + rng.range(-2.5, 2.5), z + rng.range(-2.5, 2.5));
+            x += 5.0;
+            let (roll, size, yaw, variant) = (rng.f(), rng.f(), rng.range(0.0, TAU), rng.int(64) as u32);
+            let y = ground_y(p.x, p.y);
+            if y < WATER_Y + 0.5 || !near_water(p, 40.0) || blocked(p) {
+                continue;
+            }
+            // У самой воды, под стеной, — изредка; на уступах стены — гуще.
+            let rise = (ground_y(p.x + 1.5, p.y) - y).abs().max((ground_y(p.x, p.y + 1.5) - y).abs());
+            let chance = if (1.3..=5.0).contains(&rise) { 0.38 } else if y < WATER_Y + 1.7 { 0.12 } else { 0.0 };
+            if roll >= chance {
+                continue;
+            }
+            b.at(p.x, p.y);
+            let q = g(p.x, p.y) - Vec3::Y * 0.6;
+            b.plant(PlantKind::Fir, q, 4.5 + size * 5.5, yaw, variant);
+        }
+        z += 5.0;
+    }
     // На обрыве большие деревья не держатся: их место занимает можжевельник (дубы на отвесной
     // скале издали торчали зелёными шарами на палочках). Счётчик случайных чисел не трогаем.
     for p in b.plants.iter_mut().skip(first_plant) {
