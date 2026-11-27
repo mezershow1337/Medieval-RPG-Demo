@@ -303,6 +303,15 @@ pub fn gable_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32, ridge_x: bool,
     let (a0, a1, c0, c1, cm) = if ridge_x { (ro.x0, ro.x1, ro.z0, ro.z1, r.cz()) } else { (ro.z0, ro.z1, ro.x0, ro.x1, r.cx()) };
     let slope = Vec2::new((c1 - c0) / 2.0, top - e).length();
     roof_edges(b.mesh(Mat::Tile), &w, (a0, a1), [(c0, -1.0), (c1, 1.0)], e, top, cm, slope);
+    // Калиптеры — настоящие полукруглые желоба поверх стыков тегул, от конька до карниза через
+    // каждые полметра (там же, где они нарисованы в текстуре): скат ребристый, карниз волнистый.
+    let mut al = a0 + CALYPTER_STEP;
+    while al < a1 - 0.1 {
+        for ce in [c0, c1] {
+            b.roof(Mat::Tile, |m| m.ridge_pipe(w(al, top - 0.02, cm), w(al, e - 0.005, ce), CALYPTER_R, 5));
+        }
+        al += CALYPTER_STEP;
+    }
     // Конёк — ряд полукруглых калиптеров на растворе.
     b.roof(Mat::Tile, |m| m.ridge_pipe(w(a0 - 0.04, top - 0.03, cm), w(a1 + 0.04, top - 0.03, cm), 0.13, 8));
     // Фронтоны — с обеих сторон: изнутри дома на их месте иначе видно небо.
@@ -321,6 +330,10 @@ pub fn gable_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32, ridge_x: bool,
         }
     }
 }
+
+/// Шаг и полуширина калиптеров (как в текстуре черепицы: колонна 0,5 м).
+const CALYPTER_STEP: f32 = 0.5;
+const CALYPTER_R: f32 = 0.085;
 
 /// Толщина кровли: тегула с калиптером над обрешёткой.
 const ROOF_T: f32 = 0.11;
@@ -384,6 +397,15 @@ pub fn lean_roof(b: &mut Builder, r: Rect, high: Side, y_high: f32, y_low: f32, 
         Side::E => ([Vec3::new(r.x1 + 0.25, yh, ro.z0), Vec3::new(r.x1 + 0.25, yh, ro.z1)], [Vec3::new(r.x0 - over, yl, ro.z0), Vec3::new(r.x0 - over, yl, ro.z1)]),
     };
     b.roof(Mat::Tile, |m| m.lean_roof(hi, lo));
+    {
+        // Калиптеры по скату (см. двускатную крышу).
+        let ax = (hi[1] - hi[0]).normalize_or_zero();
+        let n = ((hi[1] - hi[0]).length() / CALYPTER_STEP) as usize;
+        for k in 1..n {
+            let d = ax * (k as f32 * CALYPTER_STEP);
+            b.roof(Mat::Tile, |m| m.ridge_pipe(hi[0] + d - Vec3::Y * 0.01, lo[0] + d - Vec3::Y * 0.005, CALYPTER_R, 5));
+        }
+    }
     let down = Vec3::Y * -ROOF_T;
     let mut under = MeshBuilder::default();
     under.lean_roof([hi[0] + down, hi[1] + down], [lo[0] + down, lo[1] + down]);
