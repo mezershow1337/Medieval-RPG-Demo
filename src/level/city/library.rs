@@ -128,31 +128,39 @@ pub fn lecterns() -> Vec<Lectern> {
     let h = p.hall;
     let cx = h.cx();
     let mut v = Vec::new();
-    let tilt = 0.42;
     // Большой аналой посреди нефа — Четвероевангелие на пурпуре.
-    v.push(Lectern { at: Vec3::new(cx, 1.32, h.z0 + 5.6), toward: Vec3::Z, tilt: 0.55, width: 0.62, text: 0, scroll: false });
-    // Пюпитры вдоль столов нефа: по два на стол, читающие сидят лицом к оси нефа.
+    v.push(Lectern { at: on_board(Vec3::new(cx, 1.32 - 0.04, h.z0 + 5.6), Vec3::Z, 0.55, 0.04), toward: Vec3::Z, tilt: 0.55, width: 0.62, text: 0, scroll: false });
+    // Кодексы на столах нефа: по два на стол, читающие сидят лицом к оси нефа.
     let tables = table_rows(&p);
     let mut k = 1;
     for t in &tables {
         for (dz, side) in [(-0.9, -1.0), (0.9, 1.0)] {
-            let at = Vec3::new(t.cx() + side * 0.18, 0.86 + 0.13, t.cz() + dz);
-            v.push(Lectern { at, toward: Vec3::new(side, 0.0, 0.0), tilt, width: 0.46, text: k, scroll: false });
+            // Кодекс раскрыт прямо на столе, лицом к сидящему на скамье.
+            let toward = Vec3::new(side, 0.0, 0.0);
+            v.push(Lectern { at: Vec3::new(t.cx() + side * 0.2, 0.86 + 0.026, t.cz() + dz), toward, tilt: 0.0, width: 0.46, text: k, scroll: false });
             k += 1;
         }
     }
     // Свитки, раскатанные на столах в портиках двора.
     for (i, x) in [p.court.x0 + 0.9, p.court.x1 - 0.9].into_iter().enumerate() {
         let toward = if i == 0 { Vec3::X } else { Vec3::NEG_X };
-        v.push(Lectern { at: Vec3::new(x, 0.79, p.court.cz() + 1.6), toward, tilt: 0.0, width: 0.7, text: k, scroll: true });
+        v.push(Lectern { at: Vec3::new(x, 0.765, p.court.cz() + 1.6), toward, tilt: 0.0, width: 0.7, text: k, scroll: true });
         k += 1;
     }
     // В скриптории — образец (то, с чего переписывают), на подставке у окна.
-    v.push(Lectern { at: Vec3::new(p.scriptorium.x0 + 1.25, 1.05, p.scriptorium.z0 + 2.6), toward: Vec3::X, tilt: 0.6, width: 0.4, text: k, scroll: false });
+    let board = Vec3::new(p.scriptorium.x0 + 1.25 - 0.18, 1.05 - 0.04, p.scriptorium.z0 + 2.6);
+    v.push(Lectern { at: on_board(board, Vec3::X, 0.6, 0.04), toward: Vec3::X, tilt: 0.6, width: 0.4, text: k, scroll: false });
     k += 1;
     // На столе библиофилакса — опись книг (пинакс).
     v.push(Lectern { at: Vec3::new(p.office.cx() + 0.2, 0.83, p.office.z0 + 1.35), toward: Vec3::Z, tilt: 0.0, width: 0.42, text: k, scroll: false });
     v
+}
+
+/// Точка над серединой наклонной доски: книга лежит на ней, а не тонет в дереве
+/// (у граней уровня ещё и сдвиг по нормали — `graphics::depth_rank`).
+fn on_board(board: Vec3, toward: Vec3, tilt: f32, lift: f32) -> Vec3 {
+    let l = Lectern { at: board, toward, tilt, width: 0.0, text: 0, scroll: false };
+    board + l.axes().2 * lift
 }
 
 /// Длинные столы нефа (по оси нефа, друг за другом).
@@ -566,15 +574,12 @@ fn reading_hall(b: &mut Builder, p: &Plan, rng: &mut Rng) {
     b.solid([cx - 2.4, 0.0, h.z0], [cx + 2.4, 0.32, h.z0 + 2.6], Mat::Marble);
     interior::chair(b, Vec3::new(cx, 0.32, h.z0 + 1.2), Vec3::NEG_Z);
     lectern_stand(b, Vec3::new(cx, 0.0, h.z0 + 5.6), Vec3::Z, 1.32, 0.55, 0.62, true);
-    // Столы с пюпитрами и скамьями.
+    // Столы со скамьями, на них раскрытые кодексы (из [`lecterns`]).
     for t in table_rows(p) {
         kit::table(b, t, 0.86);
         for s in [-1.0f32, 1.0] {
             let bx = t.cx() + s * 0.85;
             b.solid([bx - 0.2, 0.0, t.z0 + 0.2], [bx + 0.2, 0.45, t.z1 - 0.2], Mat::Wood);
-        }
-        for (dz, s) in [(-0.9, -1.0f32), (0.9, 1.0)] {
-            desk_slope(b, Vec3::new(t.cx() + s * 0.18, 0.86, t.cz() + dz), Vec3::new(s, 0.0, 0.0), 0.42, 0.5);
         }
         // Чернильница и лампа посередине стола, стопка кодексов на краю.
         let c = t.center(0.86);

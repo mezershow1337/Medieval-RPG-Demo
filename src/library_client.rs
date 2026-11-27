@@ -177,7 +177,9 @@ fn spawn_pages(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mat
         // Над листами: геометрия уровня сдвинута по нормали на depth_rank (пергамент — 12 мм).
         let c = l.at + n * 0.016;
         let mesh = meshes.add(quad_mesh(c, right * (l.width / 2.0), up * (l.page_height() / 2.0), uv0, uv1));
-        commands.spawn((Mesh3d(mesh), MeshMaterial3d(atlases[a].clone()), Transform::default(), NotShadowCaster));
+        // Листы крошечные (меньше порога «мелочи» в settings) — но это два треугольника, а
+        // дальность видимости им ни к чему: без текста книга выглядит пустой.
+        commands.spawn((Mesh3d(mesh), MeshMaterial3d(atlases[a].clone()), Transform::default(), NotShadowCaster, crate::settings::NoDetailRange));
     }
     let ins = mat(&mut materials, "textures/library/inscriptions.jpg", 0.55);
     let (mc, mw, mh) = library::mosaic_panel();
