@@ -1017,7 +1017,7 @@ fn fragment(
             let rock_flat = 0.5 * (surface.photo_mean_b.rgb + base_b);
             // Самые чёрные щели скана подняты к среднему тону: на солнце они лежали кляксами.
             let rock_a = mix(rock.albedo, max(rock.albedo, surface.photo_mean_b.rgb * 0.72), 0.85);
-            let rock_c = mix(rock_flat, retint(rock_a, surface.photo_mean_b.rgb, base_b, 0.5), mix(0.6, 0.9, pom_k)) * vec3<f32>(0.57, 0.57, 0.55) * mix(0.72, 1.12, strata) * (1.0 - 0.3 * drip);
+            let rock_c = mix(rock_flat, retint(rock_a, surface.photo_mean_b.rgb, base_b, 0.5), mix(0.6, 0.9, pom_k)) * vec3<f32>(0.52, 0.52, 0.5) * mix(0.72, 1.12, strata) * (1.0 - 0.3 * drip);
             // Скала ломается на блоки по пластам и трещинам: у каждого блока свой наклон грани
             // и тон, между блоками — тёмные щели. Без этого обрыв читался гладкой «подушкой».
             // Вблизи рельеф скалы в полную силу (резкие грани и трещинки), вдали мягче — там он рябит.
@@ -1038,6 +1038,15 @@ fn fragment(
                 crag = mix(0.82, 1.12, id) * (1.0 - 0.5 * gap);
                 let tilt = vec3<f32>(fract(id * 17.3) - 0.5, (fract(id * 5.1) - 0.5) * 0.5, fract(id * 29.7) - 0.5);
                 crag_n = normalize(crag_n + tilt * 0.7 * far * (1.0 - gap));
+                // Уступы пластов: низ каждого пласта выступает полочкой и ловит свет, верх уходит под
+                // карниз следующего и лежит в тени — на отвесной стене это главный рисунок (без него
+                // обрыв через бухту был ровной светлой лентой). Сила у каждого пласта своя.
+                let lp = ly * 1.3 + fbm(vec2<f32>(wp.x - wp.z, wp.y) * 0.13) * 0.8;
+                let lf = fract(lp);
+                let ledge_k = far * (1.0 - smoothstep(0.2, 0.5, fwidth(lp))) * mix(0.3, 1.0, smoothstep(0.35, 0.65, fbm(vec2<f32>((wp.x + wp.z) * 0.07, floor(lp) * 1.7))));
+                let under = smoothstep(0.5, 0.97, lf) * ledge_k;
+                crag = crag * (1.0 - 0.42 * under);
+                crag_n = normalize(crag_n + vec3<f32>(0.0, (0.42 - lf) * 0.9 * ledge_k, 0.0));
             }
             // Живой камень: серо-оливковый лишайник пятнами и тёмный мох на гранях, глядящих вверх.
             let lichen = smoothstep(0.52, 0.74, fbm(vec2<f32>(wp.x + wp.y * 0.6, wp.z - wp.y * 0.5) * 0.9)) * smoothstep(0.3, 0.62, fbm(wp.xz * 3.1 + vec2<f32>(wp.y * 2.0, 1.3)));

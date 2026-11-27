@@ -149,6 +149,24 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     visibility_range_dither(in.position, in.visibility_range_dither);
     var pbr_input = pbr_input_from_standard_material(in, is_front);
     pbr_input.material.base_color = alpha_discard(pbr_input.material.flags, pbr_input.material.alpha_cutoff, pbr_input.material.base_color);
+@if(VERTEX_OUTPUT_INSTANCE_INDEX) {
+    if foliage.wind.x > 0.0 {
+        // Объём кроны: низ и сердцевина темнее (туда не доходит свет неба), макушка и края
+        // светлее; каждая ветка листвы чуть своего тона. Без этого крона — ровное зелёное пятно.
+        let wfl = mesh_functions::get_world_from_local(in.instance_index);
+        let scale = length(wfl[1].xyz);
+        let up = wfl[1].xyz / scale;
+        let rel = in.world_position.xyz - (wfl[3].xyz + up * foliage.wind.w * scale);
+        let half = max(foliage.wind.w * scale * 0.55, 0.3);
+        let hn = dot(rel, up) / half;
+        let rn = length(rel - up * dot(rel, up)) / half;
+        var tone = mix(0.58, 1.1, smoothstep(-0.9, 0.8, hn)) * mix(0.7, 1.0, smoothstep(0.1, 0.75, rn + max(hn, 0.0) * 0.6));
+@if(VERTEX_UVS_B) {
+        tone *= mix(0.82, 1.1, fract(in.uv_b.y * 7.13));
+}
+        pbr_input.material.base_color = vec4<f32>(pbr_input.material.base_color.rgb * tone, pbr_input.material.base_color.a);
+    }
+}
     // Крона ещё и светится насквозь: свет неба проходит через хвою и листья, поэтому теневой
     // бок дерева получает больше рассеянного света, чем глухая стена.
     pbr_input.diffuse_occlusion = max(pbr_input.diffuse_occlusion, vec3<f32>(0.8)) * (1.0 + foliage.dir.w);
