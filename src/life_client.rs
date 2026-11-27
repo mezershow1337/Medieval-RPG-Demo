@@ -472,6 +472,28 @@ fn look_for(me: usize, role: Role, s: &NpcState, t: f32, phase: f32, night: bool
             i.right_grip = grip(0.2, 0.9, -0.2);
             props[1] = Some(Prop::HotIron);
         }
+        Act::Sit => {
+            // Сидит прямо, руки на коленях; изредка говорит, поводя правой рукой.
+            i.crouch = 0.82;
+            i.lean = 0.08;
+            i.pitch = 0.05 * (tt * 0.17).sin();
+            i.twist = 0.1 * (tt * 0.11).sin();
+            let g = (((tt / 11.0).fract() * TAU).sin() * 1.6 - 0.6).clamp(0.0, 1.0);
+            i.right_grip = Some(Vec3::new(0.16, 0.62, -0.3).lerp(Vec3::new(0.3, 1.0, -0.42), g));
+            i.left_grip = grip(-0.16, 0.62, -0.3);
+        }
+        Act::Dine => {
+            // Сидит за трапезой: то тянется к блюду, то подносит чашу.
+            i.crouch = 0.82;
+            i.lean = -0.05;
+            let up = ((tt / 6.0).fract() * TAU).sin().max(0.0).powf(0.6);
+            let reach = ((tt / 6.0 + 0.5).fract() * TAU).sin().max(0.0);
+            i.pitch = 0.2 * up - 0.25;
+            i.right_grip = Some(Vec3::new(0.16, 0.7, -0.36).lerp(Vec3::new(0.05, 1.08, -0.13), up));
+            i.right_axis = Some(Vec3::Y.lerp(Vec3::new(0.0, 0.3, 1.0), up).normalize());
+            i.left_grip = Some(Vec3::new(-0.16, 0.64, -0.3).lerp(Vec3::new(-0.08, 0.66, -0.55), reach));
+            props[0] = Some(Prop::Cup);
+        }
         Act::Cower => {
             i.crouch = 1.0;
             i.lean = -0.35;
@@ -858,13 +880,35 @@ fn chatter(
         if act == Act::Talk {
             let partner = plans.as_ref().and_then(|p| p.people.get(r.index)).and_then(|p| p.state(clock.of_day())).and_then(|s| s.partner);
             let Some(p) = partner else { continue };
+            // Двор комита говорит о своём: свои разговоры, реплики по очереди.
+            if let (Some(a), Some(b)) = (crate::court::of_resident(r.index), crate::court::of_resident(p as usize))
+                && let Some(talk) = crate::court::overheard(a, b)
+            {
+                let (who, line) = talk[(t / 5.0) as usize % talk.len()];
+                if who == a {
+                    lines.push((d, head, format!("{}: «{line}»", a.name())));
+                }
+                continue;
+            }
             if !speaking(r.index, Some(p), t) {
                 continue;
             }
             let pair = (r.index.min(p as usize) as u64) << 16 | r.index.max(p as usize) as u64;
             let topic = TALKS[(crate::world_clock::hash(pair, clock.day() as u64) % TALKS.len() as u64) as usize];
             let turn = (t / 5.0) as usize;
-            lines.push((d, head, format!("{}: «{}»", crate::residents::title(r.role), topic[turn % topic.len()])));
+            lines.push((d, head, format!("{}: «{}»", crate::residents::name_of(r.index, r.role), topic[turn % topic.len()])));
+        } else if d < 4.5
+            && let Some(c) = crate::court::of_resident(r.index)
+            && let Some(line) = crate::court::bark(c, &crate::court::Ctx { hour: clock.hour(), day: clock.day(), met: (t / 45.0) as u32, act, rain: clock.rain() > 0.2 })
+        {
+            // Двор комита: свои присказки (стража у ворот, препозит в час приёма, кухарка).
+            let last = greeted.get(&r.index).copied().unwrap_or(-100.0);
+            if t - last > 45.0 {
+                greeted.insert(r.index, t);
+            }
+            if t - greeted[&r.index] < 3.5 {
+                lines.push((d, head, format!("{}: «{line}»", c.name())));
+            }
         } else if d < 3.2 && !matches!(act, Act::Sleep | Act::Lie | Act::Cower | Act::Away) {
             // Прохожий здоровается раз в минуту.
             let last = greeted.get(&r.index).copied().unwrap_or(-100.0);
@@ -1110,6 +1154,8 @@ mod tests {
             Act::Hoe,
             Act::Bathe,
             Act::Cower,
+            Act::Sit,
+            Act::Dine,
         ];
         for act in acts {
             for t in [0.0, 0.7, 3.1] {

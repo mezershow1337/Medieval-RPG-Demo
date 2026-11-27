@@ -53,7 +53,7 @@ pub fn title(role: Role) -> &'static str {
         Role::Scholar => "Грамматик",
         Role::Student => "Ученик",
         Role::Soldier => "Стратиот",
-        Role::Officer => "Комит",
+        Role::Officer => "Кентарх",
         Role::Bather => "Банщик",
         Role::Sailor => "Моряк",
         Role::Noble => "Знатный ссыльный",
@@ -174,7 +174,10 @@ pub fn spawn_residents(commands: &mut Commands, residents: &[Resident]) {
                 Visibility::default(),
             ))
             .with_children(|p| {
-                p.spawn((NeedsRig(outfit(r.role, i as u64 + 17)), Transform::default(), Visibility::default()));
+                let look = outfit(r.role, i as u64 + 17);
+                // Двор комита одет по должности.
+                let look = crate::court::of_home(r.pos).map_or(look, |c| crate::court_look::outfit(c, look));
+                p.spawn((NeedsRig(look), Transform::default(), Visibility::default()));
             });
     }
 }
@@ -215,6 +218,7 @@ fn talk(
     acts: Res<crate::life_client::LiveActs>,
     clock: Res<crate::world_clock::WorldClock>,
     mut speech: ResMut<Speech>,
+    mut court: Option<ResMut<crate::court_ui::CourtUi>>,
     mut said: Local<u32>,
     lore: Option<Res<crate::lore_client::LoreView>>,
     mut school: Option<ResMut<crate::school_client::SchoolUi>>,
@@ -228,17 +232,35 @@ fn talk(
         school.show(id);
         return;
     }
-    *said += 1;
+    // Комит и его двор: окно разговора (спящего и испуганного не расспросишь).
     let act = acts.0.get(i).copied().unwrap_or(crate::daily_life::Act::Idle);
+    if let Some(court) = court.as_mut() {
+        if court.open() {
+            return;
+        }
+        if let Some(c) = crate::court::of_resident(i)
+            && !matches!(act, crate::daily_life::Act::Sleep | crate::daily_life::Act::Away | crate::daily_life::Act::Cower)
+        {
+            court.begin(c, i, crate::court::Ctx { hour: clock.hour(), day: clock.day(), met: 0, act, rain: clock.rain() > 0.2 });
+            return;
+        }
+    }
+    *said += 1;
+    let who = name_of(i, role);
     speech.line = match busy_line(act, clock.night(), *said as usize + i) {
-        Some(l) if l.starts_with('(') => format!("{}: {l}", title(role)),
-        Some(l) => format!("{}: «{l}»", title(role)),
+        Some(l) if l.starts_with('(') => format!("{who}: {l}"),
+        Some(l) => format!("{who}: «{l}»"),
         None => {
             let l = lines(role);
-            format!("{}: «{}»", title(role), l[(i + *said as usize) % l.len()])
+            format!("{who}: «{}»", l[(i + *said as usize) % l.len()])
         }
     };
     speech.until = time.elapsed_secs() + 5.0;
+}
+
+/// Как назвать жителя: человека двора — по имени и должности, остальных — по роли.
+pub fn name_of(i: usize, role: Role) -> String {
+    crate::court::of_resident(i).map_or_else(|| title(role).to_string(), |c| c.label())
 }
 
 /// Что отвечает занятый человек (спящий, молящийся, испуганный…); `None` — обычная речь.
@@ -298,6 +320,7 @@ fn update_speech(
     aim: Res<ResidentAim>,
     speech: Res<Speech>,
     acts: Res<crate::life_client::LiveActs>,
+    court: Option<Res<crate::court_ui::CourtUi>>,
     lore: Option<Res<crate::lore_client::LoreView>>,
     school: Option<Res<crate::school_client::SchoolUi>>,
     mut text: Single<&mut Text, With<SpeechText>>,
@@ -305,6 +328,8 @@ fn update_speech(
     let teacher = aim.0.and_then(|(i, _)| lore.as_ref().and_then(|l| l.master_of_resident(i)).and_then(|id| l_master(lore.as_deref(), id)));
     let line = if time.elapsed_secs() < speech.until {
         speech.line.clone()
+    } else if court.is_some_and(|c| c.open()) {
+        String::new()
     } else if school.is_some_and(|s| s.open()) {
         String::new()
     } else if let (Some((i, _)), Some(t)) = (aim.0, teacher) {
@@ -313,8 +338,8 @@ fn update_speech(
     } else if let Some((i, role)) = aim.0 {
         // Видно, чем человек занят: «Ремесленник (куёт)».
         match acts.0.get(i) {
-            Some(a) if *a != crate::daily_life::Act::Idle => format!("[E] Поговорить: {} ({})", title(role), a.name()),
-            _ => format!("[E] Поговорить: {}", title(role)),
+            Some(a) if *a != crate::daily_life::Act::Idle => format!("[E] Поговорить: {} ({})", name_of(i, role), a.name()),
+            _ => format!("[E] Поговорить: {}", name_of(i, role)),
         }
     } else {
         String::new()

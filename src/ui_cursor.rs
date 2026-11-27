@@ -25,6 +25,7 @@ impl Plugin for UiCursorPlugin {
 /// Все окна игры, которым нужна свободная мышь.
 #[derive(SystemParam)]
 pub struct OpenWindows<'w> {
+    court: Option<Res<'w, crate::court_ui::CourtUi>>,
     loot: Option<Res<'w, crate::loot_client::LootState>>,
     trade: Option<Res<'w, crate::trade_client::TradeState>>,
     menu: Option<Res<'w, crate::menu::MenuState>>,
@@ -39,7 +40,8 @@ pub struct OpenWindows<'w> {
 impl OpenWindows<'_> {
     /// Открыто окно, которое забирает мышь (меню и консоль считаются отдельно).
     pub fn game_window(&self) -> bool {
-        self.loot.as_ref().is_some_and(|l| l.ui_open)
+        self.court.as_ref().is_some_and(|c| c.open())
+            || self.loot.as_ref().is_some_and(|l| l.ui_open)
             || self.trade.as_ref().is_some_and(|t| t.window_open())
             || self.law.as_ref().is_some_and(|l| l.open())
             || self.book.as_ref().is_some_and(|b| b.open)
