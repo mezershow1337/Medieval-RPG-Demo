@@ -743,7 +743,7 @@ fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelCo
             let yaw0 = hash2(gx, gz, 8) * std::f32::consts::TAU;
             let shade = 0.82 + hash2(gx, gz, 9) * 0.36;
                     // Общий тон: приглушённая зелень, без желтизны.
-            let c = tint * shade * Vec3::new(0.56, 0.46, 0.84);
+            let c = tint * shade * Vec3::new(0.45, 0.37, 0.67);
             for q in 0..quads {
                 let a = yaw0 + q as f32 * std::f32::consts::PI / quads as f32 + (hash2(gx + q, gz - q, 10) - 0.5) * 0.5;
                 let dir = Vec3::new(a.cos(), 0.0, a.sin());
