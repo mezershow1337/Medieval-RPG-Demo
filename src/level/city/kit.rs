@@ -303,6 +303,20 @@ pub fn gable_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32, ridge_x: bool,
     let (a0, a1, c0, c1, cm) = if ridge_x { (ro.x0, ro.x1, ro.z0, ro.z1, r.cz()) } else { (ro.z0, ro.z1, ro.x0, ro.x1, r.cx()) };
     let slope = Vec2::new((c1 - c0) / 2.0, top - e).length();
     roof_edges(b.mesh(Mat::Tile), &w, (a0, a1), [(c0, -1.0), (c1, 1.0)], e, top, cm, slope);
+    // Концы стропил под свесом карниза: брусья через 0,7 м от стены до края кровли.
+    if over > 0.15 {
+        let (cw0, cw1) = if ridge_x { (r.z0, r.z1) } else { (r.x0, r.x1) };
+        let (aw0, aw1) = if ridge_x { (r.x0, r.x1) } else { (r.z0, r.z1) };
+        let under = ROOF_T + 0.055;
+        let m = b.mesh(Mat::Wood);
+        let mut al = aw0 + 0.25;
+        while al < aw1 - 0.1 {
+            for (cw, ce, s) in [(cw0, c0, 1.0f32), (cw1, c1, -1.0)] {
+                m.beam(w(al, eave - under, cw + s * 0.02), w(al, e - under, ce + s * 0.04), 0.04, 0.055, Vec3::Y);
+            }
+            al += 0.7;
+        }
+    }
     // Калиптеры — настоящие полукруглые желоба поверх стыков тегул, от конька до карниза через
     // каждые полметра (там же, где они нарисованы в текстуре): скат ребристый, карниз волнистый.
     let mut al = a0 + CALYPTER_STEP;
@@ -432,6 +446,14 @@ pub fn lean_roof(b: &mut Builder, r: Rect, high: Side, y_high: f32, y_low: f32, 
     let m = b.mesh(Mat::Wood);
     let inward = -out * 0.18 + Vec3::Y * -(ROOF_T + 0.05);
     m.beam(lo[0] + inward, lo[1] + inward, 0.05, 0.05, Vec3::Y);
+    // И сами концы стропил под свесом, через 0,7 м.
+    let sd = (lo[0] - hi[0]).normalize_or_zero();
+    let downb = Vec3::Y * -(ROOF_T + 0.055);
+    let n = (along / 0.7) as usize;
+    for k in 0..=n {
+        let d = ax * (0.2 + k as f32 * 0.7).min(along - 0.1);
+        m.beam(lo[0] + d - sd * (over + 0.15) + downb, lo[0] + d - sd * 0.04 + downb, 0.04, 0.055, Vec3::Y);
+    }
 }
 
 /// Насколько кладка под скатом заходит в толщу кровли: выше настила, но ниже черепицы.
