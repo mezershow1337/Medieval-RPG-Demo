@@ -650,7 +650,8 @@ fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelCo
                         // Нормаль почти вверх — трава освещается мягко, без чёрных граней.
                         let n = (Vec3::Y * 0.85 + Vec3::new(-face.sin(), 0.0, face.cos()) * 0.25 * sign).normalize();
                         nrm.push(n.to_array());
-                        let cc = bottom.lerp(top, t.powf(0.7));
+                        // Лист сложен вдоль жилки: одна половина в тени, другая на свету.
+                        let cc = bottom.lerp(top, t.powf(0.7)) * if sign < 0.0 { 0.78 } else { 1.1 };
                         col.push([cc.x, cc.y, cc.z, 1.0]);
                         uv0.push([(sign + 1.0) * 0.5, t]);
                         uv1.push([t.powf(1.5) * (h / 0.5).min(1.5), phase]);

@@ -76,7 +76,7 @@ fn layer_depth(layer: i32) -> f32 {
         case 9 { return 0.07; }           // скала
         case 18 { return 0.04; }          // галька
         case 6, 8 { return 0.03; }        // земля
-        case 7 { return 0.035; }          // трава
+        case 7 { return 0.02; }          // трава
         case 4 { return 0.018; }          // доски
         case 5 { return 0.012; }          // брус
         case 2 { return 0.008; }          // штукатурка
@@ -136,7 +136,9 @@ fn photo_plane(layer: i32, uv0: vec2<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f
                 let hh = photo_height(uv + to_sun * (1.0 - h0) * f, layer, lod);
                 occ = max(occ, (hh - ray_h) * (1.3 - f));
             }
-            shade = 1.0 - clamp(occ * 8.0, 0.0, 1.0) * 0.55 * smoothstep(0.35, 0.6, pom_k);
+            // На мягком (трава, земля) тени от «выступов» слабые: там рельеф — комки и стебли, не камень.
+            let soft = select(1.0, 0.3, layer == 7 || layer == 6 || layer == 8);
+            shade = 1.0 - clamp(occ * 8.0, 0.0, 1.0) * 0.55 * soft * smoothstep(0.35, 0.6, pom_k);
         }
     }
     o.albedo = textureSampleGrad(photo_albedo, photo_sampler, uv, layer, dx, dy).rgb * shade;
