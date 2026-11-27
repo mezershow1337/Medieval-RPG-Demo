@@ -536,7 +536,7 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         Mat::Coals => (Color::srgb(0.08, 0.05, 0.04), Color::srgb(1.0, 0.35, 0.08), P_COALS, 1.0, 0.5, 0.5, 0.9, 0.0, 0.0, 0.0, 6.0),
         Mat::Water => (Color::srgb(0.06, 0.13, 0.16), Color::srgb(0.10, 0.2, 0.22), P_WATER, 1.0, 0.0, 0.3, 0.05, 0.0, 0.0, 0.0, 0.0),
         Mat::Leaves => (Color::srgb(0.07, 0.15, 0.07), Color::srgb(0.16, 0.24, 0.09), P_LEAVES, 1.0, 0.4, 1.0, 0.9, 0.0, 0.0, 0.0, 0.0),
-        Mat::Paving => (Color::srgb(0.66, 0.61, 0.52), Color::srgb(0.36, 0.33, 0.28), P_FLAGSTONE, 0.8, 0.3, 0.9, 0.8, 0.0, 0.1, 0.0, 0.0),
+        Mat::Paving => (Color::srgb(0.54, 0.50, 0.42), Color::srgb(0.30, 0.27, 0.23), P_FLAGSTONE, 0.8, 0.3, 0.9, 0.8, 0.0, 0.1, 0.0, 0.0),
         Mat::Limestone => (Color::srgb(0.70, 0.64, 0.52), Color::srgb(0.42, 0.38, 0.31), P_ASHLAR, 0.62, 0.22, 1.0, 0.9, 0.0, 0.25, 0.55, 0.0),
         Mat::Rubble => (Color::srgb(0.62, 0.57, 0.47), Color::srgb(0.55, 0.50, 0.42), P_RUBBLE, 1.0, 0.35, 1.2, 0.92, 0.0, 0.15, 0.6, 0.0),
         Mat::Plaster => (Color::srgb(0.86, 0.83, 0.76), Color::srgb(0.66, 0.60, 0.50), P_PLASTER, 1.0, 0.18, 0.3, 0.9, 0.0, 0.05, 0.8, 0.0),

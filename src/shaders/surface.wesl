@@ -141,7 +141,11 @@ fn photo_plane(layer: i32, uv0: vec2<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f
             shade = 1.0 - clamp(occ * 8.0, 0.0, 1.0) * 0.55 * soft * smoothstep(0.35, 0.6, pom_k);
         }
     }
-    o.albedo = textureSampleGrad(photo_albedo, photo_sampler, uv, layer, dx, dy).rgb * shade;
+    let tex = textureSampleGrad(photo_albedo, photo_sampler, uv, layer, dx, dy);
+    // Швы и щели темнее выступов (туда не попадает рассеянный свет): рисунок кладки
+    // читается и на ярком солнце, а не только в тени.
+    let cavity = mix(1.0, smoothstep(-0.25, 0.55, tex.a), clamp(layer_depth(layer) * 22.0, 0.0, 0.75));
+    o.albedo = tex.rgb * shade * cavity;
     let m = textureSampleGrad(photo_nrm, photo_sampler, uv, layer, dx, dy);
     let xy = (m.xy * 2.0 - 1.0) * relief;
     let z = sqrt(max(1.0 - dot(xy, xy), 0.0));
