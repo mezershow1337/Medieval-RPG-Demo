@@ -18,6 +18,7 @@ mod spawns;
 mod terrain;
 
 pub use places::*;
+pub(crate) use city::palace;
 /// Полуширина главной улицы Херсона.
 pub const MAIN_STREET_HALF: f32 = city::MAIN_HALF;
 pub use spawns::{SpawnChoice, pick_spawn, spawn_spot, spawn_spots};

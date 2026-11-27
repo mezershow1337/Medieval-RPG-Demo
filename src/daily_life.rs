@@ -488,6 +488,10 @@ pub enum Act {
     Quench,
     /// Присел и закрыл голову: рядом драка.
     Cower,
+    /// Сидит (на троне, на скамье, за столом).
+    Sit,
+    /// Возлежит за трапезой (обед и ужин у комита).
+    Dine,
 }
 
 impl Act {
@@ -523,6 +527,8 @@ impl Act {
             Act::Stoke => "греет заготовку в горне",
             Act::Quench => "закаляет поковку",
             Act::Cower => "прячется",
+            Act::Sit => "сидит",
+            Act::Dine => "трапезничает",
         }
     }
 }
@@ -976,6 +982,9 @@ impl Town {
         order.sort_by_key(|&i| hash(i as u64, 0xBED));
         for i in order {
             let r = &residents[i];
+            if crate::court::of_home(r.pos).is_some_and(|c| !crate::court::sleeps_here(c)) {
+                continue;
+            }
             let best = beds
                 .iter()
                 .enumerate()
@@ -1337,6 +1346,7 @@ impl Town {
                     Some((s, partner)) => (s.pos, s.yaw, Some(d), partner, if w.act == Act::Talk && partner.is_none() { Act::Idle } else { w.act }),
                     None => (home, r.yaw, None, None, Act::Idle),
                 },
+                Target::Spot(p, yaw, partner) => (p, yaw, None, partner, w.act),
             };
             let start = want_t.max(t);
             if start >= DAY - 60.0 && k + 1 < wishes.len() {
@@ -1368,7 +1378,8 @@ impl Town {
             }
             let t1 = next_t.max(t + 1.0).min(DAY);
             if t1 > t {
-                let rounds = if lie.is_some() || partner.is_some() { None } else { self.rounds_for(i, act, pos, dest, day, k) };
+                let fixed = matches!(w.target, Target::Spot(..));
+                let rounds = if lie.is_some() || partner.is_some() || fixed { None } else { self.rounds_for(i, act, pos, dest, day, k) };
                 // Котёл — на очаге: мешать ходят туда, а на своём месте режут и месят.
                 let act = if act == Act::Stir && rounds.as_ref().is_some_and(|r| r.errands.iter().any(|e| e.act == Act::Stir)) { Act::Work } else { act };
                 segs.push(Seg::Stay(Stay { t0: t, t1, pos, yaw, act, partner, lie, rounds }));
@@ -1570,6 +1581,8 @@ enum Target {
     Anvil,
     Fishing,
     Dest(Dest),
+    /// Своё место во дворце (трон, конторка, скамья): точка, взгляд и собеседник.
+    Spot(Vec3, f32, Option<u16>),
 }
 
 /// Желание: с часа `at` быть там-то и делать то-то.
@@ -1610,7 +1623,34 @@ fn work_act(role: Role) -> Act {
 }
 
 impl Town {
+    /// Распорядок человека двора комита (места во дворце — свои, а не общие).
+    fn court_wishes(&self, c: crate::court::Courtier, day: u32) -> Vec<Wish> {
+        use crate::court::Where;
+        crate::court::day_plan(c, day, |a, b| rains_during(day, a, b))
+            .into_iter()
+            .map(|st| {
+                let target = match st.place {
+                    Where::Home => Target::Home,
+                    Where::Bed => Target::Bed,
+                    Where::Dest(d) => Target::Dest(d),
+                    Where::Seat(_) | Where::Talk(..) => {
+                        let (p, yaw) = crate::court::seat_of(st.place).unwrap();
+                        let partner = match st.place {
+                            Where::Talk(_, with) => self.residents.iter().position(|r| crate::court::of_home(r.pos) == Some(with)).map(|j| j as u16),
+                            _ => None,
+                        };
+                        Target::Spot(p, yaw, partner)
+                    }
+                };
+                w(st.at, target, st.act)
+            })
+            .collect()
+    }
+
     fn wishes(&self, i: usize, day: u32) -> Vec<Wish> {
+        if let Some(c) = crate::court::of_home(self.residents[i].pos) {
+            return self.court_wishes(c, day);
+        }
         use Act::*;
         use Target::{Bed, Dest as D, Home};
         let r = &self.residents[i];
@@ -2285,6 +2325,24 @@ mod errand_shots {
                     break;
                 }
             }
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod court_tests {
+    use super::*;
+
+    #[test]
+    fn court_reaches_every_seat_of_the_palace() {
+        // Трон, конторки, ложа триклиния: туда и обратно — по сетке, а не сквозь стены.
+        let town = test_town();
+        let comes = town.residents.iter().position(|r| crate::court::of_home(r.pos) == Some(crate::court::Courtier::Comes)).expect("комит на месте");
+        let home = town.residents[comes].pos;
+        for s in crate::level::palace::all_seats() {
+            let (p, _) = crate::level::palace::seat(s);
+            assert!(town.route(home, None, p, None).is_some() && town.route(p, None, home, None).is_some(), "{s:?} недостижимо");
         }
     }
 }

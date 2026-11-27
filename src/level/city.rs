@@ -24,6 +24,7 @@ pub(crate) mod cozy;
 pub(crate) mod interior;
 pub(crate) mod kit;
 pub(crate) mod outside;
+pub(crate) mod palace;
 pub(crate) mod port;
 pub(crate) mod public;
 pub(crate) mod ships;

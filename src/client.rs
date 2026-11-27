@@ -201,6 +201,7 @@ pub fn run(start: crate::menu::Start) {
         .add_plugins(crate::towns_client::TownClientPlugin)
         .add_plugins(crate::ui_theme::UiThemePlugin)
         .add_plugins(crate::ui_cursor::UiCursorPlugin)
+        .add_plugins((crate::court_ui::CourtUiPlugin, crate::court_look::CourtLookPlugin))
         .add_plugins((crate::skill_book::SkillBookPlugin, crate::hints::HintsPlugin, crate::school_client::SchoolClientPlugin, crate::tablet_view::TabletViewPlugin))
         .add_plugins(crate::work_client::WorkClientPlugin)
         .add_plugins(crate::console::ConsolePlugin)

@@ -1171,41 +1171,9 @@ pub fn citadel(b: &mut Builder) {
     b.torch(gate - 2.8, 3.2, wall_z - 2.3, Vec3::NEG_Z);
     b.torch(gate + 2.8, 3.2, wall_z - 2.3, Vec3::NEG_Z);
     b.torch(gate - 2.8, 3.2, wall_z + 2.3, Vec3::Z);
-    // Претория.
-    let pr = Rect::new(c.x0 + 2.0, c.z0 + 2.0, c.x0 + 28.0, c.z0 + 24.0);
+    // Претория — дворец комита Херсона со двором, залом приёмов и садом.
+    super::palace::praetorium(b);
     let mut rng = Rng::new(488);
-    b.loot(L::Wealthy);
-    let peri = peristyle(b, pr, 6.0, 4.8, Mat::OpusMixtum, &[(Side::E, pr.cz())], [2, 2, 1, 1], true);
-    for (side, room) in &peri.rooms {
-        if *side == Side::N {
-            kit::table(b, Rect::new(room.cx() - 1.0, room.cz() - 0.5, room.cx() + 1.0, room.cz() + 0.5), 0.8);
-            kit::chest(b, Vec3::new(room.x0 + 0.6, 0.0, room.z0 + 0.5), true);
-            b.lamp(room.center(2.6), Color::srgb(1.0, 0.72, 0.45), 6_000.0, 7.0);
-        } else if rng.chance(0.5) {
-            kit::bed(b, Rect::new(room.x0 + 0.2, room.z0 + 0.2, room.x0 + 1.1, room.z0 + 2.1));
-        }
-    }
-    for (k, (side, room)) in peri.rooms.iter().enumerate() {
-        let c = room.center(0.0);
-        let mut rr = interior::Room::new(b, room.inset(0.05));
-        let all = [Side::N, Side::S, Side::W, Side::E];
-        match (side, k % 2) {
-            (Side::N, 0) => extras(b, *room, L::Wealthy, &["Шкаф с бумагами"], &[(Role::Officer, c + Vec3::Z * 1.0, c)], &mut rng),
-            (Side::N, _) => {
-                if let Some((f, _)) = rr.take(1.2, 0.7, &all, &mut rng) {
-                    interior::desk_codex(b, f);
-                }
-                extras(b, *room, L::Library, &["Ларь с донесениями"], &[(Role::Servant, c, c + Vec3::X)], &mut rng);
-            }
-            (Side::S, _) => {
-                if let Some((f, s)) = rr.take(1.6, 0.4, &all, &mut rng) {
-                    interior::weapon_rack(b, f, s);
-                }
-                extras(b, *room, L::Barracks, &["Сундук"], &[(Role::Soldier, c, c + Vec3::Z)], &mut rng);
-            }
-            _ => extras(b, *room, L::Kitchen, &["Корзина с припасами"], &[(Role::Cook, c, c + Vec3::X)], &mut rng),
-        }
-    }
     // Казармы вдоль южной стены: длинный корпус с комнатами на 8 солдат.
     let ba = Rect::new(c.x0 + 32.0, c.z1 - 9.0, c.x1 - 1.0, c.z1);
     kit::wall_x(b, ba.x0, ba.x1, ba.z0 + 0.3, 0.6, 3.8, &(0..6).map(|k| Op::Door { s: ba.x0 + 5.0 + k as f32 * 10.0, w: 1.2, h: 2.4 }).collect::<Vec<_>>(), Mat::Rubble);
