@@ -322,7 +322,8 @@ pub fn gable_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32, ridge_x: bool,
     let mut al = a0 + CALYPTER_STEP;
     while al < a1 - 0.1 {
         for ce in [c0, c1] {
-            b.roof(Mat::Tile, |m| m.ridge_pipe(w(al, top - 0.02, cm), w(al, e - 0.005, ce), CALYPTER_R, 5));
+            // Только вид: коллизию ската дают плиты кровли (b.roof), желоба в неё не входят.
+            b.mesh(Mat::Tile).ridge_pipe(w(al, top - 0.02, cm), w(al, e - 0.005, ce), CALYPTER_R, 5);
         }
         al += CALYPTER_STEP;
     }
@@ -417,7 +418,7 @@ pub fn lean_roof(b: &mut Builder, r: Rect, high: Side, y_high: f32, y_low: f32, 
         let n = ((hi[1] - hi[0]).length() / CALYPTER_STEP) as usize;
         for k in 1..n {
             let d = ax * (k as f32 * CALYPTER_STEP);
-            b.roof(Mat::Tile, |m| m.ridge_pipe(hi[0] + d - Vec3::Y * 0.01, lo[0] + d - Vec3::Y * 0.005, CALYPTER_R, 5));
+            b.mesh(Mat::Tile).ridge_pipe(hi[0] + d - Vec3::Y * 0.01, lo[0] + d - Vec3::Y * 0.005, CALYPTER_R, 5);
         }
     }
     let down = Vec3::Y * -ROOF_T;
