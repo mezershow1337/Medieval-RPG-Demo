@@ -594,10 +594,10 @@ fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelCo
     let mut idx: Vec<u32> = Vec::new();
     // Цвета степи в конце лета: соломенный ковыль, оливковый типчак, сизая полынь, зелень у воды.
     // Тон подобран под фототекстуру земли — иначе трава читается тёмной щетиной на светлом склоне.
-    let straw = srgb(0.37, 0.39, 0.19);
-    let olive = srgb(0.21, 0.32, 0.11);
-    let green = srgb(0.15, 0.29, 0.09);
-    let sage = srgb(0.27, 0.35, 0.23);
+    let straw = srgb(0.36, 0.36, 0.20);
+    let olive = srgb(0.21, 0.28, 0.12);
+    let green = srgb(0.15, 0.24, 0.09);
+    let sage = srgb(0.26, 0.31, 0.22);
     let flowers = [srgb(0.90, 0.75, 0.20), srgb(0.88, 0.86, 0.78), srgb(0.52, 0.40, 0.62), srgb(0.75, 0.18, 0.12)];
     for iz in 0..n {
         for ix in 0..n {

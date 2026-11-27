@@ -966,7 +966,7 @@ fn fragment(
             let rock = photo_triplanar(side, side, surface.photo.w, surface.photo.w, wp * 0.5, n, relief);
             let gravel = photo_top(18, 0.5, wp, n, relief, 1.0);
             let dry = smoothstep(0.5, 0.78, fbm(wp.xz * 0.045) + fbm(wp.xz * 0.4) * 0.25);
-            let g_col = retint(grass.albedo, mean, base_a, tint) * mix(vec3<f32>(1.0), vec3<f32>(1.05, 1.02, 0.9), smoothstep(0.4, 0.85, fbm(wp.xz * 0.02))) * vec3<f32>(0.66, 0.74, 0.62);
+            let g_col = retint(grass.albedo, mean, base_a, tint) * mix(vec3<f32>(1.0), vec3<f32>(1.05, 1.02, 0.9), smoothstep(0.4, 0.85, fbm(wp.xz * 0.02))) * vec3<f32>(0.66, 0.69, 0.59);
             // Сухая почва под травой — тёмная, с прозеленью: светлая соломенная земля спорила
             // с зелёной травой и пересвечивала кадр.
             let soil_c = mix(soil.albedo * vec3<f32>(0.5, 0.54, 0.46), g_col, 0.4);

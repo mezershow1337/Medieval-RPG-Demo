@@ -983,11 +983,12 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
     for h in places::herb_patches() {
         clear.push((Vec2::new(h.pos.x, h.pos.z), h.radius + 2.0));
     }
+    // Рыбацкая хижина с причалом и подход к ней.
+    clear.push((Vec2::new(fishing::HUT.cx(), fishing::HUT.cz()), 20.0));
     clear.extend(mines::clearings());
     clear.push(village::clearing());
     let blocked = |p: Vec2| {
         terrain::city_distance(p.x, p.y) < 40.0
-            || p.y < 186.0 && p.x < 330.0
             || p.x.abs() > WORLD_HALF - 12.0
             || p.y.abs() > WORLD_HALF - 12.0
             || ground_y(p.x, p.y) < WATER_Y + 1.6
