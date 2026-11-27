@@ -433,9 +433,10 @@ fn apply_cameras(
         // Сглаживание: TAA требует предварительных проходов (глубина, движение) — на низких
         // эффектах дешевле FXAA.
         if settings.effects == 0 {
-            ec.remove::<TemporalAntiAliasing>().insert((Fxaa::default(), ShadowFilteringMethod::Gaussian));
+            ec.remove::<TemporalAntiAliasing>().remove::<bevy::anti_alias::contrast_adaptive_sharpening::ContrastAdaptiveSharpening>().insert((Fxaa::default(), ShadowFilteringMethod::Gaussian));
         } else {
-            ec.remove::<Fxaa>().insert((TemporalAntiAliasing::default(), ShadowFilteringMethod::Temporal));
+            // TAA слегка мылит кадр — возвращаем резкость мелких деталей (трава, кладка, кора).
+            ec.remove::<Fxaa>().insert((TemporalAntiAliasing::default(), ShadowFilteringMethod::Temporal, bevy::anti_alias::contrast_adaptive_sharpening::ContrastAdaptiveSharpening { enabled: true, sharpening_strength: 0.45, denoise: false }));
         }
         if settings.effects >= 1 {
             ec.insert(Bloom { intensity: if m.day { 0.16 } else { 0.2 }, ..Bloom::NATURAL });
