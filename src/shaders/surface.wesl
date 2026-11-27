@@ -1015,10 +1015,11 @@ fn fragment(
             let rock_flat = 0.5 * (surface.photo_mean_b.rgb + base_b);
             // Самые чёрные щели скана подняты к среднему тону: на солнце они лежали кляксами.
             let rock_a = mix(rock.albedo, max(rock.albedo, surface.photo_mean_b.rgb * 0.55), 0.75);
-            let rock_c = mix(rock_flat, retint(rock_a, surface.photo_mean_b.rgb, base_b, 0.5), mix(0.6, 0.9, pom_k)) * vec3<f32>(0.6, 0.58, 0.54) * mix(0.72, 1.12, strata) * (1.0 - 0.3 * drip);
+            let rock_c = mix(rock_flat, retint(rock_a, surface.photo_mean_b.rgb, base_b, 0.5), mix(0.6, 0.9, pom_k)) * vec3<f32>(0.57, 0.57, 0.55) * mix(0.72, 1.12, strata) * (1.0 - 0.3 * drip);
             // Скала ломается на блоки по пластам и трещинам: у каждого блока свой наклон грани
             // и тон, между блоками — тёмные щели. Без этого обрыв читался гладкой «подушкой».
-            var crag_n = normalize(mix(n, rock.n, 0.4));
+            // Вблизи рельеф скалы в полную силу (резкие грани и трещинки), вдали мягче — там он рябит.
+            var crag_n = normalize(mix(n, rock.n, mix(0.4, 0.85, pom_k)));
             var crag = 1.0;
             if rk > 0.01 {
                 // Пласты лежат почти горизонтально и длинные; трещины идут не сплошной сеткой, а
@@ -1036,7 +1037,13 @@ fn fragment(
                 let tilt = vec3<f32>(fract(id * 17.3) - 0.5, (fract(id * 5.1) - 0.5) * 0.5, fract(id * 29.7) - 0.5);
                 crag_n = normalize(crag_n + tilt * 0.7 * far * (1.0 - gap));
             }
-            ph.albedo = mix(ph.albedo, rock_c * crag, rk);
+            // Живой камень: серо-оливковый лишайник пятнами и тёмный мох на гранях, глядящих вверх.
+            let lichen = smoothstep(0.52, 0.74, fbm(vec2<f32>(wp.x + wp.y * 0.6, wp.z - wp.y * 0.5) * 0.9)) * smoothstep(0.3, 0.62, fbm(wp.xz * 3.1 + vec2<f32>(wp.y * 2.0, 1.3)));
+            let moss = smoothstep(0.62, 0.8, crag_n.y) * smoothstep(0.38, 0.6, fbm(wp.xz * 1.3 + vec2<f32>(3.1, wp.y)));
+            var rock_cc = rock_c * crag;
+            rock_cc = mix(rock_cc, (rock_cc * 0.55 + vec3<f32>(0.035, 0.04, 0.022)) * vec3<f32>(0.9, 1.0, 0.72), lichen * 0.6);
+            rock_cc = mix(rock_cc, vec3<f32>(0.035, 0.05, 0.018) * (0.6 + rock_a.g / max(surface.photo_mean_b.g, 0.02) * 0.5), moss * 0.7);
+            ph.albedo = mix(ph.albedo, rock_cc, rk);
             ph.n = normalize(mix(ph.n, crag_n, rk));
             ph.rough = mix(ph.rough, rock.rough, rk);
             let shore = 1.0 - smoothstep(-1.0, 0.4, wp.y + (fbm(wp.xz * 0.3) - 0.5) * 0.8);
