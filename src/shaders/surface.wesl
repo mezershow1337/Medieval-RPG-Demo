@@ -74,7 +74,7 @@ fn layer_depth(layer: i32) -> f32 {
         case 0 { return 0.03; }           // тёсаные блоки
         case 13 { return 0.022; }         // кирпич
         case 11 { return 0.02; }          // плиты
-        case 19 { return 0.06; }          // солома
+        case 19 { return 0.035; }         // солома
         case 9 { return 0.07; }           // скала
         case 18 { return 0.04; }          // галька
         case 6, 8 { return 0.03; }        // земля
@@ -148,12 +148,20 @@ fn photo_plane(layer: i32, uv0: vec2<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f
     // читается и на ярком солнце, а не только в тени.
     let cavity = mix(1.0, smoothstep(-0.25, 0.55, tex.a), clamp(layer_depth(layer) * 22.0, 0.0, 0.75));
     o.albedo = tex.rgb * shade * cavity;
+    if layer == 19 {
+        // Камыш: убираем «лоскуты» светлых и тёмных пучков (издали они читались подушками),
+        // оставляем стебли и ряды снопов.
+        let low = textureSampleLevel(photo_albedo, photo_sampler, uv, layer, 5.0).rgb;
+        let mean = textureSampleLevel(photo_albedo, photo_sampler, uv, layer, 10.0).rgb;
+        let flat_c = tex.rgb / max(low, vec3<f32>(0.03)) * mean;
+        o.albedo = mix(tex.rgb, flat_c, 0.7) * mix(1.0, shade * cavity, 0.6);
+    }
     let m = textureSampleGrad(photo_nrm, photo_sampler, uv, layer, dx, dy);
     var xy = (m.xy * 2.0 - 1.0) * relief;
     // Мелкая фактура вблизи: тот же материал в 4,7 раза мельче (у кладки и плит — зерно скалы)
     // добавляет поры, зёрна и волокна, которых в текстуре 1024 при подходе вплотную не хватает.
     let metal = layer == 14 || layer == 15 || layer == 16 || layer == 17;
-    if pom_near > 0.02 && !metal {
+    if pom_near > 0.02 && !metal && layer != 19 {
         let dl = select(layer, 9, layer_has_grid(layer) || layer == 3);
         let duv = uv * 4.7 + vec2<f32>(0.37, 0.11);
         let fine = textureSampleGrad(photo_albedo, photo_sampler, duv, dl, dx * 4.7, dy * 4.7).rgb;

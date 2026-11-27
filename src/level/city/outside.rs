@@ -167,20 +167,56 @@ pub fn thatch_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32, ridge_x: bool
     let mut under = crate::level::geom::MeshBuilder::default();
     under.gable_roof_slopes(Vec2::new(ro.x0, ro.z0), Vec2::new(ro.x1, ro.z1), e - 0.25, top - 0.25, ridge_x);
     b.mesh(Mat::Thatch).append(under.flipped());
-    // Толстый срез кровли по свесу и конёк, прижатый жердями (по ним тоже можно ступить).
+    // Кровля — толстый пласт камыша, а не лист: торцы над фронтонами закрыты срезом снопов,
+    // по свесу — округлый валик, конёк — толстый жгут, прижатый жердями (по ним можно ступить).
+    let th = 0.25;
+    {
+        let m = b.mesh(Mat::Thatch);
+        let (lo, hi, c) = if ridge_x { (ro.z0, ro.z1, r.cz()) } else { (ro.x0, ro.x1, r.cx()) };
+        let (e0, e1) = if ridge_x { (ro.x0, ro.x1) } else { (ro.z0, ro.z1) };
+        let pt = |along: f32, across: f32, y: f32| if ridge_x { Vec3::new(along, y, across) } else { Vec3::new(across, y, along) };
+        for (end, sgn) in [(e0, -1.0f32), (e1, 1.0)] {
+            let out = pt(sgn, 0.0, 0.0) - pt(0.0, 0.0, 0.0);
+            for side in [lo, hi] {
+                m.quad([pt(end, side, e), pt(end, c, top), pt(end, c, top - th), pt(end, side, e - th)], out);
+            }
+        }
+    }
     b.roof(Mat::Thatch, |m| {
         if ridge_x {
             for z in [ro.z0, ro.z1] {
-                m.beam(Vec3::new(ro.x0, e - 0.12, z), Vec3::new(ro.x1, e - 0.12, z), 0.12, 0.13, Vec3::Y);
+                m.ridge_pipe(Vec3::new(ro.x0, e - 0.13, z), Vec3::new(ro.x1, e - 0.13, z), 0.14, 6);
+                m.beam(Vec3::new(ro.x0, e - 0.19, z), Vec3::new(ro.x1, e - 0.19, z), 0.14, 0.06, Vec3::Y);
             }
-            m.beam(Vec3::new(ro.x0, top, r.cz()), Vec3::new(ro.x1, top, r.cz()), 0.25, 0.12, Vec3::Y);
+            m.ridge_pipe(Vec3::new(ro.x0 - 0.04, top - 0.1, r.cz()), Vec3::new(ro.x1 + 0.04, top - 0.1, r.cz()), 0.26, 7);
         } else {
             for x in [ro.x0, ro.x1] {
-                m.beam(Vec3::new(x, e - 0.12, ro.z0), Vec3::new(x, e - 0.12, ro.z1), 0.12, 0.13, Vec3::Y);
+                m.ridge_pipe(Vec3::new(x, e - 0.13, ro.z0), Vec3::new(x, e - 0.13, ro.z1), 0.14, 6);
+                m.beam(Vec3::new(x, e - 0.19, ro.z0), Vec3::new(x, e - 0.19, ro.z1), 0.14, 0.06, Vec3::Y);
             }
-            m.beam(Vec3::new(r.cx(), top, ro.z0), Vec3::new(r.cx(), top, ro.z1), 0.25, 0.12, Vec3::Y);
+            m.ridge_pipe(Vec3::new(r.cx(), top - 0.1, ro.z0 - 0.04), Vec3::new(r.cx(), top - 0.1, ro.z1 + 0.04), 0.26, 7);
         }
     });
+    // Жерди-прижимы поперёк конька (каждые ~1.1 м) и стропила под свесом.
+    {
+        let m = b.mesh(Mat::Wood);
+        let len = if ridge_x { ro.w() } else { ro.d() };
+        let n = (len / 1.1).round().max(2.0) as usize;
+        let slope = Vec2::new(half + over, top - e).normalize();
+        for i in 0..=n {
+            let t = i as f32 / n as f32;
+            for sgn in [-1.0f32, 1.0] {
+                let (a, c) = if ridge_x {
+                    let x = ro.x0 + 0.15 + (len - 0.3) * t;
+                    (Vec3::new(x, top + 0.2, r.cz()), Vec3::new(x, top + 0.2 - slope.y * 0.75, r.cz() + sgn * slope.x * 0.75))
+                } else {
+                    let z = ro.z0 + 0.15 + (len - 0.3) * t;
+                    (Vec3::new(r.cx(), top + 0.2, z), Vec3::new(r.cx() + sgn * slope.x * 0.75, top + 0.2 - slope.y * 0.75, z))
+                };
+                m.beam(a, c, 0.025, 0.025, Vec3::Y);
+            }
+        }
+    }
     let m = b.mesh(gable);
     if ridge_x {
         for (x, s) in [(r.x0, -1.0f32), (r.x1, 1.0)] {
