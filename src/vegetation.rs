@@ -381,7 +381,7 @@ fn spawn_plants(
         let (Some(g0), Some(g1)) = (gltf_meshes.get(l0), gltf_meshes.get(l1)) else { continue };
         let (Some(p0), Some(p1)) = (g0.primitives.first(), g1.primitives.first()) else { continue };
         let mut sm = p0.material.as_ref().and_then(|m| gltf_materials.get(m)).map(bevy::pbr::gltf::standard_material_from_gltf_material).unwrap_or_default();
-        sm.base_color = Color::srgb(1.12, 1.08, 1.0);
+        sm.base_color = Color::srgb(0.92, 0.96, 1.0);
         // Сетка в главном мире бывает уже выгружена (только для рендера) — тогда берём размер
         // скана из таблицы, иначе камни выходят то с гальку, то со скалу.
         let size = meshes.get(&p0.mesh).and_then(mesh_bounds).map(|(a, b)| (b - a).max_element()).filter(|s| *s > 0.0).unwrap_or_else(|| rock_scan_size(id));

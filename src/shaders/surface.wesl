@@ -1089,8 +1089,11 @@ fn fragment(
         let runs = smoothstep(0.35, 0.75, fbm(vec2<f32>(wp.x + wp.z, wp.y * 0.15) * 2.3)) * (1.0 - up);
         color *= 1.0 - wet * (0.22 + 0.18 * up + 0.12 * runs);
         color = mix(color, color * 0.6 + vec3<f32>(0.004, 0.005, 0.007), puddle);
-        rough = mix(rough, rough * mix(0.65, 0.3, up), wet);
-        rough = mix(rough, 0.04, puddle);
+        // Мокрый камень блестит, но не зеркалит целиком: против солнца склон и стена
+        // превращались в белый лист. Земля под травой (рельеф) почти не блестит, лужи на ней редки.
+        let ground19 = select(0.0, 1.0, kind == 19);
+        rough = mix(rough, rough * mix(mix(0.8, 0.5, up), 0.9, ground19), wet);
+        rough = mix(rough, 0.04, puddle * (1.0 - 0.8 * ground19));
         // В луже рельеф камня тонет: поверхность ровная, как зеркало.
         N = normalize(mix(N, n, puddle * 0.92 + wet * up * 0.25));
     }
