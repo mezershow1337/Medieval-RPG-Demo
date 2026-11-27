@@ -937,7 +937,7 @@ pub(super) fn dugout(b: &mut Builder, h: Rect, hy: f32) {
             let (top0, top1) = (Vec3::new(xa, ridge + 0.12 + th, 0.0), Vec3::new(xb, ridge + 0.12 + th, 0.0));
             let (lo0, lo1) = (Vec3::new(xa, eave + th - 0.02, sz * (ez + 0.08)), Vec3::new(xb, eave + th - 0.02, sz * (ez + 0.08)));
             let up = Vec3::new(0.0, 1.0, sz * 0.9);
-            t.mesh(Mat::Thatch).quad([top0, top1, lo1, lo0], up);
+            t.roof(Mat::Thatch, |m| m.quad([top0, top1, lo1, lo0], up));
             let dn = Vec3::Y * th;
             t.mesh(Mat::Earth).quad([lo0, lo1, lo1 - dn, lo0 - dn], Vec3::new(0.0, -0.2, sz));
             for (p0, p1, out) in [(top0, lo0, Vec3::NEG_X), (top1, lo1, Vec3::X)] {
