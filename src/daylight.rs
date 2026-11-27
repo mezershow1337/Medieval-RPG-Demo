@@ -106,6 +106,7 @@ fn drive_daylight(
     for id in ids {
         if let Some(mut w) = waters.get_mut(id) {
             w.extension.water.sky = u;
+            w.extension.water.waves.w = m.visibility;
             w.extension.water.params.x = 3.0 - m.dayness;
         }
     }

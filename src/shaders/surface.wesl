@@ -988,9 +988,12 @@ fn fragment(
             ph.rough = mix(grass.rough, soil.rough, dry);
             // На крутом трава не держится: сначала голая земля с осыпью, круче — скала.
             let bare = smoothstep(0.24, 0.33, slope + (fbm(wp.xz * 0.3) - 0.5) * 0.1 + (fbm(wp.xz * 0.9) - 0.5) * 0.05);
-            ph.albedo = mix(ph.albedo, mix(vec3<f32>(dot(soil.albedo, vec3<f32>(0.3, 0.6, 0.1))), soil.albedo, 0.45) * vec3<f32>(0.4, 0.39, 0.36), bare);
-            ph.n = normalize(mix(ph.n, soil.n, bare));
-            ph.rough = mix(ph.rough, soil.rough, bare);
+            // Осыпь: голая земля вперемешку с щебнем, пятнами.
+            let scree = smoothstep(0.42, 0.62, fbm(wp.xz * 0.55 + vec2<f32>(7.3, 1.9))) * 0.75;
+            let bare_c = mix(mix(vec3<f32>(dot(soil.albedo, vec3<f32>(0.3, 0.6, 0.1))), soil.albedo, 0.45) * vec3<f32>(0.33, 0.32, 0.3), gravel.albedo * vec3<f32>(0.5, 0.5, 0.49), scree);
+            ph.albedo = mix(ph.albedo, bare_c, bare);
+            ph.n = normalize(mix(ph.n, mix(soil.n, gravel.n, scree), bare));
+            ph.rough = mix(ph.rough, mix(soil.rough, gravel.rough, scree), bare);
             let rk = smoothstep(0.31, 0.5, slope + (fbm(wp.xz * 0.08) - 0.5) * 0.3 + (fbm(wp.xz * 0.6) - 0.5) * 0.12);
             // Скала обрывов: серый обветренный известняк пластами (светлый на солнце выгорал в белое
             // пятно), сверху по уступам — тёмные потёки.

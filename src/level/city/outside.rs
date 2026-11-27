@@ -1005,6 +1005,7 @@ fn herb_plant(b: &mut Builder, p: Vec3, herb: &str, rng: &mut Rng) {
 /// Шибляк и редколесье плато: можжевельник высокий, крымская сосна на гребнях,
 /// дуб пушистый ближе к предгорьям; известняковые выходы. Вокруг стен — чисто (обзор для стражи).
 fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
+    let first_plant = b.plants.len();
     let mut clear: Vec<(Vec2, f32)> = vec![
         (Vec2::new(NECROPOLIS.x + 10.0, NECROPOLIS.z + 2.0), 72.0),
         (Vec2::new(-197.0, 270.0), 80.0),
@@ -1153,6 +1154,19 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
         }
         z += 7.0;
     }
+    // На обрыве большие деревья не держатся: их место занимает можжевельник (дубы на отвесной
+    // скале издали торчали зелёными шарами на палочках). Счётчик случайных чисел не трогаем.
+    for p in b.plants.iter_mut().skip(first_plant) {
+        if !matches!(p.kind, PlantKind::Oak | PlantKind::Pine | PlantKind::Cypress) {
+            continue;
+        }
+        let y = ground_y(p.pos.x, p.pos.z);
+        let rise = (ground_y(p.pos.x + 1.5, p.pos.z) - y).abs().max((ground_y(p.pos.x, p.pos.z + 1.5) - y).abs()).max((ground_y(p.pos.x - 1.5, p.pos.z) - y).abs()).max((ground_y(p.pos.x, p.pos.z - 1.5) - y).abs());
+        if rise > 1.3 {
+            p.kind = PlantKind::Juniper;
+            p.height = (p.height * 0.35).clamp(1.8, 3.4);
+        }
+    }
     // Каменные выходы на крутых склонах по всему плато: глыбы и осыпь вместо голой земли.
     // Опять свой счётчик: деревья и кусты остаются на своих местах.
     let mut rng = Rng::new(4471);
@@ -1165,7 +1179,7 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
             let (roll, size) = (rng.f(), rng.f());
             let y = ground_y(p.x, p.y);
             let rise = (ground_y(p.x + 1.5, p.y) - y).abs().max((ground_y(p.x, p.y + 1.5) - y).abs());
-            if roll > 0.55 || y < WATER_Y + 0.4 || !(0.75..3.2).contains(&rise) || terrain::city_distance(p.x, p.y) < 14.0 || road_distance(roads, p) < ROAD_W / 2.0 + 2.0 || clear.iter().any(|(c, r)| p.distance(*c) < *r) {
+            if roll > 0.7 || y < WATER_Y + 0.4 || !(0.6..3.2).contains(&rise) || terrain::city_distance(p.x, p.y) < 14.0 || road_distance(roads, p) < ROAD_W / 2.0 + 2.0 || clear.iter().any(|(c, r)| p.distance(*c) < *r) {
                 continue;
             }
             rock(b, p, 0.9 + size * size * 2.8, &mut rng);

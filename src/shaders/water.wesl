@@ -21,6 +21,12 @@ import bevy_pbr::render::{
     view_transformations::{depth_ndc_to_view_z, position_world_to_view, position_world_to_clip},
 };
 import medieval_rpg::shaders::sky_common::{SkyParams, sky_radiance, sky_radiance_parts, mountain_map_uv, dome_uv, vnoise, fbm3};
+@if(DISTANCE_FOG)
+import bevy_pbr::render::mesh_view_bindings::fog;
+@if(DISTANCE_FOG)
+import bevy_pbr::render::pbr_functions::apply_fog;
+@if(DISTANCE_FOG)
+import bevy_pbr::render::pbr_types::STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;
 @if(DEPTH_PREPASS)
 import bevy_pbr::prepass::utils::prepass_depth;
 @if(DEPTH_PREPASS)
@@ -392,7 +398,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let far_k = smoothstep(30.0, 350.0, dist) * (1.0 - water.params.w);
     let gust = smoothstep(0.3, 0.7, fbm3(vec2<f32>(wp.x * 0.004 + t * 0.004, wp.z * 0.022 - t * 0.002)));
     // В закрытой бухте ряби мало — вода ближе к зеркалу и отражает светлое небо у горизонта.
-    let cap = mix(mix(0.5, 0.8, gust), mix(0.18, 0.4, gust), calm);
+    let cap = mix(mix(0.5, 0.8, gust), mix(0.16, 0.34, gust), calm);
     fres = mix(fres, min(fres, cap), far_k);
 
     // Отражение неба (луч не ниже горизонта — там море видит само себя).
@@ -520,6 +526,18 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     alpha = max(alpha, foam);
 
     var out: FragmentOutput;
-    out.color = main_pass_post_lighting_processing(pbr_input, vec4<f32>(col, alpha));
+    var c4 = vec4<f32>(col, alpha);
+@if(DISTANCE_FOG) {
+    // Дымка над водой — по дальности видимости погоды, а не по краю прорисовки: суша дальше
+    // края не рисуется и прячется в дымке, а море уходит до горизонта — с общей дымкой оно за
+    // краем прорисовки было сплошной белёсой пеленой.
+    if water.waves.w > fog.be.y && fog.be.y > 1.0 {
+        var f = fog;
+        f.be = vec3<f32>(fog.be.x * water.waves.w / fog.be.y, water.waves.w, fog.be.z);
+        c4 = apply_fog(f, c4, wp, view.world_position.xyz, in.position.xy);
+        pbr_input.material.flags = pbr_input.material.flags & ~STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;
+    }
+}
+    out.color = main_pass_post_lighting_processing(pbr_input, c4);
     return out;
 }
