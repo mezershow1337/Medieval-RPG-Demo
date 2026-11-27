@@ -527,7 +527,7 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         Mat::Stone => (Color::srgb(0.52, 0.51, 0.49), Color::srgb(0.22, 0.21, 0.20), P_ASHLAR, 0.8, 0.25, 1.0, 0.88, 0.0, 0.5, 0.6, 0.0),
         Mat::DarkStone => (Color::srgb(0.38, 0.37, 0.38), Color::srgb(0.14, 0.13, 0.14), P_ASHLAR, 0.9, 0.25, 1.0, 0.85, 0.0, 0.4, 0.6, 0.0),
         Mat::Floor => (Color::srgb(0.42, 0.38, 0.34), Color::srgb(0.16, 0.14, 0.13), P_FLAGSTONE, 1.0, 0.3, 0.8, 0.55, 0.0, 0.0, 0.2, 0.0),
-        Mat::Wood => (Color::srgb(0.34, 0.22, 0.12), Color::srgb(0.18, 0.11, 0.06), P_WOOD, 1.0, 0.35, 0.6, 0.75, 0.0, 0.0, 0.0, 0.0),
+        Mat::Wood => (Color::srgb(0.27, 0.19, 0.12), Color::srgb(0.15, 0.10, 0.06), P_WOOD, 1.0, 0.35, 0.6, 0.75, 0.0, 0.0, 0.0, 0.0),
         Mat::Banner => (Color::srgb(0.50, 0.04, 0.05), Color::srgb(0.85, 0.62, 0.20), P_CLOTH, 1.0, 0.2, 0.3, 0.9, 0.0, 0.0, 0.0, 0.0),
         Mat::Gold => (Color::srgb(0.90, 0.68, 0.30), Color::srgb(0.55, 0.38, 0.12), P_METAL, 1.0, 0.2, 0.3, 0.3, 1.0, 0.0, 0.0, 0.0),
         Mat::Trim => (Color::srgb(0.62, 0.58, 0.52), Color::srgb(0.30, 0.28, 0.25), P_ASHLAR, 1.6, 0.15, 0.5, 0.8, 0.0, 0.3, 0.4, 0.0),
@@ -585,6 +585,9 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
     let has_photo = tex.is_some() && extra_ok && photo.is_some_and(|(top, side, ..)| photo_layer_ok(top) && photo_layer_ok(side));
     let (top, side, tint, relief) = photo.unwrap_or((0, 0, 0.0, 0.0));
     let layer = |l: u32| &crate::surface_layers::LAYERS[l as usize];
+    // Доски на фото шириной 0,8 м — для дверей, ящиков и мостков это бревно, а не доска:
+    // рисунок мельче, доска ~0,45 м.
+    let photo_zoom = if mat == Mat::Wood { 1.7 } else { 1.0 };
     let mean = |l: u32| Vec3::from_array(layer(l).mean);
     ExtendedMaterial {
         base: StandardMaterial { base_color: a, perceptual_roughness: rough, metallic: metal, reflectance: 0.4, ..default() },
@@ -592,7 +595,7 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
             color_b: lin(b).truncate().extend(wet_capacity(mat)),
             params: Vec4::new(pattern, scale, var, bump),
             params2: Vec4::new(moss, grime, glow, 0.0),
-            photo: if has_photo { Vec4::new(top as f32, 1.0 / layer(top).meters, side as f32, 1.0 / layer(side).meters) } else { Vec4::new(-1.0, 1.0, -1.0, 1.0) },
+            photo: if has_photo { Vec4::new(top as f32, photo_zoom / layer(top).meters, side as f32, photo_zoom / layer(side).meters) } else { Vec4::new(-1.0, 1.0, -1.0, 1.0) },
             // Воде вместо фото передаём солнце (для отражений неба и солнечной дорожки) и «день».
             photo_mean: if mat == Mat::Water { mood().sun.normalize().extend(0.0) } else { mean(top).extend(tint) },
             photo_mean_b: if mat == Mat::Water { Vec4::new(if mood().day { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0) } else { mean(side).extend(relief) },
