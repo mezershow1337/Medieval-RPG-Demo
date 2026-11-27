@@ -14,7 +14,7 @@ import sys
 import numpy as np
 from PIL import Image
 
-ATLAS_OF = {"pine": "pine", "oak": "broadleaf", "fig": "broadleaf", "shrub": "broadleaf", "juniper": "scale", "cypress": "scale"}
+ATLAS_OF = {"fir": "pine", "pine": "pine", "oak": "broadleaf", "fig": "broadleaf", "shrub": "broadleaf", "juniper": "scale", "cypress": "scale"}
 TARGET = 0.85
 
 

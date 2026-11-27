@@ -41,6 +41,12 @@ SPECIES = {
     "pine": Species(height=11.0, trunk_r=0.26, levels=3, children=(10, 5, 3), crown_start=0.45,
                     angle=(78, 50, 40), length=(0.36, 0.45, 0.5), up=0.12, gravity=0.05, wobble=0.12,
                     atlas="pine", card=1.3, cards_per_tip=5, whorl=True, taper=0.85, multi_stem=1),
+    # Горная сосна склонов Таврики (сосна Коха, Pinus sylvestris var. hamata; так же стоит
+    # молодая крымская сосна в сомкнутом лесу): высокий прямой ствол, узкая коническая крона
+    # до самой земли, ветви мутовками, нижние поникают.
+    "fir": Species(height=17.0, trunk_r=0.24, levels=2, children=(54, 7), crown_start=0.1,
+                   angle=(98, 62), length=(0.215, 0.42), up=0.05, gravity=0.16, wobble=0.1,
+                   atlas="pine", card=1.25, cards_per_tip=4, whorl=True, taper=0.9, multi_stem=1, cone=0.9),
     # Дуб пушистый (Quercus pubescens): узловатый ствол, широкая раскидистая крона.
     "oak": Species(height=8.0, trunk_r=0.34, levels=3, children=(6, 4, 3), crown_start=0.25,
                    angle=(55, 45, 40), length=(0.6, 0.5, 0.45), up=0.25, gravity=0.06, wobble=0.5,
@@ -138,7 +144,7 @@ def grow(sp, rnd):
             ang = math.radians(sp.angle[level] + rnd.uniform(-10, 10))
             d = (axis * math.cos(ang) + side * math.sin(ang)).normalized()
             # Ветви выше по стволу короче (конус кроны) — у сосны сильнее.
-            shape = 1.0 - (t - start) / max(1e-3, 1 - start) * (0.55 if level == 0 else 0.3)
+            shape = 1.0 - (t - start) / max(1e-3, 1 - start) * (getattr(sp, "cone", 0.55) if level == 0 else 0.3)
             if getattr(sp, "narrow", False) and level == 0:
                 shape = 0.5 + 0.5 * math.sin(min(1.0, (t - start) / (1 - start)) * math.pi) ** 0.7
             L = b.length * sp.length[level] * shape * rnd.uniform(0.8, 1.15)
@@ -439,7 +445,7 @@ def export(tid, meshes, out_dir, scene):
     return path
 
 
-VARIANTS = {"pine": 3, "oak": 3, "juniper": 3, "cypress": 2, "fig": 2, "shrub": 3}
+VARIANTS = {"fir": 3, "pine": 3, "oak": 3, "juniper": 3, "cypress": 2, "fig": 2, "shrub": 3}
 
 
 def build_all(out_dir, only=None):
