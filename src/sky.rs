@@ -113,8 +113,9 @@ pub fn water_material(m: &Mood, map: Option<Handle<Image>>, full: bool) -> Water
         extension: WaterExt {
             water: WaterUniform {
                 sky: m.sky_uniform(),
-                deep: Vec4::new(0.0035, 0.016, 0.021, 1.0),
-                shallow: Vec4::new(0.09, 0.2, 0.17, 1.0),
+                // w у deep — плотность воды: 1.7 даёт тёмную, глубокую на вид воду уже в метре от берега.
+                deep: Vec4::new(0.003, 0.013, 0.018, 1.7),
+                shallow: Vec4::new(0.035, 0.085, 0.08, 1.0),
                 params: Vec4::new(if m.day { 2.0 } else { 3.0 }, 1.0, 1.0, if full { 0.0 } else { 1.0 }),
                 waves: Vec4::new(1.0, crate::level::WATER_Y, 1.0, 0.0),
             },
