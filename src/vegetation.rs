@@ -582,7 +582,7 @@ pub fn grass_allowed(x: f32, z: f32, y: f32, colliders: &crate::collision::Level
 /// Меш травы на участке: пучки тонких изогнутых травинок (ковыль, типчак, полынь) с цветами.
 fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelColliders) -> Option<Mesh> {
     let density = grass_density();
-    let step = if dense { 0.5 } else { 0.95 } / density.sqrt().max(0.2);
+    let step = if dense { 0.36 } else { 0.8 } / density.sqrt().max(0.2);
     let x0 = k.0 as f32 * GRASS_CHUNK;
     let z0 = k.1 as f32 * GRASS_CHUNK;
     let n = (GRASS_CHUNK / step).ceil() as i32;
@@ -594,10 +594,10 @@ fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelCo
     let mut idx: Vec<u32> = Vec::new();
     // Цвета степи в конце лета: соломенный ковыль, оливковый типчак, сизая полынь, зелень у воды.
     // Тон подобран под фототекстуру земли — иначе трава читается тёмной щетиной на светлом склоне.
-    let straw = srgb(0.80, 0.66, 0.40);
-    let olive = srgb(0.56, 0.55, 0.28);
-    let green = srgb(0.36, 0.46, 0.18);
-    let sage = srgb(0.62, 0.63, 0.50);
+    let straw = srgb(0.44, 0.42, 0.21);
+    let olive = srgb(0.26, 0.34, 0.12);
+    let green = srgb(0.17, 0.30, 0.09);
+    let sage = srgb(0.32, 0.38, 0.25);
     let flowers = [srgb(0.90, 0.75, 0.20), srgb(0.88, 0.86, 0.78), srgb(0.52, 0.40, 0.62), srgb(0.75, 0.18, 0.12)];
     for iz in 0..n {
         for ix in 0..n {
@@ -607,7 +607,7 @@ fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelCo
             let z = z0 + (iz as f32 + hash2(gx, gz, 2)) * step;
             // Пятна: где-то густо, где-то проплешины с камнями.
             let patch = crate::level::fbm(x * 0.045, z * 0.045, 91);
-            let keep = ((patch - 0.28) * 2.6).clamp(0.0, 1.0);
+            let keep = ((patch - 0.2) * 3.6).clamp(0.0, 1.0);
             if hash2(gx, gz, 3) > keep {
                 continue;
             }
@@ -621,24 +621,25 @@ fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelCo
             let wet = (-(y - crate::level::WATER_Y - 2.0) * 0.3).clamp(0.0, 1.0);
             let base_col = straw.lerp(olive, ((mix - 0.35) * 3.0).clamp(0.0, 1.0)).lerp(sage, ((0.4 - mix) * 4.0).clamp(0.0, 1.0)).lerp(green, wet * 0.7);
             let tall = 0.75 + keep * 0.5;
-            let blades = 6 + (hash2(gx, gz, 4) * 6.0) as i32;
+            let blades = if dense { 9 + (hash2(gx, gz, 4) * 8.0) as i32 } else { 7 + (hash2(gx, gz, 4) * 5.0) as i32 };
             let phase = hash2(gx, gz, 5);
             for b in 0..blades {
                 let hb = |s: u32| hash2(gx * 13 + b, gz * 7 - b, s);
                 let a = hb(6) * std::f32::consts::TAU;
-                let r = hb(7) * 0.16;
+                let r = hb(7).sqrt() * if dense { 0.26 } else { 0.5 };
                 let bx = x + a.cos() * r;
                 let bz = z + a.sin() * r;
-                let h = (0.22 + hb(8) * 0.5) * tall * if dense { 1.0 } else { 1.15 };
-                let w = 0.03 + hb(9) * 0.035;
+                let h = (0.16 + hb(8) * hb(8) * 0.5) * tall * if dense { 1.0 } else { 1.15 };
+                let w = if dense { 0.014 + hb(9) * 0.02 } else { 0.035 + hb(9) * 0.04 };
                 let lean_dir = Vec2::new(a.cos(), a.sin()) * (0.15 + hb(10) * 0.45);
                 let face = a + std::f32::consts::FRAC_PI_2 + (hb(11) - 0.5);
                 let side = Vec3::new(face.cos(), 0.0, face.sin()) * w * 0.5;
                 let tint = 0.8 + hb(12) * 0.35;
-                let bottom = base_col * 0.62 * tint;
-                let top = base_col * (1.0 + hb(13) * 0.2) * tint;
+                // У корня темно: стебли затеняют друг друга — ковёр выглядит объёмным.
+                let bottom = base_col * 0.38 * tint;
+                let top = base_col.lerp(straw, hb(13) * 0.35) * (1.0 + hb(13) * 0.15) * tint;
                 let start = pos.len() as u32;
-                let segs = 3;
+                let segs = if dense { 3 } else { 2 };
                 for s in 0..=segs {
                     let t = s as f32 / segs as f32;
                     let bend = Vec3::new(lean_dir.x, 0.0, lean_dir.y) * h * t * t;
@@ -649,7 +650,8 @@ fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelCo
                         // Нормаль почти вверх — трава освещается мягко, без чёрных граней.
                         let n = (Vec3::Y * 0.85 + Vec3::new(-face.sin(), 0.0, face.cos()) * 0.25 * sign).normalize();
                         nrm.push(n.to_array());
-                        let cc = bottom.lerp(top, t.powf(0.7));
+                        // Лист сложен вдоль жилки: одна половина в тени, другая на свету.
+                        let cc = bottom.lerp(top, t.powf(0.7)) * if sign < 0.0 { 0.78 } else { 1.1 };
                         col.push([cc.x, cc.y, cc.z, 1.0]);
                         uv0.push([(sign + 1.0) * 0.5, t]);
                         uv1.push([t.powf(1.5) * (h / 0.5).min(1.5), phase]);

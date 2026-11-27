@@ -343,11 +343,18 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
     // Френель (Шлик, n = 1.33).
     let nv = max(dot(N, v), 0.0);
-    let fres = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
+    var fres = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
+    // Вдали рябь не рисуется, но она есть: склоны мелких волн повёрнуты к зрителю, поэтому
+    // настоящее море у горизонта не зеркало — оно темнее неба и отражает небо повыше.
+    // Полосы порывов (вытянуты по ветру) дают тёмные и светлые дорожки на воде.
+    let far_k = smoothstep(30.0, 350.0, dist) * (1.0 - water.params.w);
+    let gust = smoothstep(0.3, 0.7, fbm3(vec2<f32>(wp.x * 0.004 + t * 0.004, wp.z * 0.022 - t * 0.002)));
+    fres = mix(fres, min(fres, mix(0.26, 0.5, gust)), far_k);
 
     // Отражение неба (луч не ниже горизонта — там море видит само себя).
     var r = reflect(-v, N);
-    r.y = max(r.y, 0.004);
+    r.y = max(r.y, 0.004) + mix(0.24, 0.08, gust) * far_k;
+    r = normalize(r);
     var s = water.sky;
     s.zenith.w = t;
     var refl = sky_radiance(r, s, t, false);

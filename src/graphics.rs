@@ -212,18 +212,18 @@ impl Key {
 const DAY: Key = Key {
     sun_color: Vec3::new(1.0, 0.93, 0.8),
     lux: 15_000.0,
-    ambient: (Vec3::new(0.6, 0.7, 0.9), 250.0),
+    ambient: (Vec3::new(0.55, 0.68, 0.95), 170.0),
     horizon: Vec3::new(0.62, 0.72, 0.86),
     horizon_sun: (Vec3::new(0.35, 0.28, 0.15), 8.0),
     zenith: Vec3::new(0.07, 0.2, 0.62),
     glow: Vec3::new(1.0, 0.66, 0.46),
     tint: Vec3::new(0.34, 0.40, 0.66),
     cloud_glow: 1.5,
-    fog_far: (Vec3::new(0.55, 0.64, 0.78), Vec3::new(0.80, 0.78, 0.72)),
-    visibility: 1100.0,
-    sky_light: 900.0,
+    fog_far: (Vec3::new(0.50, 0.62, 0.80), Vec3::new(0.78, 0.78, 0.74)),
+    visibility: 850.0,
+    sky_light: 760.0,
     haze: 0.0003,
-    exposure: 0.3,
+    exposure: 0.0,
 };
 
 /// Золотой час (солнце ≈7° над горизонтом): длинные тёплые тени, золотая дорожка на
@@ -755,6 +755,24 @@ fn load_surface_textures(images: &mut Assets<Image>) -> Option<(Handle<Image>, H
                         let mut img = Image::from_buffer(&bytes, ImageType::Extension("jpg"), CompressedImageFormats::NONE, srgb, ImageSampler::Default, RenderAssetUsages::default()).ok()?;
                         crate::textures::generate_mips(&mut img, suffix == "nrm");
                         crate::textures::cap_size(&mut img, crate::settings::startup().texture_cap());
+                        if suffix == "albedo" {
+                            // Карта высот слоя (tools/textures/build_heights.py) едет в альфа-канале цвета:
+                            // по ней шейдер делает объёмный рельеф. Нет файла — слой остаётся плоским.
+                            let hp = path.with_file_name(format!("{}_h.jpg", l.name));
+                            // MRPG_FLAT=1 — без рельефа (для снимков «до/после»); на низких эффектах рельефа тоже нет.
+                            let height = Some(()).filter(|_| std::env::var_os("MRPG_FLAT").is_none() && crate::settings::startup().effects > 0).and_then(|_| std::fs::read(&hp).ok()).and_then(|b| Image::from_buffer(&b, ImageType::Extension("jpg"), CompressedImageFormats::NONE, false, ImageSampler::Default, RenderAssetUsages::default()).ok()).map(|mut h| {
+                                crate::textures::generate_mips(&mut h, false);
+                                crate::textures::cap_size(&mut h, crate::settings::startup().texture_cap());
+                                h
+                            });
+                            if let (Some(d), Some(h)) = (img.data.as_mut(), height.as_ref().and_then(|h| h.data.as_ref())) {
+                                if d.len() == h.len() {
+                                    for (px, hx) in d.chunks_exact_mut(4).zip(h.chunks_exact(4)) {
+                                        px[3] = hx[0];
+                                    }
+                                }
+                            }
+                        }
                         Some(img)
                     })
                 })
@@ -1056,10 +1074,10 @@ pub fn color_grading(m: &Mood) -> ColorGrading {
     let section = |saturation: f32, contrast: f32| ColorGradingSection { saturation, contrast, ..default() };
     ColorGrading {
         // Ночью глаз привыкает к темноте, но краски уходят (сумеречное зрение).
-        global: ColorGradingGlobal { exposure: m.exposure, post_saturation: 1.06 - 0.3 * m.night - 0.15 * m.overcast, ..default() },
-        shadows: section(0.92, 1.0),
-        midtones: section(1.04, 1.08),
-        highlights: section(1.1, 1.0),
+        global: ColorGradingGlobal { exposure: m.exposure, post_saturation: 1.0 - 0.3 * m.night - 0.15 * m.overcast, ..default() },
+        shadows: section(0.9, 1.12),
+        midtones: section(1.02, 1.2),
+        highlights: section(1.06, 1.0),
     }
 }
 
