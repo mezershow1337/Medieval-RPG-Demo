@@ -232,7 +232,7 @@ fn look(kind: PlantKind) -> (&'static str, Color, [f32; 3]) {
         PlantKind::Oak => ("broadleaf", Color::srgb(0.78, 0.81, 0.66), [0.9, 0.9, 0.9]),
         // Можжевельник высокий — сизый.
         PlantKind::Juniper => ("scale", Color::linear_rgb(1.25, 1.32, 1.22), [1.0, 0.85, 0.8]),
-        PlantKind::Cypress => ("scale", Color::linear_rgb(1.08, 1.2, 1.06), [0.9, 0.8, 0.75]),
+        PlantKind::Cypress => ("scale", Color::linear_rgb(0.72, 0.84, 0.7), [0.9, 0.8, 0.75]),
         // Инжир — светлая сочная листва, гладкая серая кора.
         PlantKind::Fig => ("broadleaf", Color::srgb(1.05, 1.12, 0.85), [1.25, 1.25, 1.25]),
         PlantKind::Shrub => ("broadleaf", Color::srgb(0.8, 0.82, 0.68), [0.9, 0.85, 0.8]),
@@ -463,7 +463,7 @@ fn spawn_plants(
         let (Some(g0), Some(g1)) = (gltf_meshes.get(l0), gltf_meshes.get(l1)) else { continue };
         let (Some(p0), Some(p1)) = (g0.primitives.first(), g1.primitives.first()) else { continue };
         let mut sm = p0.material.as_ref().and_then(|m| gltf_materials.get(m)).map(bevy::pbr::gltf::standard_material_from_gltf_material).unwrap_or_default();
-        sm.base_color = Color::srgb(0.74, 0.82, 0.85);
+        sm.base_color = Color::srgb(0.66, 0.8, 0.84);
         // Сетка в главном мире бывает уже выгружена (только для рендера) — тогда берём размер
         // скана из таблицы, иначе камни выходят то с гальку, то со скалу.
         let size = meshes.get(&p0.mesh).and_then(mesh_bounds).map(|(a, b)| (b - a).max_element()).filter(|s| *s > 0.0).unwrap_or_else(|| rock_scan_size(id));
@@ -727,8 +727,9 @@ fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelCo
                 (2usize, 0.55 + hash2(gx, gz, 6) * 0.3, 0.5 + hash2(gx, gz, 7) * 0.35, 2)
             } else if roll < 0.12 + 0.3 * dry {
                 (1, 0.6 + hash2(gx, gz, 6) * 0.4, 0.5 + hash2(gx, gz, 7) * 0.4, 2)
-            } else if roll < 0.5 + 0.1 * lush || keep < 0.7 {
-                // На проплешинах — только стоячие пучки: низкая дернина поодиночке лежит «звёздами».
+            } else if roll < 0.5 + 0.1 * lush || keep < 0.7 || slope > 0.6 {
+                // На проплешинах и откосах — только стоячие пучки: низкая дернина поодиночке
+                // лежит «звёздами».
                 (0, 0.55 + hash2(gx, gz, 6) * 0.4, (0.34 + hash2(gx, gz, 7) * 0.36) * (0.8 + 0.4 * keep), 2)
             } else {
                 (3, 0.7 + hash2(gx, gz, 6) * 0.45, (0.2 + hash2(gx, gz, 7) * 0.16) * (0.85 + 0.3 * keep), if dense { 3 } else { 2 })

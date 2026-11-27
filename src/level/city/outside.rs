@@ -1165,10 +1165,10 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
             let (roll, size) = (rng.f(), rng.f());
             let y = ground_y(p.x, p.y);
             let rise = (ground_y(p.x + 1.5, p.y) - y).abs().max((ground_y(p.x, p.y + 1.5) - y).abs());
-            if roll > 0.42 || y < WATER_Y + 0.4 || !(0.75..3.2).contains(&rise) || terrain::city_distance(p.x, p.y) < 14.0 || road_distance(roads, p) < ROAD_W / 2.0 + 2.0 || clear.iter().any(|(c, r)| p.distance(*c) < *r) {
+            if roll > 0.55 || y < WATER_Y + 0.4 || !(0.75..3.2).contains(&rise) || terrain::city_distance(p.x, p.y) < 14.0 || road_distance(roads, p) < ROAD_W / 2.0 + 2.0 || clear.iter().any(|(c, r)| p.distance(*c) < *r) {
                 continue;
             }
-            rock(b, p, 0.5 + size * size * 2.2, &mut rng);
+            rock(b, p, 0.9 + size * size * 2.8, &mut rng);
         }
         z += 5.5;
     }
@@ -1183,10 +1183,7 @@ fn rock(b: &mut Builder, p: Vec2, size: f32, rng: &mut Rng) {
         let off = if k == 0 { Vec2::ZERO } else { Vec2::new(rng.range(-1.0, 1.0), rng.range(-1.0, 1.0)) * size * 1.2 };
         let s = size * if k == 0 { 1.0 } else { rng.range(0.3, 0.6) };
         let q = Vec2::new(p.x + off.x, p.y + off.y);
-        // На откосе глыба сидит в склоне по нижнему краю, а не висит над ним.
-        let r = s * 0.35;
-        let low = [(0.0, 0.0), (r, 0.0), (-r, 0.0), (0.0, r), (0.0, -r)].iter().map(|(dx, dz)| ground_y(q.x + dx, q.y + dz)).fold(f32::MAX, f32::min);
-        let c = Vec3::new(q.x, low - s * 0.2, q.y);
+        let c = Vec3::new(q.x, ground_y(q.x, q.y) - s * 0.25, q.y);
         b.plant(PlantKind::Rock, c, s, rng.range(0.0, TAU), rng.int(64) as u32);
         if s > 0.7 {
             let r = s * 0.45;
