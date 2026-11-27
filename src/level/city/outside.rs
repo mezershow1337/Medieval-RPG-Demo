@@ -1023,6 +1023,15 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
     clear.push((Vec2::new(fishing::HUT.cx(), fishing::HUT.cz()), 20.0));
     clear.extend(mines::clearings());
     clear.push(village::clearing());
+    // Деревьям у стен нельзя (обзор для стражи), а низким кустам можно — с 14 м от стены.
+    let blocked_low = |p: Vec2| {
+        terrain::city_distance(p.x, p.y) < 14.0
+            || p.x.abs() > WORLD_HALF - 12.0
+            || p.y.abs() > WORLD_HALF - 12.0
+            || ground_y(p.x, p.y) < WATER_Y + 1.2
+            || road_distance(roads, p) < ROAD_W / 2.0 + 1.5
+            || clear.iter().any(|(c, r)| p.distance(*c) < *r)
+    };
     let blocked = |p: Vec2| {
         terrain::city_distance(p.x, p.y) < 40.0
             || p.x.abs() > WORLD_HALF - 12.0
@@ -1044,6 +1053,16 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
             let chance = ((density - 0.34) * 2.6).clamp(0.07, 0.92);
             if !rng.chance(chance) || blocked(p) {
                 if blocked(p) {
+                    // Полоса у стен и у берега: только кусты, зато чаще — не голая земля.
+                    if !blocked_low(p) && rng.chance(0.45) {
+                        b.at(p.x, p.y);
+                        for _ in 0..1 + rng.int(3) {
+                            let s = p + Vec2::new(rng.range(-3.5, 3.5), rng.range(-3.5, 3.5));
+                            if !blocked_low(s) {
+                                kit::shrub(b, g(s.x, s.y) - Vec3::Y * 0.05, rng.range(0.6, 1.5));
+                            }
+                        }
+                    }
                     continue;
                 }
                 // На открытых местах — камни и куртины кустов.
@@ -1074,7 +1093,10 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
                 let roll = rng.f();
                 // На самом плато сосна редка (крымская сосна — дерево гор), больше можжевельника,
                 // дуба пушистого и диких груш (их изображает тот же лиственный вид).
-                if roll < 0.5 - up * 0.3 {
+                if grove && roll > 0.9 {
+                    // Тёмные свечи кипарисов среди бора.
+                    kit::cypress(b, q, rng.range(7.0, 11.0));
+                } else if roll < 0.5 - up * 0.3 {
                     kit::juniper(b, q, rng.range(2.0, 4.5), &mut rng);
                 } else if roll < 0.6 - up * 0.1 + if grove { 0.2 } else { 0.0 } {
                     // В сердце рощи — сосновый бор: тёмная стена хвои.
