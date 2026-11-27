@@ -62,6 +62,8 @@ var<private> pom_view: vec3<f32>;
 var<private> pom_sun: vec3<f32>;
 var<private> pom_k: f32;
 var<private> pom_gate: f32;
+// Близость к камере для мелкой фактуры: 1 — вплотную, 0 — дальше 14 м.
+var<private> pom_near: f32;
 
 // Глубина рельефа слоя, м. Номера — из surface_layers.rs.
 fn layer_depth(layer: i32) -> f32 {
@@ -147,7 +149,21 @@ fn photo_plane(layer: i32, uv0: vec2<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f
     let cavity = mix(1.0, smoothstep(-0.25, 0.55, tex.a), clamp(layer_depth(layer) * 22.0, 0.0, 0.75));
     o.albedo = tex.rgb * shade * cavity;
     let m = textureSampleGrad(photo_nrm, photo_sampler, uv, layer, dx, dy);
-    let xy = (m.xy * 2.0 - 1.0) * relief;
+    var xy = (m.xy * 2.0 - 1.0) * relief;
+    // Мелкая фактура вблизи: тот же материал в 4,7 раза мельче (у кладки и плит — зерно скалы)
+    // добавляет поры, зёрна и волокна, которых в текстуре 1024 при подходе вплотную не хватает.
+    let metal = layer == 14 || layer == 15 || layer == 16 || layer == 17;
+    if pom_near > 0.02 && !metal {
+        let dl = select(layer, 9, layer_has_grid(layer) || layer == 3);
+        let duv = uv * 4.7 + vec2<f32>(0.37, 0.11);
+        let fine = textureSampleGrad(photo_albedo, photo_sampler, duv, dl, dx * 4.7, dy * 4.7).rgb;
+        let coarse = textureSampleLevel(photo_albedo, photo_sampler, duv, dl, 5.0).rgb;
+        let lw = vec3<f32>(0.3, 0.5, 0.2);
+        let ratio = clamp(dot(fine, lw) / max(dot(coarse, lw), 0.02), 0.55, 1.6);
+        o.albedo *= mix(1.0, ratio, 0.6 * pom_near);
+        let fn2 = textureSampleGrad(photo_nrm, photo_sampler, duv, dl, dx * 4.7, dy * 4.7).xy * 2.0 - 1.0;
+        xy += fn2 * relief * 0.7 * pom_near;
+    }
     let z = sqrt(max(1.0 - dot(xy, xy), 0.0));
     o.n = t * xy.x + b * xy.y + n * z;
     o.rough = m.z;
@@ -674,6 +690,7 @@ fn fragment(
     pom_view = normalize(to_cam);
     pom_k = 1.0 - smoothstep(18.0, 45.0, length(to_cam));
     pom_gate = 1.0;
+    pom_near = 1.0 - smoothstep(3.5, 14.0, length(to_cam));
     pom_sun = vec3<f32>(0.0, -1.0, 0.0);
 @if(!PREPASS_PIPELINE) {
     if lights.n_directional_lights > 0u {
