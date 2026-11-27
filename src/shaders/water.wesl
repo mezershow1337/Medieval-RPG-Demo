@@ -349,7 +349,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     // Полосы порывов (вытянуты по ветру) дают тёмные и светлые дорожки на воде.
     let far_k = smoothstep(30.0, 350.0, dist) * (1.0 - water.params.w);
     let gust = smoothstep(0.3, 0.7, fbm3(vec2<f32>(wp.x * 0.004 + t * 0.004, wp.z * 0.022 - t * 0.002)));
-    fres = mix(fres, min(fres, mix(0.26, 0.5, gust)), far_k);
+    fres = mix(fres, min(fres, mix(0.18, 0.4, gust)), far_k);
 
     // Отражение неба (луч не ниже горизонта — там море видит само себя).
     var r = reflect(-v, N);
