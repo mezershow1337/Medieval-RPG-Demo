@@ -995,41 +995,63 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
             || clear.iter().any(|(c, r)| p.distance(*c) < *r)
     };
     let mut rng = Rng::new(1783);
-    let step = 21.0;
+    // Зелени много: рощи сливаются в редколесье, между ними — одиночные деревья и кусты.
+    let step = 15.0;
     let mut z = -WORLD_HALF + 10.0;
     while z < WORLD_HALF {
         let mut x = -WORLD_HALF + 10.0;
         while x < WORLD_HALF {
-            let p = Vec2::new(x + rng.range(-8.0, 8.0), z + rng.range(-8.0, 8.0));
+            let p = Vec2::new(x + rng.range(-6.5, 6.5), z + rng.range(-6.5, 6.5));
             x += step;
             let density = terrain::fbm(p.x * 0.007, p.y * 0.007, 77);
-            let chance = ((density - 0.42) * 3.0).clamp(0.0, 0.85);
+            let chance = ((density - 0.34) * 2.6).clamp(0.07, 0.92);
             if !rng.chance(chance) || blocked(p) {
-                // Камни — на открытых местах.
-                if rng.chance(0.12) && !blocked(p) {
+                if blocked(p) {
+                    continue;
+                }
+                // На открытых местах — камни и куртины кустов.
+                if rng.chance(0.07) {
                     rock(b, p, rng.range(0.5, 1.8), &mut rng);
+                } else if rng.chance(0.27) {
+                    b.at(p.x, p.y);
+                    for _ in 0..1 + rng.int(2) {
+                        let s = p + Vec2::new(rng.range(-2.5, 2.5), rng.range(-2.5, 2.5));
+                        if !blocked(s) {
+                            kit::shrub(b, g(s.x, s.y) - Vec3::Y * 0.05, rng.range(0.7, 1.8));
+                        }
+                    }
                 }
                 continue;
             }
             b.at(p.x, p.y);
-            let q = g(p.x, p.y) - Vec3::Y * 0.1;
             let up = ((p.y - 300.0) / 400.0).clamp(0.0, 1.0);
-            let roll = rng.f();
-            // На самом плато сосна редка (крымская сосна — дерево гор), больше можжевельника,
-            // дуба пушистого и диких груш (их изображает тот же лиственный вид).
-            if roll < 0.55 - up * 0.3 {
-                kit::juniper(b, q, rng.range(2.0, 4.5), &mut rng);
-            } else if roll < 0.64 - up * 0.1 {
-                kit::pine(b, q, rng.range(7.0, 12.0), &mut rng);
-            } else {
-                kit::oak(b, q, rng.range(6.0, 10.0), &mut rng);
+            // В густой роще деревья стоят по два-три.
+            let trees = if density > 0.5 { 2 + rng.int(3) as usize } else { 1 + rng.chance(0.25) as usize };
+            for k in 0..trees {
+                let tp = if k == 0 { p } else { p + Vec2::new(rng.range(-7.0, 7.0), rng.range(-7.0, 7.0)) };
+                if k > 0 && (blocked(tp) || tp.distance(p) < 2.5) {
+                    continue;
+                }
+                let q = g(tp.x, tp.y) - Vec3::Y * 0.1;
+                let roll = rng.f();
+                // На самом плато сосна редка (крымская сосна — дерево гор), больше можжевельника,
+                // дуба пушистого и диких груш (их изображает тот же лиственный вид).
+                if roll < 0.5 - up * 0.3 {
+                    kit::juniper(b, q, rng.range(2.0, 4.5), &mut rng);
+                } else if roll < 0.6 - up * 0.1 {
+                    kit::pine(b, q, rng.range(7.0, 12.0), &mut rng);
+                } else {
+                    kit::oak(b, q, rng.range(6.0, 10.0), &mut rng);
+                }
             }
             // Подлесок: кусты шибляка вокруг деревьев.
-            for _ in 0..1 + rng.int(4) {
+            for _ in 0..1 + rng.int(3) {
                 let a = rng.range(0.0, TAU);
                 let d = rng.range(1.8, 5.0);
-                let s = g(p.x + a.cos() * d, p.y + a.sin() * d);
-                kit::shrub(b, s - Vec3::Y * 0.05, rng.range(0.9, 2.0));
+                let s = Vec2::new(p.x + a.cos() * d, p.y + a.sin() * d);
+                if !blocked(s) {
+                    kit::shrub(b, g(s.x, s.y) - Vec3::Y * 0.05, rng.range(0.9, 2.0));
+                }
             }
         }
         z += step;
