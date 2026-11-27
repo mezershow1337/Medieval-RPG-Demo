@@ -174,7 +174,8 @@ fn spawn_pages(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mat
     for l in library::lecterns() {
         let (right, up, n) = l.axes();
         let (a, uv0, uv1) = spread_uv(l.text);
-        let c = l.at + n * 0.003;
+        // Над листами: геометрия уровня сдвинута по нормали на depth_rank (пергамент — 12 мм).
+        let c = l.at + n * 0.016;
         let mesh = meshes.add(quad_mesh(c, right * (l.width / 2.0), up * (l.page_height() / 2.0), uv0, uv1));
         commands.spawn((Mesh3d(mesh), MeshMaterial3d(atlases[a].clone()), Transform::default(), NotShadowCaster));
     }
@@ -183,7 +184,7 @@ fn spawn_pages(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mat
     let m = meshes.add(quad_mesh(mc + Vec3::Z * 0.01, Vec3::X * (mw / 2.0), Vec3::Y * (mh / 2.0), Vec2::new(0.0, 0.0), Vec2::new(1.0, 576.0 / 1024.0)));
     commands.spawn((Mesh3d(m), MeshMaterial3d(ins.clone()), Transform::default(), NotShadowCaster));
     let (sc, sw, sh) = library::sign_board();
-    let s = meshes.add(quad_mesh(sc, Vec3::X * (sw / 2.0), Vec3::Y * (sh / 2.0), Vec2::new(0.0, 576.0 / 1024.0), Vec2::new(1.0, 1.0)));
+    let s = meshes.add(quad_mesh(sc + Vec3::Z * 0.012, Vec3::X * (sw / 2.0), Vec3::Y * (sh / 2.0), Vec2::new(0.0, 576.0 / 1024.0), Vec2::new(1.0, 1.0)));
     commands.spawn((Mesh3d(s), MeshMaterial3d(ins), Transform::default(), NotShadowCaster));
 }
 

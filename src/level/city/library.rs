@@ -375,6 +375,94 @@ fn shell(b: &mut Builder, p: &Plan) {
     for (lo, hi) in [([h.x0, h.z0], [h.x0 + 0.03, h.z1]), ([h.x1 - 0.03, h.z0], [h.x1, h.z1])] {
         b.decor([lo[0], 0.05, lo[1]], [hi[0], 0.6, hi[1]], Mat::Signinum);
     }
+    // Внутри стены оштукатурены: известковая штукатурка поверх кладки,
+    // охристые пояса над цоколем и под окнами. Проёмы остаются открытыми.
+    let aisle_wins: Vec<(f32, f32, f32, f32)> = (0..4).map(|k| {
+        let z = h.z0 + 3.2 + k as f32 * 5.0;
+        (z - 0.5, z + 0.5, 3.5, 5.4)
+    }).collect();
+    for (x, inx) in [(h.x0, 1.0f32), (h.x1, -1.0)] {
+        plaster(b, Face::X(x, inx), h.z0, h.z1, 0.6, AISLE_H - 0.15, &aisle_wins, Mat::Plaster);
+        plaster(b, Face::X(x, inx * 1.6), h.z0, h.z1, 0.6, 0.72, &[], Mat::Ochre);
+        plaster(b, Face::X(x, inx * 1.6), h.z0, h.z1, 3.28, 3.4, &[], Mat::Ochre);
+    }
+    // Северная стена: штукатурка от пола до кровли бокового нефа, в нефе — до потолка.
+    let nwin = [(cx - 0.7, cx + 0.7, AISLE_H + 1.0, AISLE_H + 2.9)];
+    plaster(b, Face::Z(h.z0, 1.0), h.x0, h.x1, 0.0, AISLE_H - 0.15, &[], Mat::Plaster);
+    plaster(b, Face::Z(h.z0, 1.0), nx0 + 0.35, nx1 - 0.35, AISLE_H - 0.15, NAVE_H - 0.95, &nwin, Mat::Plaster);
+    // Южная стена изнутри: двери и окна.
+    let swin = [
+        (cx - 1.1, cx + 1.1, 0.0, 3.4),
+        ((h.x0 + nx0) / 2.0 - 0.55, (h.x0 + nx0) / 2.0 + 0.55, 3.4, 5.2),
+        ((nx1 + h.x1) / 2.0 - 0.55, (nx1 + h.x1) / 2.0 + 0.55, 3.4, 5.2),
+    ];
+    plaster(b, Face::Z(h.z1, -1.0), h.x0, h.x1, 0.0, AISLE_H - 0.15, &swin, Mat::Plaster);
+    plaster(b, Face::Z(h.z1, -1.0), nx0 + 0.35, nx1 - 0.35, AISLE_H - 0.15, NAVE_H - 0.95, &[(cx - 0.9, cx + 0.9, AISLE_H + 0.6, AISLE_H + 2.8)], Mat::Plaster);
+    // Стены второго света над колоннадами — с обеих сторон, между окнами.
+    let ncol = 5;
+    let step = (h.d() - 2.0) / ncol as f32;
+    let clere: Vec<(f32, f32, f32, f32)> = (0..ncol).map(|k| {
+        let z = h.z0 + 1.0 + step * (k as f32 + 0.5);
+        (z - 0.55, z + 0.55, COL_H + 2.8, COL_H + 4.8)
+    }).collect();
+    for x in [nx0, nx1] {
+        let toward_nave = if x < cx { 1.0 } else { -1.0 };
+        plaster(b, Face::X(x + toward_nave * 0.35, toward_nave), h.z0, h.z1, COL_H + 2.2, NAVE_H - 0.95, &clere, Mat::Plaster);
+    }
+}
+
+/// Грань стены, на которую кладётся штукатурка: плоскость и куда смотрит (в комнату).
+#[derive(Clone, Copy)]
+enum Face {
+    /// x = const, нормаль ±X (знак — направление и множитель толщины).
+    X(f32, f32),
+    /// z = const, нормаль ±Z.
+    Z(f32, f32),
+}
+
+/// Тонкий слой отделки на грани стены от `s0` до `s1` (вдоль стены) и от `y0` до `y1`,
+/// с вырезами под проёмы `holes` (s0, s1, y0, y1).
+fn plaster(b: &mut Builder, face: Face, s0: f32, s1: f32, y0: f32, y1: f32, holes: &[(f32, f32, f32, f32)], mat: Mat) {
+    let mut ys = vec![y0, y1];
+    for &(_, _, hy0, hy1) in holes {
+        for y in [hy0, hy1] {
+            if y > y0 && y < y1 {
+                ys.push(y);
+            }
+        }
+    }
+    ys.sort_by(|a, b| a.total_cmp(b));
+    ys.dedup();
+    for w in ys.windows(2) {
+        let (ya, yb) = (w[0], w[1]);
+        if yb - ya < 0.01 {
+            continue;
+        }
+        let mid = (ya + yb) / 2.0;
+        let mut cuts: Vec<(f32, f32)> = holes.iter().filter(|h| h.2 <= mid && h.3 >= mid).map(|h| (h.0, h.1)).collect();
+        cuts.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut s = s0;
+        for (c0, c1) in cuts.into_iter().chain(std::iter::once((s1, s1))) {
+            let e = c0.min(s1);
+            if e - s > 0.01 {
+                piece(b, face, s, e, ya, yb, mat);
+            }
+            s = s.max(c1);
+        }
+    }
+}
+
+fn piece(b: &mut Builder, face: Face, s0: f32, s1: f32, y0: f32, y1: f32, mat: Mat) {
+    match face {
+        Face::X(x, n) => {
+            let t = 0.02 * n;
+            b.decor([x.min(x + t), y0, s0], [x.max(x + t), y1, s1], mat);
+        }
+        Face::Z(z, n) => {
+            let t = 0.02 * n;
+            b.decor([s0, y0, z.min(z + t)], [s1, y1, z.max(z + t)], mat);
+        }
+    }
 }
 
 /// Дощатый потолок на балках (балки поперёк длинной стороны, если `across`).
@@ -626,12 +714,12 @@ fn armarium(b: &mut Builder, f: Rect, side: Side, rng: &mut Rng) {
             }
         }
     }
-    // Распахнутые створки (на петлях у боков, развёрнуты на ~110°).
+    // Распахнутые створки (на петлях у боков, развёрнуты на ~135°).
     let door_w = len / 2.0 - 0.02;
     for (edge, sgn) in [(0.0, -1.0f32), (len, 1.0)] {
         let hinge = pt(edge, 0.2, depth + 0.01);
         let along = if along_x { Vec3::X } else { Vec3::Z } * sgn;
-        let dir = (along * 0.34 + inward * 0.94).normalize();
+        let dir = (along * 0.72 + inward * 0.69).normalize();
         let c = hinge + dir * (door_w / 2.0);
         let yaw = (-dir.z).atan2(dir.x);
         let half = Vec3::new(door_w / 2.0, (hgt - 0.25) / 2.0, 0.018);
