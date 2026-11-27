@@ -229,7 +229,9 @@ fn cloud_layer(dir: vec3<f32>, s: SkyParams, t: f32, hor: vec3<f32>) -> vec4<f32
     // Перистые облака — тонкие штрихи высоко в небе (в ненастье их не видно за тучами).
     let pc = dir.xz / (e + 0.3) * 0.55 + vec2<f32>(t * 0.002, 0.0) + s.extra.zw * (t * 0.0004);
     let rp = vec2<f32>(pc.x * 0.8 + pc.y * 0.6, -pc.x * 0.6 + pc.y * 0.8);
-    let streak = fbm(vec2<f32>(rp.x * 0.45, rp.y * 5.0) + w * 0.6);
+    // Днём перистые — короткие пряди, а не длинные полосы через всё небо (на закате — прежние).
+    let sf = mix(vec2<f32>(0.45, 5.0), vec2<f32>(1.0, 2.6), d);
+    let streak = fbm(rp * sf + w * 0.6);
     let cirrus = smoothstep(0.56, 0.78, streak) * smoothstep(0.04, 0.25, e) * 0.35 * (1.0 - cover) * (1.0 - deck) * (1.0 - oc);
     var cc = mix(mix(vec3<f32>(1.0, 0.55, 0.6), vec3<f32>(2.3, 1.2, 0.6), pow(toward, 1.5)), vec3<f32>(1.1, 1.12, 1.15), d);
     cc = mix(cc, vec3<f32>(0.04, 0.045, 0.06) * (0.6 + moon_up), n);
