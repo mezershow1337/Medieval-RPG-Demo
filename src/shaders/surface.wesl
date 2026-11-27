@@ -869,8 +869,17 @@ fn fragment(
                     let streak = fbm(vec2<f32>(uv.x * 2.3, uv.y * 0.45) + wp.xz * 0.05);
                     color *= 0.84 + 0.32 * streak;
                     // Старая солома сереет и темнеет пятнами, свежие заплаты светлее и желтее.
-                    let age = smoothstep(0.35, 0.75, fbm(wp.xz * 0.18 + vec2<f32>(wp.y * 0.1, 2.3)));
-                    color = mix(color * vec3<f32>(1.08, 1.04, 0.9), color * vec3<f32>(0.72, 0.71, 0.72), age);
+                    let age = smoothstep(0.35, 0.7, fbm(wp.xz * 0.18 + vec2<f32>(wp.y * 0.1, 2.3)) * 0.55 + fbm(vec2<f32>(uv.x * 0.9, uv.y * 0.5) + wp.xz * 0.11) * 0.5);
+                    color = mix(color * vec3<f32>(0.54, 0.5, 0.42), color * vec3<f32>(0.33, 0.33, 0.35), age);
+                    // Ряды снопов видны и издали: под рваным срезом верхнего ряда лежит тень, у
+                    // каждого ряда свой тон. Без этого скат издали — ровный жёлтый лист.
+                    let rj = uv.y / 0.3 + (fbm(vec2<f32>(uv.x * 4.0, uv.y * 0.8)) - 0.5) * 0.45;
+                    let row_fade = 1.0 - smoothstep(0.1, 0.35, fwidth(rj));
+                    let lip = (1.0 - smoothstep(0.0, 0.3, fract(rj))) * row_fade;
+                    color *= (1.0 - 0.5 * lip) * mix(1.0, 0.84 + 0.3 * hash21(vec2<f32>(floor(rj), 3.1)), row_fade);
+                    // Потёки от дождей вниз по скату — тёмные серые дорожки.
+                    let run = smoothstep(0.5, 0.8, fbm(vec2<f32>(uv.x * 1.4, uv.y * 0.12) + wp.xz * 0.03 + vec2<f32>(7.0, 1.0)));
+                    color = mix(color, color * vec3<f32>(0.66, 0.67, 0.7), run * 0.8);
                     let moss = smoothstep(0.62, 0.8, fbm(uv * 0.9 + wp.xz * 0.04)) * moss_amount * (0.4 + age);
                     color = mix(color, vec3<f32>(0.17, 0.19, 0.08), moss * 0.7);
                     rough = clamp(ph.rough + moss * 0.1, 0.6, 1.0);

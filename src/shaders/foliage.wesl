@@ -33,6 +33,8 @@ struct Foliage {
     // xy — направление ветра (мир, XZ), z — жёсткость (1 — дерево, 0.3 — трава),
     // w — добавка рассеянного света в кроне (0 — как у всего остального).
     dir: vec4<f32>,
+    // x — сила объёмного затенения кроны (0 — нет), y — крона-колонна (0 — шар, 1 — колонна).
+    shade: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100)
@@ -77,8 +79,10 @@ fn crown_normal(n: vec3<f32>, world: vec3<f32>, world_from_local: mat4x4<f32>) -
     }
     let center = world_from_local[3].xyz + world_from_local[1].xyz * foliage.wind.w;
     // Низ кроны смотрит вбок, а не в землю: иначе снизу куст чёрный.
-    let rn = normalize(world - center);
     let up = normalize(world_from_local[1].xyz);
+    // У кроны-колонны (кипарис) нормали идут от оси ствола, а не от одной точки посередине.
+    let d = world - center;
+    let rn = normalize(d - up * dot(d, up) * foliage.shade.y);
     let round = normalize(rn + up * (0.3 + 0.6 * max(-dot(rn, up), 0.0)));
     return normalize(mix(n, round, k));
 }
@@ -150,7 +154,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     var pbr_input = pbr_input_from_standard_material(in, is_front);
     pbr_input.material.base_color = alpha_discard(pbr_input.material.flags, pbr_input.material.alpha_cutoff, pbr_input.material.base_color);
 @if(VERTEX_OUTPUT_INSTANCE_INDEX) {
-    if foliage.wind.x > 0.0 {
+    if foliage.shade.x > 0.0 {
         // Объём кроны: низ и сердцевина темнее (туда не доходит свет неба), макушка и края
         // светлее; каждая ветка листвы чуть своего тона. Без этого крона — ровное зелёное пятно.
         let wfl = mesh_functions::get_world_from_local(in.instance_index);
@@ -164,7 +168,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 @if(VERTEX_UVS_B) {
         tone *= mix(0.82, 1.1, fract(in.uv_b.y * 7.13));
 }
-        pbr_input.material.base_color = vec4<f32>(pbr_input.material.base_color.rgb * tone, pbr_input.material.base_color.a);
+        pbr_input.material.base_color = vec4<f32>(pbr_input.material.base_color.rgb * mix(1.0, tone, foliage.shade.x), pbr_input.material.base_color.a);
     }
 }
     // Крона ещё и светится насквозь: свет неба проходит через хвою и листья, поэтому теневой

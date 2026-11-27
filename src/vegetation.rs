@@ -63,6 +63,10 @@ pub struct FoliageExt {
     /// xy — направление ветра, z — гибкость (1 — листва, 0.3 — кора), w — запас.
     #[uniform(100)]
     pub dir: Vec4,
+    /// x — сила объёмного затенения кроны (тёмный низ и сердцевина, светлая макушка),
+    /// y — крона-колонна (0 — шар, 1 — нормали от оси ствола); остальное — запас.
+    #[uniform(100)]
+    pub shade: Vec4,
 }
 
 impl MaterialExtension for FoliageExt {
@@ -232,7 +236,7 @@ fn look(kind: PlantKind) -> (&'static str, Color, [f32; 3]) {
         PlantKind::Oak => ("broadleaf", Color::srgb(0.78, 0.78, 0.6), [0.9, 0.9, 0.9]),
         // Можжевельник высокий — сизый.
         PlantKind::Juniper => ("scale", Color::linear_rgb(1.9, 1.25, 1.2), [1.0, 0.85, 0.8]),
-        PlantKind::Cypress => ("scale", Color::linear_rgb(0.72, 0.84, 0.7), [0.9, 0.8, 0.75]),
+        PlantKind::Cypress => ("scale", Color::linear_rgb(0.86, 0.8, 0.72), [0.9, 0.8, 0.75]),
         // Инжир — светлая сочная листва, гладкая серая кора.
         PlantKind::Fig => ("broadleaf", Color::srgb(1.05, 1.12, 0.85), [1.25, 1.25, 1.25]),
         PlantKind::Shrub => ("broadleaf", Color::srgb(0.84, 0.76, 0.52), [0.9, 0.85, 0.8]),
@@ -257,6 +261,27 @@ fn crown_of(kind: PlantKind) -> Option<(f32, f32)> {
     }
 }
 
+/// Сила объёмного затенения кроны (`FoliageExt::shade.x`). Шейдер считает крону шаром вокруг её
+/// середины; у узкой колонны кипариса шара нет — с полной силой нижняя половина уходила в черноту.
+fn shade_of(kind: PlantKind) -> f32 {
+    match kind {
+        PlantKind::Cypress => 0.45,
+        PlantKind::Fir | PlantKind::Rock => 0.0,
+        _ => 1.0,
+    }
+}
+
+/// Насколько крона — колонна, а не шар (`FoliageExt::shade.y`): у кипариса нормали «от середины
+/// кроны» ниже середины смотрели в землю, и вся нижняя половина дерева стояла без солнца —
+/// чёрной, с резкой границей посередине. У колонны нормали идут от оси ствола.
+fn column_of(kind: PlantKind) -> f32 {
+    match kind {
+        PlantKind::Cypress => 0.88,
+        PlantKind::Juniper => 0.4,
+        _ => 0.0,
+    }
+}
+
 /// Добавка рассеянного света в кроне (`FoliageExt::dir.w`): свет неба проходит сквозь хвою и
 /// листья, и теневой бок дерева тёмно-зелёный, а не чёрный. У тёмных хвойных добавка больше.
 fn fill_of(kind: PlantKind) -> f32 {
@@ -269,7 +294,7 @@ fn fill_of(kind: PlantKind) -> f32 {
 
 fn foliage_material(base: StandardMaterial, kind: WindKind) -> FoliageMaterial {
     let (s, flutter, flex) = wind_of(kind);
-    ExtendedMaterial { base, extension: FoliageExt { wind: Vec4::new(0.0, s, flutter, 0.0), dir: Vec4::new(0.8, 0.45, flex, 0.0) } }
+    ExtendedMaterial { base, extension: FoliageExt { wind: Vec4::new(0.0, s, flutter, 0.0), dir: Vec4::new(0.8, 0.45, flex, 0.0), shade: Vec4::ZERO } }
 }
 
 fn mesh_named(gltf: &Gltf, gltf_meshes: &Assets<GltfMesh>, name: &str) -> Option<Handle<Mesh>> {
@@ -386,6 +411,8 @@ fn spawn_plants(
         if let Some((round, center)) = crown {
             leaf.extension.wind.x = round;
             leaf.extension.wind.w = center;
+            leaf.extension.shade.x = shade_of(kind);
+            leaf.extension.shade.y = column_of(kind);
         }
         leaf.extension.dir.w = fill_of(kind);
         let leaf = foliage.add(leaf);
@@ -435,6 +462,8 @@ fn spawn_plants(
         if let Some((round, center)) = crown_of(*kind) {
             imp_m.extension.wind.x = round;
             imp_m.extension.wind.w = center;
+            imp_m.extension.shade.x = shade_of(*kind);
+            imp_m.extension.shade.y = column_of(*kind);
         }
         imp_m.extension.dir.w = fill_of(*kind);
         let imp_mat = foliage.add(imp_m);
