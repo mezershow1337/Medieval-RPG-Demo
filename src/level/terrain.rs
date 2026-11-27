@@ -16,9 +16,10 @@ pub const WATER_Y: f32 = -1.4;
 /// Край карты (±), дальше — невидимая стена.
 pub const WORLD_HALF: f32 = 900.0;
 pub const CELL: f32 = 6.0;
-/// Клетки с перепадом высот больше этого (м) рисуются мельче — на `STEEP_PARTS`² частей.
+/// Клетки с перепадом высот больше этого (м) и их соседи рисуются мельче — на `STEEP_PARTS`²
+/// частей, а изломы земли в них скруглены (см. [`HeightField::round`]).
 const STEEP_CELL: f32 = 1.5;
-const STEEP_PARTS: usize = 3;
+const STEEP_PARTS: usize = crate::collision::ROUND_PARTS;
 
 /// Стена города (по оси кладки), по часовой стрелке при взгляде сверху (X вправо, Z вниз).
 /// Север (−Z) — открытое море, восток (+X) — Карантинная бухта, юг (+Z) — суша.
@@ -249,7 +250,38 @@ pub fn heightfield(holes: Vec<(Vec2, Vec2)>) -> HeightField {
             data.push(height_at(origin.x + ix as f32 * CELL, origin.y + iz as f32 * CELL));
         }
     }
-    HeightField { origin, cell: CELL, nx: n, nz: n, data, holes }
+    let mut hf = HeightField { origin, cell: CELL, nx: n, nz: n, data, holes, round: Vec::new() };
+    // Скругление изломов — там, где все четыре клетки вокруг узла мелкие (см. `fine_cell`):
+    // на границе с обычными клетками вес нулевой, и меши сходятся без щелей. У города, на
+    // набережной и в каменоломне земля остаётся как была: там к ней подогнаны постройки.
+    let mut round = vec![0.0; n * n];
+    for iz in 1..n - 1 {
+        for ix in 1..n - 1 {
+            if (0..4).all(|k| fine_cell(&hf, ix - 1 + k % 2, iz - 1 + k / 2)) {
+                let (x, z) = (origin.x + ix as f32 * CELL, origin.y + iz as f32 * CELL);
+                let (qx, qz) = QUARRY_FACE;
+                let quarry = (x - qx).abs() < 60.0 && (z - qz).abs() < 70.0;
+                let built = quarry || on_quay(x, z) || hf.holes.iter().any(|(a, b)| x > a.x - 2.0 * CELL && x < b.x + 2.0 * CELL && z > a.y - 2.0 * CELL && z < b.y + 2.0 * CELL);
+                round[iz * n + ix] = if built { 0.0 } else { smoothstep(6.0, 24.0, city_distance(x, z)) };
+            }
+        }
+    }
+    hf.round = round;
+    hf
+}
+
+/// Крутая ли клетка (перепад высот углов больше [`STEEP_CELL`]).
+fn steep_cell(hf: &HeightField, ix: usize, iz: usize) -> bool {
+    let h = [hf.node(ix, iz), hf.node(ix + 1, iz), hf.node(ix + 1, iz + 1), hf.node(ix, iz + 1)];
+    h.iter().fold(f32::MIN, |m, v| m.max(*v)) - h.iter().fold(f32::MAX, |m, v| m.min(*v)) > STEEP_CELL
+}
+
+/// Мелкая клетка: крутая или рядом с крутой. Такие рисуются подробной сеткой.
+fn fine_cell(hf: &HeightField, ix: usize, iz: usize) -> bool {
+    (0..9).any(|k| {
+        let (jx, jz) = (ix as i64 + k % 3 - 1, iz as i64 + k / 3 - 1);
+        jx >= 0 && jz >= 0 && (jx as usize) < hf.nx - 1 && (jz as usize) < hf.nz - 1 && steep_cell(hf, jx as usize, jz as usize)
+    })
 }
 
 /// Высота земли (по той же сетке, по которой ходят персонажи). Сетка считается один раз.
@@ -292,18 +324,29 @@ pub fn terrain_meshes(hf: &HeightField, out: &mut HashMap<(Mat, Chunk), MeshBuil
             let key = (mat, chunk);
             let mb = out.entry(key).or_default();
             // Крутая клетка (обрыв, берег балки) двумя треугольниками выходит «пилой» по
-            // диагонали. Делим её на 3×3 по той же билинейной поверхности, по которой ходят
-            // персонажи: обрыв выходит плавным, а ноги стоят ровно на нём.
-            let (lo, hi) = corners.iter().fold((f32::MAX, f32::MIN), |(lo, hi), c| (lo.min(c.y), hi.max(c.y)));
-            if hi - lo > STEEP_CELL {
+            // диагонали, а ребро между клетками — грубым скосом. Такие клетки и их соседей
+            // делим мельче по той же поверхности, по которой ходят персонажи (со скруглёнными
+            // изломами): обрыв выходит плавным, а ноги стоят ровно на нём.
+            if fine_cell(hf, ix, iz) {
                 let nrm = [normal(ix, iz), normal(ix + 1, iz), normal(ix + 1, iz + 1), normal(ix, iz + 1)];
                 let at = |u: f32, w: f32, v: &[Vec3; 4]| (v[0] * (1.0 - u) + v[1] * u) * (1.0 - w) + (v[3] * (1.0 - u) + v[2] * u) * w;
+                let surface = |x: f32, z: f32| hf.height(x, z).max(-1.0e4);
                 let mut ids = [[(0u32, 0.0f32); STEEP_PARTS + 1]; STEEP_PARTS + 1];
                 for (j, row) in ids.iter_mut().enumerate() {
                     for (i, id) in row.iter_mut().enumerate() {
                         let (u, w) = (i as f32 / STEEP_PARTS as f32, j as f32 / STEEP_PARTS as f32);
-                        let p = at(u, w, &corners);
-                        *id = (mb.vert(p, at(u, w, &nrm).normalize(), Vec2::new(p.x, p.z)), p.y);
+                        let mut p = at(u, w, &corners);
+                        // Там, где изломы скруглены, нормаль берём с самой поверхности; у границы
+                        // с обычными клетками она плавно переходит в нормаль узлов.
+                        let k = hf.round_at(p.x, p.z);
+                        let mut nn = at(u, w, &nrm).normalize();
+                        if k > 0.0 {
+                            p.y = surface(p.x, p.z);
+                            let e = hf.cell / STEEP_PARTS as f32 * 0.5;
+                            let fd = Vec3::new(surface(p.x - e, p.z) - surface(p.x + e, p.z), 2.0 * e, surface(p.x, p.z - e) - surface(p.x, p.z + e)).normalize();
+                            nn = nn.lerp(fd, k).normalize();
+                        }
+                        *id = (mb.vert(p, nn, Vec2::new(p.x, p.z)), p.y);
                     }
                 }
                 for j in 0..STEEP_PARTS {
@@ -336,4 +379,36 @@ pub fn terrain_meshes(hf: &HeightField, out: &mut HashMap<(Mat, Chunk), MeshBuil
         }
     }
     let _ = CHUNK;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Скругление изломов не трогает землю в городе; больше всего (метра на три) оно сдвигает
+    /// кромки сорокаметровых отвесных обрывов на краю карты.
+    #[test]
+    fn rounding_is_local_and_bounded() {
+        let hf = heightfield(Vec::new());
+        let flat = HeightField { round: Vec::new(), ..hf.clone() };
+        let (mut worst, mut moved, mut fine) = (0.0f32, 0usize, 0usize);
+        for iz in 0..hf.nz - 1 {
+            for ix in 0..hf.nx - 1 {
+                fine += fine_cell(&hf, ix, iz) as usize;
+                for k in 0..4 {
+                    // Сильнее всего земля сдвигается на рёбрах клеток: смотрим узел и середины рёбер.
+                    let (x, z) = (hf.origin.x + (ix as f32 + 0.5 * (k % 2) as f32) * CELL, hf.origin.y + (iz as f32 + 0.5 * (k / 2) as f32) * CELL);
+                    let d = (hf.height(x, z) - flat.height(x, z)).abs();
+                    if d > 0.01 {
+                        moved += 1;
+                        assert!(!inside_city(x, z), "земля в городе сдвинулась у {x},{z}");
+                    }
+                    worst = worst.max(d);
+                }
+            }
+        }
+        println!("мелких клеток {fine}, точек со сдвигом {moved}, наибольший сдвиг {worst:.2} м");
+        assert!(moved > 100, "скругление нигде не сработало");
+        assert!(worst < 4.0, "скругление сдвинуло землю на {worst} м");
+    }
 }

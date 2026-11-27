@@ -39,7 +39,14 @@ pub struct HeightField {
     pub data: Vec<f32>,
     /// Прямоугольники (min, max по X/Z), где земли нет: там уровень строит свой пол из коробок.
     pub holes: Vec<(Vec2, Vec2)>,
+    /// Скругление изломов, по узлам (0..1); пусто — земля строго билинейная. Там, где вес
+    /// больше нуля, высота усредняется по соседним точкам в [`ROUND_STEP`] долях клетки: ребро
+    /// между клетками превращается в плавный перегиб, и по нему же ходят персонажи.
+    pub round: Vec<f32>,
 }
+
+/// Шаг усреднения при скруглении изломов земли, в долях клетки (он же шаг мелкой сетки меша).
+pub const ROUND_PARTS: usize = 4;
 
 impl HeightField {
     pub fn node(&self, ix: usize, iz: usize) -> f32 {
@@ -50,17 +57,42 @@ impl HeightField {
         self.holes.iter().any(|(a, b)| x > a.x && x < b.x && z > a.y && z < b.y)
     }
 
-    pub fn height(&self, x: f32, z: f32) -> f32 {
-        if self.in_hole(x, z) {
-            return f32::NEG_INFINITY;
-        }
+    /// Билинейная выборка сетки значений по узлам (высот или весов скругления).
+    fn sample(&self, data: &[f32], x: f32, z: f32) -> f32 {
         let fx = ((x - self.origin.x) / self.cell).clamp(0.0, (self.nx - 1) as f32 - 0.001);
         let fz = ((z - self.origin.y) / self.cell).clamp(0.0, (self.nz - 1) as f32 - 0.001);
         let (ix, iz) = (fx as usize, fz as usize);
         let (tx, tz) = (fx - ix as f32, fz - iz as f32);
-        let a = self.node(ix, iz) * (1.0 - tx) + self.node(ix + 1, iz) * tx;
-        let b = self.node(ix, iz + 1) * (1.0 - tx) + self.node(ix + 1, iz + 1) * tx;
+        let at = |jx: usize, jz: usize| data[jz.min(self.nz - 1) * self.nx + jx.min(self.nx - 1)];
+        let a = at(ix, iz) * (1.0 - tx) + at(ix + 1, iz) * tx;
+        let b = at(ix, iz + 1) * (1.0 - tx) + at(ix + 1, iz + 1) * tx;
         a * (1.0 - tz) + b * tz
+    }
+
+    /// Вес скругления изломов в точке (0 — земля строго билинейная).
+    pub fn round_at(&self, x: f32, z: f32) -> f32 {
+        if self.round.is_empty() { 0.0 } else { self.sample(&self.round, x, z) }
+    }
+
+    pub fn height(&self, x: f32, z: f32) -> f32 {
+        if self.in_hole(x, z) {
+            return f32::NEG_INFINITY;
+        }
+        let base = self.sample(&self.data, x, z);
+        let w = self.round_at(x, z);
+        if w <= 0.0 {
+            return base;
+        }
+        // Среднее с весами 1-2-1 по обеим осям: излом в одну линию становится тремя пологими.
+        let r = self.cell / ROUND_PARTS as f32;
+        let taps = [(-r, 0.25), (0.0, 0.5), (r, 0.25)];
+        let mut s = 0.0;
+        for (dz, wz) in taps {
+            for (dx, wx) in taps {
+                s += self.sample(&self.data, x + dx, z + dz) * wx * wz;
+            }
+        }
+        base + (s - base) * w
     }
 }
 
@@ -668,7 +700,7 @@ mod tests {
             let x = (i % nx) as f32 * 2.0 - 40.0;
             (8.0 - x.abs() * 0.25).max(0.0)
         }).collect();
-        let hf = HeightField { origin: Vec2::splat(-40.0), cell: 2.0, nx, nz: nx, data, holes: vec![] };
+        let hf = HeightField { origin: Vec2::splat(-40.0), cell: 2.0, nx, nz: nx, data, holes: vec![], round: vec![] };
         let level = LevelColliders::new(vec![], Some(hf));
         let mut feet = Vec3::new(-35.0, 0.0, 0.0);
         let mut grounded = true;

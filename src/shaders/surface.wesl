@@ -991,8 +991,20 @@ fn fragment(
             // Осыпь: голая земля вперемешку с щебнем, пятнами.
             let scree = smoothstep(0.42, 0.62, fbm(wp.xz * 0.55 + vec2<f32>(7.3, 1.9))) * 0.75;
             let bare_c = mix(mix(vec3<f32>(dot(soil.albedo, vec3<f32>(0.3, 0.6, 0.1))), soil.albedo, 0.45) * vec3<f32>(0.33, 0.32, 0.3), gravel.albedo * vec3<f32>(0.5, 0.5, 0.49), scree);
-            ph.albedo = mix(ph.albedo, bare_c, bare);
-            ph.n = normalize(mix(ph.n, mix(soil.n, gravel.n, scree), bare));
+            // На крутом проекция сверху растягивает рисунок земли полосами вдоль склона. Там
+            // рисунок берём со скалы (она снята с трёх сторон и не тянется): выходит плотный
+            // каменистый грунт, как на осыпающемся берегу.
+            let tilt_k = smoothstep(0.2, 0.42, slope);
+            let stony = clamp(rock.albedo / max(surface.photo_mean_b.rgb, vec3<f32>(0.02)), vec3<f32>(0.45), vec3<f32>(1.9)) * vec3<f32>(0.17, 0.155, 0.132) * mix(0.85, 1.12, fbm(wp.xz * 0.37 + vec2<f32>(wp.y, 2.7)));
+            // Щебень на каменистом грунте: мелкие камни разного тона с тёмными щелями между ними
+            // (вблизи; дальше 45 м они мельче пиксела и только рябят).
+            let peb_far = 1.0 - smoothstep(18.0, 45.0, length(view.world_position.xyz - wp));
+            let peb = voronoi(vec2<f32>(wp.x + wp.y * 0.7, wp.z + wp.y * 0.6) * 3.3);
+            let peb_gap = 1.0 - smoothstep(0.02, 0.14, peb.y - peb.x);
+            let pebbles = mix(1.0, mix(0.78, 1.22, peb.z) * (1.0 - 0.45 * peb_gap), peb_far * smoothstep(0.3, 0.6, fbm(wp.xz * 0.8 + vec2<f32>(wp.y, 5.5))));
+            let bare_cc = mix(bare_c, stony * pebbles, tilt_k);
+            ph.albedo = mix(ph.albedo, bare_cc, bare);
+            ph.n = normalize(mix(ph.n, mix(mix(soil.n, gravel.n, scree), normalize(mix(n, rock.n, 0.6)), tilt_k), bare));
             ph.rough = mix(ph.rough, mix(soil.rough, gravel.rough, scree), bare);
             let rk = smoothstep(0.31, 0.5, slope + (fbm(wp.xz * 0.08) - 0.5) * 0.3 + (fbm(wp.xz * 0.6) - 0.5) * 0.12);
             // Скала обрывов: серый обветренный известняк пластами (светлый на солнце выгорал в белое
@@ -1001,7 +1013,9 @@ fn fragment(
             let drip = smoothstep(0.45, 0.8, fbm(vec2<f32>((wp.x - wp.z) * 0.7, wp.y * 0.12)));
             // Чёрные щели скана на солнце выглядят кляксами — контраст картинки убавлен.
             let rock_flat = 0.5 * (surface.photo_mean_b.rgb + base_b);
-            let rock_c = mix(rock_flat, retint(rock.albedo, surface.photo_mean_b.rgb, base_b, 0.5), 0.55) * vec3<f32>(0.6, 0.58, 0.54) * mix(0.72, 1.12, strata) * (1.0 - 0.3 * drip);
+            // Самые чёрные щели скана подняты к среднему тону: на солнце они лежали кляксами.
+            let rock_a = mix(rock.albedo, max(rock.albedo, surface.photo_mean_b.rgb * 0.55), 0.75);
+            let rock_c = mix(rock_flat, retint(rock_a, surface.photo_mean_b.rgb, base_b, 0.5), 0.55) * vec3<f32>(0.6, 0.58, 0.54) * mix(0.72, 1.12, strata) * (1.0 - 0.3 * drip);
             // Скала ломается на блоки по пластам и трещинам: у каждого блока свой наклон грани
             // и тон, между блоками — тёмные щели. Без этого обрыв читался гладкой «подушкой».
             var crag_n = normalize(mix(n, rock.n, 0.4));
