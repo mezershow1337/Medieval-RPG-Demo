@@ -915,6 +915,15 @@ fn dev_shot(
         // Сначала открыть окна (кадр n), снимок — через 4 кадра, когда интерфейс уже построен.
         t = if *frames >= n + 12 { delay + 3.0 } else if *frames >= n + 4 { delay + 1.0 } else if *frames >= n { delay - 0.5 } else { 0.0 };
     }
+    // `MRPG_SHOT_REAL=секунды` — снимок через столько настоящих секунд после запуска (на
+    // программном рендере первые сотни кадров пустые и быстрые, пока собираются шейдеры, а
+    // настоящие идут по нескольку секунд: счёт кадров там ненадёжен).
+    if let Some(secs) = std::env::var("MRPG_SHOT_REAL").ok().and_then(|s| s.parse::<f32>().ok()) {
+        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        let r = START.get_or_init(std::time::Instant::now).elapsed().as_secs_f32();
+        *frames += u32::from(r >= secs);
+        t = if *frames >= 6 { delay + 3.0 } else if *frames >= 3 { delay + 1.0 } else if *frames >= 1 { delay - 0.5 } else { 0.0 };
+    }
     let ui = std::env::var("MRPG_SHOT_UI").unwrap_or_default();
     // `MRPG_SHOT_UI=fx` — выставить перед камерой сосуды на огне и показать вспышку и осколки.
     if ui == "fx"

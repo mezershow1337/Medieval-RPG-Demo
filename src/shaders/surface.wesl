@@ -8,6 +8,8 @@ import bevy_pbr::render::{
     pbr_functions::alpha_discard,
     mesh_view_bindings::{globals, view},
 };
+@if(!PREPASS_PIPELINE)
+import bevy_pbr::render::mesh_view_bindings::lights;
 
 @if(PREPASS_PIPELINE)
 import bevy_pbr::{
@@ -49,11 +51,96 @@ struct Photo {
     rough: f32,
 }
 
+// ---------- объёмный рельеф (параллакс по карте высот) ----------
+// Высота слоя лежит в альфа-канале цвета (1 — выступ, 0 — дно шва). Луч взгляда идёт внутрь
+// поверхности, пока не упрётся в рельеф: выступы закрывают то, что за ними, а к солнцу
+// от них ложатся мелкие тени — черепица, кладка и булыжник читаются объёмными.
+
+// Взгляд (от точки к камере), направление на солнце, сила эффекта (гаснет с расстоянием)
+// и вес текущей проекции — задаются во фрагментном шейдере перед выборками.
+var<private> pom_view: vec3<f32>;
+var<private> pom_sun: vec3<f32>;
+var<private> pom_k: f32;
+var<private> pom_gate: f32;
+
+// Глубина рельефа слоя, м. Номера — из surface_layers.rs.
+fn layer_depth(layer: i32) -> f32 {
+    switch layer {
+        case 3 { return 0.1; }          // черепица: калиптеры над тегулами
+        case 1 { return 0.06; }           // бутовая кладка
+        case 10 { return 0.045; }         // булыжник
+        case 0 { return 0.03; }           // тёсаные блоки
+        case 13 { return 0.022; }         // кирпич
+        case 11 { return 0.02; }          // плиты
+        case 19 { return 0.06; }          // солома
+        case 9 { return 0.07; }           // скала
+        case 18 { return 0.04; }          // галька
+        case 6, 8 { return 0.03; }        // земля
+        case 7 { return 0.035; }          // трава
+        case 4 { return 0.018; }          // доски
+        case 5 { return 0.012; }          // брус
+        case 2 { return 0.008; }          // штукатурка
+        default { return 0.0; }
+    }
+}
+
+fn photo_height(uv: vec2<f32>, layer: i32, lod: f32) -> f32 {
+    return textureSampleLevel(photo_albedo, photo_sampler, uv, layer, lod).a;
+}
+
 // Одна проекция: цвет, шероховатость и нормаль, развёрнутая в мир по осям t (u) и b (v вверх по картинке).
-fn photo_plane(layer: i32, uv: vec2<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f32>, relief: f32) -> Photo {
+// `scale` — сколько единиц uv в одном метре.
+fn photo_plane(layer: i32, uv0: vec2<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f32>, relief: f32, scale: f32) -> Photo {
     var o: Photo;
-    o.albedo = textureSample(photo_albedo, photo_sampler, uv, layer).rgb;
-    let m = textureSample(photo_nrm, photo_sampler, uv, layer);
+    let dx = dpdx(uv0);
+    let dy = dpdy(uv0);
+    var uv = uv0;
+    var shade = 1.0;
+    let depth = layer_depth(layer) * pom_k * pom_gate;
+    if depth > 0.004 {
+        let size = f32(textureDimensions(photo_albedo).x);
+        let lod = max(0.5 * log2(max(dot(dx, dx), dot(dy, dy)) * size * size), 0.0);
+        let vz = max(dot(pom_view, n), 0.0);
+        // Под скользящим углом сдвиг ограничен, иначе рисунок «плывёт».
+        let slide = vec2<f32>(dot(pom_view, t), -dot(pom_view, b)) / max(vz, 0.3);
+        let span = -slide * depth * scale;
+        let steps = i32(mix(16.0, 7.0, vz));
+        let dl = 1.0 / f32(steps);
+        var d = 0.0;
+        var prev_gap = 0.0;
+        var gap = 0.0;
+        var hit = 1.0;
+        for (var i = 0; i <= steps; i++) {
+            gap = (1.0 - photo_height(uv0 + span * d, layer, lod)) - d;
+            if gap <= 0.0 {
+                // Точное место — между двумя последними шагами.
+                let k = prev_gap / max(prev_gap - gap, 1e-4);
+                hit = d - dl * (1.0 - k);
+                break;
+            }
+            prev_gap = gap;
+            d += dl;
+        }
+        hit = clamp(hit, 0.0, 1.0);
+        uv = uv0 + span * hit;
+        // Тень от выступов: от найденной точки идём к солнцу и смотрим, что выше луча.
+        let sz = dot(pom_sun, n);
+        if sz > 0.02 && pom_k > 0.35 && hit > 0.01 {
+            let to_sun = vec2<f32>(dot(pom_sun, t), -dot(pom_sun, b)) / max(sz, 0.12) * depth * scale;
+            let h0 = 1.0 - hit;
+            var occ = 0.0;
+            for (var i = 1; i <= 6; i++) {
+                let f = f32(i) / 6.0;
+                // Луч поднимается от h0 до верха рельефа.
+                let ray_h = h0 + (1.0 - h0) * f;
+                let hh = photo_height(uv + to_sun * (1.0 - h0) * f, layer, lod);
+                occ = max(occ, (hh - ray_h) * (1.3 - f));
+            }
+            shade = 1.0 - clamp(occ * 8.0, 0.0, 1.0) * 0.7 * smoothstep(0.35, 0.6, pom_k);
+        }
+    }
+    o.albedo = textureSampleGrad(photo_albedo, photo_sampler, uv, layer, dx, dy).rgb * shade;
+    let m = textureSampleGrad(photo_nrm, photo_sampler, uv, layer, dx, dy);
     let xy = (m.xy * 2.0 - 1.0) * relief;
     let z = sqrt(max(1.0 - dot(xy, xy), 0.0));
     o.n = t * xy.x + b * xy.y + n * z;
@@ -71,15 +158,20 @@ fn layer_has_grid(layer: i32) -> bool {
 // Сверху — две выборки: обычная и повёрнутая на ~37° крупнее, смешанные по мягкому шуму,
 // чтобы на больших площадях (трава, земля, галька) не было видно повтора тайла.
 fn photo_top(layer: i32, inv: f32, wp: vec3<f32>, n: vec3<f32>, relief: f32, sy: f32) -> Photo {
-    let a = photo_plane(layer, vec2<f32>(wp.x, -wp.z * sy) * inv, vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, sy), n, relief);
+    let gate = pom_gate;
+    let grid = layer_has_grid(layer);
+    let k = select(smoothstep(0.35, 0.65, fbm(wp.xz * 0.11)), 0.0, grid);
+    pom_gate = gate * (1.0 - k);
+    let a = photo_plane(layer, vec2<f32>(wp.x, -wp.z * sy) * inv, vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, sy), n, relief, inv);
+    pom_gate = gate * k;
     let r = mat2x2<f32>(0.8, 0.6, -0.6, 0.8);
     let q = r * vec2<f32>(wp.x, -wp.z * sy) * inv * 0.61 + vec2<f32>(0.37, 0.71);
     let tb = r * vec2<f32>(1.0, 0.0);
     let bb = r * vec2<f32>(0.0, 1.0);
-    let b = photo_plane(layer, q, vec3<f32>(tb.x, 0.0, -tb.y * sy), vec3<f32>(bb.x, 0.0, -bb.y * sy), n, relief);
+    let b = photo_plane(layer, q, vec3<f32>(tb.x, 0.0, -tb.y * sy), vec3<f32>(bb.x, 0.0, -bb.y * sy), n, relief, inv * 0.61);
+    pom_gate = gate;
     // Обе выборки читаются всегда (номер слоя зависит от нормали — ветвиться по нему нельзя),
     // у слоёв с рисунком просто берём только первую.
-    let k = select(smoothstep(0.35, 0.65, fbm(wp.xz * 0.11)), 0.0, layer_has_grid(layer));
     var o: Photo;
     o.albedo = mix(a.albedo, b.albedo, k);
     o.n = mix(a.n, b.n, k);
@@ -97,11 +189,16 @@ fn photo_triplanar(top: i32, side: i32, inv_top: f32, inv_side: f32, wp: vec3<f3
     let sy = select(-1.0, 1.0, n.y >= 0.0);
     let sz = select(-1.0, 1.0, n.z >= 0.0);
     // Картинка «вверх» — мировой +Y на стенах; v в текстуре растёт вниз, отсюда минус.
-    let px = photo_plane(side, vec2<f32>(-wp.z * sx, -wp.y) * inv_side, vec3<f32>(0.0, 0.0, -sx), vec3<f32>(0.0, 1.0, 0.0), n, relief);
-    let pz = photo_plane(side, vec2<f32>(wp.x * sz, -wp.y) * inv_side, vec3<f32>(sz, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), n, relief);
+    // Рельеф считаем только для проекций, которые здесь действительно видны.
+    pom_gate = smoothstep(0.1, 0.4, w.x);
+    let px = photo_plane(side, vec2<f32>(-wp.z * sx, -wp.y) * inv_side, vec3<f32>(0.0, 0.0, -sx), vec3<f32>(0.0, 1.0, 0.0), n, relief, inv_side);
+    pom_gate = smoothstep(0.1, 0.4, w.z);
+    let pz = photo_plane(side, vec2<f32>(wp.x * sz, -wp.y) * inv_side, vec3<f32>(sz, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), n, relief, inv_side);
+    pom_gate = smoothstep(0.1, 0.4, w.y);
     let layer = select(side, top, n.y > 0.0);
     let inv = select(inv_side, inv_top, n.y > 0.0);
     let py = photo_top(layer, inv, wp, n, relief, sy);
+    pom_gate = 1.0;
     var o: Photo;
     o.albedo = px.albedo * w.x + py.albedo * w.y + pz.albedo * w.z;
     o.n = normalize(px.n * w.x + py.n * w.y + pz.n * w.z);
@@ -566,6 +663,17 @@ fn fragment(
     var N = pbr_input.N;
     var emissive = vec3<f32>(0.0);
     var water = false;
+    // Объёмный рельеф: в полную силу вблизи, к 45 м сходит на нет (дальше его не разглядеть).
+    let to_cam = view.world_position.xyz - wp;
+    pom_view = normalize(to_cam);
+    pom_k = 1.0 - smoothstep(18.0, 45.0, length(to_cam));
+    pom_gate = 1.0;
+    pom_sun = vec3<f32>(0.0, -1.0, 0.0);
+@if(!PREPASS_PIPELINE) {
+    if lights.n_directional_lights > 0u {
+        pom_sun = lights.directional_lights[0].direction_to_light;
+    }
+}
 
     if kind == 5 || kind == 6 || kind == 7 || kind == 8 || kind == 9 || kind == 12 || kind == 20 || kind == 21 {
         // Узоры, завязанные на UV или особые.
@@ -634,7 +742,7 @@ fn fragment(
                     let cell = select(teg, kal + vec2<f32>(311.0, 97.0), on_k > 0.5);
                     let id = hash21(cell);
                     let kiln = hash21(cell * 1.37 + vec2<f32>(3.1, 7.7));
-                    let ph = photo_plane(i32(surface.photo.x + 0.5), uvr * surface.photo.y, tt, bb, n, surface.photo_mean_b.w * 0.85);
+                    let ph = photo_plane(i32(surface.photo.x + 0.5), uvr * surface.photo.y, tt, bb, n, surface.photo_mean_b.w * 0.85, surface.photo.y);
                     color = retint(ph.albedo, surface.photo_mean.rgb, base_a, surface.photo_mean.w);
                     color *= (0.88 + id * 0.22) * vec3<f32>(1.0 + (kiln - 0.5) * 0.1, 1.0, 1.0 - (kiln - 0.5) * 0.14);
                     // Новые (краснее и светлее) и старые (бурые, серые) черепицы вперемешку.
@@ -694,7 +802,7 @@ fn fragment(
                 }
                 if surface.photo.x >= 0.0 {
                     let fr = uv_frame(n, dp_x, dp_y, duv_x, duv_y);
-                    let ph = photo_plane(i32(surface.photo.x + 0.5), uv * surface.photo.y, fr.t, fr.b, n, surface.photo_mean_b.w);
+                    let ph = photo_plane(i32(surface.photo.x + 0.5), uv * surface.photo.y, fr.t, fr.b, n, surface.photo_mean_b.w, surface.photo.y);
                     color = retint(ph.albedo, surface.photo_mean.rgb, base_a, surface.photo_mean.w);
                     // Каждое бревно своего тона, вдоль ствола — потёки и серые обветренные полосы.
                     let streak = fbm(vec2<f32>(uv.x * 0.35, uv.y * 2.2) + wp.xz * 0.07);
@@ -720,7 +828,7 @@ fn fragment(
                     // Своя солома из Blender (tools/textures/blender_thatch.py): ряды по 0.3 м,
                     // пучки стеблей с рваными комлями, верх картинки — конёк. Развёртка та же,
                     // что у черепицы: u — вдоль карниза, v — вниз по скату.
-                    let ph = photo_plane(i32(surface.photo.x + 0.5), uv * surface.photo.y, fr.t, fr.b, n, surface.photo_mean_b.w);
+                    let ph = photo_plane(i32(surface.photo.x + 0.5), uv * surface.photo.y, fr.t, fr.b, n, surface.photo_mean_b.w, surface.photo.y);
                     color = retint(ph.albedo, surface.photo_mean.rgb, base_a, surface.photo_mean.w);
                     // Тайл 1.5 м повторяется вдоль карниза — полосы по скату своей ширины и
                     // оттенка (не кратные тайлу) прячут повтор.
