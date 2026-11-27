@@ -533,9 +533,13 @@ fn apiary(b: &mut Builder, rng: &mut Rng) {
 }
 
 /// Огороды за северными дворами (капуста, лук, бобы — грядками) за низкой оградой.
+/// Огороды села: на грядках дикая трава не растёт (см. `mines::bare_ground`).
+pub fn garden_rects() -> [Rect; 2] {
+    [(-37.0f32, -16.0f32), (14.0, 35.0)].map(|(x0, x1)| Rect::new(VILLAGE.x + x0, VILLAGE.z - 33.0, VILLAGE.x + x1, VILLAGE.z - 24.0))
+}
+
 fn gardens(b: &mut Builder, rng: &mut Rng) {
-    for (x0, x1) in [(-37.0f32, -16.0f32), (14.0, 35.0)] {
-        let r = Rect::new(VILLAGE.x + x0, VILLAGE.z - 33.0, VILLAGE.x + x1, VILLAGE.z - 24.0);
+    for r in garden_rects() {
         b.at(r.cx(), r.cz());
         super::low_wall(b, Vec2::new(r.x0, r.z0), Vec2::new(r.x1, r.z0));
         super::low_wall(b, Vec2::new(r.x0, r.z0), Vec2::new(r.x0, r.z1));
@@ -553,7 +557,7 @@ fn gardens(b: &mut Builder, rng: &mut Rng) {
                 if row % 3 == 0 {
                     kit::cabbage(b, Mat::HerbGreen, p, 1.15, 1.0, x * 2.3 + z);
                 } else if row % 3 == 1 {
-                    b.mesh(Mat::HerbGreen).lathe(p, &[(0.0, 0.0), (0.06, 0.02), (0.02, 0.35), (0.0, 0.36)], 5);
+                    kit::leek(b, Mat::HerbGreen, p, 1.0, x * 3.1 + z);
                 } else {
                     kit::cabbage(b, Mat::HerbSilver, p, 0.9, 1.7, x * 1.7 - z);
                 }

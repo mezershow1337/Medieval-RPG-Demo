@@ -1024,18 +1024,66 @@ pub fn oak(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
     b.invisible.push(Aabb::new(p - Vec3::new(0.3, 0.0, 0.3), p + Vec3::new(0.3, h * 0.5, 0.3)));
 }
 
-/// Кочан в розетке наружных листьев (капуста, свёкла, салат): вместо гладкой «шапки» —
-/// маленькая голова и четыре отогнутых листа. `turn` — поворот розетки, у каждого кочана свой.
+/// Кочан в розетке листьев (капуста, свёкла, салат): округлая голова, вокруг неё три листа
+/// чашей и пять отогнутых наружу, разной длины. `turn` — поворот розетки, у каждого кочана свой.
+/// Треугольников ~270: огородов много, а кадр должен держать 60 FPS.
 pub fn cabbage(b: &mut Builder, mat: Mat, p: Vec3, s: f32, tall: f32, turn: f32) {
     let m = b.mesh(mat);
-    m.lathe(p, &[(0.0, 0.02), (0.09 * s, 0.03 * s), (0.13 * s, 0.09 * s * tall), (0.11 * s, 0.17 * s * tall), (0.05 * s, 0.21 * s * tall), (0.0, 0.22 * s * tall)], 8);
-    for k in 0..4 {
-        let a = turn + k as f32 * TAU / 4.0 + if k % 2 == 0 { 0.0 } else { 0.25 };
-        let lift = if k % 2 == 0 { 1.0 } else { 0.7 };
-        let leaf = [(0.05 * s, 0.01), (0.2 * s, 0.05 * s * lift), (0.27 * s, 0.15 * s * lift * tall)];
-        // Лист виден с обеих сторон.
-        m.lathe_arc(p, &leaf, a - 0.6, a + 0.6, 2, false);
-        m.lathe_arc(p, &leaf, a - 0.6, a + 0.6, 2, true);
+    let (r, h) = (0.125 * s, 0.2 * s * tall);
+    let head: Vec<(f32, f32)> = (0..=5)
+        .map(|k| {
+            let t = k as f32 / 5.0 * std::f32::consts::PI;
+            (r * t.sin().max(0.0), 0.025 * s + h * 0.5 * (1.0 - t.cos()))
+        })
+        .collect();
+    m.lathe(p, &head, 8);
+    // Листья чашей: прижаты к голове, верх чуть отходит.
+    for k in 0..3 {
+        let a = turn + 0.5 + k as f32 * TAU / 3.0;
+        let cup = [(0.05 * s, 0.02 * s), (0.15 * s, 0.09 * s * tall), (0.165 * s, 0.19 * s * tall), (0.14 * s, 0.26 * s * tall)];
+        // Кончик листа уже основания: с ровным срезом лист выглядел бумажной лопастью.
+        for inward in [false, true] {
+            m.lathe_arc(p, &cup[..3], a - 0.75, a + 0.75, 2, inward);
+            m.lathe_arc(p, &cup[2..], a - 0.42, a + 0.42, 2, inward);
+        }
+    }
+    // Наружные листья: лежат розеткой, через один короче и ниже.
+    for k in 0..5 {
+        let f = ((turn * 7.3 + k as f32 * 2.1).sin() * 0.5 + 0.5) * 0.3;
+        let a = turn + k as f32 * TAU / 5.0 + f;
+        let (len, lift) = if k % 2 == 0 { (1.0 + f * 0.4, 1.0) } else { (0.82, 0.55 + f) };
+        let leaf = [(0.05 * s, 0.012), (0.16 * s * len, 0.035 * s * lift), (0.25 * s * len, 0.1 * s * lift * tall), (0.31 * s * len, 0.19 * s * lift * tall)];
+        for inward in [false, true] {
+            m.lathe_arc(p, &leaf[..3], a - 0.5, a + 0.5, 2, inward);
+            m.lathe_arc(p, &leaf[2..], a - 0.27, a + 0.27, 1, inward);
+        }
+    }
+}
+
+/// Перья лука-порея и чеснока: пучок узких листьев веером, кончики отгибаются.
+pub fn leek(b: &mut Builder, mat: Mat, p: Vec3, s: f32, turn: f32) {
+    let m = b.mesh(mat);
+    for k in 0..5 {
+        let f = (turn * 5.1 + k as f32 * 1.7).sin() * 0.5 + 0.5;
+        let a = turn + k as f32 * TAU / 5.0 + f * 0.6;
+        let h = (0.3 + 0.16 * f) * s;
+        let blade = [(0.006, 0.0), (0.03 * s, h * 0.45), (0.075 * s, h * 0.85), (0.14 * s, h * (0.98 - 0.12 * f))];
+        m.lathe_arc(p, &blade, a - 0.22, a + 0.22, 1, false);
+        m.lathe_arc(p, &blade, a - 0.22, a + 0.22, 1, true);
+    }
+}
+
+/// Кустик зелени (мята, шалфей, салат): низкая пышная розетка листьев в два яруса.
+pub fn herb(b: &mut Builder, mat: Mat, p: Vec3, s: f32, turn: f32) {
+    let m = b.mesh(mat);
+    for k in 0..7 {
+        let f = (turn * 4.3 + k as f32 * 2.3).sin() * 0.5 + 0.5;
+        let a = turn + k as f32 * TAU / 7.0 + f * 0.4;
+        let up = if k % 2 == 0 { 1.0 } else { 1.7 };
+        let reach = if k % 2 == 0 { 1.0 } else { 0.6 };
+        let leaf = [(0.015, 0.01), (0.08 * s * reach, 0.05 * s * up), (0.15 * s * reach, 0.09 * s * up), (0.2 * s * reach, (0.08 + 0.03 * f) * s * up)];
+        m.lathe_arc(p, &leaf, a - 0.36, a + 0.36, 1, false);
+        m.lathe_arc(p, &leaf, a - 0.36, a + 0.36, 1, true);
     }
 }
 

@@ -1218,11 +1218,13 @@ fn kitchen_garden(b: &mut Builder, r: Rect, inside: &impl Fn(f32, f32) -> bool, 
             2 => {
                 for k in 0..n {
                     let p = at(k, rng) + Vec3::new(rng.range(-0.15, 0.15), 0.0, rng.range(-0.15, 0.15));
-                    let m = b.mesh(Mat::HerbGreen);
+                    // Те же четыре случайных числа, что и раньше (две «палочки»): остальной огород на месте.
+                    let (mut turn, mut tall) = (0.0, 0.0);
                     for q in 0..2 {
-                        let a = q as f32 * 3.1 + rng.range(0.0, 1.0);
-                        m.beam(p, p + Vec3::new(a.cos() * 0.06, rng.range(0.25, 0.4), a.sin() * 0.06), 0.008, 0.008, Vec3::X);
+                        turn += q as f32 * 3.1 + rng.range(0.0, 1.0);
+                        tall += rng.range(0.25, 0.4);
                     }
+                    kit::leek(b, Mat::HerbGreen, p, tall / 0.66, turn);
                 }
             }
             // Бобы на тычинах: колья шалашиком, плети кое-где добрались до верха.
@@ -1246,7 +1248,7 @@ fn kitchen_garden(b: &mut Builder, r: Rect, inside: &impl Fn(f32, f32) -> bool, 
                 for k in 0..n {
                     let p = at(k, rng);
                     let mat = [Mat::HerbGreen, Mat::HerbSilver, Mat::HerbGreen][rng.int(3)];
-                    b.mesh(mat).lathe(p, &[(0.0, 0.0), (0.16, 0.07), (0.0, 0.2)], 5);
+                    kit::herb(b, mat, p, 1.0, p.x * 1.9 - p.z * 2.7);
                 }
             }
             // Вскопано под посев: бороздки.

@@ -130,6 +130,10 @@ pub fn bare_ground(p: Vec2) -> bool {
         let t = ((p - a).dot(c - a) / (c - a).length_squared()).clamp(0.0, 1.0);
         p.distance(a + (c - a) * t)
     };
+    // Огородные грядки села: прополоты.
+    if super::village::garden_rects().iter().any(|r| p.x > r.x0 + 0.4 && p.x < r.x1 - 0.4 && p.y > r.z0 + 0.5 && p.y < r.z1 - 0.3) {
+        return true;
+    }
     bare.discs.iter().any(|(c, r)| p.distance(*c) < *r) || bare.trails.iter().any(|(pts, hw)| pts.windows(2).any(|w| seg(w[0], w[1]) < *hw))
 }
 
