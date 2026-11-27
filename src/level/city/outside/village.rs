@@ -551,11 +551,11 @@ fn gardens(b: &mut Builder, rng: &mut Rng) {
             while x < r.x1 - 1.2 {
                 let p = g(x, z) + Vec3::Y * 0.1;
                 if row % 3 == 0 {
-                    b.mesh(Mat::HerbGreen).lathe(p, &[(0.0, 0.0), (0.22, 0.05), (0.26, 0.18), (0.16, 0.3), (0.0, 0.33)], 7);
+                    kit::cabbage(b, Mat::HerbGreen, p, 1.15, 1.0, x * 2.3 + z);
                 } else if row % 3 == 1 {
                     b.mesh(Mat::HerbGreen).lathe(p, &[(0.0, 0.0), (0.06, 0.02), (0.02, 0.35), (0.0, 0.36)], 5);
                 } else {
-                    b.mesh(Mat::HerbSilver).lathe(p, &[(0.0, 0.0), (0.16, 0.06), (0.14, 0.32), (0.0, 0.4)], 6);
+                    kit::cabbage(b, Mat::HerbSilver, p, 0.9, 1.7, x * 1.7 - z);
                 }
                 x += rng.range(0.55, 0.75);
             }

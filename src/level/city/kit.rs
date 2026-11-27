@@ -1024,6 +1024,21 @@ pub fn oak(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
     b.invisible.push(Aabb::new(p - Vec3::new(0.3, 0.0, 0.3), p + Vec3::new(0.3, h * 0.5, 0.3)));
 }
 
+/// Кочан в розетке наружных листьев (капуста, свёкла, салат): вместо гладкой «шапки» —
+/// маленькая голова и четыре отогнутых листа. `turn` — поворот розетки, у каждого кочана свой.
+pub fn cabbage(b: &mut Builder, mat: Mat, p: Vec3, s: f32, tall: f32, turn: f32) {
+    let m = b.mesh(mat);
+    m.lathe(p, &[(0.0, 0.02), (0.09 * s, 0.03 * s), (0.13 * s, 0.09 * s * tall), (0.11 * s, 0.17 * s * tall), (0.05 * s, 0.21 * s * tall), (0.0, 0.22 * s * tall)], 8);
+    for k in 0..4 {
+        let a = turn + k as f32 * TAU / 4.0 + if k % 2 == 0 { 0.0 } else { 0.25 };
+        let lift = if k % 2 == 0 { 1.0 } else { 0.7 };
+        let leaf = [(0.05 * s, 0.01), (0.2 * s, 0.05 * s * lift), (0.27 * s, 0.15 * s * lift * tall)];
+        // Лист виден с обеих сторон.
+        m.lathe_arc(p, &leaf, a - 0.6, a + 0.6, 2, false);
+        m.lathe_arc(p, &leaf, a - 0.6, a + 0.6, 2, true);
+    }
+}
+
 /// Куст шибляка (шиповник, боярышник, держидерево) — без коллизии.
 /// Поворот и вариант — от положения, `rng` не трогаем (куст встал на место прежних «холмиков»).
 pub fn shrub(b: &mut Builder, p: Vec3, h: f32) {

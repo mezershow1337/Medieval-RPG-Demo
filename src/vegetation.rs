@@ -235,7 +235,7 @@ fn look(kind: PlantKind) -> (&'static str, Color, [f32; 3]) {
         PlantKind::Cypress => ("scale", Color::linear_rgb(0.72, 0.84, 0.7), [0.9, 0.8, 0.75]),
         // Инжир — светлая сочная листва, гладкая серая кора.
         PlantKind::Fig => ("broadleaf", Color::srgb(1.05, 1.12, 0.85), [1.25, 1.25, 1.25]),
-        PlantKind::Shrub => ("broadleaf", Color::srgb(0.8, 0.82, 0.68), [0.9, 0.85, 0.8]),
+        PlantKind::Shrub => ("broadleaf", Color::srgb(0.7, 0.74, 0.6), [0.9, 0.85, 0.8]),
         // Хвоя в бору тёмная, с сизым отливом; затенение кроны — в цвете вершин модели.
         PlantKind::Fir => ("bough", Color::srgb(0.72, 0.73, 0.77), [0.74, 0.72, 0.74]),
         PlantKind::Rock => ("broadleaf", Color::WHITE, [1.0, 1.0, 1.0]),
@@ -486,7 +486,9 @@ fn spawn_plants(
         let Some(list) = models.get(&plant.kind).filter(|l| !l.is_empty()) else { continue };
         let m = &list[plant.variant as usize % list.len()];
         let s = plant.height / m.height;
-        let t = Transform::from_translation(plant.pos).with_rotation(Quat::from_rotation_y(plant.yaw)).with_scale(Vec3::splat(s));
+        // Высокая ель стройнее низкой: растёт вверх, а не вширь.
+        let slim = if plant.kind == PlantKind::Fir { 1.0 - 0.25 * ((plant.height - 10.0) / 14.0).clamp(0.0, 1.0) } else { 1.0 };
+        let t = Transform::from_translation(plant.pos).with_rotation(Quat::from_rotation_y(plant.yaw)).with_scale(Vec3::new(s * slim, s, s * slim));
         // Дальности LOD растут с размером растения: кусты переходят на импостор раньше деревьев.
         let k = (plant.height / 8.0).clamp(0.35, 1.5);
         let (d0, d1, d2) = (40.0 * k, 120.0 * k, 900.0 * k.min(1.0));
@@ -751,12 +753,15 @@ fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelCo
                 let lean = if cell == 3 { 2.6 } else if dense { 0.5 } else { 1.3 };
                 let back = Vec3::new(-a.sin(), 0.0, a.cos()) * (hash2(gx - q, gz + q, 11) - 0.5) * lean * h;
                 let flip = hash2(gx + 3 * q, gz, 12) < 0.5;
+                // Полосы низкой дернины не сходятся в одной точке: сверху пучок выглядел
+                // «звездой» из скрещённых лент, а так они лежат вразброс, как кочки.
+                let off = if cell == 3 { Vec3::new(-a.sin(), 0.0, a.cos()) * (hash2(gx + 5 * q, gz - 2 * q, 13) - 0.5) * 0.7 } else { Vec3::ZERO };
                 let start = pos.len() as u32;
                 for row in 0..3 {
                     let t = row as f32 * 0.5;
                     for (side, u) in [(-0.5f32, 0.0f32), (0.5, 1.0)] {
-                        let px = x + dir.x * side * w + back.x * t * t;
-                        let pz = z + dir.z * side * w + back.z * t * t;
+                        let px = x + off.x + dir.x * side * w + back.x * t * t;
+                        let pz = z + off.z + dir.z * side * w + back.z * t * t;
                         // Низ карточки идёт по земле (на склоне края не висят и не тонут).
                         let gy = y + sx * (px - x) + sz * (pz - z);
                         pos.push([px, gy - 0.04 + h * t, pz]);

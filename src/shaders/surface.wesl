@@ -979,10 +979,10 @@ fn fragment(
             // дальше, чем растёт трава, — сам травяной ковёр, светлее и зеленее: иначе вокруг
             // игрока было бы видно кольцо, где трава кончается.
             let carpet = smoothstep(35.0, 75.0, length(view.world_position.xyz - wp));
-            let g_col = retint(grass.albedo, mean, base_a, tint) * mix(vec3<f32>(1.0), vec3<f32>(1.05, 1.02, 0.9), smoothstep(0.4, 0.85, fbm(wp.xz * 0.02))) * mix(vec3<f32>(0.2, 0.25, 0.52), vec3<f32>(0.28, 0.285, 0.83), carpet);
+            let g_col = retint(grass.albedo, mean, base_a, tint) * mix(vec3<f32>(1.0), vec3<f32>(1.05, 1.02, 0.9), smoothstep(0.4, 0.85, fbm(wp.xz * 0.02))) * mix(vec3<f32>(0.25, 0.28, 0.6), vec3<f32>(0.28, 0.285, 0.83), carpet);
             // Сухая почва под травой — тёмная, с прозеленью: светлая соломенная земля спорила
             // с зелёной травой и пересвечивала кадр.
-            let soil_c = mix(soil.albedo * mix(vec3<f32>(0.3, 0.36, 0.28), vec3<f32>(0.5, 0.54, 0.46), carpet), g_col, 0.5);
+            let soil_c = mix(soil.albedo * mix(vec3<f32>(0.4, 0.45, 0.36), vec3<f32>(0.5, 0.54, 0.46), carpet), g_col, 0.5);
             ph.albedo = mix(g_col, soil_c, dry);
             ph.n = normalize(mix(grass.n, soil.n, dry));
             ph.rough = mix(grass.rough, soil.rough, dry);
@@ -1002,8 +1002,28 @@ fn fragment(
             // Чёрные щели скана на солнце выглядят кляксами — контраст картинки убавлен.
             let rock_flat = 0.5 * (surface.photo_mean_b.rgb + base_b);
             let rock_c = mix(rock_flat, retint(rock.albedo, surface.photo_mean_b.rgb, base_b, 0.5), 0.55) * vec3<f32>(0.6, 0.58, 0.54) * mix(0.72, 1.12, strata) * (1.0 - 0.3 * drip);
-            ph.albedo = mix(ph.albedo, rock_c, rk);
-            ph.n = normalize(mix(ph.n, normalize(mix(n, rock.n, 0.4)), rk));
+            // Скала ломается на блоки по пластам и трещинам: у каждого блока свой наклон грани
+            // и тон, между блоками — тёмные щели. Без этого обрыв читался гладкой «подушкой».
+            var crag_n = normalize(mix(n, rock.n, 0.4));
+            var crag = 1.0;
+            if rk > 0.01 {
+                // Пласты лежат почти горизонтально и длинные; трещины идут не сплошной сеткой, а
+                // местами (сплошная сетка читалась каменной кладкой).
+                let warp = fbm(wp.xz * 0.21 + vec2<f32>(wp.y * 0.3, 4.1)) - 0.5;
+                let ly = wp.y * 0.5 + fbm(wp.xz * 0.06) * 2.2 + warp * 0.9;
+                let wx = smoothstep(0.3, 0.7, n.x * n.x / max(n.x * n.x + n.z * n.z, 1e-4));
+                let va = voronoi(vec2<f32>(wp.z * 0.17 + ly * 0.2 + warp, ly));
+                let vb = voronoi(vec2<f32>(wp.x * 0.17 - ly * 0.2 + warp, ly + 3.7));
+                let far = 1.0 - smoothstep(250.0, 500.0, length(view.world_position.xyz - wp));
+                let open = smoothstep(0.38, 0.62, fbm(vec2<f32>(wp.x + wp.z, wp.y * 2.0) * 0.23 + vec2<f32>(9.2, 3.3)));
+                let gap = mix(1.0 - smoothstep(0.02, 0.13, vb.y - vb.x), 1.0 - smoothstep(0.02, 0.13, va.y - va.x), wx) * far * mix(0.25, 1.0, open);
+                let id = mix(vb.z, va.z, step(0.5, wx));
+                crag = mix(0.82, 1.12, id) * (1.0 - 0.5 * gap);
+                let tilt = vec3<f32>(fract(id * 17.3) - 0.5, (fract(id * 5.1) - 0.5) * 0.5, fract(id * 29.7) - 0.5);
+                crag_n = normalize(crag_n + tilt * 0.7 * far * (1.0 - gap));
+            }
+            ph.albedo = mix(ph.albedo, rock_c * crag, rk);
+            ph.n = normalize(mix(ph.n, crag_n, rk));
             ph.rough = mix(ph.rough, rock.rough, rk);
             let shore = 1.0 - smoothstep(-1.0, 0.4, wp.y + (fbm(wp.xz * 0.3) - 0.5) * 0.8);
             ph.albedo = mix(ph.albedo, gravel.albedo, shore);

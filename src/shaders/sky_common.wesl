@@ -401,8 +401,9 @@ fn mountain_shade_q(dir_in: vec3<f32>, s: SkyParams, steps: i32, octs: i32, noct
     let amb_l = (mix(mix(s.tint.rgb * 0.55, hor * 0.5, 0.5), vec3<f32>(0.22, 0.29, 0.42), d) * (1.0 - 0.9 * n) + hor * 0.25 * n) * 1.2;
     var mc = alb * (sun_l * ndl + amb_l);
     // Клочья низких облаков на склонах: белые мягкие пятна между лесом и снегом.
-    let wn = vnoise(p / 2300.0 + vec2<f32>(3.1, 7.7)) * 0.6 + vnoise(p / 900.0) * 0.3 + vnoise(p / 310.0) * 0.1;
-    let wisp = smoothstep(0.5, 0.7, wn) * smoothstep(0.04, 0.13, hn) * (1.0 - smoothstep(0.26, 0.46, hn)) * 0.8 * (1.0 - n);
+    // Края рваные (мелкий шум), сплошной белой стеной клок не встаёт.
+    let wn = vnoise(p / 2300.0 + vec2<f32>(3.1, 7.7)) * 0.46 + vnoise(p / 900.0) * 0.32 + vnoise(p / 310.0) * 0.22;
+    let wisp = smoothstep(0.47, 0.82, wn) * smoothstep(0.07, 0.18, hn) * (1.0 - smoothstep(0.26, 0.46, hn)) * 0.7 * (1.0 - n);
     mc = mix(mc, vec3<f32>(0.85) * (sun_l * 0.55 + amb_l), wisp);
     // Дымка: ясным днём голубее и темнее неба у горизонта (дальние горы синие), в ненастье гуще.
     let tr = exp(-t / mix(45000.0, 11000.0, oc));
@@ -410,6 +411,11 @@ fn mountain_shade_q(dir_in: vec3<f32>, s: SkyParams, steps: i32, octs: i32, noct
     mc = mix(haze_c, mc, tr);
     // У подножий стоит дымка: горы отделяются от ближнего леса.
     mc = mix(mc, hor, (1.0 - smoothstep(0.05, 0.3, hn)) * 0.35 * (1.0 - n));
+    // Воздух у земли: чем ниже над горизонтом, тем длиннее луч идёт сквозь приземную дымку.
+    // Подножия тонут в том же цвете, в который уходят дальние деревья и стены, — иначе те
+    // светлели на фоне тёмных предгорий, как вырезанные из бумаги.
+    let low = 1.0 - smoothstep(0.0, 0.2, e);
+    mc = mix(mc, hor, low * sqrt(low) * 0.9);
     return vec4<f32>(mc, 1.0);
 }
 

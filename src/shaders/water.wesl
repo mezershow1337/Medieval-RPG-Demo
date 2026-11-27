@@ -184,13 +184,21 @@ fn wave_grad(p: vec2<f32>, dir: vec2<f32>, len: f32, steep: f32, t: f32) -> vec2
 }
 
 fn ripples(p: vec2<f32>, t: f32) -> vec2<f32> {
+    // Рябь вытянута гребнями поперёк ветра: под малым углом такие гребни растягивают отражения
+    // в светлые и тёмные дорожки, а круглая «крупа» давала ровный шум.
+    let w = vec2<f32>(0.6, 0.8);
+    let c = vec2<f32>(0.8, -0.6);
+    let q = vec2<f32>(dot(p, c), dot(p, w));
     let e = 0.15;
-    let a = p * 1.6 + vec2<f32>(t * 0.35, t * 0.21);
-    let b = p * 3.7 - vec2<f32>(t * 0.27, -t * 0.4);
-    let h0 = vnoise(a) + vnoise(b) * 0.5;
-    let hx = vnoise(a + vec2<f32>(e, 0.0)) + vnoise(b + vec2<f32>(e * 2.3, 0.0)) * 0.5;
-    let hz = vnoise(a + vec2<f32>(0.0, e)) + vnoise(b + vec2<f32>(0.0, e * 2.3)) * 0.5;
-    return vec2<f32>(hx - h0, hz - h0) / e;
+    let a = vec2<f32>(q.x * 0.6, q.y * 1.7) + vec2<f32>(t * 0.1, t * 0.4);
+    let b = vec2<f32>(q.x * 1.5, q.y * 3.9) - vec2<f32>(t * 0.27, -t * 0.4);
+    // Третья, мелкая октава: без неё вода у ног гладкая, как масло.
+    let d = vec2<f32>(q.x * 3.6, q.y * 8.5) + vec2<f32>(t * 0.5, t * 0.75);
+    let h0 = vnoise(a) + vnoise(b) * 0.5 + vnoise(d) * 0.2;
+    let hx = vnoise(a + vec2<f32>(e * 0.375, 0.0)) + vnoise(b + vec2<f32>(e * 0.94, 0.0)) * 0.5 + vnoise(d + vec2<f32>(e * 2.25, 0.0)) * 0.2;
+    let hz = vnoise(a + vec2<f32>(0.0, e * 1.06)) + vnoise(b + vec2<f32>(0.0, e * 2.44)) * 0.5 + vnoise(d + vec2<f32>(0.0, e * 5.3)) * 0.2;
+    let g = vec2<f32>(hx - h0, hz - h0) / e;
+    return c * g.x + w * g.y;
 }
 
 // Поглощение света в воде, 1/м (красный — сильнее всего): вода Понта зеленовато-синяя.
@@ -316,7 +324,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     if water.params.w < 0.5 {
         g += wave_grad(p, normalize(vec2<f32>(-0.4, 0.9)), 0.9, 0.05, t) * fade_small;
         g += wave_grad(p, normalize(vec2<f32>(0.6, -0.8)), 0.55, 0.04, t) * fade_small;
-        g += ripples(p, t) * mix(0.065, 0.04, calm) * fade_small;
+        // У самых ног рябь мельче: крупные блики вплотную выглядели масляными кольцами.
+        g += ripples(p, t) * mix(0.065, 0.04, calm) * fade_small * mix(0.6, 1.0, smoothstep(2.0, 14.0, dist));
     }
     let big = normalize(in.world_normal);
     var N = normalize(vec3<f32>(big.x - g.x, big.y, big.z - g.y));

@@ -1211,7 +1211,7 @@ fn kitchen_garden(b: &mut Builder, r: Rect, inside: &impl Fn(f32, f32) -> bool, 
                     }
                     let p = at(k, rng);
                     let s = rng.range(0.7, 1.25);
-                    b.mesh(Mat::HerbGreen).lathe(p, &[(0.0, 0.0), (0.21 * s, 0.09 * s), (0.0, 0.26 * s)], 6);
+                    kit::cabbage(b, Mat::HerbGreen, p, s, 1.0, p.x * 2.3 + p.z);
                 }
             }
             // Лук и чеснок: пучки тонких перьев.

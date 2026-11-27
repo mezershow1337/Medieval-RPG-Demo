@@ -1148,7 +1148,8 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
             }
             b.at(p.x, p.y);
             let q = g(p.x, p.y) - Vec3::Y * 0.15;
-            let h = 9.0 + size * 8.5;
+            // Каждая четвёртая ель — великан: бор с ровной кромкой издали похож на забор.
+            let h = 9.0 + size * 8.5 + if variant % 4 == 0 { 3.0 + size * 5.0 } else { 0.0 };
             b.plant(PlantKind::Fir, q, h, yaw, variant);
             b.invisible.push(Aabb::new(q - Vec3::new(0.25, 0.0, 0.25), q + Vec3::new(0.25, h * 0.5, 0.25)));
         }
