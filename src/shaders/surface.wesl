@@ -692,6 +692,8 @@ fn fragment(
     var color = base_a;
     var rough = pbr_input.material.perceptual_roughness;
     var N = pbr_input.N;
+    // Добавка рассеянного света на скале обрывов (см. рельеф, вид 19).
+    var rock_fill = 0.0;
     var emissive = vec3<f32>(0.0);
     var water = false;
     // Объёмный рельеф: в полную силу вблизи, к 45 м сходит на нет (дальше его не разглядеть).
@@ -1014,12 +1016,12 @@ fn fragment(
             // Чёрные щели скана на солнце выглядят кляксами — контраст картинки убавлен.
             let rock_flat = 0.5 * (surface.photo_mean_b.rgb + base_b);
             // Самые чёрные щели скана подняты к среднему тону: на солнце они лежали кляксами.
-            let rock_a = mix(rock.albedo, max(rock.albedo, surface.photo_mean_b.rgb * 0.55), 0.75);
+            let rock_a = mix(rock.albedo, max(rock.albedo, surface.photo_mean_b.rgb * 0.72), 0.85);
             let rock_c = mix(rock_flat, retint(rock_a, surface.photo_mean_b.rgb, base_b, 0.5), mix(0.6, 0.9, pom_k)) * vec3<f32>(0.57, 0.57, 0.55) * mix(0.72, 1.12, strata) * (1.0 - 0.3 * drip);
             // Скала ломается на блоки по пластам и трещинам: у каждого блока свой наклон грани
             // и тон, между блоками — тёмные щели. Без этого обрыв читался гладкой «подушкой».
             // Вблизи рельеф скалы в полную силу (резкие грани и трещинки), вдали мягче — там он рябит.
-            var crag_n = normalize(mix(n, rock.n, mix(0.4, 0.85, pom_k)));
+            var crag_n = normalize(mix(n, rock.n, mix(0.4, 0.7, pom_k)));
             var crag = 1.0;
             if rk > 0.01 {
                 // Пласты лежат почти горизонтально и длинные; трещины идут не сплошной сеткой, а
@@ -1044,6 +1046,9 @@ fn fragment(
             rock_cc = mix(rock_cc, (rock_cc * 0.55 + vec3<f32>(0.035, 0.04, 0.022)) * vec3<f32>(0.9, 1.0, 0.72), lichen * 0.6);
             rock_cc = mix(rock_cc, vec3<f32>(0.035, 0.05, 0.018) * (0.6 + rock_a.g / max(surface.photo_mean_b.g, 0.02) * 0.5), moss * 0.7);
             ph.albedo = mix(ph.albedo, rock_cc, rk);
+            // Светлая скала сама подсвечивает свои тени отражённым светом: без добавки тени елей
+            // лежали на обрыве иссиня-чёрными кляксами (на референсе тень на камне серая).
+            rock_fill = rk;
             ph.n = normalize(mix(ph.n, crag_n, rk));
             ph.rough = mix(ph.rough, rock.rough, rk);
             let shore = 1.0 - smoothstep(-1.0, 0.4, wp.y + (fbm(wp.xz * 0.3) - 0.5) * 0.8);
@@ -1200,6 +1205,7 @@ fn fragment(
 @if(PREPASS_PIPELINE) {
     out = deferred_output(in, pbr_input);
 } @else {
+    pbr_input.diffuse_occlusion = pbr_input.diffuse_occlusion * (1.0 + 0.8 * rock_fill);
     out.color = apply_pbr_lighting(pbr_input);
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
 }
