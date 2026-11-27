@@ -315,8 +315,8 @@ fn spawn_plants(
                 alpha_mode: AlphaMode::Mask(0.45),
                 double_sided: true,
                 cull_mode: None,
-                perceptual_roughness: 0.8,
-                reflectance: 0.25,
+                perceptual_roughness: 0.9,
+                reflectance: 0.12,
                 // Свет сквозь листву (контровое солнце просвечивает крону). Больше не ставим:
                 // в Bevy пропускание отнимает столько же у отражённого света и крона темнеет.
                 diffuse_transmission: 0.15,
@@ -505,7 +505,7 @@ fn update_grass(
         .material
         .get_or_insert_with(|| {
             let h = foliage.add(foliage_material(
-                StandardMaterial { base_color: Color::WHITE, double_sided: true, cull_mode: None, perceptual_roughness: 0.85, reflectance: 0.25, diffuse_transmission: 0.3, ..default() },
+                StandardMaterial { base_color: Color::WHITE, double_sided: true, cull_mode: None, perceptual_roughness: 0.95, reflectance: 0.08, diffuse_transmission: 0.3, ..default() },
                 WindKind::Grass,
             ));
             wind.0.push((h.clone(), WindKind::Grass));

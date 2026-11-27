@@ -992,6 +992,13 @@ fn fragment(
         color *= 1.0 + macro_v * variation * 1.2;
         rough = clamp(mix(rough, ph.rough, 0.85), 0.05, 1.0);
         N = ph.n;
+        if kind == 19 {
+            // Земля и трава матовые: против солнца блик на мелких нормалях давал белёсую рябь
+            // с чёрными точками.
+            rough = max(rough, 0.93);
+            pbr_input.material.reflectance = vec3<f32>(0.12);
+            N = normalize(mix(n, N, 0.6));
+        }
 
         // Мох у земли и на верхних гранях, грязь и подтёки снизу.
         let up = clamp(n.y, 0.0, 1.0);

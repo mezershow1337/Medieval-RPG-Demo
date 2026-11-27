@@ -459,14 +459,11 @@ fn spring(b: &mut Builder) {
     }
 }
 
-/// Ива у воды.
+/// Ива у воды: настоящее дерево с кроной из листвы (модель лиственного дерева), а не
+/// прежние гранёные «шары» на столбе.
 fn willow(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
-    b.mesh(Mat::Wood).lathe(p - Vec3::Y * 0.2, &[(0.3, 0.0), (0.22, h * 0.45), (0.12, h * 0.6)], 7);
-    for k in 0..6 {
-        let a = k as f32 / 6.0 * TAU + rng.range(0.0, 0.8);
-        let c = p + Vec3::new(a.cos() * h * 0.25, h * rng.range(0.6, 0.8), a.sin() * h * 0.25);
-        b.mesh(Mat::HerbSilver).lathe(c, &[(0.0, -h * 0.35), (h * 0.18, -h * 0.25), (h * 0.22, 0.0), (h * 0.12, h * 0.1), (0.0, h * 0.12)], 7);
-    }
+    let (yaw, v) = (rng.range(0.0, TAU), (rng.range(0.0, 3.0)) as u32);
+    b.plant(PlantKind::Oak, p - Vec3::Y * 0.15, h * 1.35, yaw, v);
     kit::hidden(b, p - Vec3::new(0.3, 0.2, 0.3), p + Vec3::new(0.3, h * 0.5, 0.3));
 }
 

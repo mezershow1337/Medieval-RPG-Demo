@@ -212,7 +212,7 @@ impl Key {
 const DAY: Key = Key {
     sun_color: Vec3::new(1.0, 0.93, 0.8),
     lux: 15_000.0,
-    ambient: (Vec3::new(0.55, 0.68, 0.95), 170.0),
+    ambient: (Vec3::new(0.55, 0.68, 0.95), 200.0),
     horizon: Vec3::new(0.62, 0.72, 0.86),
     horizon_sun: (Vec3::new(0.35, 0.28, 0.15), 8.0),
     zenith: Vec3::new(0.07, 0.2, 0.62),
