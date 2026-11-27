@@ -41,7 +41,7 @@ impl Surface {
             Wood | Timber | Bread => Surface::Wood,
             Earth | Soot => Surface::Dirt,
             Grass | Terrain | Leaves | Conifer | HerbGreen | HerbSilver | PetalYellow | PetalPurple | PetalWhite | PetalRed | PetalPink | Thatch => Surface::Grass,
-            Rug | Cloth | Felt | Canvas | Banner | Leather => Surface::Cloth,
+            Rug | Cloth | Felt | Canvas | Banner | Leather | Parchment => Surface::Cloth,
             Tile | Roof | Ceramic => Surface::Tile,
             Water => Surface::Water,
         })

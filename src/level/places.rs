@@ -157,6 +157,7 @@ fn city_places() -> Vec<Place> {
         p("iatreion", "Ятрейон (кабинет врача)", "ἰατρεῖον", Hospital, flat(xr.x0 + 4.35, xc.z0 + xc.d() / 4.0 + 1.3), 3.0),
         p("didaskaleion", "Дидаскалион (школа)", "διδασκαλεῖον", School, dc.center(0.0), 8.0),
         p("library", "Книгохранилище дидаскалиона", "βιβλιοθήκη", Library, flat(dr.x0 + 3.75, dc.z0 + dc.d() / 4.0 + 1.3), 3.0),
+        p("bibliotheke", "Городская библиотека", "βιβλιοθήκη", Library, city::library::plan().vestibule.center(0.0), 12.0),
         p("bookseller", "Лавка книжника", "βιβλιοπωλεῖον", Bookseller, houses::shop_point(16, -2, Side::S), 2.5),
         p("apothecary_agora", "Аптека у агоры", "μυροπωλεῖον", Apothecary, houses::shop_point(17, -2, Side::S), 2.5),
         p("apothecary_port", "Аптека у порта", "πιγμεντάριον", Apothecary, houses::shop_point(17, 1, Side::N), 2.5),

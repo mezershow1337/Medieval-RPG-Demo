@@ -56,7 +56,7 @@ pub fn tutors(people: &[Townsman]) -> Vec<Tutor> {
         // Учителя дидаскалиона: тот, вокруг кого сидят ученики, — грамматист (класс),
         // остальные — грамматики в книгохранилище.
         let near = |p: Vec3, r: f32| (p - school.pos).length() < r;
-        let scholars: Vec<usize> = people.iter().enumerate().filter(|(_, r)| r.role == Some(Role::Scholar) && near(r.pos, 30.0)).map(|(i, _)| i).collect();
+        let scholars: Vec<usize> = people.iter().enumerate().filter(|(_, r)| r.role == Some(Role::Scholar) && near(r.pos, 30.0) && !crate::level::library::inside(r.pos)).map(|(i, _)| i).collect();
         let pupils = |i: usize| people.iter().filter(|r| r.role == Some(Role::Student) && (r.pos - people[i].pos).length() < 9.0).count();
         let class = scholars.iter().copied().max_by_key(|i| (pupils(*i), usize::MAX - *i));
         if let Some(c) = class {

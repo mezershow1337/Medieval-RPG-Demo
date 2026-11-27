@@ -576,6 +576,8 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         Mat::Shingle => (Color::srgb(0.52, 0.48, 0.4), Color::srgb(0.4, 0.37, 0.31), P_EARTH, 1.0, 0.3, 0.8, 0.9, 0.0, 0.0, 0.0, 0.0),
         // Окорённое бревно: серо-бурое, обветренное; второй цвет — светлый торец.
         Mat::Timber => (Color::srgb(0.36, 0.27, 0.19), Color::srgb(0.62, 0.5, 0.36), P_LOG, 1.0, 0.35, 0.8, 0.85, 0.0, 0.0, 0.0, 0.0),
+        // Пергамент: тёплый кремовый, матовый, с лёгкой неровностью выделки.
+        Mat::Parchment => (Color::srgb(0.80, 0.72, 0.55), Color::srgb(0.66, 0.57, 0.41), P_PLAIN, 1.0, 0.18, 0.15, 0.85, 0.0, 0.0, 0.15, 0.0),
     };
     let photo = photo_layers(mat);
     let tex = surface_textures();
@@ -627,7 +629,7 @@ pub fn depth_rank(mat: Mat) -> f32 {
         Mat::Felt | Mat::Canvas | Mat::Cloth => 11,
         Mat::Water | Mat::Coals => 10,
         Mat::Mosaic | Mat::Signinum => 9,
-        Mat::Ceramic | Mat::Bronze | Mat::Iron | Mat::Gold | Mat::Glass | Mat::Bread | Mat::Leather => 8,
+        Mat::Ceramic | Mat::Bronze | Mat::Iron | Mat::Gold | Mat::Glass | Mat::Bread | Mat::Leather | Mat::Parchment => 8,
         Mat::Ochre => 7,
         Mat::Paving | Mat::Floor | Mat::Cobble => 7,
         Mat::Plaster | Mat::Trim => 6,

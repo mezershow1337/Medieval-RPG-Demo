@@ -33,6 +33,7 @@ pub struct OpenWindows<'w> {
     map: Option<Res<'w, crate::map::MapView>>,
     towns: Option<Res<'w, crate::towns_client::TownUi>>,
     school: Option<Res<'w, crate::school_client::SchoolUi>>,
+    library: Option<Res<'w, crate::library_client::LibraryUi>>,
     console: Option<Res<'w, crate::console::Console>>,
 }
 
@@ -46,6 +47,7 @@ impl OpenWindows<'_> {
             || self.map.as_ref().is_some_and(|m| m.open)
             || self.towns.as_ref().is_some_and(|t| t.open())
             || self.school.as_ref().is_some_and(|s| s.open())
+            || self.library.as_ref().is_some_and(|l| l.open())
     }
 
     pub fn menu_open(&self) -> bool {

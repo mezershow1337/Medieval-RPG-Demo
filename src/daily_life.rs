@@ -1673,7 +1673,9 @@ impl Town {
             Job::Porter | Job::Fisher => Role::Sailor,
             Job::Default => r.role,
         };
-        let work = work_act(role);
+        // В городской библиотеке грамматики не учат, а читают и пишут; в книгохранилище дидаскалиона не ходят.
+        let in_library = crate::level::library::inside(r.pos);
+        let work = if in_library && role == Role::Scholar { Write } else { work_act(role) };
         let mut v = vec![w(0.0, Bed, Sleep)];
         match role {
             Role::Craftsman | Role::Weaver | Role::Cook | Role::Shopkeeper | Role::Bather | Role::Scholar | Role::Student => {
@@ -1682,7 +1684,7 @@ impl Town {
                 let at_work = if self.anvil[i].is_some() { Target::Anvil } else { Home };
                 v.push(w(7.2 + j(4), at_work, work));
                 v.push(w(12.0 + j(5), Home, Eat));
-                if r.role == Role::Scholar && self.dist_home(i, Dest::Library) < 300.0 {
+                if r.role == Role::Scholar && !in_library && self.dist_home(i, Dest::Library) < 300.0 {
                     v.push(w(13.5, D(Dest::Library), Write));
                 } else {
                     v.push(w(13.3 + j(6), at_work, work));
