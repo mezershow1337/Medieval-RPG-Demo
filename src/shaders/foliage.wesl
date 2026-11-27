@@ -15,14 +15,23 @@ import bevy_pbr::render::mesh_view_bindings::globals;
 @if(PREPASS_PIPELINE)
 import bevy_pbr::prepass::io::{Vertex, VertexOutput, decompress_vertex};
 @else
-import bevy_pbr::render::forward_io::{Vertex, VertexOutput, decompress_vertex};
+import bevy_pbr::render::forward_io::{Vertex, VertexOutput, FragmentOutput, decompress_vertex};
+@if(!PREPASS_PIPELINE)
+import bevy_pbr::render::{
+    pbr_fragment::pbr_input_from_standard_material,
+    pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
+};
+@if(!PREPASS_PIPELINE && VISIBILITY_RANGE_DITHER)
+import bevy_pbr::render::pbr_functions::visibility_range_dither;
 
 struct Foliage {
-    // x — не используется, y — сила ветра, z — порывистость, w — не используется.
+    // x — насколько нормали листвы скруглены по кроне (0 — как в модели), y — сила ветра,
+    // z — порывистость, w — высота середины кроны (в единицах модели).
     // Время берём из `globals` вида: материал меняется только при смене погоды, а не каждый
     // кадр (изменённый материал заставляет Bevy заново готовить все ~12 тыс. мешей листвы).
     wind: vec4<f32>,
-    // xy — направление ветра (мир, XZ), z — жёсткость (1 — дерево, 0.3 — трава), w — запас.
+    // xy — направление ветра (мир, XZ), z — жёсткость (1 — дерево, 0.3 — трава),
+    // w — добавка рассеянного света в кроне (0 — как у всего остального).
     dir: vec4<f32>,
 }
 
@@ -58,6 +67,22 @@ fn wind_offset(world: vec3<f32>, base: vec3<f32>, flex: f32, phase: f32, t: f32)
     return off;
 }
 
+/// Нормаль листа, скруглённая по кроне: каждая карточка листвы смотрит куда попало, и с
+/// нормалями модели крона пестрит светлыми и тёмными лоскутами. С нормалями «от середины
+/// кроны» дерево освещено как один объём: солнечный бок светлый, теневой тёмный.
+fn crown_normal(n: vec3<f32>, world: vec3<f32>, world_from_local: mat4x4<f32>) -> vec3<f32> {
+    let k = foliage.wind.x;
+    if k <= 0.0 {
+        return n;
+    }
+    let center = world_from_local[3].xyz + world_from_local[1].xyz * foliage.wind.w;
+    // Низ кроны смотрит вбок, а не в землю: иначе снизу куст чёрный.
+    let rn = normalize(world - center);
+    let up = normalize(world_from_local[1].xyz);
+    let round = normalize(rn + up * (0.3 + 0.6 * max(-dot(rn, up), 0.0)));
+    return normalize(mix(n, round, k));
+}
+
 @vertex
 fn vertex(vertex_in: Vertex) -> VertexOutput {
     var out: VertexOutput;
@@ -88,7 +113,7 @@ fn vertex(vertex_in: Vertex) -> VertexOutput {
     out.position.z = min(out.position.z, 1.0);
 }
 @if(NORMAL_PREPASS_OR_DEFERRED_PREPASS && VERTEX_NORMALS)
-    out.world_normal = mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex_in.instance_index);
+    out.world_normal = crown_normal(mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex_in.instance_index), world.xyz, world_from_local);
 @if(NORMAL_PREPASS_OR_DEFERRED_PREPASS && VERTEX_TANGENTS)
     out.world_tangent = mesh_functions::mesh_tangent_local_to_world(world_from_local, vertex.tangent, vertex_in.instance_index);
 @if(MOTION_VECTOR_PREPASS) {
@@ -99,7 +124,7 @@ fn vertex(vertex_in: Vertex) -> VertexOutput {
 }
 } @else {
 @if(VERTEX_NORMALS)
-    out.world_normal = mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex_in.instance_index);
+    out.world_normal = crown_normal(mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex_in.instance_index), world.xyz, world_from_local);
 @if(VERTEX_TANGENTS)
     out.world_tangent = mesh_functions::mesh_tangent_local_to_world(world_from_local, vertex.tangent, vertex_in.instance_index);
 }
@@ -110,5 +135,26 @@ fn vertex(vertex_in: Vertex) -> VertexOutput {
     out.instance_index = vertex_in.instance_index;
 @if(VISIBILITY_RANGE_DITHER)
     out.visibility_range_dither = mesh_functions::get_visibility_range_dither_level(vertex_in.instance_index, world_from_local[3]);
+    return out;
+}
+
+// Цвет листвы — обычный расчёт света Bevy, но без затенения по экрану (SSAO) в полную силу:
+// в густой кроне карточки листвы заслоняют друг друга, и SSAO съедал там весь рассеянный
+// свет — тенистый низ кустов и можжевельников выходил чёрной кляксой. Листва же пропускает
+// и рассеивает свет, в тени кроны она тёмно-зелёная, а не чёрная.
+@if(!PREPASS_PIPELINE)
+@fragment
+fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
+@if(VISIBILITY_RANGE_DITHER)
+    visibility_range_dither(in.position, in.visibility_range_dither);
+    var pbr_input = pbr_input_from_standard_material(in, is_front);
+    pbr_input.material.base_color = alpha_discard(pbr_input.material.flags, pbr_input.material.alpha_cutoff, pbr_input.material.base_color);
+    // Крона ещё и светится насквозь: свет неба проходит через хвою и листья, поэтому теневой
+    // бок дерева получает больше рассеянного света, чем глухая стена.
+    pbr_input.diffuse_occlusion = max(pbr_input.diffuse_occlusion, vec3<f32>(0.8)) * (1.0 + foliage.dir.w);
+    pbr_input.specular_occlusion = max(pbr_input.specular_occlusion, 0.8);
+    var out: FragmentOutput;
+    out.color = apply_pbr_lighting(pbr_input);
+    out.color = main_pass_post_lighting_processing(pbr_input, out.color);
     return out;
 }

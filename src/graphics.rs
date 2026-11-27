@@ -48,8 +48,6 @@ pub struct Mood {
     pub tint: Vec3,
     /// Сила подсветки облаков снизу низким солнцем.
     pub cloud_glow: f32,
-    /// Цвета поглощения и рассеяния дымки (см. `FogFalloff::from_visibility_colors`).
-    pub fog_far: (Color, Color),
     pub visibility: f32,
     pub shadow_distance: f32,
     pub day: bool,
@@ -147,7 +145,6 @@ fn castle_mood() -> Mood {
         glow: Vec3::new(1.0, 0.66, 0.46),
         tint: Vec3::new(0.34, 0.40, 0.66),
         cloud_glow: 1.5,
-        fog_far: (Color::srgb(0.36, 0.36, 0.46), Color::srgb(0.62, 0.56, 0.60)),
         visibility: 380.0,
         shadow_distance: 160.0,
         day: false,
@@ -178,7 +175,6 @@ struct Key {
     glow: Vec3,
     tint: Vec3,
     cloud_glow: f32,
-    fog_far: (Vec3, Vec3),
     visibility: f32,
     sky_light: f32,
     haze: f32,
@@ -199,7 +195,6 @@ impl Key {
             glow: v(self.glow, o.glow),
             tint: v(self.tint, o.tint),
             cloud_glow: f(self.cloud_glow, o.cloud_glow),
-            fog_far: (v(self.fog_far.0, o.fog_far.0), v(self.fog_far.1, o.fog_far.1)),
             visibility: f(self.visibility, o.visibility),
             sky_light: f(self.sky_light, o.sky_light),
             haze: f(self.haze, o.haze),
@@ -212,16 +207,16 @@ impl Key {
 const DAY: Key = Key {
     sun_color: Vec3::new(1.0, 0.93, 0.8),
     lux: 15_000.0,
-    ambient: (Vec3::new(0.55, 0.68, 0.95), 260.0),
+    // Рассеянного света днём много (как на референсе: тени тёмные, но не чёрные).
+    ambient: (Vec3::new(0.55, 0.68, 0.95), 400.0),
     horizon: Vec3::new(0.62, 0.72, 0.86),
     horizon_sun: (Vec3::new(0.35, 0.28, 0.15), 8.0),
-    zenith: Vec3::new(0.07, 0.2, 0.62),
+    zenith: Vec3::new(0.11, 0.25, 0.6),
     glow: Vec3::new(1.0, 0.66, 0.46),
     tint: Vec3::new(0.34, 0.40, 0.66),
     cloud_glow: 1.5,
-    fog_far: (Vec3::new(0.50, 0.62, 0.80), Vec3::new(0.78, 0.78, 0.74)),
-    visibility: 850.0,
-    sky_light: 760.0,
+    visibility: 2600.0,
+    sky_light: 980.0,
     haze: 0.0003,
     exposure: 0.0,
 };
@@ -238,7 +233,6 @@ const GOLD: Key = Key {
     glow: Vec3::new(1.0, 0.66, 0.46),
     tint: Vec3::new(0.34, 0.40, 0.66),
     cloud_glow: 1.5,
-    fog_far: (Vec3::new(0.5, 0.5, 0.56), Vec3::new(0.8, 0.77, 0.74)),
     visibility: 1600.0,
     sky_light: 950.0,
     haze: 0.0007,
@@ -259,7 +253,6 @@ const SET: Key = Key {
     glow: Vec3::new(0.55, 0.1, 0.14),
     tint: Vec3::new(0.38, 0.32, 0.49),
     cloud_glow: 5.2,
-    fog_far: (Vec3::new(0.25, 0.2, 0.3), Vec3::new(0.48, 0.27, 0.33)),
     visibility: 1500.0,
     sky_light: 550.0,
     haze: 0.0013,
@@ -277,7 +270,6 @@ const DUSK: Key = Key {
     glow: Vec3::new(0.24, 0.05, 0.07),
     tint: Vec3::new(0.10, 0.09, 0.19),
     cloud_glow: 1.6,
-    fog_far: (Vec3::new(0.14, 0.13, 0.22), Vec3::new(0.28, 0.2, 0.26)),
     visibility: 1300.0,
     sky_light: 900.0,
     haze: 0.0016,
@@ -295,7 +287,6 @@ const NIGHT: Key = Key {
     glow: Vec3::new(0.02, 0.022, 0.04),
     tint: Vec3::new(0.012, 0.016, 0.035),
     cloud_glow: 0.0,
-    fog_far: (Vec3::new(0.025, 0.032, 0.06), Vec3::new(0.04, 0.05, 0.08)),
     visibility: 900.0,
     sky_light: 900.0,
     haze: 0.0018,
@@ -366,7 +357,6 @@ pub fn mood_at(game: f64) -> Mood {
         (moon, Vec3::new(0.62, 0.72, 1.0), moon_lux)
     };
     let fog = w.fog;
-    let fog_tint = |c: Vec3| c.lerp(horizon * 1.1, 0.6 * fog.max(overcast * 0.5));
     let visibility = (key.visibility * (1.0 - 0.94 * fog) * (1.0 - 0.55 * w.rain)).max(55.0);
     let c = |v: Vec3| Color::linear_rgb(v.x, v.y, v.z);
     Mood {
@@ -382,7 +372,6 @@ pub fn mood_at(game: f64) -> Mood {
         glow: grey(key.glow, 0.8 * overcast) * dim,
         tint: grey(key.tint, 0.6 * overcast) * dim,
         cloud_glow: key.cloud_glow * (1.0 - 0.8 * overcast),
-        fog_far: (c(fog_tint(key.fog_far.0)), c(fog_tint(key.fog_far.1))),
         visibility,
         shadow_distance: 240.0,
         day: e > 0.3,
@@ -415,6 +404,7 @@ impl Plugin for GraphicsPlugin {
         embedded_asset!(app, "shaders/smoke.wesl");
         // Общая функция неба — модуль, который импортируют небо, море и дым.
         bevy::shader::load_shader_library!(app, "shaders/sky_common.wesl");
+        app.add_plugins((crate::cloud_map::CloudMapPlugin, crate::mountain_map::MountainMapPlugin));
         app.add_plugins((
             MaterialPlugin::<SurfaceMaterial>::default(),
             MaterialPlugin::<GlassMaterial>::default(),
@@ -956,7 +946,7 @@ fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
     let sun = m.sun.normalize();
     commands.spawn((
         Mesh3d(meshes.add(sky_mesh(SKY_RADIUS))),
-        MeshMaterial3d(skies.add(SkyMaterial { sky: m.sky_uniform() })),
+        MeshMaterial3d(skies.add(SkyMaterial { sky: m.sky_uniform(), clouds: images.add(Image::default()), dome: default(), mountains: images.add(Image::default()) })),
         Transform::IDENTITY,
         SkyDome,
         NotShadowCaster,
@@ -1065,8 +1055,18 @@ pub fn distance_fog(m: &Mood, draw_distance: f32) -> DistanceFog {
         // Свечение дымки к солнцу — слабее, чем у неба: иначе город против солнца тонет в оранжевом.
         directional_light_color: Color::linear_rgba(m.horizon_sun.0.x * 0.55, m.horizon_sun.0.y * 0.55, m.horizon_sun.0.z * 0.55, 1.0),
         directional_light_exponent: m.horizon_sun.1,
-        falloff: FogFalloff::from_visibility_colors(m.visibility.min(draw_distance), m.fog_far.0, m.fog_far.1),
+        falloff: fog_falloff(m, draw_distance),
     }
+}
+
+/// Как дымка густеет с расстоянием. В ясную погоду видно дальше, чем рисует камера, и дымка
+/// нужна только затем, чтобы край прорисовки не обрывался: ближняя треть чистая (деревья и
+/// стены в сотне метров — в полную силу, без молока), дальше дымка линейно густеет до края.
+/// В дождь чистая полоса короче, в туман дымка стоит от самой камеры и до края видимости.
+fn fog_falloff(m: &Mood, draw_distance: f32) -> FogFalloff {
+    let end = m.visibility.min(draw_distance);
+    let clear = ((m.visibility / draw_distance - 1.0) / 0.5).clamp(0.0, 1.0) * (m.visibility / 2200.0).min(1.0);
+    FogFalloff::Linear { start: end * 0.32 * clear * (0.6 + 0.4 * m.dayness), end }
 }
 
 /// Цветокоррекция: чуть больше контраста в средних тонах, насыщенные света (закатное
@@ -1079,7 +1079,7 @@ pub fn color_grading(m: &Mood) -> ColorGrading {
     let l = |a: f32, b: f32| a + (b - a) * k;
     ColorGrading {
         // Ночью глаз привыкает к темноте, но краски уходят (сумеречное зрение).
-        global: ColorGradingGlobal { exposure: m.exposure, post_saturation: l(1.0, 0.93) - 0.3 * m.night - 0.15 * m.overcast, ..default() },
+        global: ColorGradingGlobal { exposure: m.exposure, post_saturation: l(1.0, 0.87) - 0.3 * m.night - 0.15 * m.overcast, ..default() },
         shadows: section(l(0.9, 0.86), l(1.0, 1.08)),
         midtones: section(l(1.02, 0.94), l(1.14, 1.2)),
         highlights: section(l(1.06, 1.04), l(1.0, 1.08)),

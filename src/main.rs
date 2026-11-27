@@ -20,6 +20,9 @@ mod brewing_client;
 mod civil_client;
 mod civil_server;
 mod civilians;
+mod cloud_map;
+mod mountain_map;
+mod cloud_noise;
 mod client;
 mod collision;
 mod combat;
@@ -134,6 +137,60 @@ fn parse_addr(s: &str) -> SocketAddr {
     launcher::resolve(s).unwrap_or_else(|e| panic!("не понимаю адрес сервера: {e}"))
 }
 
+/// Вид мира сверху: вода, рельеф, город, дороги и растения точками. 2 м на пиксель,
+/// от −900 до 900 м по обеим осям (север сверху, как на миникарте: +z вниз).
+fn dump_map(path: &str) {
+    use level::PlantKind as K;
+    const N: usize = 900;
+    let mut px = vec![0u8; N * N * 3];
+    for j in 0..N {
+        for i in 0..N {
+            let (x, z) = (i as f32 * 2.0 - 900.0, j as f32 * 2.0 - 900.0);
+            let y = level::ground_y(x, z);
+            let c = if y < level::WATER_Y {
+                [40, 70, 120]
+            } else if level::inside_city(x, z) {
+                [170, 150, 120]
+            } else if level::road_distance(x, z) < 2.6 {
+                [120, 95, 60]
+            } else {
+                let k = (60.0 + y * 4.0).clamp(40.0, 200.0) as u8;
+                [k, k.saturating_add(25), k / 2 + 20]
+            };
+            px[(j * N + i) * 3..][..3].copy_from_slice(&c);
+        }
+    }
+    for p in &level::layout().plants {
+        let c = match p.kind {
+            K::Fir => [0, 60, 20],
+            K::Pine => [20, 110, 30],
+            K::Oak => [230, 200, 40],
+            K::Juniper | K::Cypress => [0, 130, 130],
+            K::Rock => [255, 255, 255],
+            K::Fig => [200, 60, 160],
+            _ => continue,
+        };
+        let (i, j) = (((p.pos.x + 900.0) / 2.0) as i32, ((p.pos.z + 900.0) / 2.0) as i32);
+        if i >= 0 && j >= 0 && (i as usize) < N && (j as usize) < N {
+            px[(j as usize * N + i as usize) * 3..][..3].copy_from_slice(&c);
+        }
+    }
+    // По три растения каждого вида, ближайших к заданной точке (`medieval_rpg map файл x z`).
+    let at: Vec<f32> = std::env::args().skip(3).filter_map(|a| a.parse().ok()).collect();
+    if let [x, z] = at[..] {
+        for kind in [K::Pine, K::Oak, K::Juniper, K::Cypress, K::Fig, K::Shrub, K::Fir, K::Rock] {
+            let mut near: Vec<_> = level::layout().plants.iter().filter(|p| p.kind == kind).map(|p| (((p.pos.x - x).powi(2) + (p.pos.z - z).powi(2)).sqrt(), p.pos, p.height)).collect();
+            near.sort_by(|a, b| a.0.total_cmp(&b.0));
+            for (d, pos, h) in near.into_iter().take(3) {
+                println!("{kind:?}: {:.0},{:.1},{:.0} высота {h:.1} (до точки {d:.0} м)", pos.x, pos.y, pos.z);
+            }
+        }
+    }
+    let mut out = format!("P6\n{N} {N}\n255\n").into_bytes();
+    out.extend_from_slice(&px);
+    std::fs::write(path, out).expect("не записать карту");
+}
+
 fn main() {
     // Загрузка больших glTF (serde_json) в пуле ввода-вывода Bevy уходит глубоко в стек, и
     // стандартных 2 МБ на поток не хватает: игра падала с «stack overflow» при запуске.
@@ -147,6 +204,8 @@ fn main() {
         launcher::attach_parent_console();
     }
     match args.first().map(String::as_str) {
+        // Карта мира сверху в файл PPM (для подбора точек съёмки): `medieval_rpg map файл.ppm`.
+        Some("map") => dump_map(args.get(1).map(String::as_str).unwrap_or("map.ppm")),
         Some("server") => {
             let port = args.get(1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
             let socket = server::bind_socket(port).expect("порт занят");

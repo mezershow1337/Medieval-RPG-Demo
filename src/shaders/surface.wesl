@@ -139,14 +139,15 @@ fn photo_plane(layer: i32, uv0: vec2<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f
                 occ = max(occ, (hh - ray_h) * (1.3 - f));
             }
             // На мягком (трава, земля) тени от «выступов» слабые: там рельеф — комки и стебли, не камень.
-            let soft = select(1.0, 0.3, layer == 7 || layer == 6 || layer == 8);
+            // У скалы щели широкие: в полную силу тень от них ложилась чёрными кляксами.
+            let soft = select(select(1.0, 0.45, layer == 9), 0.3, layer == 7 || layer == 6 || layer == 8);
             shade = 1.0 - clamp(occ * 8.0, 0.0, 1.0) * 0.55 * soft * smoothstep(0.35, 0.6, pom_k);
         }
     }
     let tex = textureSampleGrad(photo_albedo, photo_sampler, uv, layer, dx, dy);
     // Швы и щели темнее выступов (туда не попадает рассеянный свет): рисунок кладки
     // читается и на ярком солнце, а не только в тени.
-    let cavity = mix(1.0, smoothstep(-0.25, 0.55, tex.a), clamp(layer_depth(layer) * 22.0, 0.0, 0.75));
+    let cavity = mix(1.0, smoothstep(-0.25, 0.55, tex.a), clamp(layer_depth(layer) * 22.0, 0.0, 0.75) * select(1.0, 0.4, layer == 9));
     o.albedo = tex.rgb * shade * cavity;
     if layer == 19 {
         // Камыш: убираем «лоскуты» светлых и тёмных пучков (издали они читались подушками),
@@ -974,16 +975,32 @@ fn fragment(
             let rock = photo_triplanar(side, side, surface.photo.w, surface.photo.w, wp * 0.5, n, relief);
             let gravel = photo_top(18, 0.5, wp, n, relief, 1.0);
             let dry = smoothstep(0.5, 0.78, fbm(wp.xz * 0.045) + fbm(wp.xz * 0.4) * 0.25);
-            let g_col = retint(grass.albedo, mean, base_a, tint) * mix(vec3<f32>(1.0), vec3<f32>(1.05, 1.02, 0.9), smoothstep(0.4, 0.85, fbm(wp.xz * 0.02))) * vec3<f32>(0.58, 0.62, 0.68);
+            // Вблизи это земля под пучками травы (тёмная, пучки растут поверх — vegetation.rs);
+            // дальше, чем растёт трава, — сам травяной ковёр, светлее и зеленее: иначе вокруг
+            // игрока было бы видно кольцо, где трава кончается.
+            let carpet = smoothstep(35.0, 75.0, length(view.world_position.xyz - wp));
+            let g_col = retint(grass.albedo, mean, base_a, tint) * mix(vec3<f32>(1.0), vec3<f32>(1.05, 1.02, 0.9), smoothstep(0.4, 0.85, fbm(wp.xz * 0.02))) * mix(vec3<f32>(0.2, 0.25, 0.52), vec3<f32>(0.28, 0.285, 0.83), carpet);
             // Сухая почва под травой — тёмная, с прозеленью: светлая соломенная земля спорила
             // с зелёной травой и пересвечивала кадр.
-            let soil_c = mix(soil.albedo * vec3<f32>(0.5, 0.54, 0.46), g_col, 0.4);
+            let soil_c = mix(soil.albedo * mix(vec3<f32>(0.3, 0.36, 0.28), vec3<f32>(0.5, 0.54, 0.46), carpet), g_col, 0.5);
             ph.albedo = mix(g_col, soil_c, dry);
             ph.n = normalize(mix(grass.n, soil.n, dry));
             ph.rough = mix(grass.rough, soil.rough, dry);
-            let rk = smoothstep(0.38, 0.62, slope + (fbm(wp.xz * 0.08) - 0.5) * 0.35);
-            ph.albedo = mix(ph.albedo, retint(rock.albedo, surface.photo_mean_b.rgb, base_b, 0.5), rk);
-            ph.n = normalize(mix(ph.n, rock.n, rk));
+            // На крутом трава не держится: сначала голая земля с осыпью, круче — скала.
+            let bare = smoothstep(0.24, 0.33, slope + (fbm(wp.xz * 0.3) - 0.5) * 0.1 + (fbm(wp.xz * 0.9) - 0.5) * 0.05);
+            ph.albedo = mix(ph.albedo, mix(vec3<f32>(dot(soil.albedo, vec3<f32>(0.3, 0.6, 0.1))), soil.albedo, 0.45) * vec3<f32>(0.4, 0.39, 0.36), bare);
+            ph.n = normalize(mix(ph.n, soil.n, bare));
+            ph.rough = mix(ph.rough, soil.rough, bare);
+            let rk = smoothstep(0.31, 0.5, slope + (fbm(wp.xz * 0.08) - 0.5) * 0.3 + (fbm(wp.xz * 0.6) - 0.5) * 0.12);
+            // Скала обрывов: серый обветренный известняк пластами (светлый на солнце выгорал в белое
+            // пятно), сверху по уступам — тёмные потёки.
+            let strata = fbm(vec2<f32>((wp.x + wp.z) * 0.05, wp.y * 0.9));
+            let drip = smoothstep(0.45, 0.8, fbm(vec2<f32>((wp.x - wp.z) * 0.7, wp.y * 0.12)));
+            // Чёрные щели скана на солнце выглядят кляксами — контраст картинки убавлен.
+            let rock_flat = 0.5 * (surface.photo_mean_b.rgb + base_b);
+            let rock_c = mix(rock_flat, retint(rock.albedo, surface.photo_mean_b.rgb, base_b, 0.5), 0.55) * vec3<f32>(0.6, 0.58, 0.54) * mix(0.72, 1.12, strata) * (1.0 - 0.3 * drip);
+            ph.albedo = mix(ph.albedo, rock_c, rk);
+            ph.n = normalize(mix(ph.n, normalize(mix(n, rock.n, 0.4)), rk));
             ph.rough = mix(ph.rough, rock.rough, rk);
             let shore = 1.0 - smoothstep(-1.0, 0.4, wp.y + (fbm(wp.xz * 0.3) - 0.5) * 0.8);
             ph.albedo = mix(ph.albedo, gravel.albedo, shore);

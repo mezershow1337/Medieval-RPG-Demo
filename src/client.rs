@@ -268,13 +268,27 @@ fn mute_player_camera_for_shots(mut cams: Query<&mut Camera, With<crate::player:
     }
 }
 
-/// Обход для снимков уровня (вместе с `MRPG_CAM`): `MRPG_TOUR="имя:x,y,z,tx,ty,tz;…"` — камера
+/// Обход для снимков уровня (вместе с `MRPG_CAM`): `MRPG_TOUR="имя:x,y,z,tx,ty,tz;…"` (высота `g2` — над землёй) — камера
 /// ожидания по очереди встаёт в каждую точку и сохраняет `MRPG_TOUR_DIR/имя.png` (первый снимок —
 /// через `MRPG_TOUR_FRAMES` кадров, пока всё грузится, следующие — через `MRPG_TOUR_NEXT`, по
 /// умолчанию 8), потом игра выходит.
 /// Одна загрузка уровня на много снимков: на программном рендере это минуты и гигабайты.
 /// `имя@часы:…` — снимок в другое время суток (`@75.5` — 03:30 четвёртых суток).
-fn shot_tour(mut commands: Commands, mut cams: Query<&mut Transform, With<WaitingCamera>>, mut state: Local<(usize, u32)>, mut exit: MessageWriter<AppExit>) {
+fn shot_tour(
+    mut commands: Commands,
+    mut cams: Query<&mut Transform, With<WaitingCamera>>,
+    mut ui: Query<&mut Node, Without<ChildOf>>,
+    mut state: Local<(usize, u32)>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    // Снимки мира — без полосок здоровья и карты (`MRPG_TOUR_HUD=1` — оставить).
+    if std::env::var("MRPG_TOUR_HUD").is_err() {
+        for mut n in &mut ui {
+            if n.display != Display::None {
+                n.display = Display::None;
+            }
+        }
+    }
     let tour = std::env::var("MRPG_TOUR").unwrap_or_default();
     let views: Vec<(&str, Option<f64>, Transform)> = tour
         .split(';')
@@ -284,8 +298,18 @@ fn shot_tour(mut commands: Commands, mut cams: Query<&mut Transform, With<Waitin
                 Some((n, h)) => (n, h.trim().parse::<f64>().ok().map(|h| h * 3600.0)),
                 None => (name, None),
             };
-            let f: Vec<f32> = cam.split(',').filter_map(|t| t.trim().parse().ok()).collect();
-            (f.len() == 6).then(|| (name.trim(), at, Transform::from_xyz(f[0], f[1], f[2]).looking_at(Vec3::new(f[3], f[4], f[5]), Vec3::Y)))
+            let t: Vec<&str> = cam.split(',').map(str::trim).collect();
+            let mut f: Vec<f32> = t.iter().filter_map(|t| t.trim_start_matches('g').parse().ok()).collect();
+            if f.len() != 6 {
+                return None;
+            }
+            // Высота `g1.7` — над землёй в этой точке (как в `MRPG_CAM`).
+            for i in [1, 4] {
+                if t[i].starts_with('g') {
+                    f[i] += crate::level::ground_y(f[i - 1], f[i + 1]);
+                }
+            }
+            Some((name.trim(), at, Transform::from_xyz(f[0], f[1], f[2]).looking_at(Vec3::new(f[3], f[4], f[5]), Vec3::Y)))
         })
         .collect();
     let first: u32 = std::env::var("MRPG_TOUR_FRAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(30);

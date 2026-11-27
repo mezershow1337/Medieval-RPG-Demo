@@ -1007,7 +1007,13 @@ pub fn juniper(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
 /// Крымская сосна.
 pub fn pine(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
     let (yaw, v) = look_of(rng, 3);
-    b.plant(PlantKind::Pine, p, h, yaw, v);
+    // В бору сосны стройные, конусом, с хвоей до земли (три из четырёх); старые одиночные —
+    // зонтиком. Вид берём из номера варианта — лишних чисел из `rng` не тянем.
+    if v % 4 != 0 {
+        b.plant(PlantKind::Fir, p, h * 1.3, yaw, v / 4 + v);
+    } else {
+        b.plant(PlantKind::Pine, p, h, yaw, v);
+    }
     b.invisible.push(Aabb::new(p - Vec3::new(0.25, 0.0, 0.25), p + Vec3::new(0.25, h * 0.6, 0.25)));
 }
 

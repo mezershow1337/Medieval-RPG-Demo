@@ -16,6 +16,9 @@ pub const WATER_Y: f32 = -1.4;
 /// Край карты (±), дальше — невидимая стена.
 pub const WORLD_HALF: f32 = 900.0;
 pub const CELL: f32 = 6.0;
+/// Клетки с перепадом высот больше этого (м) рисуются мельче — на `STEEP_PARTS`² частей.
+const STEEP_CELL: f32 = 1.5;
+const STEEP_PARTS: usize = 3;
 
 /// Стена города (по оси кладки), по часовой стрелке при взгляде сверху (X вправо, Z вниз).
 /// Север (−Z) — открытое море, восток (+X) — Карантинная бухта, юг (+Z) — суша.
@@ -260,12 +263,17 @@ pub fn ground_y(x: f32, z: f32) -> f32 {
 pub fn terrain_meshes(hf: &HeightField, out: &mut HashMap<(Mat, Chunk), MeshBuilder>) {
     let n = hf.nx;
     let pos = |ix: usize, iz: usize| Vec3::new(hf.origin.x + ix as f32 * hf.cell, hf.node(ix, iz), hf.origin.y + iz as f32 * hf.cell);
+    // Нормаль узла — по более крутой из двух соседних клеток по каждой оси, а не по разности
+    // через две клетки (12 м): короткий откос в одну клетку по средней разности выходил
+    // пологим — на нём «росла» трава и свет ложился как на луг.
     let normal = |ix: usize, iz: usize| {
+        let c = hf.node(ix, iz);
         let l = hf.node(ix.saturating_sub(1), iz);
         let r = hf.node((ix + 1).min(n - 1), iz);
         let d = hf.node(ix, iz.saturating_sub(1));
         let u = hf.node(ix, (iz + 1).min(n - 1));
-        Vec3::new(l - r, 2.0 * hf.cell, d - u).normalize()
+        let steeper = |a: f32, b: f32| if a.abs() > b.abs() { a } else { b };
+        Vec3::new(-steeper(c - l, r - c), hf.cell, -steeper(c - d, u - c)).normalize()
     };
     // Вершины одного участка переиспользуются: индекс узла -> индекс вершины в меше участка.
     let mut maps: HashMap<(Mat, Chunk), HashMap<usize, u32>> = HashMap::new();
@@ -283,6 +291,36 @@ pub fn terrain_meshes(hf: &HeightField, out: &mut HashMap<(Mat, Chunk), MeshBuil
             let chunk = chunk_of(c);
             let key = (mat, chunk);
             let mb = out.entry(key).or_default();
+            // Крутая клетка (обрыв, берег балки) двумя треугольниками выходит «пилой» по
+            // диагонали. Делим её на 3×3 по той же билинейной поверхности, по которой ходят
+            // персонажи: обрыв выходит плавным, а ноги стоят ровно на нём.
+            let (lo, hi) = corners.iter().fold((f32::MAX, f32::MIN), |(lo, hi), c| (lo.min(c.y), hi.max(c.y)));
+            if hi - lo > STEEP_CELL {
+                let nrm = [normal(ix, iz), normal(ix + 1, iz), normal(ix + 1, iz + 1), normal(ix, iz + 1)];
+                let at = |u: f32, w: f32, v: &[Vec3; 4]| (v[0] * (1.0 - u) + v[1] * u) * (1.0 - w) + (v[3] * (1.0 - u) + v[2] * u) * w;
+                let mut ids = [[(0u32, 0.0f32); STEEP_PARTS + 1]; STEEP_PARTS + 1];
+                for (j, row) in ids.iter_mut().enumerate() {
+                    for (i, id) in row.iter_mut().enumerate() {
+                        let (u, w) = (i as f32 / STEEP_PARTS as f32, j as f32 / STEEP_PARTS as f32);
+                        let p = at(u, w, &corners);
+                        *id = (mb.vert(p, at(u, w, &nrm).normalize(), Vec2::new(p.x, p.z)), p.y);
+                    }
+                }
+                for j in 0..STEEP_PARTS {
+                    for i in 0..STEEP_PARTS {
+                        let ((a, ha), (b, hb), (c, hc), (d, hd)) = (ids[j][i], ids[j][i + 1], ids[j + 1][i + 1], ids[j + 1][i]);
+                        // Диагональ — вдоль склона (между ближайшими по высоте углами).
+                        if (ha - hc).abs() <= (hb - hd).abs() {
+                            mb.index_tri(a, c, b);
+                            mb.index_tri(a, d, c);
+                        } else {
+                            mb.index_tri(a, d, b);
+                            mb.index_tri(b, d, c);
+                        }
+                    }
+                }
+                continue;
+            }
             let map = maps.entry(key).or_default();
             let mut v = [0u32; 4];
             for (k, (jx, jz)) in [(ix, iz), (ix + 1, iz), (ix + 1, iz + 1), (ix, iz + 1)].into_iter().enumerate() {

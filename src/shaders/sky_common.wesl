@@ -86,6 +86,25 @@ fn cloud_density(q: vec2<f32>) -> f32 {
     return base * 0.7 + puffs * 0.26 + fine * 0.09 - 0.115;
 }
 
+// Карта облаков (cloud_map.wesl) — круг «рыбий глаз» вверх: в центре зенит, по краю горизонт.
+const DOME_R: f32 = 0.985;
+
+// Куда в карте облаков смотрит направление `dir` (выше горизонта).
+fn dome_uv(dir: vec3<f32>) -> vec2<f32> {
+    let e = asin(clamp(dir.y, 0.0, 1.0));
+    let r = (1.0 - e / 1.5707963) * DOME_R;
+    return 0.5 + 0.5 * r * dir.xz / max(length(dir.xz), 1e-5);
+}
+
+// Обратно: направление для точки карты; w — 1 внутри круга неба.
+fn dome_dir(uv: vec2<f32>) -> vec4<f32> {
+    let q = (uv - 0.5) * 2.0 / DOME_R;
+    let r = length(q);
+    let e = (1.0 - min(r, 1.0)) * 1.5707963;
+    let h = q / max(r, 1e-5);
+    return vec4<f32>(cos(e) * h.x, sin(e), cos(e) * h.y, step(r, 1.0));
+}
+
 // Цвет горизонта (и дымки) в направлении `dir`: та же формула, что у тумана Bevy,
 // поэтому дальние стены и море уходят в дымку ровно того цвета, что и небо за ними.
 fn horizon_color(dir: vec3<f32>, s: SkyParams) -> vec3<f32> {
@@ -116,7 +135,8 @@ fn twilight_light(dir: vec3<f32>, sun: vec3<f32>, e: f32, reach: f32) -> vec4<f3
 const DECK_ROT: vec2<f32> = vec2<f32>(0.17, -0.985);
 
 // Облака: x — плотность покрытия 0..1, yzw — цвет.
-fn cloud_layer(dir: vec3<f32>, s: SkyParams, t: f32, hor: vec3<f32>) -> vec4<f32> {
+// `cum_k` — доля плоских кучевых (0 — их рисует объёмный слой купола, см. sky.wesl).
+fn cloud_layer(dir: vec3<f32>, s: SkyParams, t: f32, hor: vec3<f32>, cum_k: f32) -> vec4<f32> {
     let e = dir.y;
     if e <= 0.0 {
         return vec4<f32>(0.0);
@@ -171,6 +191,7 @@ fn cloud_layer(dir: vec3<f32>, s: SkyParams, t: f32, hor: vec3<f32>) -> vec4<f32
         lit = mix(lit0, lit, d);
         thin = mix(thin0, thin, d);
     }
+    cover *= cum_k;
     // Солнце над горизонтом (для золотой кромки у солнца).
     let up = smoothstep(-0.03, 0.04, sun.y);
     // Тени облаков в сумерки освещены сиреневым небом.
@@ -251,6 +272,165 @@ fn sky_radiance(dir_in: vec3<f32>, s: SkyParams, t: f32, disc: bool) -> vec3<f32
 
 // То же, и сколько неба закрыто облаками (купол прячет за ними звёзды — облака не считаем дважды).
 fn sky_radiance_cover(dir_in: vec3<f32>, s: SkyParams, t: f32, disc: bool, cover: ptr<function, f32>) -> vec3<f32> {
+    return sky_radiance_cover_k(dir_in, s, t, disc, cover, 1.0);
+}
+
+// Горы Таврики на юге и юго-востоке (+Z — суша). Это настоящий рельеф, только далёкий: луч
+// взгляда идёт над картой высот (гребневой шум) от 2,5 до 42 км и ищет, где упрётся в склон.
+// Поэтому гряды сами заслоняют друг друга, у склонов есть освещённая и теневая сторона, а
+// дальние тонут в голубой дымке. Ближе — лесистые предгорья, за ними главная гряда: лес
+// понизу, выше тёмные скальные стены, на полках и макушках снег. На закате горы розовеют,
+// ночью — тёмный силуэт на чуть светлом небе.
+//
+// Купол неба и море читают горы из готовой панорамы (mountain_map.wesl рисует её этой же
+// `mountain_shade`, понемногу); `sky_mountains` — упрощённый расчёт на месте для редких случаев
+// (карта окружения, вид из-под воды).
+const MOUNT_L: vec2<f32> = vec2<f32>(0.2873, 0.9578);
+// Высота главных вершин, м.
+const MOUNT_H: f32 = 4600.0;
+// Панорама гор: половина охвата по азимуту (рад) и высота над горизонтом у нижнего и
+// верхнего края (рад).
+const MOUNT_AZ: f32 = 1.62;
+const MOUNT_EL0: f32 = -0.02;
+const MOUNT_EL1: f32 = 0.56;
+
+// Направление для точки панорамы гор.
+fn mountain_map_dir(uv: vec2<f32>) -> vec3<f32> {
+    let az = (uv.x * 2.0 - 1.0) * MOUNT_AZ;
+    let el = mix(MOUNT_EL1, MOUNT_EL0, uv.y);
+    let c = cos(az);
+    let sn = sin(az);
+    let h = vec2<f32>(MOUNT_L.x * c - MOUNT_L.y * sn, MOUNT_L.x * sn + MOUNT_L.y * c);
+    return vec3<f32>(h.x * cos(el), sin(el), h.y * cos(el));
+}
+
+// Обратно: точка панорамы для направления (xy) и попадает ли оно в панораму (z).
+fn mountain_map_uv(dir: vec3<f32>) -> vec3<f32> {
+    let hd = dir.xz / max(length(dir.xz), 1e-5);
+    let az = atan2(MOUNT_L.x * hd.y - MOUNT_L.y * hd.x, dot(MOUNT_L, hd));
+    let el = asin(clamp(dir.y, -1.0, 1.0));
+    let uv = vec2<f32>(az / MOUNT_AZ * 0.5 + 0.5, (MOUNT_EL1 - el) / (MOUNT_EL1 - MOUNT_EL0));
+    let inside = step(abs(az), MOUNT_AZ) * step(el, MOUNT_EL1) * step(0.0, el);
+    return vec3<f32>(uv, inside);
+}
+
+fn mountain_ridged(p0: vec2<f32>, octs: i32) -> f32 {
+    var h = 0.0;
+    var a = 0.5;
+    var sum = 0.0;
+    var p = p0;
+    for (var i = 0; i < octs; i++) {
+        let r = 1.0 - abs(2.0 * vnoise(p + vec2<f32>(17.1, 9.3) * f32(i)) - 1.0);
+        h += a * r * r;
+        sum += a;
+        p = p * 2.07 + vec2<f32>(3.1, 1.7);
+        a *= 0.5;
+    }
+    return h / sum;
+}
+
+fn mountain_height(p: vec2<f32>, octs: i32) -> f32 {
+    let u = dot(p, MOUNT_L);
+    let q = p / 9000.0;
+    let warp = (vec2<f32>(vnoise(q + vec2<f32>(3.3, 0.0)), vnoise(q + vec2<f32>(0.0, 7.1))) - 0.5) * 0.875;
+    let r = mountain_ridged(p / 3600.0 + warp, octs);
+    let env = MOUNT_H * smoothstep(3600.0, 8200.0, u) * (1.0 - 0.35 * smoothstep(15000.0, 30000.0, u)) + 420.0 * smoothstep(2400.0, 3600.0, u);
+    return env * (0.32 + 0.68 * pow(r, 1.1));
+}
+
+// Гора в направлении `dir`: rgb — её цвет (со светом и дымкой), a — 1, если луч упёрся в склон.
+// `steps` — шагов луча, `octs` — слоёв шума в форме гребней, `nocts` — в мелком рельефе склона.
+fn mountain_shade_q(dir_in: vec3<f32>, s: SkyParams, steps: i32, octs: i32, nocts: i32) -> vec4<f32> {
+    let dir = normalize(dir_in);
+    let e = dir.y;
+    let flat_len = length(dir.xz);
+    let hd = dir.xz / max(flat_len, 1e-5);
+    // Выше 31° гор нет; в сторону моря — тоже.
+    if e < 0.0 || e > 0.52 || dot(hd, MOUNT_L) < 0.05 {
+        return vec4<f32>(0.0);
+    }
+    let te = e / max(flat_len, 1e-5);
+    var t_prev = 2500.0;
+    var t_hit = -1.0;
+    for (var i = 0; i < steps; i++) {
+        let t = 2500.0 * pow(16.8, f32(i + 1) / f32(steps));
+        if te * t < mountain_height(hd * t, octs) {
+            t_hit = t;
+            break;
+        }
+        t_prev = t;
+    }
+    if t_hit < 0.0 {
+        return vec4<f32>(0.0);
+    }
+    for (var i = 0; i < 6; i++) {
+        let mid = 0.5 * (t_prev + t_hit);
+        if te * mid < mountain_height(hd * mid, octs) {
+            t_hit = mid;
+        } else {
+            t_prev = mid;
+        }
+    }
+    let t = t_hit;
+    let p = hd * t;
+    // Склон: нормаль по соседним высотам (с мелким рельефом — он даёт скальные грани).
+    let st = 25.0 + t * 0.004;
+    let h0 = mountain_height(p, nocts);
+    let nrm = normalize(vec3<f32>(mountain_height(p - vec2<f32>(st, 0.0), nocts) - mountain_height(p + vec2<f32>(st, 0.0), nocts), 2.0 * st, mountain_height(p - vec2<f32>(0.0, st), nocts) - mountain_height(p + vec2<f32>(0.0, st), nocts)));
+    let sun = normalize(s.sun.xyz);
+    let d = clamp(s.sun.w, 0.0, 1.0);
+    let n = clamp(s.extra.x, 0.0, 1.0);
+    let oc = clamp(s.extra.y, 0.0, 1.0);
+    let hor = horizon_color(dir, s);
+    let ndl = max(dot(nrm, sun), 0.0);
+    let slope = 1.0 - nrm.y;
+    let hn = h0 / MOUNT_H;
+    let fold = vnoise(p / 700.0);
+    // Лес понизу, выше — луга на пологом и тёмная скала на крутом, на полках и макушках снег.
+    let rock = smoothstep(0.16, 0.34, slope + (fold - 0.5) * 0.12) * smoothstep(0.2, 0.5, hn + (fold - 0.5) * 0.2);
+    let forest = vec3<f32>(0.045, 0.075, 0.04) + vec3<f32>(0.03, 0.035, 0.01) * fold;
+    let meadow = vec3<f32>(0.17, 0.19, 0.09);
+    var alb = mix(forest, meadow, smoothstep(0.34, 0.5, hn + (fold - 0.5) * 0.25) * (1.0 - smoothstep(0.05, 0.16, slope)));
+    // Скала неровная по тону: трещины и уступы.
+    let crag = vnoise(p / 130.0 + vec2<f32>(0.0, h0 / 60.0));
+    alb = mix(alb, vec3<f32>(0.24, 0.235, 0.226) * (1.0 - 0.5 * crag), rock);
+    let snow = smoothstep(0.28, 0.43, hn + (fold - 0.5) * 0.2) * (1.0 - smoothstep(0.3, 0.5, slope));
+    alb = mix(alb, vec3<f32>(0.9, 0.92, 0.95), snow);
+    let sun_h = smoothstep(-0.06, 0.12, sun.y) * (1.0 - n) * (1.0 - 0.85 * oc);
+    let sun_l = mix(vec3<f32>(1.25, 0.5, 0.3), vec3<f32>(1.15, 1.1, 1.0), d) * sun_h * 1.5;
+    let amb_l = (mix(mix(s.tint.rgb * 0.55, hor * 0.5, 0.5), vec3<f32>(0.22, 0.29, 0.42), d) * (1.0 - 0.9 * n) + hor * 0.25 * n) * 1.2;
+    var mc = alb * (sun_l * ndl + amb_l);
+    // Клочья низких облаков на склонах: белые мягкие пятна между лесом и снегом.
+    let wn = vnoise(p / 2300.0 + vec2<f32>(3.1, 7.7)) * 0.6 + vnoise(p / 900.0) * 0.3 + vnoise(p / 310.0) * 0.1;
+    let wisp = smoothstep(0.5, 0.7, wn) * smoothstep(0.04, 0.13, hn) * (1.0 - smoothstep(0.26, 0.46, hn)) * 0.8 * (1.0 - n);
+    mc = mix(mc, vec3<f32>(0.85) * (sun_l * 0.55 + amb_l), wisp);
+    // Дымка: ясным днём голубее и темнее неба у горизонта (дальние горы синие), в ненастье гуще.
+    let tr = exp(-t / mix(45000.0, 11000.0, oc));
+    let haze_c = hor * mix(vec3<f32>(1.0), vec3<f32>(0.8, 0.875, 1.0), d * (1.0 - oc));
+    mc = mix(haze_c, mc, tr);
+    // У подножий стоит дымка: горы отделяются от ближнего леса.
+    mc = mix(mc, hor, (1.0 - smoothstep(0.05, 0.3, hn)) * 0.35 * (1.0 - n));
+    return vec4<f32>(mc, 1.0);
+}
+
+fn mountain_shade(dir: vec3<f32>, s: SkyParams) -> vec4<f32> {
+    return mountain_shade_q(dir, s, 40, 5, 8);
+}
+
+// Горы поверх неба `col_in`, расчётом на месте (упрощённым).
+fn sky_mountains(col_in: vec3<f32>, dir_in: vec3<f32>, s: SkyParams) -> vec3<f32> {
+    let m = mountain_shade_q(dir_in, s, 22, 4, 5);
+    return mix(col_in, m.rgb, m.a);
+}
+
+// То же, с долей плоских кучевых облаков `cum_k` (купол днём рисует их объёмными сам).
+fn sky_radiance_cover_k(dir_in: vec3<f32>, s: SkyParams, t: f32, disc: bool, cover: ptr<function, f32>, cum_k: f32) -> vec3<f32> {
+    return sky_radiance_parts(dir_in, s, t, disc, cover, cum_k, true);
+}
+
+// То же; `mountains` — рисовать ли горы (купол кладёт их сам, поверх объёмных облаков: горы
+// ближе облаков у горизонта).
+fn sky_radiance_parts(dir_in: vec3<f32>, s: SkyParams, t: f32, disc: bool, cover: ptr<function, f32>, cum_k: f32, mountains: bool) -> vec3<f32> {
     let dir = normalize(dir_in);
     let sun = normalize(s.sun.xyz);
     let d = clamp(s.sun.w, 0.0, 1.0);
@@ -297,23 +477,12 @@ fn sky_radiance_cover(dir_in: vec3<f32>, s: SkyParams, t: f32, disc: bool, cover
     }
 
     // Облака.
-    let cl = cloud_layer(dir, s, s.zenith.w, hor);
+    let cl = cloud_layer(dir, s, s.zenith.w, hor, cum_k);
     col = mix(col, cl.yzw, cl.x);
     *cover = cl.x;
 
-    // Горы Таврики на юго-востоке (+X, +Z): голубые в дымке, на закате — с розовым отсветом,
-    // ночью — чёрный силуэт на чуть светлом небе.
-    // Гребни не выше 0,085 рад — выше горы не считаем.
-    if e < 0.09 {
-        let az = atan2(dir.z, dir.x);
-        let land = smoothstep(-0.2, 0.5, dot(normalize(vec2<f32>(dir.x, dir.z) + 1e-5), normalize(vec2<f32>(0.45, 1.0))));
-        let ridge = (0.012 + 0.05 * fbm(vec2<f32>(az * 3.0, 1.0)) + 0.02 * fbm(vec2<f32>(az * 12.0, 5.0))) * land;
-        let near_ridge = (0.004 + 0.022 * fbm(vec2<f32>(az * 6.0 + 9.0, 2.0))) * land;
-        var far_c = mix(mix(hor * 0.8, vec3<f32>(0.62, 0.44, 0.50), 0.5), vec3<f32>(0.52, 0.60, 0.72), d);
-        far_c = mix(far_c, hor * 0.92, oc * 0.5);
-        far_c = mix(far_c, hor * 0.55, n);
-        col = mix(col, far_c, (1.0 - smoothstep(ridge - 0.002, ridge + 0.002, e)) * 0.9);
-        col = mix(col, far_c * 0.72, (1.0 - smoothstep(near_ridge - 0.002, near_ridge + 0.002, e)) * 0.9);
+    if mountains {
+        col = sky_mountains(col, dir, s);
     }
     if e < 0.0 {
         // Ниже горизонта — дымка (туман Bevy того же цвета закрывает здесь землю и море).

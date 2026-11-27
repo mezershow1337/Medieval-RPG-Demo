@@ -1117,6 +1117,61 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
         }
         z += step;
     }
+    // Берега Карантинной бухты: хвойный бор стеной по кромке обрывов и валуны у самой воды.
+    // Свой счётчик случайных чисел — остальная зелень от этого не сдвигается.
+    let mut rng = Rng::new(9127);
+    let near_water = |p: Vec2, r: f32| (0..8).any(|k| ground_y(p.x + (k as f32 * TAU / 8.0).cos() * r, p.y + (k as f32 * TAU / 8.0).sin() * r) < WATER_Y);
+    let mut z = 140.0;
+    while z < 480.0 {
+        let mut x = 270.0;
+        while x < 540.0 {
+            let p = Vec2::new(x + rng.range(-3.0, 3.0), z + rng.range(-3.0, 3.0));
+            x += 7.0;
+            let (roll, size, yaw, variant) = (rng.f(), rng.f(), rng.range(0.0, TAU), rng.int(64) as u32);
+            let y = ground_y(p.x, p.y);
+            if y < WATER_Y - 0.3 {
+                continue;
+            }
+            if y < WATER_Y + 1.7 {
+                // Полоса прибоя: валуны, поодиночке и кучками.
+                if roll < 0.2 && terrain::city_distance(p.x, p.y) > 14.0 && road_distance(roads, p) > ROAD_W / 2.0 + 1.5 && near_water(p, 4.0) {
+                    rock(b, p, 0.7 + size * size * 2.4, &mut rng);
+                }
+                continue;
+            }
+            let chance = if near_water(p, 22.0) { 0.7 } else if near_water(p, 48.0) { 0.5 } else if near_water(p, 75.0) { 0.22 } else { 0.0 };
+            // На отвесной скале деревья не растут.
+            let steep = (ground_y(p.x + 1.5, p.y) - y).abs().max((ground_y(p.x, p.y + 1.5) - y).abs()) > 1.6;
+            if roll >= chance || steep || blocked(p) {
+                continue;
+            }
+            b.at(p.x, p.y);
+            let q = g(p.x, p.y) - Vec3::Y * 0.15;
+            let h = 9.0 + size * 8.5;
+            b.plant(PlantKind::Fir, q, h, yaw, variant);
+            b.invisible.push(Aabb::new(q - Vec3::new(0.25, 0.0, 0.25), q + Vec3::new(0.25, h * 0.5, 0.25)));
+        }
+        z += 7.0;
+    }
+    // Каменные выходы на крутых склонах по всему плато: глыбы и осыпь вместо голой земли.
+    // Опять свой счётчик: деревья и кусты остаются на своих местах.
+    let mut rng = Rng::new(4471);
+    let mut z = -WORLD_HALF + 14.0;
+    while z < WORLD_HALF - 14.0 {
+        let mut x = -WORLD_HALF + 14.0;
+        while x < WORLD_HALF - 14.0 {
+            let p = Vec2::new(x + rng.range(-2.6, 2.6), z + rng.range(-2.6, 2.6));
+            x += 5.5;
+            let (roll, size) = (rng.f(), rng.f());
+            let y = ground_y(p.x, p.y);
+            let rise = (ground_y(p.x + 1.5, p.y) - y).abs().max((ground_y(p.x, p.y + 1.5) - y).abs());
+            if roll > 0.42 || y < WATER_Y + 0.4 || !(0.75..3.2).contains(&rise) || terrain::city_distance(p.x, p.y) < 14.0 || road_distance(roads, p) < ROAD_W / 2.0 + 2.0 || clear.iter().any(|(c, r)| p.distance(*c) < *r) {
+                continue;
+            }
+            rock(b, p, 0.5 + size * size * 2.2, &mut rng);
+        }
+        z += 5.5;
+    }
 }
 
 /// Известняковый выход: фотоскан глыбы, наполовину в земле, иногда с камнями поменьше.
@@ -1128,7 +1183,10 @@ fn rock(b: &mut Builder, p: Vec2, size: f32, rng: &mut Rng) {
         let off = if k == 0 { Vec2::ZERO } else { Vec2::new(rng.range(-1.0, 1.0), rng.range(-1.0, 1.0)) * size * 1.2 };
         let s = size * if k == 0 { 1.0 } else { rng.range(0.3, 0.6) };
         let q = Vec2::new(p.x + off.x, p.y + off.y);
-        let c = Vec3::new(q.x, ground_y(q.x, q.y) - s * 0.25, q.y);
+        // На откосе глыба сидит в склоне по нижнему краю, а не висит над ним.
+        let r = s * 0.35;
+        let low = [(0.0, 0.0), (r, 0.0), (-r, 0.0), (0.0, r), (0.0, -r)].iter().map(|(dx, dz)| ground_y(q.x + dx, q.y + dz)).fold(f32::MAX, f32::min);
+        let c = Vec3::new(q.x, low - s * 0.2, q.y);
         b.plant(PlantKind::Rock, c, s, rng.range(0.0, TAU), rng.int(64) as u32);
         if s > 0.7 {
             let r = s * 0.45;

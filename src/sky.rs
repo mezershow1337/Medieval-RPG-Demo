@@ -39,6 +39,16 @@ pub struct SkyUniform {
 pub struct SkyMaterial {
     #[uniform(0)]
     pub sky: SkyUniform,
+    /// Карта объёмных облаков на всё небо (`cloud_map.rs`).
+    #[texture(1)]
+    #[sampler(2)]
+    pub clouds: Handle<Image>,
+    #[uniform(3)]
+    pub dome: crate::cloud_map::CloudDome,
+    /// Панорама дальних гор (`mountain_map.rs`).
+    #[texture(4)]
+    #[sampler(5)]
+    pub mountains: Handle<Image>,
 }
 
 impl Material for SkyMaterial {
@@ -84,6 +94,16 @@ pub struct WaterExt {
     #[texture(101)]
     #[sampler(102)]
     pub map: Option<Handle<Image>>,
+    /// Карта объёмных облаков (cloud_map.rs): они отражаются в воде.
+    #[texture(103)]
+    #[sampler(104)]
+    pub clouds: Option<Handle<Image>>,
+    #[uniform(105)]
+    pub dome: crate::cloud_map::CloudDome,
+    /// Панорама дальних гор (mountain_map.rs).
+    #[texture(106)]
+    #[sampler(107)]
+    pub mountains: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for WaterExt {
@@ -114,12 +134,15 @@ pub fn water_material(m: &Mood, map: Option<Handle<Image>>, full: bool) -> Water
             water: WaterUniform {
                 sky: m.sky_uniform(),
                 // w у deep — плотность воды: 1.7 даёт тёмную, глубокую на вид воду уже в метре от берега.
-                deep: Vec4::new(0.003, 0.013, 0.018, 1.7),
+                deep: Vec4::new(0.019, 0.036, 0.024, 1.7),
                 shallow: Vec4::new(0.035, 0.085, 0.08, 1.0),
                 params: Vec4::new(if m.day { 2.0 } else { 3.0 }, 1.0, 1.0, if full { 0.0 } else { 1.0 }),
                 waves: Vec4::new(1.0, crate::level::WATER_Y, 1.0, 0.0),
             },
             map,
+            clouds: None,
+            dome: default(),
+            mountains: None,
         },
     }
 }
