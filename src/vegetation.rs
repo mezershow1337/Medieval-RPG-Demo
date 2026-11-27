@@ -346,7 +346,8 @@ fn spawn_plants(
         let (_, tint, _) = look(*kind);
         let imp_mat = foliage.add(foliage_material(
             StandardMaterial {
-                base_color: tint,
+                // Запечённый импостор светлее живой кроны — вдали деревья выходили бледными «призраками».
+                base_color: Color::from((tint.to_linear() * 0.55).with_alpha(1.0)),
                 base_color_texture: assets.impostors.get(id).cloned(),
                 alpha_mode: AlphaMode::Mask(0.45),
                 double_sided: true,

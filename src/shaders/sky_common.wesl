@@ -61,6 +61,31 @@ fn fbm3(p: vec2<f32>) -> f32 {
     return vnoise(p) * 0.57 + vnoise(p * 2.03 + 3.1) * 0.29 + vnoise(p * 4.1 + 7.7) * 0.14;
 }
 
+// Ячеистый шум (Ворли): расстояние до ближайшей точки, 0..~1. Его «обратная» сторона даёт
+// круглые клубы — как у кучевых облаков (приём из облаков Horizon Zero Dawn: Перлин + Ворли).
+fn worley(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    var d = 1.0;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            let g = vec2<f32>(f32(x), f32(y));
+            let o = vec2<f32>(hash21(i + g), hash21(i + g + 17.3));
+            let r = g + o - f;
+            d = min(d, dot(r, r));
+        }
+    }
+    return sqrt(d);
+}
+
+// Плотность кучевого облака в точке плоскости: крупная форма, выеденная клубами.
+fn cloud_density(q: vec2<f32>) -> f32 {
+    let base = fbm(q * 1.3);
+    let puffs = 1.0 - worley(q * 3.4);
+    let fine = 1.0 - worley(q * 8.3 + 4.0);
+    return base * 0.7 + puffs * 0.26 + fine * 0.09 - 0.115;
+}
+
 // Цвет горизонта (и дымки) в направлении `dir`: та же формула, что у тумана Bevy,
 // поэтому дальние стены и море уходят в дымку ровно того цвета, что и небо за ними.
 fn horizon_color(dir: vec3<f32>, s: SkyParams) -> vec3<f32> {
@@ -109,15 +134,43 @@ fn cloud_layer(dir: vec3<f32>, s: SkyParams, t: f32, hor: vec3<f32>) -> vec4<f32
     let p = dir.xz / (e + 0.07) * 0.75 + drift * t;
     // Искривление пространства — рваные, «живые» края.
     let w = vec2<f32>(fbm3(p * 0.6 + 3.1), fbm3(p * 0.6 + 7.7));
-    let q = p + (w - 0.5) * 1.1;
-    let dn = fbm(q * 1.3);
+    let q = p + (w - 0.5) * 0.55;
+    let dn = cloud_density(q);
     let thr = mix(0.66, 0.44, min(cover_k, 1.0)) - 0.22 * smoothstep(0.7, 1.0, cover_k) - 0.3 * oc;
+    // Толща облака: четыре слоя по высоте (луч проходит сквозь пласт — у слоёв параллакс),
+    // днище плоское, макушка круглая; свет гаснет в толще по закону Бера — освещённые бока и
+    // серые днища получаются сами, как у настоящих кучевых.
+    var trans = 1.0;
+    var lit_acc = 0.0;
+    for (var i = 0; i < 4; i++) {
+        let h = (f32(i) + 0.5) / 4.0;
+        let qh = q * (1.0 + h * 0.07);
+        let thr_h = thr + h * h * 0.17;
+        let dh = cloud_density(qh);
+        let a = smoothstep(thr_h, thr_h + 0.05, dh) * 0.7;
+        // Сколько облака между этой точкой и солнцем (выше и в его сторону).
+        let ds = cloud_density(qh + s2 * 0.11) - (thr + (h + 0.3) * (h + 0.3) * 0.17);
+        let shade = exp(-max(ds, 0.0) * 9.0) * mix(0.55, 1.0, h);
+        lit_acc += trans * a * shade;
+        trans *= 1.0 - a;
+    }
+    let body = 1.0 - trans;
     // В ненастье тучи сливаются в сплошную пелену без просветов.
-    let cover = max(smoothstep(thr, thr + 0.16, dn), oc * 0.93) * smoothstep(0.0, 0.07, e);
-    // Самозатенение: насколько облако гуще в сторону солнца.
-    let d_sun = fbm((q + s2 * 0.16) * 1.3);
-    let lit = clamp((dn - d_sun) * 5.0 + 0.45, 0.0, 1.0);
-    let thin = 1.0 - smoothstep(thr + 0.05, thr + 0.3, dn);
+    var cover = max(body, oc * 0.93) * smoothstep(0.0, 0.07, e);
+    var lit = clamp(lit_acc / max(body, 1e-3), 0.0, 1.0);
+    var thin = 1.0 - smoothstep(0.25, 0.85, body);
+    // На закате и ночью облака прежние (мягкие, с золотой кромкой) — закаты не трогаем;
+    // объёмные кучевые проявляются с высотой солнца.
+    if d < 0.999 {
+        let q0 = p + (w - 0.5) * 1.1;
+        let dn0 = fbm(q0 * 1.3);
+        let cover0 = max(smoothstep(thr, thr + 0.16, dn0), oc * 0.93) * smoothstep(0.0, 0.07, e);
+        let lit0 = clamp((dn0 - fbm((q0 + s2 * 0.16) * 1.3)) * 5.0 + 0.45, 0.0, 1.0);
+        let thin0 = 1.0 - smoothstep(thr + 0.05, thr + 0.3, dn0);
+        cover = mix(cover0, cover, d);
+        lit = mix(lit0, lit, d);
+        thin = mix(thin0, thin, d);
+    }
     // Солнце над горизонтом (для золотой кромки у солнца).
     let up = smoothstep(-0.03, 0.04, sun.y);
     // Тени облаков в сумерки освещены сиреневым небом.
@@ -129,7 +182,7 @@ fn cloud_layer(dir: vec3<f32>, s: SkyParams, t: f32, hor: vec3<f32>) -> vec4<f32
 
     // ---- Кучевые ----
     // День: белые кучевые с серыми днищами.
-    var day_c = mix(vec3<f32>(0.62, 0.66, 0.76), vec3<f32>(1.32, 1.3, 1.26), lit * 0.7 + thin * 0.3);
+    var day_c = mix(vec3<f32>(0.5, 0.55, 0.68), vec3<f32>(1.38, 1.36, 1.32), clamp(lit * 0.85 + thin * 0.25, 0.0, 1.0));
     day_c += vec3<f32>(0.8, 0.7, 0.5) * pow(sd, 10.0) * thin;
     // Закат: снизу облака подсвечены низким солнцем, сердцевины темнее, у солнца — золотая кромка.
     let low_sun = twilight_light(dir, sun, e, 0.001);
@@ -177,7 +230,7 @@ fn cloud_layer(dir: vec3<f32>, s: SkyParams, t: f32, hor: vec3<f32>) -> vec4<f32
     let pc = dir.xz / (e + 0.3) * 0.55 + vec2<f32>(t * 0.002, 0.0) + s.extra.zw * (t * 0.0004);
     let rp = vec2<f32>(pc.x * 0.8 + pc.y * 0.6, -pc.x * 0.6 + pc.y * 0.8);
     let streak = fbm(vec2<f32>(rp.x * 0.45, rp.y * 5.0) + w * 0.6);
-    let cirrus = smoothstep(0.56, 0.78, streak) * smoothstep(0.04, 0.25, e) * 0.55 * (1.0 - cover) * (1.0 - deck) * (1.0 - oc);
+    let cirrus = smoothstep(0.56, 0.78, streak) * smoothstep(0.04, 0.25, e) * 0.35 * (1.0 - cover) * (1.0 - deck) * (1.0 - oc);
     var cc = mix(mix(vec3<f32>(1.0, 0.55, 0.6), vec3<f32>(2.3, 1.2, 0.6), pow(toward, 1.5)), vec3<f32>(1.1, 1.12, 1.15), d);
     cc = mix(cc, vec3<f32>(0.04, 0.045, 0.06) * (0.6 + moon_up), n);
     // Кучевые впереди пелены, перистые — в просветах.

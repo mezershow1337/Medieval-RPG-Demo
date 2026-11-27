@@ -1011,7 +1011,7 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
                     continue;
                 }
                 // На открытых местах — камни и куртины кустов.
-                if rng.chance(0.07) {
+                if rng.chance(0.11) {
                     rock(b, p, rng.range(0.5, 1.8), &mut rng);
                 } else if rng.chance(0.27) {
                     b.at(p.x, p.y);
@@ -1027,7 +1027,8 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
             b.at(p.x, p.y);
             let up = ((p.y - 300.0) / 400.0).clamp(0.0, 1.0);
             // В густой роще деревья стоят по два-три.
-            let trees = if density > 0.5 { 2 + rng.int(3) as usize } else { 1 + rng.chance(0.25) as usize };
+            let grove = density > 0.55;
+            let trees = if grove { 3 + rng.int(3) } else if density > 0.48 { 2 + rng.int(2) } else { 1 + rng.chance(0.25) as usize };
             for k in 0..trees {
                 let tp = if k == 0 { p } else { p + Vec2::new(rng.range(-7.0, 7.0), rng.range(-7.0, 7.0)) };
                 if k > 0 && (blocked(tp) || tp.distance(p) < 2.5) {
@@ -1039,8 +1040,9 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
                 // дуба пушистого и диких груш (их изображает тот же лиственный вид).
                 if roll < 0.5 - up * 0.3 {
                     kit::juniper(b, q, rng.range(2.0, 4.5), &mut rng);
-                } else if roll < 0.6 - up * 0.1 {
-                    kit::pine(b, q, rng.range(7.0, 12.0), &mut rng);
+                } else if roll < 0.6 - up * 0.1 + if grove { 0.2 } else { 0.0 } {
+                    // В сердце рощи — сосновый бор: тёмная стена хвои.
+                    kit::pine(b, q, rng.range(7.0, 13.0), &mut rng);
                 } else {
                     kit::oak(b, q, rng.range(6.0, 10.0), &mut rng);
                 }

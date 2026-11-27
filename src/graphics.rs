@@ -1073,12 +1073,16 @@ pub fn distance_fog(m: &Mood, draw_distance: f32) -> DistanceFog {
 /// золото), чуть приглушённые тени — как на плёнке.
 pub fn color_grading(m: &Mood) -> ColorGrading {
     let section = |saturation: f32, contrast: f32| ColorGradingSection { saturation, contrast, ..default() };
+    // Днём — глубже тени и плотнее средние тона (как на референсе); на закате и ночью
+    // цветокоррекция прежняя: закаты и так контрастные, лишний контраст топит землю в черноте.
+    let k = ((m.sun.y - 0.2) / 0.3).clamp(0.0, 1.0) * (1.0 - m.night);
+    let l = |a: f32, b: f32| a + (b - a) * k;
     ColorGrading {
         // Ночью глаз привыкает к темноте, но краски уходят (сумеречное зрение).
-        global: ColorGradingGlobal { exposure: m.exposure, post_saturation: 0.93 - 0.3 * m.night - 0.15 * m.overcast, ..default() },
-        shadows: section(0.86, 1.08),
-        midtones: section(0.94, 1.2),
-        highlights: section(1.04, 1.08),
+        global: ColorGradingGlobal { exposure: m.exposure, post_saturation: l(1.0, 0.93) - 0.3 * m.night - 0.15 * m.overcast, ..default() },
+        shadows: section(l(0.9, 0.86), l(1.0, 1.08)),
+        midtones: section(l(1.02, 0.94), l(1.14, 1.2)),
+        highlights: section(l(1.06, 1.04), l(1.0, 1.08)),
     }
 }
 
