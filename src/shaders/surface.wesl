@@ -1015,7 +1015,7 @@ fn fragment(
             let rock_flat = 0.5 * (surface.photo_mean_b.rgb + base_b);
             // Самые чёрные щели скана подняты к среднему тону: на солнце они лежали кляксами.
             let rock_a = mix(rock.albedo, max(rock.albedo, surface.photo_mean_b.rgb * 0.55), 0.75);
-            let rock_c = mix(rock_flat, retint(rock_a, surface.photo_mean_b.rgb, base_b, 0.5), 0.55) * vec3<f32>(0.6, 0.58, 0.54) * mix(0.72, 1.12, strata) * (1.0 - 0.3 * drip);
+            let rock_c = mix(rock_flat, retint(rock_a, surface.photo_mean_b.rgb, base_b, 0.5), mix(0.6, 0.9, pom_k)) * vec3<f32>(0.6, 0.58, 0.54) * mix(0.72, 1.12, strata) * (1.0 - 0.3 * drip);
             // Скала ломается на блоки по пластам и трещинам: у каждого блока свой наклон грани
             // и тон, между блоками — тёмные щели. Без этого обрыв читался гладкой «подушкой».
             var crag_n = normalize(mix(n, rock.n, 0.4));

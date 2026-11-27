@@ -762,13 +762,20 @@ fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelCo
                     for (side, u) in [(-0.5f32, 0.0f32), (0.5, 1.0)] {
                         let px = x + off.x + dir.x * side * w + back.x * t * t;
                         let pz = z + off.z + dir.z * side * w + back.z * t * t;
-                        // Низ карточки идёт по земле (на склоне края не висят и не тонут).
-                        let gy = y + sx * (px - x) + sz * (pz - z);
-                        pos.push([px, gy - 0.04 + h * t, pz]);
+                        // Низ карточки идёт по нарисованной земле, по её треугольникам: посаженный
+                        // по гладкой высоте или по наклону в центре пучок на крутом и неровном
+                        // тонул краем в ребре треугольника, и земля срезала его прямой линией.
+                        let gy = crate::level::mesh_y(px, pz);
+                        // Комель пучка на картинке тёмный и плотный: на светлой земле (склон, осыпь,
+                        // проплешина) он лежал тёмной полосой с прямым нижним краем — «ямкой» под
+                        // каждым пучком. Самый низ прячем в землю, остальной комель высветляем.
+                        let root = if cell == 3 { 0.16 } else { 0.11 };
+                        pos.push([px, gy - 0.04 + h * (t - root * (1.0 - t)), pz]);
                         // Нормаль вверх — трава освещается мягко, как ковёр, а не как забор.
                         let nn = (Vec3::Y + Vec3::new(-a.sin(), 0.0, a.cos()) * 0.2).normalize();
                         nrm.push(nn.to_array());
-                        col.push([c.x, c.y, c.z, 1.0]);
+                        let lift = 1.0 + (if cell == 3 { 0.75 } else { 0.5 }) * (1.0 - t) * (1.0 - t);
+                        col.push([c.x * lift, c.y * lift, c.z * lift, 1.0]);
                         let uu = if flip { 1.0 - u } else { u };
                         uv0.push([cu + 0.006 + uu * 0.488, cv + 0.497 - t * 0.49]);
                         uv1.push([t.powf(1.5) * (h / 0.5).min(1.5), phase]);

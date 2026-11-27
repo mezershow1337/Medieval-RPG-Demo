@@ -286,8 +286,39 @@ fn fine_cell(hf: &HeightField, ix: usize, iz: usize) -> bool {
 
 /// Высота земли (по той же сетке, по которой ходят персонажи). Сетка считается один раз.
 pub fn ground_y(x: f32, z: f32) -> f32 {
+    shared_field().height(x, z)
+}
+
+fn shared_field() -> &'static HeightField {
     static HF: std::sync::OnceLock<HeightField> = std::sync::OnceLock::new();
-    HF.get_or_init(|| heightfield(Vec::new())).height(x, z)
+    HF.get_or_init(|| heightfield(Vec::new()))
+}
+
+/// Высота нарисованной земли: по тем же треугольникам, что строит [`terrain_meshes`].
+/// От [`ground_y`] (гладкой поверхности, по которой ходят) она отличается там, где четыре угла
+/// клетки не лежат в одной плоскости, — на сантиметры, на крутом до пары дециметров. Для
+/// травы это заметно: посаженный по гладкой высоте пучок тонет в ребре треугольника, и земля
+/// срезает его прямой линией.
+pub fn mesh_y(x: f32, z: f32) -> f32 {
+    let hf = shared_field();
+    let fx = ((x - hf.origin.x) / hf.cell).clamp(0.0, (hf.nx - 1) as f32 - 0.001);
+    let fz = ((z - hf.origin.y) / hf.cell).clamp(0.0, (hf.nz - 1) as f32 - 0.001);
+    let (ix, iz) = (fx as usize, fz as usize);
+    let fine = fine_cell(hf, ix, iz);
+    let parts = if fine { STEEP_PARTS } else { 1 } as f32;
+    let (ux, uz) = ((fx - ix as f32) * parts, (fz - iz as f32) * parts);
+    let (i, j) = (ux.floor().min(parts - 1.0), uz.floor().min(parts - 1.0));
+    let (tx, tz) = (ux - i, uz - j);
+    let at = |di: f32, dj: f32| hf.height(hf.origin.x + (ix as f32 + (i + di) / parts) * hf.cell, hf.origin.y + (iz as f32 + (j + dj) / parts) * hf.cell);
+    let (ha, hb, hc, hd) = (at(0.0, 0.0), at(1.0, 0.0), at(1.0, 1.0), at(0.0, 1.0));
+    if !fine || (ha - hc).abs() <= (hb - hd).abs() {
+        // Диагональ a–c.
+        if tx >= tz { ha + (hb - ha) * tx + (hc - hb) * tz } else { ha + (hd - ha) * tz + (hc - hd) * tx }
+    } else if tx + tz <= 1.0 {
+        ha + (hb - ha) * tx + (hd - ha) * tz
+    } else {
+        hc + (hd - hc) * (1.0 - tx) + (hb - hc) * (1.0 - tz)
+    }
 }
 
 /// Меши земли по участкам: внутри стен — утоптанная земля, снаружи — трава и камень.
@@ -407,6 +438,14 @@ mod tests {
                 }
             }
         }
+        // Нарисованная земля совпадает с гладкой в вершинах сетки и нигде не уходит от неё далеко.
+        let mut gap = 0.0f32;
+        for k in 0..40000 {
+            let (x, z) = (-700.0 + (k % 200) as f32 * 7.13, -700.0 + (k / 200) as f32 * 7.07);
+            gap = gap.max((mesh_y(x, z) - ground_y(x, z)).abs());
+        }
+        assert!((mesh_y(300.0, 300.0) - ground_y(300.0, 300.0)).abs() < 1e-3);
+        assert!(gap < 1.5, "нарисованная земля ушла от гладкой на {gap} м");
         println!("мелких клеток {fine}, точек со сдвигом {moved}, наибольший сдвиг {worst:.2} м");
         assert!(moved > 100, "скругление нигде не сработало");
         assert!(worst < 4.0, "скругление сдвинуло землю на {worst} м");
