@@ -236,7 +236,7 @@ fn look(kind: PlantKind) -> (&'static str, Color, [f32; 3]) {
         PlantKind::Oak => ("broadleaf", Color::srgb(0.78, 0.78, 0.6), [0.9, 0.9, 0.9]),
         // Можжевельник высокий — сизый.
         PlantKind::Juniper => ("scale", Color::linear_rgb(1.9, 1.25, 1.2), [1.0, 0.85, 0.8]),
-        PlantKind::Cypress => ("scale", Color::linear_rgb(0.86, 0.8, 0.72), [0.9, 0.8, 0.75]),
+        PlantKind::Cypress => ("scale", Color::linear_rgb(0.98, 0.78, 0.72), [0.9, 0.8, 0.75]),
         // Инжир — светлая сочная листва, гладкая серая кора.
         PlantKind::Fig => ("broadleaf", Color::srgb(1.05, 1.12, 0.85), [1.25, 1.25, 1.25]),
         PlantKind::Shrub => ("broadleaf", Color::srgb(0.84, 0.76, 0.52), [0.9, 0.85, 0.8]),
@@ -265,7 +265,7 @@ fn crown_of(kind: PlantKind) -> Option<(f32, f32)> {
 /// середины; у узкой колонны кипариса шара нет — с полной силой нижняя половина уходила в черноту.
 fn shade_of(kind: PlantKind) -> f32 {
     match kind {
-        PlantKind::Cypress => 0.45,
+        PlantKind::Cypress => 0.3,
         PlantKind::Fir | PlantKind::Rock => 0.0,
         _ => 1.0,
     }
@@ -287,7 +287,9 @@ fn column_of(kind: PlantKind) -> f32 {
 fn fill_of(kind: PlantKind) -> f32 {
     match kind {
         PlantKind::Fir => 1.6,
-        PlantKind::Pine | PlantKind::Juniper | PlantKind::Cypress => 1.2,
+        // Кипарис — плотная тёмная колонна: без большой добавки теневая сторона уходит в черноту.
+        PlantKind::Cypress => 2.6,
+        PlantKind::Pine | PlantKind::Juniper => 1.2,
         _ => 0.8,
     }
 }
