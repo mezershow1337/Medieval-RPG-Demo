@@ -25,72 +25,9 @@ pub(super) fn noise3(p: Vec3, seed: u32) -> f32 {
     (terrain::fbm(p.x + p.y * 0.37, p.z - p.y * 0.61, seed) + terrain::fbm(p.y * 1.13 + p.z * 0.31, p.x * 0.71 - p.z * 0.23, seed + 7)) * 0.5
 }
 
-/// Бревно от `a` до `c` (радиус у комля `r0`, у вершины `r1`): чуть кривое, неровное, с торцами.
-/// Развёртка: u — вдоль ствола (м), v — по окружности (м); торцы — u = 1000 + доля радиуса.
+/// Бревно — общее с городским набором (`kit::log`).
 pub(super) fn log(b: &mut Builder, a: Vec3, c: Vec3, r0: f32, r1: f32, seed: u32) {
-    let len = a.distance(c);
-    if len < 0.02 {
-        return;
-    }
-    let d = (c - a) / len;
-    let up = if d.y.abs() > 0.9 { Vec3::X } else { Vec3::Y };
-    let s = d.cross(up).normalize();
-    let w = s.cross(d);
-    let mut rng = Rng::new(seed.wrapping_mul(7919).wrapping_add(17));
-    let ba = rng.range(0.0, TAU);
-    let bow = (s * ba.cos() + w * ba.sin()) * len * rng.range(0.005, 0.014);
-    let phase = rng.range(0.0, 10.0);
-    let knot = rng.range(0.03, 0.06);
-    let sides = if r0.max(r1) > 0.075 { 11 } else { 7 };
-    let n = ((len / 0.4).ceil() as usize).max(2);
-    let circ = TAU * (r0 + r1) * 0.5;
-    let ring_r = |t: f32, k: usize| {
-        let r = r0 + (r1 - r0) * t;
-        let ang = k as f32 / sides as f32 * TAU;
-        r * (1.0 + knot * (ang * 2.0 + phase + t * len * 2.3).sin() * (t * len * 1.7 + phase).cos() + 0.03 * (t * len * 4.1 + phase).sin())
-    };
-    let center = |t: f32| a + d * (len * t) + bow * (PI * t).sin();
-    let m = b.mesh(Mat::Timber);
-    let mut rings: Vec<Vec<u32>> = Vec::with_capacity(n + 1);
-    for i in 0..=n {
-        let t = i as f32 / n as f32;
-        let ctr = center(t);
-        let ring: Vec<u32> = (0..=sides)
-            .map(|k| {
-                let ang = k as f32 / sides as f32 * TAU;
-                let dir = s * ang.cos() + w * ang.sin();
-                m.vert(ctr + dir * ring_r(t, k % sides), dir, Vec2::new(t * len, k as f32 / sides as f32 * circ))
-            })
-            .collect();
-        rings.push(ring);
-    }
-    for i in 0..n {
-        for k in 0..sides {
-            let (a0, a1, b0, b1) = (rings[i][k], rings[i][k + 1], rings[i + 1][k], rings[i + 1][k + 1]);
-            m.index_tri(a0, b0, b1);
-            m.index_tri(a0, b1, a1);
-        }
-    }
-    // Торцы: плоские срезы с кольцами.
-    for (t, out) in [(0.0f32, -d), (1.0, d)] {
-        let ctr = center(t);
-        let r = r0 + (r1 - r0) * t;
-        let cv = m.vert(ctr, out, Vec2::new(1000.0, r));
-        let rim: Vec<u32> = (0..=sides)
-            .map(|k| {
-                let ang = k as f32 / sides as f32 * TAU;
-                let dir = s * ang.cos() + w * ang.sin();
-                m.vert(ctr + dir * ring_r(t, k % sides), out, Vec2::new(1001.0, r))
-            })
-            .collect();
-        for k in 0..sides {
-            if t == 0.0 {
-                m.index_tri(cv, rim[k], rim[k + 1]);
-            } else {
-                m.index_tri(cv, rim[k + 1], rim[k]);
-            }
-        }
-    }
+    crate::level::city::kit::log(b, a, c, r0, r1, seed);
 }
 
 /// Кусок камня (руды, породы): неровный многогранник, приплюснутый, со сглаженными рёбрами

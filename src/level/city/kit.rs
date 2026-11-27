@@ -569,7 +569,7 @@ pub fn amphora(b: &mut Builder, p: Vec3, scale: f32, kind: u32) {
     };
     let scaled: Vec<(f32, f32)> = prof.iter().map(|&(r, y)| (r * scale, y * scale)).collect();
     let m = b.mesh(Mat::Ceramic);
-    m.lathe(p, &scaled, 10);
+    m.lathe(p, &scaled, 16);
     let neck_y = scaled[scaled.len() - 3].1;
     let shoulder = scaled[scaled.len() / 2 + 1];
     for s in [-1.0f32, 1.0] {
@@ -599,7 +599,7 @@ pub fn pithos(b: &mut Builder, p: Vec3, h: f32, buried: f32) {
     let r = h * 0.38;
     let prof = [(0.0, 0.0), (r * 0.45, 0.0), (r * 0.85, h * 0.18), (r, h * 0.48), (r * 0.88, h * 0.78), (r * 0.5, h * 0.95), (r * 0.52, h), (r * 0.42, h), (r * 0.4, h * 0.96)];
     let base = p - Vec3::Y * buried;
-    b.mesh(Mat::Ceramic).lathe(base, &prof, 14);
+    b.mesh(Mat::Ceramic).lathe(base, &prof, 20);
     // Тёмное нутро.
     b.mesh(Mat::Coals).disc(base + Vec3::Y * (h * 0.955), r * 0.4, 10, true);
     let hh = h - buried;
@@ -612,7 +612,7 @@ pub fn pithos(b: &mut Builder, p: Vec3, h: f32, buried: f32) {
 pub fn jug(b: &mut Builder, p: Vec3, h: f32, mat: Mat) {
     let r = h * 0.35;
     let prof = [(0.0, 0.0), (r * 0.6, 0.0), (r, h * 0.35), (r * 0.9, h * 0.65), (r * 0.45, h * 0.85), (r * 0.5, h), (0.0, h)];
-    b.mesh(mat).lathe(p, &prof, 8);
+    b.mesh(mat).lathe(p, &prof, 12);
 }
 
 /// Невидимая коллизия (форму рисует декоративный меш).
@@ -620,13 +620,42 @@ pub fn hidden(b: &mut Builder, min: Vec3, max: Vec3) {
     b.invisible.push(Aabb::new(min, max));
 }
 
-/// Стол на четырёх ножках.
+/// Стол на четырёх ножках: столешница из отдельных досок, царги под ней, проножки.
 pub fn table(b: &mut Builder, r: Rect, h: f32) {
     b.invisible.push(Aabb::new(r.min3(0.0), r.max3(h)));
     let m = b.mesh(Mat::Wood);
-    m.cuboid(r.min3(h - 0.06), r.max3(h));
-    for (x, z) in [(r.x0 + 0.08, r.z0 + 0.08), (r.x1 - 0.08, r.z0 + 0.08), (r.x0 + 0.08, r.z1 - 0.08), (r.x1 - 0.08, r.z1 - 0.08)] {
-        m.cuboid(Vec3::new(x - 0.04, 0.0, z - 0.04), Vec3::new(x + 0.04, h - 0.06, z + 0.04));
+    let along_x = r.w() > r.d();
+    // Доски идут вдоль длинной стороны; между ними щели, толщина чуть гуляет.
+    let width = if along_x { r.d() } else { r.w() };
+    let n = ((width / 0.17).round() as usize).max(2);
+    let pw = width / n as f32;
+    for i in 0..n {
+        let (a, c) = (i as f32 * pw + 0.004, (i + 1) as f32 * pw - 0.004);
+        let dy = ((i * 7 + 3) % 5) as f32 * 0.0015;
+        let end = ((i * 5 + 1) % 4) as f32 * 0.006;
+        if along_x {
+            m.cuboid(Vec3::new(r.x0 + end, h - 0.045, r.z0 + a), Vec3::new(r.x1 - end * 0.5, h - dy, r.z0 + c));
+        } else {
+            m.cuboid(Vec3::new(r.x0 + a, h - 0.045, r.z0 + end), Vec3::new(r.x0 + c, h - dy, r.z1 - end * 0.5));
+        }
+    }
+    let leg = 0.045;
+    let ins = 0.09;
+    for (x, z) in [(r.x0 + ins, r.z0 + ins), (r.x1 - ins, r.z0 + ins), (r.x0 + ins, r.z1 - ins), (r.x1 - ins, r.z1 - ins)] {
+        m.cuboid(Vec3::new(x - leg, 0.0, z - leg), Vec3::new(x + leg, h - 0.045, z + leg));
+    }
+    // Царги под столешницей и проножки у пола.
+    for (y0, y1, t) in [(h - 0.14, h - 0.045, 0.018), (h * 0.22, h * 0.22 + 0.05, 0.02)] {
+        if r.w() > 0.4 {
+            for z in [r.z0 + ins, r.z1 - ins] {
+                m.cuboid(Vec3::new(r.x0 + ins, y0, z - t), Vec3::new(r.x1 - ins, y1, z + t));
+            }
+        }
+        if r.d() > 0.4 {
+            for x in [r.x0 + ins, r.x1 - ins] {
+                m.cuboid(Vec3::new(x - t, y0, r.z0 + ins), Vec3::new(x + t, y1, r.z1 - ins));
+            }
+        }
     }
 }
 
@@ -650,12 +679,45 @@ pub fn chest(b: &mut Builder, p: Vec3, along_x: bool) {
     b.container(p + Vec3::Y * 0.7, "Сундук");
 }
 
-/// Только сам сундук (без добычи).
+/// Только сам сундук (без добычи): ящик на ножках, выступающая крышка, железные полосы,
+/// петли и накладка замка.
 pub fn chest_body(b: &mut Builder, p: Vec3, along_x: bool) {
     let (hx, hz) = if along_x { (0.5, 0.3) } else { (0.3, 0.5) };
-    b.solid([p.x - hx, 0.0, p.z - hz], [p.x + hx, 0.55, p.z + hz], Mat::Wood);
-    let m = b.mesh(Mat::Iron);
-    m.cuboid(Vec3::new(p.x - hx - 0.01, 0.42, p.z - hz - 0.01), Vec3::new(p.x + hx + 0.01, 0.47, p.z + hz + 0.01));
+    hidden(b, Vec3::new(p.x - hx, 0.0, p.z - hz), Vec3::new(p.x + hx, 0.57, p.z + hz));
+    let m = b.mesh(Mat::Wood);
+    // Ножки-бруски и корпус.
+    for (sx, sz) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+        let c = Vec3::new(p.x + sx * (hx - 0.05), 0.0, p.z + sz * (hz - 0.05));
+        m.cuboid(c - Vec3::new(0.05, 0.0, 0.05), c + Vec3::new(0.05, 0.06, 0.05));
+    }
+    m.cuboid(Vec3::new(p.x - hx + 0.012, 0.04, p.z - hz + 0.012), Vec3::new(p.x + hx - 0.012, 0.44, p.z + hz - 0.012));
+    // Крышка: шире корпуса, с двускатной «спинкой».
+    m.cuboid(Vec3::new(p.x - hx, 0.445, p.z - hz), Vec3::new(p.x + hx, 0.52, p.z + hz));
+    let (lx, lz) = if along_x { (hx, hz * 0.55) } else { (hx * 0.55, hz) };
+    m.cuboid(Vec3::new(p.x - lx, 0.52, p.z - lz), Vec3::new(p.x + lx, 0.57, p.z + lz));
+    let i = b.mesh(Mat::Iron);
+    let e = 0.006;
+    // Полосы поперёк сундука (через корпус и крышку), петли и замок.
+    for s in [-0.62f32, 0.62] {
+        if along_x {
+            let x = p.x + s * hx;
+            i.cuboid(Vec3::new(x - 0.025, 0.04, p.z - hz + 0.012 - e), Vec3::new(x + 0.025, 0.44, p.z + hz - 0.012 + e));
+            i.cuboid(Vec3::new(x - 0.025, 0.445, p.z - hz - e), Vec3::new(x + 0.025, 0.52 + e, p.z + hz + e));
+        } else {
+            let z = p.z + s * hz;
+            i.cuboid(Vec3::new(p.x - hx + 0.012 - e, 0.04, z - 0.025), Vec3::new(p.x + hx - 0.012 + e, 0.44, z + 0.025));
+            i.cuboid(Vec3::new(p.x - hx - e, 0.445, z - 0.025), Vec3::new(p.x + hx + e, 0.52 + e, z + 0.025));
+        }
+    }
+    for s in [-1.0f32, 1.0] {
+        if along_x {
+            let z = p.z + s * hz;
+            i.cuboid(Vec3::new(p.x - 0.045, 0.33, z - 0.012 - e), Vec3::new(p.x + 0.045, 0.5, z + e));
+        } else {
+            let x = p.x + s * hx;
+            i.cuboid(Vec3::new(x - 0.012 - e, 0.33, p.z - 0.045), Vec3::new(x + e, 0.5, p.z + 0.045));
+        }
+    }
 }
 
 /// Полка у стены с посудой: `r` — прямоугольник полки (узкий), `levels` ярусов.
@@ -742,24 +804,101 @@ pub fn hand_mill(b: &mut Builder, p: Vec3) {
     b.mesh(Mat::Wood).beam(p + Vec3::new(0.22, 0.58, 0.0), p + Vec3::new(0.22, 0.85, 0.0), 0.025, 0.025, Vec3::X);
 }
 
-/// Штабель дров.
+/// Бревно от `a` до `c` (радиус у комля `r0`, у вершины `r1`): чуть кривое, неровное, с торцами.
+/// Развёртка: u — вдоль ствола (м), v — по окружности (м); торцы — u = 1000 + доля радиуса.
+pub fn log(b: &mut Builder, a: Vec3, c: Vec3, r0: f32, r1: f32, seed: u32) {
+    let len = a.distance(c);
+    if len < 0.02 {
+        return;
+    }
+    let d = (c - a) / len;
+    let up = if d.y.abs() > 0.9 { Vec3::X } else { Vec3::Y };
+    let s = d.cross(up).normalize();
+    let w = s.cross(d);
+    let mut rng = Rng::new(seed.wrapping_mul(7919).wrapping_add(17));
+    let ba = rng.range(0.0, TAU);
+    let bow = (s * ba.cos() + w * ba.sin()) * len * rng.range(0.005, 0.014);
+    let phase = rng.range(0.0, 10.0);
+    let knot = rng.range(0.03, 0.06);
+    let sides = if r0.max(r1) > 0.075 { 11 } else { 7 };
+    let n = ((len / 0.4).ceil() as usize).max(2);
+    let circ = TAU * (r0 + r1) * 0.5;
+    let ring_r = |t: f32, k: usize| {
+        let r = r0 + (r1 - r0) * t;
+        let ang = k as f32 / sides as f32 * TAU;
+        r * (1.0 + knot * (ang * 2.0 + phase + t * len * 2.3).sin() * (t * len * 1.7 + phase).cos() + 0.03 * (t * len * 4.1 + phase).sin())
+    };
+    let center = |t: f32| a + d * (len * t) + bow * (std::f32::consts::PI * t).sin();
+    let m = b.mesh(Mat::Timber);
+    let mut rings: Vec<Vec<u32>> = Vec::with_capacity(n + 1);
+    for i in 0..=n {
+        let t = i as f32 / n as f32;
+        let ctr = center(t);
+        let ring: Vec<u32> = (0..=sides)
+            .map(|k| {
+                let ang = k as f32 / sides as f32 * TAU;
+                let dir = s * ang.cos() + w * ang.sin();
+                m.vert(ctr + dir * ring_r(t, k % sides), dir, Vec2::new(t * len, k as f32 / sides as f32 * circ))
+            })
+            .collect();
+        rings.push(ring);
+    }
+    for i in 0..n {
+        for k in 0..sides {
+            let (a0, a1, b0, b1) = (rings[i][k], rings[i][k + 1], rings[i + 1][k], rings[i + 1][k + 1]);
+            m.index_tri(a0, b0, b1);
+            m.index_tri(a0, b1, a1);
+        }
+    }
+    // Торцы: плоские срезы с кольцами.
+    for (t, out) in [(0.0f32, -d), (1.0, d)] {
+        let ctr = center(t);
+        let r = r0 + (r1 - r0) * t;
+        let cv = m.vert(ctr, out, Vec2::new(1000.0, r));
+        let rim: Vec<u32> = (0..=sides)
+            .map(|k| {
+                let ang = k as f32 / sides as f32 * TAU;
+                let dir = s * ang.cos() + w * ang.sin();
+                m.vert(ctr + dir * ring_r(t, k % sides), out, Vec2::new(1001.0, r))
+            })
+            .collect();
+        for k in 0..sides {
+            if t == 0.0 {
+                m.index_tri(cv, rim[k], rim[k + 1]);
+            } else {
+                m.index_tri(cv, rim[k + 1], rim[k]);
+            }
+        }
+    }
+}
+
+/// Штабель дров: настоящие круглые поленья с торцами, уложенные «в шахматку».
 pub fn woodpile(b: &mut Builder, r: Rect, h: f32) {
-    b.solid([r.x0, 0.0, r.z0], [r.x1, h, r.z1], Mat::Wood);
-    let m = b.mesh(Mat::Wood);
+    hidden(b, r.min3(0.0), r.max3(h));
     let along_x = r.w() > r.d();
-    let n = ((if along_x { r.w() } else { r.d() }) / 0.14) as usize;
-    for k in 0..n {
-        let t = (k as f32 + 0.5) / n as f32;
-        for y in [0.15, 0.4, 0.65] {
-            if y > h {
+    let (len, depth) = if along_x { (r.w(), r.d()) } else { (r.d(), r.w()) };
+    let mut rng = Rng::new((r.x0 * 37.0 + r.z0 * 91.0) as i32 as u32 ^ 0x51ED);
+    let rr = 0.075;
+    let rows = ((h - rr) / (rr * 1.74)).floor().max(0.0) as usize + 1;
+    for j in 0..rows {
+        let y = rr + j as f32 * rr * 1.74;
+        let n = (len / (rr * 2.0)) as usize - (j % 2);
+        let off = (len - n as f32 * rr * 2.0) * 0.5 + rr;
+        for i in 0..n {
+            // Верхний ряд неполный — как у начатой поленницы.
+            if j + 1 == rows && rows > 1 && rng.chance(0.3) {
                 continue;
             }
+            let t = off + i as f32 * rr * 2.0 + rng.range(-0.008, 0.008);
+            let rad = rr * rng.range(0.78, 1.0);
+            let yy = y - (rr - rad) + rng.range(0.0, 0.006);
+            let (o0, o1) = (rng.range(-0.07, 0.03), rng.range(-0.03, 0.07));
             let (a, c) = if along_x {
-                (Vec3::new(r.x0 + r.w() * t, y, r.z0 - 0.05), Vec3::new(r.x0 + r.w() * t, y, r.z1 + 0.05))
+                (Vec3::new(r.x0 + t, yy, r.z0 + o0), Vec3::new(r.x0 + t + rng.range(-0.01, 0.01), yy, r.z0 + depth + o1))
             } else {
-                (Vec3::new(r.x0 - 0.05, y, r.z0 + r.d() * t), Vec3::new(r.x1 + 0.05, y, r.z0 + r.d() * t))
+                (Vec3::new(r.x0 + o0, yy, r.z0 + t), Vec3::new(r.x0 + depth + o1, yy, r.z0 + t + rng.range(-0.01, 0.01)))
             };
-            m.beam(a, c, 0.06, 0.06, Vec3::Y);
+            log(b, a, c, rad, rad * rng.range(0.86, 0.98), rng.f().to_bits());
         }
     }
 }
