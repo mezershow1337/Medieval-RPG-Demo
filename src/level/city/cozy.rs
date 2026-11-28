@@ -190,7 +190,7 @@ pub fn lidded_pot(b: &mut Builder, p: Vec3) {
 
 /// Плоская корзинка с плодами (смоквы, яблоки, виноград, лук).
 pub fn fruit_tray(b: &mut Builder, p: Vec3, fruit: Mat, rng: &mut Rng) {
-    b.mesh(Mat::Thatch).lathe(p, &[(0.0, 0.0), (0.12, 0.0), (0.15, 0.06), (0.14, 0.065), (0.11, 0.01)], 10);
+    b.mesh(Mat::Wicker).lathe(p, &[(0.0, 0.0), (0.12, 0.0), (0.15, 0.06), (0.14, 0.065), (0.11, 0.01)], 10);
     let m = b.mesh(fruit);
     for k in 0..7 {
         let a = k as f32 * 2.4 + rng.range(0.0, 0.5);
@@ -1003,7 +1003,7 @@ fn wall_tools(b: &mut Builder, p: Vec3, out: Vec3, along: Vec3, rng: &mut Rng) {
 
 /// Корзинка с крышкой.
 fn lidded_basket(b: &mut Builder, p: Vec3, r: f32) {
-    b.mesh(Mat::Thatch).lathe(p, &[(0.0, 0.0), (r * 0.85, 0.0), (r, r * 1.2), (r * 0.6, r * 1.45), (0.0, r * 1.5)], 7);
+    b.mesh(Mat::Wicker).lathe(p, &[(0.0, 0.0), (r * 0.85, 0.0), (r, r * 1.2), (r * 0.6, r * 1.45), (0.0, r * 1.5)], 7);
 }
 
 /// Камышовая циновка или ковёр посреди комнаты.

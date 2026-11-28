@@ -566,6 +566,10 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         Mat::Shingle => (Color::srgb(0.52, 0.48, 0.4), Color::srgb(0.4, 0.37, 0.31), P_EARTH, 1.0, 0.3, 0.8, 0.9, 0.0, 0.0, 0.0, 0.0),
         // Окорённое бревно: серо-бурое, обветренное; второй цвет — светлый торец.
         Mat::Timber => (Color::srgb(0.36, 0.27, 0.19), Color::srgb(0.62, 0.5, 0.36), P_LOG, 1.0, 0.35, 0.8, 0.85, 0.0, 0.0, 0.0, 0.0),
+        Mat::Wicker => (Color::srgb(0.5, 0.39, 0.24), Color::srgb(0.3, 0.22, 0.13), P_PLAIN, 1.0, 0.3, 0.9, 0.9, 0.0, 0.0, 0.2, 0.0),
+        Mat::Limewash => (Color::srgb(0.9, 0.88, 0.82), Color::srgb(0.7, 0.66, 0.58), P_PLASTER, 1.0, 0.14, 0.3, 0.9, 0.0, 0.03, 0.7, 0.0),
+        Mat::PlasterOchre => (Color::srgb(0.8, 0.68, 0.48), Color::srgb(0.62, 0.5, 0.32), P_PLASTER, 1.0, 0.18, 0.3, 0.9, 0.0, 0.03, 0.75, 0.0),
+        Mat::PlasterRose => (Color::srgb(0.8, 0.6, 0.5), Color::srgb(0.6, 0.42, 0.34), P_PLASTER, 1.0, 0.18, 0.3, 0.9, 0.0, 0.03, 0.75, 0.0),
     };
     let photo = photo_layers(mat);
     let tex = surface_textures();
@@ -605,7 +609,7 @@ fn wet_capacity(mat: Mat) -> f32 {
         Mat::Marble => 0.6,
         Mat::Limestone | Mat::Stone | Mat::DarkStone | Mat::Rubble | Mat::Trim | Mat::OpusMixtum | Mat::Brick => 0.5,
         Mat::Grass | Mat::Wood | Mat::Timber | Mat::Thatch => 0.45,
-        Mat::Plaster | Mat::Signinum => 0.3,
+        Mat::Plaster | Mat::Signinum | Mat::Limewash | Mat::PlasterOchre | Mat::PlasterRose => 0.3,
         _ => 0.0,
     }
 }
@@ -620,10 +624,10 @@ pub fn depth_rank(mat: Mat) -> f32 {
         Mat::Felt | Mat::Canvas | Mat::Cloth => 11,
         Mat::Water | Mat::Coals => 10,
         Mat::Mosaic | Mat::Signinum => 9,
-        Mat::Ceramic | Mat::Bronze | Mat::Iron | Mat::Gold | Mat::Glass | Mat::Bread | Mat::Leather => 8,
+        Mat::Ceramic | Mat::Bronze | Mat::Iron | Mat::Gold | Mat::Glass | Mat::Bread | Mat::Leather | Mat::Wicker => 8,
         Mat::Ochre => 7,
         Mat::Paving | Mat::Floor | Mat::Cobble => 7,
-        Mat::Plaster | Mat::Trim => 6,
+        Mat::Plaster | Mat::Trim | Mat::Limewash | Mat::PlasterOchre | Mat::PlasterRose => 6,
         Mat::Wood | Mat::Timber => 5,
         Mat::Marble => 4,
         Mat::OpusMixtum | Mat::Brick | Mat::Tile | Mat::Roof => 3,
@@ -680,7 +684,18 @@ fn photo_layers(mat: Mat) -> Option<(u32, u32, f32, f32)> {
         Mat::Iron => (L_IRON, L_IRON, 0.9, 0.6),
         Mat::Bronze => (L_BRONZE, L_BRONZE, 0.5, 0.6),
         Mat::Gold => (L_GOLD, L_GOLD, 0.4, 0.5),
-        Mat::Canvas | Mat::Felt | Mat::Rug | Mat::Cloth => (L_WOOL, L_WOOL, 1.0, 0.7),
+        Mat::Cloth => (L_WOOL, L_WOOL, 1.0, 0.7),
+        // Утварь и убранство: глина, кожа, лён, войлок, ковёр, плетёнка — свои фото.
+        Mat::Canvas => (L_LINEN, L_LINEN, 1.0, 0.8),
+        Mat::Felt => (L_FELT, L_FELT, 1.0, 0.8),
+        Mat::Rug => (L_RUG, L_RUG, 0.6, 0.8),
+        Mat::Ceramic => (L_CERAMIC, L_CERAMIC, 0.75, 0.6),
+        Mat::Bread => (L_CERAMIC, L_CERAMIC, 1.0, 0.5),
+        Mat::Leather => (L_LEATHER, L_LEATHER, 0.8, 0.8),
+        Mat::Wicker => (L_WICKER, L_WICKER, 0.65, 1.0),
+        // Свежая побелка и её подкрашенные тона — на одном фото, цвет даёт перекраска.
+        Mat::Limewash => (L_LIMEWASH, L_LIMEWASH, 0.8, 0.7),
+        Mat::PlasterOchre | Mat::PlasterRose => (L_LIMEWASH, L_LIMEWASH, 1.0, 0.7),
         Mat::Ochre => (L_PLASTER, L_PLASTER, 1.0, 0.5),
         Mat::Bedrock => (L_ROCK, L_ROCK, 0.8, 1.0),
         Mat::Limonite => (L_SOIL, L_ROCK, 0.85, 1.0),

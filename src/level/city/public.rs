@@ -326,7 +326,7 @@ pub fn stall(b: &mut Builder, p: Vec3, facing: Vec3, kind: usize, rng: &mut Rng)
             // Корзины с зерном и бобами.
             for k in 0..3 {
                 let q = top + along(-0.7 + k as f32 * 0.7, 0.0, 0.0);
-                b.mesh(Mat::Thatch).lathe(q, &[(0.15, 0.0), (0.25, 0.22), (0.0, 0.22)], 10);
+                b.mesh(Mat::Wicker).lathe(q, &[(0.15, 0.0), (0.25, 0.22), (0.0, 0.22)], 10);
                 b.mesh(Mat::Earth).disc(q + Vec3::Y * 0.2, 0.23, 10, true);
             }
         }

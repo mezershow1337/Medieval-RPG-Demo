@@ -391,6 +391,17 @@ impl MeshBuilder {
         out
     }
 
+    /// Поворачивает всю геометрию вокруг вертикали на `turn` четвертей оборота
+    /// (см. `level::quarter`).
+    pub fn turn(&mut self, turn: u8) {
+        if turn % 4 == 0 {
+            return;
+        }
+        for p in self.pos.iter_mut().chain(self.nrm.iter_mut()) {
+            *p = crate::level::quarter(Vec3::from(*p), turn).to_array();
+        }
+    }
+
     /// Сдвигает всю геометрию.
     pub fn translate(&mut self, d: Vec3) {
         for p in &mut self.pos {

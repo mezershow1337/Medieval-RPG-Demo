@@ -37,8 +37,8 @@ impl Surface {
     pub fn of(mat: Mat) -> Option<Surface> {
         use Mat::*;
         Some(match mat {
-            Cobble | Stone | DarkStone | Floor | Trim | Paving | Limestone | Rubble | Plaster | Brick | OpusMixtum | Marble | Mosaic | Signinum | Gold | Iron | Bronze | Coals | Ochre | Glass | Bedrock | Limonite | Shingle => Surface::Stone,
-            Wood | Timber | Bread => Surface::Wood,
+            Cobble | Stone | DarkStone | Floor | Trim | Paving | Limestone | Rubble | Plaster | Brick | OpusMixtum | Marble | Mosaic | Signinum | Gold | Iron | Bronze | Coals | Ochre | Glass | Bedrock | Limonite | Shingle | Limewash | PlasterOchre | PlasterRose => Surface::Stone,
+            Wood | Timber | Bread | Wicker => Surface::Wood,
             Earth | Soot => Surface::Dirt,
             Grass | Terrain | Leaves | Conifer | HerbGreen | HerbSilver | PetalYellow | PetalPurple | PetalWhite | PetalRed | PetalPink | Thatch => Surface::Grass,
             Rug | Cloth | Felt | Canvas | Banner | Leather => Surface::Cloth,

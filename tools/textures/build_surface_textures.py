@@ -13,8 +13,10 @@
      (номера слоёв, средний линейный цвет слоя — по нему шейдер перекрашивает фото
      в цвет материала, и масштаб тайла в метрах).
 
-Запуск:  python3 tools/textures/build_surface_textures.py [папка_с_zip_или_jpg]
+Запуск:  python3 tools/textures/build_surface_textures.py [папка_с_zip_или_jpg] [--only слой,слой]
 Без папки архивы качаются с ambientCG в ~/.cache/mrpg-ambientcg.
+--only пересобирает только названные слои: остальные картинки не трогаются, а их средний
+цвет берётся из прежнего src/surface_layers.rs (так добавляют новый слой, не меняя старых).
 Нужны только Pillow и numpy.
 """
 import io, os, sys, zipfile, urllib.request
@@ -48,6 +50,14 @@ LAYERS = [
     ("gold", "Metal048C", 1.0, "золото"),
     ("gravel", "Gravel041", 2.0, "береговая галька"),
     ("thatch", "MrpgThatch", 1.5, "солома и камыш: ряды пучков стеблей внахлёст (своя, Blender: tools/textures/blender_thatch.py)"),
+    # Утварь и убранство домов. Новые слои — только в конец: шейдер рельефа знает почву и гальку по номерам.
+    ("ceramic", "Clay002", 0.9, "обожжённая глина: амфоры, пифосы, горшки, миски"),
+    ("leather", "Leather014", 0.7, "дублёная кожа: мехи, ремни, сёдла, переплёты"),
+    ("linen", "Fabric061", 0.5, "небелёный лён: навесы, паруса, мешки, занавеси"),
+    ("felt", "Fabric034", 0.7, "валяная шерсть: войлок юрт, кошмы, подстилки"),
+    ("rug", "Carpet015", 1.1, "тканый шерстяной ковёр"),
+    ("wicker", "Wicker010B", 0.45, "плетёнка из лозы: корзины, плетни, верши"),
+    ("limewash", "Plaster003", 2.2, "свежая известковая побелка: фасады жилых домов"),
 ]
 
 
@@ -139,11 +149,32 @@ def to_srgb(l):
     return np.where(l <= 0.0031308, l * 12.92, 1.055 * np.power(np.clip(l, 0, None), 1 / 2.4) - 0.055)
 
 
+def old_means():
+    """Средние цвета слоёв из прежнего surface_layers.rs."""
+    import re
+    if not os.path.exists(RS):
+        return {}
+    text = open(RS, encoding="utf-8").read()
+    return {m.group(1): np.array([float(v) for v in m.group(2).split(",")]) for m in re.finditer(r'name: "(\w+)".*?mean: \[([^\]]+)\]', text)}
+
+
 def main():
-    src = sys.argv[1] if len(sys.argv) > 1 else None
+    args = sys.argv[1:]
+    only = None
+    if "--only" in args:
+        k = args.index("--only")
+        only = set(args[k + 1].split(","))
+        del args[k:k + 2]
+    src = args[0] if args else None
     os.makedirs(OUT, exist_ok=True)
+    kept = old_means() if only else {}
     rows = []
     for i, (layer, asset, meters, what) in enumerate(LAYERS):
+        if only is not None and layer not in only:
+            if layer not in kept:
+                sys.exit("слоя %s нет в прежнем surface_layers.rs — соберите его тоже" % layer)
+            rows.append((i, layer, asset, meters, kept[layer], what))
+            continue
         m = fetch(asset, src)
         color = arr(m["color"], "RGB")
         lin = to_lin(color)

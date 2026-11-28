@@ -50,6 +50,20 @@ pub const LAYERS: &[Layer] = &[
     Layer { name: "gravel", source: "Gravel041", meters: 2.00, mean: [0.2675, 0.2581, 0.1830] },
     // 19 — солома и камыш: ряды пучков стеблей внахлёст (своя, Blender: tools/textures/blender_thatch.py)
     Layer { name: "thatch", source: "MrpgThatch", meters: 1.50, mean: [0.2185, 0.1518, 0.0633] },
+    // 20 — обожжённая глина: амфоры, пифосы, горшки, миски
+    Layer { name: "ceramic", source: "Clay002", meters: 0.90, mean: [0.2990, 0.1198, 0.0648] },
+    // 21 — дублёная кожа: мехи, ремни, сёдла, переплёты
+    Layer { name: "leather", source: "Leather014", meters: 0.70, mean: [0.0800, 0.0378, 0.0331] },
+    // 22 — небелёный лён: навесы, паруса, мешки, занавеси
+    Layer { name: "linen", source: "Fabric061", meters: 0.50, mean: [0.2511, 0.2289, 0.2062] },
+    // 23 — валяная шерсть: войлок юрт, кошмы, подстилки
+    Layer { name: "felt", source: "Fabric034", meters: 0.70, mean: [0.3598, 0.3497, 0.3800] },
+    // 24 — тканый шерстяной ковёр
+    Layer { name: "rug", source: "Carpet015", meters: 1.10, mean: [0.3205, 0.1043, 0.0589] },
+    // 25 — плетёнка из лозы: корзины, плетни, верши
+    Layer { name: "wicker", source: "Wicker010B", meters: 0.45, mean: [0.1464, 0.1066, 0.0750] },
+    // 26 — свежая известковая побелка: фасады жилых домов
+    Layer { name: "limewash", source: "Plaster003", meters: 2.20, mean: [0.6870, 0.6629, 0.6407] },
 ];
 
 pub const L_ASHLAR: u32 = 0;
@@ -72,3 +86,10 @@ pub const L_BRONZE: u32 = 16;
 pub const L_GOLD: u32 = 17;
 pub const L_GRAVEL: u32 = 18;
 pub const L_THATCH: u32 = 19;
+pub const L_CERAMIC: u32 = 20;
+pub const L_LEATHER: u32 = 21;
+pub const L_LINEN: u32 = 22;
+pub const L_FELT: u32 = 23;
+pub const L_RUG: u32 = 24;
+pub const L_WICKER: u32 = 25;
+pub const L_LIMEWASH: u32 = 26;

@@ -24,6 +24,7 @@ pub(crate) mod cozy;
 pub(crate) mod interior;
 pub(crate) mod kit;
 pub(crate) mod outside;
+pub(crate) mod plan;
 pub(crate) mod port;
 pub(crate) mod public;
 pub(crate) mod ships;
@@ -176,13 +177,14 @@ pub fn city_layout() -> Layout {
             let r = block(i, j);
             b.at(r.cx(), r.cz());
             let seed = (i as u32 * 131 + (j + 4) as u32 * 7919) ^ 0x5eed;
-            match block_use(i, j) {
-                Use::Houses => houses::block_houses(&mut b, i, j, seed),
-                Use::Garden => houses::garden(&mut b, r, seed),
-                _ => {}
+            // По-старому (две усадьбы на квартал) строятся только кварталы с именованными лавками;
+            // остальная жилая застройка — по плану (см. `plan`).
+            if block_use(i, j) == Use::Houses && plan::classic(i, j) {
+                houses::block_houses(&mut b, i, j, seed);
             }
         }
     }
+    houses::plan_houses(&mut b);
     public::agora(&mut b);
     public::basilica(&mut b);
     public::episcopium(&mut b);

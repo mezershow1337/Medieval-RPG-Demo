@@ -28,9 +28,9 @@ pub fn road_distance(x: f32, z: f32) -> f32 {
     city::outside::road_distance_at(Vec2::new(x, z))
 }
 
-/// Голая земля без травы: кострища и натоптанные тропы рудника.
+/// Голая земля без травы: кострища и натоптанные тропы рудника, площадка порта под обрывом.
 pub fn bare_ground(x: f32, z: f32) -> bool {
-    city::outside::mines::bare_ground(Vec2::new(x, z))
+    city::outside::mines::bare_ground(Vec2::new(x, z)) || terrain::port_ground(x, z)
 }
 
 use crate::collision::{Aabb, HeightField, LevelColliders};
@@ -128,6 +128,22 @@ pub enum Mat {
     /// Круглый лес (окорённые брёвна крепи, срубов, воротов): волокна вдоль бревна по развёртке,
     /// на торцах — годичные кольца.
     Timber,
+    /// Плетёнка из лозы: корзины, плетни, верши.
+    Wicker,
+    /// Свежая известковая побелка: фасады домов побогаче.
+    Limewash,
+    /// Побелка, подкрашенная жёлтой охрой.
+    PlasterOchre,
+    /// Побелка с толчёной керамикой: тёплая розоватая.
+    PlasterRose,
+}
+
+impl Mat {
+    /// Оштукатуренная стена (любого тона): у неё гладкий цоколь, расписная панель, а на стройке
+    /// до отделки она ещё бутовая.
+    pub fn plastered(self) -> bool {
+        matches!(self, Mat::Plaster | Mat::Limewash | Mat::PlasterOchre | Mat::PlasterRose)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -578,6 +594,17 @@ pub fn chunk_of(p: Vec3) -> Chunk {
     ((p.x / CHUNK).floor() as i16, (p.z / CHUNK).floor() as i16)
 }
 
+/// Поворот вокруг вертикали на `turn` четвертей оборота: 1 — то, что смотрело на север (−Z),
+/// смотрит на восток (+X), 2 — на юг, 3 — на запад.
+pub fn quarter(p: Vec3, turn: u8) -> Vec3 {
+    match turn % 4 {
+        0 => p,
+        1 => Vec3::new(-p.z, p.y, p.x),
+        2 => Vec3::new(-p.x, p.y, -p.z),
+        _ => Vec3::new(p.z, p.y, -p.x),
+    }
+}
+
 /// Проём в стене: дверь (sill = низ стены) или окно (sill выше, со стеклом).
 #[derive(Clone, Copy, Debug)]
 struct Opening {
@@ -721,35 +748,61 @@ impl Builder {
         self.placed_with(offset, None, f);
     }
 
+    /// Как [`Builder::placed`], но построенное ещё и повёрнуто вокруг вертикали на `turn`
+    /// четвертей оборота (см. [`quarter`]): так дом, который умеет строиться фасадом на север,
+    /// ставится фасадом на любую из четырёх улиц. Точки, которые нельзя занимать
+    /// ([`Builder::keep_clear`]), видны `f` в её собственных координатах.
+    fn turned(&mut self, offset: Vec3, turn: u8, f: impl FnOnce(&mut Builder)) {
+        let back = (4 - turn % 4) % 4;
+        let keep: Vec<Vec3> = self.keep_clear.iter().map(|p| quarter(*p - offset, back)).collect();
+        self.placed_xf(offset, turn % 4, Some(chunk_of(offset)), keep, f);
+    }
+
     fn placed_with(&mut self, offset: Vec3, chunk: Option<Chunk>, f: impl FnOnce(&mut Builder)) {
+        self.placed_xf(offset, 0, chunk, Vec::new(), f);
+    }
+
+    fn placed_xf(&mut self, offset: Vec3, turn: u8, chunk: Option<Chunk>, keep_clear: Vec<Vec3>, f: impl FnOnce(&mut Builder)) {
         let mut t = Builder::new();
         t.loot = self.loot;
         t.house = self.house;
         t.wealth = self.wealth;
+        t.keep_clear = keep_clear;
         f(&mut t);
-        let shift = |a: Aabb| Aabb::new(a.min + offset, a.max + offset);
+        let pt = |p: Vec3| quarter(p, turn) + offset;
+        let dir = |d: Vec3| quarter(d, turn);
+        let shift = |a: Aabb| {
+            let (p, q) = (pt(a.min), pt(a.max));
+            Aabb::new(p.min(q), p.max(q))
+        };
+        // Поворот в плане как у игрока: 0 — взгляд на −Z.
+        let yaw = |y: f32| {
+            let d = dir(Vec3::new(-y.sin(), 0.0, -y.cos()));
+            (-d.x).atan2(-d.z)
+        };
+        let odd = turn % 2 == 1;
         self.blocks.extend(t.blocks.into_iter().map(|b| Block { aabb: shift(b.aabb), ..b }));
         self.invisible.extend(t.invisible.into_iter().map(shift));
         self.roofs.extend(t.roofs.into_iter().map(|b| Block { aabb: shift(b.aabb), ..b }));
         self.windows.extend(t.windows.into_iter().map(shift));
-        self.torches.extend(t.torches.into_iter().map(|x| Torch { pos: x.pos + offset, ..x }));
-        self.lamps.extend(t.lamps.into_iter().map(|x| Lamp { pos: x.pos + offset, ..x }));
-        self.hearths.extend(t.hearths.into_iter().map(|p| p + offset));
-        self.forges.extend(t.forges.into_iter().map(|f| ForgeSpec { fire: f.fire + offset, anvil: f.anvil + offset, trough: f.trough + offset, grind: f.grind + offset, ..f }));
+        self.torches.extend(t.torches.into_iter().map(|x| Torch { pos: pt(x.pos), out: dir(x.out) }));
+        self.lamps.extend(t.lamps.into_iter().map(|x| Lamp { pos: pt(x.pos), ..x }));
+        self.hearths.extend(t.hearths.into_iter().map(pt));
+        self.forges.extend(t.forges.into_iter().map(|f| ForgeSpec { fire: pt(f.fire), anvil: pt(f.anvil), trough: pt(f.trough), grind: pt(f.grind), ..f }));
         let (d0, c0) = (self.doors.len() as u32, self.containers.len() as u32);
-        self.doors.extend(t.doors.into_iter().map(|d| DoorSpec { center: d.center + offset, ..d }));
-        self.beds.extend(t.beds.into_iter().map(|d| Bed { pos: d.pos + offset, ..d }));
-        self.containers.extend(t.containers.into_iter().map(|c| ContainerSpec { pos: c.pos + offset, ..c }));
+        self.doors.extend(t.doors.into_iter().map(|d| DoorSpec { center: pt(d.center), along_x: d.along_x != odd, ..d }));
+        self.beds.extend(t.beds.into_iter().map(|d| Bed { pos: pt(d.pos), along: dir(d.along) }));
+        self.containers.extend(t.containers.into_iter().map(|c| ContainerSpec { pos: pt(c.pos), ..c }));
         let e0 = self.estates.len() as u16;
         for mut e in t.estates {
-            e.min += offset;
-            e.max += offset;
-            e.entrance += offset;
+            let a = shift(Aabb::new(e.min, e.max));
+            (e.min, e.max) = (a.min, a.max);
+            e.entrance = pt(e.entrance);
             e.doors.iter_mut().for_each(|d| *d += d0);
             e.containers.iter_mut().for_each(|c| *c += c0);
             for r in &mut e.rooms {
-                r.min += offset;
-                r.max += offset;
+                let a = shift(Aabb::new(r.min, r.max));
+                (r.min, r.max) = (a.min, a.max);
             }
             self.estates.push(e);
         }
@@ -758,33 +811,36 @@ impl Builder {
                 b.aabb = shift(b.aabb);
             }
             g.invisible.iter_mut().for_each(|a| *a = shift(*a));
-            g.decor.iter_mut().for_each(|(_, mb)| mb.translate(offset));
-            g.lamps.iter_mut().for_each(|l| l.pos += offset);
+            g.decor.iter_mut().for_each(|(_, mb)| {
+                mb.turn(turn);
+                mb.translate(offset)
+            });
+            g.lamps.iter_mut().for_each(|l| l.pos = pt(l.pos));
             if let SwitchKey::Furnish { estate, room, kind } = g.key {
                 g.key = SwitchKey::Furnish { estate: estate + e0, room, kind };
             }
             self.switches.push(g);
         }
-        self.residents.extend(t.residents.into_iter().map(|r| Resident { pos: r.pos + offset, ..r }));
-        self.house_items.extend(t.house_items.into_iter().map(|h| HouseItemSpec { pos: h.pos + offset, ..h }));
-        self.shops.extend(t.shops.into_iter().map(|s| ShopSpec {
-            room_min: s.room_min + offset,
-            room_max: s.room_max + offset,
-            counter_min: s.counter_min + offset,
-            counter_max: s.counter_max + offset,
-            seller: s.seller + offset,
-            goods: s.goods.map(|g| g.map(|(a, c)| (a + offset, c + offset))),
-            door: s.door.map(|d| d + d0),
-            ..s
+        self.residents.extend(t.residents.into_iter().map(|r| Resident { pos: pt(r.pos), yaw: yaw(r.yaw), ..r }));
+        self.house_items.extend(t.house_items.into_iter().map(|h| HouseItemSpec { pos: pt(h.pos), yaw: yaw(h.yaw), ..h }));
+        self.shops.extend(t.shops.into_iter().map(|s| {
+            let pair = |(a, c): (Vec3, Vec3)| {
+                let b = shift(Aabb::new(a, c));
+                (b.min, b.max)
+            };
+            let (room, counter) = (pair((s.room_min, s.room_max)), pair((s.counter_min, s.counter_max)));
+            ShopSpec { room_min: room.0, room_max: room.1, counter_min: counter.0, counter_max: counter.1, facing: dir(s.facing), seller: pt(s.seller), goods: s.goods.map(|g| g.map(pair)), door: s.door.map(|d| d + d0), ..s }
         }));
-        self.plants.extend(t.plants.into_iter().map(|p| Plant { pos: p.pos + offset, ..p }));
+        self.plants.extend(t.plants.into_iter().map(|p| Plant { pos: pt(p.pos), yaw: yaw(p.yaw), ..p }));
         for mut g in t.glass {
-            g.pts.iter_mut().for_each(|p| *p += offset);
+            g.pts.iter_mut().for_each(|p| *p = pt(*p));
+            g.normal = dir(g.normal);
             self.glass.push(g);
         }
         for ((mat, c), mut mb) in t.decor {
+            mb.turn(turn);
             mb.translate(offset);
-            let chunk = chunk.unwrap_or_else(|| chunk_of(Vec3::new((c.0 as f32 + 0.5) * CHUNK, 0.0, (c.1 as f32 + 0.5) * CHUNK) + offset));
+            let chunk = chunk.unwrap_or_else(|| chunk_of(pt(Vec3::new((c.0 as f32 + 0.5) * CHUNK, 0.0, (c.1 as f32 + 0.5) * CHUNK))));
             self.decor.entry((mat, chunk)).or_default().append(mb);
         }
     }

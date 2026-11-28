@@ -35,3 +35,10 @@ https://polyhaven.com/license): можно использовать, менят�
 | gold | [Metal048C](https://ambientcg.com/view?id=Metal048C) | золото |
 | gravel | [Gravel041](https://ambientcg.com/view?id=Gravel041) | береговая галька |
 | thatch | своя (Blender, `tools/textures/blender_thatch.py`) | солома и камыш: ряды пучков стеблей внахлёст |
+| ceramic | [Clay002](https://ambientcg.com/view?id=Clay002) | обожжённая глина: амфоры, пифосы, горшки |
+| leather | [Leather014](https://ambientcg.com/view?id=Leather014) | дублёная кожа |
+| linen | [Fabric061](https://ambientcg.com/view?id=Fabric061) | небелёный лён: навесы, паруса, мешки |
+| felt | [Fabric034](https://ambientcg.com/view?id=Fabric034) | валяная шерсть: войлок, кошмы |
+| rug | [Carpet015](https://ambientcg.com/view?id=Carpet015) | тканый шерстяной ковёр |
+| wicker | [Wicker010B](https://ambientcg.com/view?id=Wicker010B) | плетёнка из лозы: корзины |
+| limewash | [Plaster003](https://ambientcg.com/view?id=Plaster003) | свежая известковая побелка фасадов |
