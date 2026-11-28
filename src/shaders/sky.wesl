@@ -78,7 +78,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         cloud = max(cloud, 1.0 - tr);
     }
     // Горы — поверх облаков: у горизонта облака дальше гор.
-    if dir.y >= 0.0 && cloud_dome.drift.z > 0.5 {
+    if dir.y >= -0.06 && cloud_dome.drift.z > 0.5 {
         let muv = mountain_map_uv(dir);
         if muv.z > 0.5 {
             let m = textureSampleLevel(mountain_map, mountain_map_sampler, muv.xy, 0.0);

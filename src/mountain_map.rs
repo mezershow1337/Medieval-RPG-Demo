@@ -30,6 +30,21 @@ pub struct MountainMapMaterial {
     /// xy — размер панорамы в точках.
     #[uniform(1)]
     pub view: Vec4,
+    /// Откуда смотрим (`MountainView` в шейдере).
+    #[uniform(2)]
+    pub eye: MountainView,
+}
+
+/// Горы считаются от игрока: ближние предгорья — настоящая земля (`level/mountains.rs`), и
+/// панорама продолжает их только дальше края прорисовки (или края карты).
+#[derive(Clone, Copy, Debug, Default, bevy::render::render_resource::ShaderType)]
+pub struct MountainView {
+    /// xyz — глаз, w — с какого расстояния начинать луч (там стоит купол неба).
+    pub eye: Vec4,
+    /// Прямоугольник нарисованной земли: xmin, xmax, zmin, zmax.
+    pub edge: Vec4,
+    /// Дымка у ближних гор: полная до x, сходит к y (м).
+    pub fade: Vec4,
 }
 
 impl Material2d for MountainMapMaterial {
@@ -48,6 +63,8 @@ pub struct MountainMap {
     col: u32,
     /// Панорама дорисована хотя бы раз.
     ready: bool,
+    /// Откуда начат текущий круг (если игрок ушёл далеко — рисуем заново и быстро).
+    from: Vec3,
 }
 
 pub struct MountainMapPlugin;
@@ -64,11 +81,12 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut meshes: 
     // `MRPG_CLOUD_MAP` (для снимков на программном рендере) уменьшает и её.
     let small = std::env::var("MRPG_CLOUD_MAP").ok().and_then(|s| s.parse::<u32>().ok()).is_some_and(|s| s <= 1024);
     let width = if small || crate::settings::startup().effects < 2 { 2048u32 } else { 4096 };
-    let size = UVec2::new(width, width / 8);
+    // По высоте панорама охватывает 0,86 рад (из предгорий главная гряда встаёт высоко).
+    let size = UVec2::new(width, width / 6);
     let mut img = Image::new_target_texture(size.x, size.y, TextureFormat::Rgba8UnormSrgb, None);
     img.sampler = ImageSampler::linear();
     let image = images.add(img);
-    let material = materials.add(MountainMapMaterial { sky: SkyUniform::default(), view: Vec4::new(size.x as f32, size.y as f32, 0.0, 0.0) });
+    let material = materials.add(MountainMapMaterial { sky: SkyUniform::default(), view: Vec4::new(size.x as f32, size.y as f32, 0.0, 0.0), eye: MountainView::default() });
     commands.spawn((Mesh2d(meshes.add(Rectangle::new(20000.0, 20000.0))), MeshMaterial2d(material.clone()), RenderLayers::layer(LAYER), NoFrustumCulling));
     let cam = commands
         .spawn((
@@ -86,7 +104,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut meshes: 
             RenderLayers::layer(LAYER),
         ))
         .id();
-    commands.insert_resource(MountainMap { image, cam, material, size, col: 0, ready: false });
+    commands.insert_resource(MountainMap { image, cam, material, size, col: 0, ready: false, from: Vec3::splat(f32::MAX) });
 }
 
 fn drive(
@@ -97,6 +115,8 @@ fn drive(
     mut waters: ResMut<Assets<crate::sky::WaterMaterial>>,
     dome: Query<&MeshMaterial3d<SkyMaterial>, With<SkyDome>>,
     mut cams: Query<&mut Camera, Without<Camera3d>>,
+    eyes: Query<(&GlobalTransform, &Camera), With<Camera3d>>,
+    settings: Res<crate::settings::Settings>,
 ) {
     let Some(mut map) = map else { return };
     let on = crate::level::active() == crate::level::LevelKind::Chersonesus;
@@ -105,11 +125,22 @@ fn drive(
             map.ready = true;
             map.col = 0;
         }
+        let eye = crate::graphics::active_camera(&eyes).map(|c| c.translation()).unwrap_or(Vec3::ZERO);
+        // Ушёл далеко (новое место, телепорт) — старая панорама врёт: прячем её и рисуем заново.
+        if eye.distance(map.from) > 150.0 {
+            map.ready = false;
+            map.col = 0;
+            map.from = eye;
+        }
         // Свет и дымка — на начало круга (за круг они почти не меняются).
         if map.col == 0
             && let Some(mut m) = materials.get_mut(&map.material)
         {
             m.sky = crate::graphics::mood().sky_uniform();
+        }
+        // Глаз — каждый кадр (столбцы, нарисованные в разных кадрах, сходятся на шагах игрока).
+        if let Some(mut m) = materials.get_mut(&map.material) {
+            m.eye = view_from(eye, &settings);
         }
         // Первую панораму рисуем быстро (небо ждёт), дальше — понемногу.
         let cols = if map.ready { ((map.size.x as f32 * time.delta_secs() / CYCLE_SECS).ceil() as u32).clamp(1, map.size.x / 64) } else { map.size.x / 16 }.min(map.size.x - map.col);
@@ -142,5 +173,17 @@ fn drive(
             w.extension.mountains = Some(map.image.clone());
             w.extension.dome.drift.z = flag;
         }
+    }
+}
+
+/// Вид на горы из точки `eye`: луч начинается у купола неба (за ним уже не рисует камера) или
+/// раньше — где кончается земля карты.
+fn view_from(eye: Vec3, settings: &crate::settings::Settings) -> MountainView {
+    let dome = crate::graphics::sky_dome_radius(settings);
+    let half = crate::level::WORLD_HALF;
+    MountainView {
+        eye: eye.extend(dome),
+        edge: Vec4::new(-half, half, -half, crate::level::mountains::MESH_SOUTH),
+        fade: Vec4::new(dome, dome + 700.0, 0.0, 0.0),
     }
 }

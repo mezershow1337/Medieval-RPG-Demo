@@ -897,7 +897,7 @@ pub fn spawn_flame(commands: &mut Commands, mesh: Handle<Mesh>, material: Handle
 
 /// Камера, которая сейчас рисует (для снимков `MRPG_CAM` камера игрока выключена — небо и
 /// факелы должны идти за камерой снимка).
-fn active_camera<'a>(cameras: &'a Query<(&GlobalTransform, &Camera), With<Camera3d>>) -> Option<&'a GlobalTransform> {
+pub fn active_camera<'a>(cameras: &'a Query<(&GlobalTransform, &Camera), With<Camera3d>>) -> Option<&'a GlobalTransform> {
     cameras.iter().find(|(_, c)| c.is_active).or_else(|| cameras.iter().next()).map(|(t, _)| t)
 }
 
@@ -1036,6 +1036,11 @@ pub struct SunLight;
 pub struct HazeVolume;
 
 const SKY_RADIUS: f32 = 900.0;
+
+/// На каком расстоянии от камеры стоит сфера неба (м).
+pub fn sky_dome_radius(settings: &crate::settings::Settings) -> f32 {
+    crate::settings::sky_radius(settings).min(SKY_RADIUS)
+}
 
 fn follow_sky(cameras: Query<(&GlobalTransform, &Camera), With<Camera3d>>, settings: Res<crate::settings::Settings>, mut sky: Query<&mut Transform, With<SkyDome>>) {
     let Some(cam) = active_camera(&cameras) else { return };

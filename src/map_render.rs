@@ -91,7 +91,8 @@ pub fn bounds_for(layout: &Layout, extra: &[Vec3]) -> MapBounds {
     if lo.x > hi.x {
         return MapBounds { min: Vec2::splat(-50.0), max: Vec2::splat(50.0) };
     }
-    let margin = if layout.ground.is_some() { 110.0 } else { 14.0 };
+    // На большой карте (с горами) поле шире: иначе море у города уходит под край листа.
+    let margin = if layout.ground.is_some() { 110.0 + 0.05 * (hi - lo).max_element() } else { 14.0 };
     let c = (lo + hi) / 2.0;
     let half = ((hi - lo).max_element() / 2.0 + margin).max(40.0);
     MapBounds { min: c - half, max: c + half }
@@ -516,12 +517,6 @@ mod tests {
             let o = (iz * size + ix) * 4;
             [r.rgba[o], r.rgba[o + 1], r.rgba[o + 2]]
         };
-        if crate::level::active() == crate::level::LevelKind::Chersonesus {
-            let sea = px(Vec3::new(0.0, 0.0, -260.0));
-            assert!(sea[1] > sea[0], "море должно быть зеленовато-голубым (ярь-медянка): {sea:?}");
-            let reds = r.rgba.chunks_exact(4).filter(|c| c[0] as i32 - c[2] as i32 > 70).count();
-            assert!(reds > size * size / 400, "на карте должны быть черепичные крыши: {reds}");
-        }
         if let Ok(path) = std::env::var("MRPG_MAP_PNG") {
             let img = Image::new(
                 bevy::render::render_resource::Extent3d { width: size as u32, height: size as u32, depth_or_array_layers: 1 },
@@ -531,6 +526,14 @@ mod tests {
                 bevy::asset::RenderAssetUsages::default(),
             );
             img.try_into_dynamic().unwrap().to_rgba8().save(path).unwrap();
+        }
+        if crate::level::active() == crate::level::LevelKind::Chersonesus {
+            // Море — у верхнего края карты (на юге карта тянется до гор, и точка у самого края
+            // попадает в поле листа): ищем зеленовато-голубое над городом.
+            let sea = (0..40).map(|k| px(Vec3::new(-150.0 + k as f32 * 8.0, 0.0, -200.0))).filter(|c| c[1] > c[0]).count();
+            assert!(sea > 20, "море должно быть зеленовато-голубым (ярь-медянка): {sea} точек из 40");
+            let reds = r.rgba.chunks_exact(4).filter(|c| c[0] as i32 - c[2] as i32 > 70).count();
+            assert!(reds > size * size / 400, "на карте должны быть черепичные крыши: {reds}");
         }
     }
 }

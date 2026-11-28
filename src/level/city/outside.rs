@@ -17,6 +17,7 @@ use terrain::{balka_x, ground_y};
 
 pub(crate) mod mines;
 pub(crate) mod fishing;
+pub(crate) mod highlands;
 pub(crate) mod village;
 
 const ROAD_W: f32 = 4.0;
@@ -27,8 +28,14 @@ fn g(x: f32, z: f32) -> Vec3 {
 
 pub fn outside(b: &mut Builder) {
     let roads = roads();
+    // Горные тропы — узкие, натоптанные; остальные дороги — грунтовки.
+    let trails: Vec<Vec<Vec2>> = highlands::trails().iter().cloned().chain(highlands::trail_links()).collect();
     for r in &roads {
-        road(b, r);
+        if trails.contains(r) {
+            highlands::trail(b, r);
+        } else {
+            road(b, r);
+        }
     }
     milestone(b);
     necropolis(b, &roads);
@@ -45,6 +52,7 @@ pub fn outside(b: &mut Builder) {
     mines::mines(b);
     fishing::fishing_hut(b);
     wilderness(b, &roads);
+    highlands::highlands(b, &roads);
     // Село — последним: его усадьба на продажу идёт в конце списка (сохранения не сдвигаются).
     village::village(b);
 }
@@ -68,6 +76,9 @@ pub fn roads() -> Vec<Vec<Vec2>> {
     // Тропы к руднику и к стану углежогов.
     all.extend(mines::mine_roads());
     all.extend(village::village_roads());
+    // Тропы в горы.
+    all.extend(highlands::trail_links());
+    all.extend(highlands::trails().iter().cloned());
     all
 }
 

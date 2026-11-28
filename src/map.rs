@@ -374,7 +374,7 @@ struct MapLabel {
 fn label_tier(kind: crate::level::PlaceKind) -> f32 {
     use crate::level::PlaceKind::*;
     match kind {
-        SteppeCamp | GothVillage | Village | AlanCamp | Necropolis | Vineyard | Spring | Mine | CharcoalCamp | Quarry => 0.0,
+        SteppeCamp | GothVillage | Village | AlanCamp | Necropolis | Vineyard | Spring | Mine | CharcoalCamp | Quarry | Pasture | Cave => 0.0,
         Agora | Basilica | Gate | PortMarket | Theatre | Garrison | Praetorium | Thermae | Quay | Cistern => 1.8,
         _ => 3.0,
     }
@@ -431,6 +431,7 @@ fn setup_map_ui(mut commands: Commands, fonts: Res<crate::inventory_ui::UiFonts>
         labels.push(("Х Е Р С О Н".into(), Vec3::new(0.0, 0.0, 30.0), 0.0, 26.0, true));
         labels.push(("П о н т   Э в к с и н с к и й".into(), Vec3::new(60.0, 0.0, -330.0), 0.0, 24.0, true));
         labels.push(("Гераклейский полуостров".into(), Vec3::new(-40.0, 0.0, 420.0), 0.0, 18.0, true));
+        labels.push(("Г о р ы   Д о р и".into(), Vec3::new(0.0, 0.0, 1900.0), 0.0, 22.0, true));
     }
     // Крупные надписи — первыми, затем по важности места.
     labels.sort_by(|a, b| (!a.4).cmp(&!b.4).then(a.2.total_cmp(&b.2)));

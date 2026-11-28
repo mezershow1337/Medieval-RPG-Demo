@@ -15,6 +15,8 @@ mod city;
 mod geom;
 pub mod places;
 mod spawns;
+pub mod mountains;
+pub use terrain::WORLD_HALF;
 mod terrain;
 
 pub use places::*;
