@@ -30,6 +30,7 @@ pub fn fortifications(b: &mut Builder) {
         let a = Vec2::from(ring[i]);
         let c = Vec2::from(ring[(i + 1) % n]);
         b.at((a.x + c.x) / 2.0, (a.y + c.y) / 2.0);
+        b.vary(i * 4);
         if a.x == EAST_WALL_X && c.x == EAST_WALL_X {
             east_wall(b, a, c);
         } else if a.y == SOUTH_WALL_Z && c.y == SOUTH_WALL_Z {
@@ -39,16 +40,34 @@ pub fn fortifications(b: &mut Builder) {
         }
     }
     // Круглые башни на углах (кроме юго-восточного — там башня Зенона).
-    for &(x, z) in ring.iter() {
+    for (i, &(x, z)) in ring.iter().enumerate() {
         b.at(x, z);
+        b.vary(i * 2 + 1);
         if (x, z) == (EAST_WALL_X, SOUTH_WALL_Z) {
             zeno_tower(b, Vec2::new(x, z));
         } else {
             round_tower(b, Vec2::new(x, z), 5.5, TOWER_H);
         }
     }
+    b.variant = 0;
     proteichisma(b);
     stairs_to_walls(b);
+}
+
+/// Отрезки стены между башнями: башня (шириной [`TOWER_ALONG`], середина в `towers`) сама
+/// закрывает свой кусок, так что прясла по обе стороны от неё не налегают друг на друга и
+/// могут быть из разных вариантов кладки.
+fn spans(s0: f32, s1: f32, towers: &[f32]) -> Vec<(f32, f32)> {
+    let mut t: Vec<f32> = towers.iter().copied().filter(|t| *t - TOWER_ALONG / 2.0 > s0 + 0.5 && *t + TOWER_ALONG / 2.0 < s1 - 0.5).collect();
+    t.sort_by(|a, b| a.total_cmp(b));
+    let mut out = Vec::new();
+    let mut from = s0;
+    for t in t {
+        out.push((from, t - TOWER_ALONG / 2.0));
+        from = t + TOWER_ALONG / 2.0;
+    }
+    out.push((from, s1));
+    out
 }
 
 fn outward(a: Vec2, c: Vec2) -> Vec2 {
@@ -106,16 +125,22 @@ fn oriented_solid_invisible(b: &mut Builder, a: Vec2, c: Vec2, d0: f32, d1: f32,
 
 fn diagonal_curtain(b: &mut Builder, a: Vec2, c: Vec2) {
     let h = WALL_T / 2.0;
-    oriented_solid(b, a, c, -h, h, 0.0, WALL_H, Mat::Limestone);
-    battlements(b, a, c, WALL_H, h);
-    // Башни через ~45 м.
+    // Башни через ~45 м; у каждого прясла между ними и у каждой башни свой вариант кладки.
     let len = a.distance(c);
     let n = (len / 45.0).round() as usize;
     let dir = (c - a).normalize();
     let out = outward(a, c);
-    for k in 1..n {
-        let p = a + dir * (len * k as f32 / n as f32);
-        rect_tower(b, p, dir, out);
+    let towers: Vec<f32> = (1..n).map(|k| len * k as f32 / n as f32).collect();
+    let v0 = b.variant as usize;
+    for (k, (t0, t1)) in spans(0.0, len, &towers).into_iter().enumerate() {
+        b.vary(v0 + k * 2);
+        let (pa, pc) = (a + dir * t0, a + dir * t1);
+        oriented_solid(b, pa, pc, -h, h, 0.0, WALL_H, Mat::Limestone);
+        battlements(b, pa, pc, WALL_H, h);
+    }
+    for (k, t) in towers.into_iter().enumerate() {
+        b.vary(v0 + k * 2 + 1);
+        rect_tower(b, a + dir * t, dir, out);
     }
 }
 
@@ -185,21 +210,29 @@ fn straight_wall(b: &mut Builder, a: Vec2, c: Vec2, gates: &[f32], towers: &[f32
     let line = if along_x { a.y } else { a.x };
     let f = if along_x { kit::fx() } else { kit::fz() };
     let ops: Vec<Op> = gates.iter().map(|&s| Op::Arch { s, w: GATE_W, spring: 3.6 }).collect();
-    kit::wall(b, f, s0, s1, line - WALL_T / 2.0, line + WALL_T / 2.0, 0.0, WALL_H, &ops, Mat::Limestone, Mat::Limestone);
     let o = if along_x { out.y } else { out.x };
     let p2 = |s: f32| if along_x { Vec2::new(s, line) } else { Vec2::new(line, s) };
-    // Зубцы участками между башнями ворот.
-    let mut cuts: Vec<(f32, f32)> = gates.iter().map(|&g| (g - GATE_W / 2.0 - 0.2, g + GATE_W / 2.0 + 0.2)).collect();
-    cuts.sort_by(|x, y| x.0.total_cmp(&y.0));
-    let mut cur = s0;
-    for (l, r) in cuts.iter().copied().chain(std::iter::once((s1, s1))) {
-        if l > cur + 1.0 {
-            let (pa, pc) = (p2(cur), p2(l));
-            // Порядок концов такой, чтобы «наружу» указывало туда же, куда `out`.
-            let (pa, pc) = if outward(pa, pc).dot(out) > 0.0 { (pa, pc) } else { (pc, pa) };
-            battlements(b, pa, pc, WALL_H, WALL_T / 2.0);
+    // Середины всех башен на этой стене: простых и воротных.
+    let gate_tower = |g: f32, s: f32| g + s * (GATE_W / 2.0 + TOWER_ALONG / 2.0 + 0.3);
+    let mut all_towers: Vec<f32> = towers.to_vec();
+    all_towers.extend(gates.iter().flat_map(|&g| [gate_tower(g, -1.0), gate_tower(g, 1.0)]));
+    let v0 = b.variant as usize;
+    // Прясла между башнями — каждое своим вариантом кладки; зубцы — над пряслом, кроме ворот.
+    for (k, (t0, t1)) in spans(s0, s1, &all_towers).into_iter().enumerate() {
+        b.vary(v0 + k * 2);
+        kit::wall(b, f, t0, t1, line - WALL_T / 2.0, line + WALL_T / 2.0, 0.0, WALL_H, &ops, Mat::Limestone, Mat::Limestone);
+        let mut cuts: Vec<(f32, f32)> = gates.iter().filter(|&&g| g > t0 && g < t1).map(|&g| (g - GATE_W / 2.0 - 0.2, g + GATE_W / 2.0 + 0.2)).collect();
+        cuts.sort_by(|x, y| x.0.total_cmp(&y.0));
+        let mut cur = t0;
+        for (l, r) in cuts.iter().copied().chain(std::iter::once((t1, t1))) {
+            if l > cur + 1.0 {
+                let (pa, pc) = (p2(cur), p2(l));
+                // Порядок концов такой, чтобы «наружу» указывало туда же, куда `out`.
+                let (pa, pc) = if outward(pa, pc).dot(out) > 0.0 { (pa, pc) } else { (pc, pa) };
+                battlements(b, pa, pc, WALL_H, WALL_T / 2.0);
+            }
+            cur = r;
         }
-        cur = r;
     }
     // Над воротами — площадка с зубцами и ворота: створки открыты внутрь.
     for &g in gates {
@@ -223,15 +256,18 @@ fn straight_wall(b: &mut Builder, a: Vec2, c: Vec2, gates: &[f32], towers: &[f32
         }
         // Воротные башни.
         for s in [-1.0f32, 1.0] {
-            let p = p2(g + s * (GATE_W / 2.0 + TOWER_ALONG / 2.0 + 0.3));
+            let p = p2(gate_tower(g, s));
             let dir = if along_x { Vec2::X } else { Vec2::Y };
+            b.vary(v0 + 4 + (s > 0.0) as usize);
             rect_tower(b, p, dir, out);
         }
     }
-    for &t in towers {
+    for (k, &t) in towers.iter().enumerate() {
         let dir = if along_x { Vec2::X } else { Vec2::Y };
+        b.vary(v0 + k * 2 + 1);
         rect_tower(b, p2(t), dir, out);
     }
+    b.variant = v0 as u8;
 }
 
 fn east_wall(b: &mut Builder, a: Vec2, c: Vec2) {

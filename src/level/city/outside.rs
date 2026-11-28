@@ -538,8 +538,10 @@ fn goth_village(b: &mut Builder) {
         } else {
             kit::Side::N
         };
+        b.vary(k + 2);
         goth_house(b, p, front, k, &mut rng);
     }
+    b.variant = 0;
     // Ток — мощёный круг для обмолота, у центра.
     let tp = g(c.x - 2.0, c.z - 1.0);
     b.at(tp.x, tp.z);

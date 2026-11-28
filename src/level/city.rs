@@ -185,22 +185,41 @@ pub fn city_layout() -> Layout {
         }
     }
     houses::plan_houses(&mut b);
+    b.variant = 0;
+    // Общественные здания и мастерские: у каждого свой вариант кладки, черепицы и штукатурки.
+    b.vary(2);
     public::agora(&mut b);
+    b.vary(6);
     public::basilica(&mut b);
+    b.vary(10);
     public::episcopium(&mut b);
+    b.vary(14);
     public::didaskaleion(&mut b);
+    b.vary(18);
     public::exiles_house(&mut b);
+    b.vary(22);
     public::thermae(&mut b);
+    b.vary(26);
     public::theatre(&mut b);
+    b.vary(30);
     public::reservoir(&mut b);
+    b.vary(34);
     public::west_church(&mut b);
+    b.vary(38);
     public::citadel(&mut b);
+    b.vary(42);
     crafts::fish_salting(&mut b, block(18, -3).union(&block(19, -3)), 1);
+    b.vary(46);
     crafts::fish_salting(&mut b, block(8, -3), 2);
+    b.vary(50);
     crafts::glassworks(&mut b);
+    b.vary(54);
     crafts::pottery(&mut b);
+    b.vary(58);
     crafts::smithy(&mut b);
+    b.vary(62);
     crafts::winery(&mut b);
+    b.variant = 0;
     port::port(&mut b);
     outside::outside(&mut b);
 

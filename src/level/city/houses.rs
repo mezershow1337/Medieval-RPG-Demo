@@ -157,6 +157,7 @@ fn iron_yard_lot(i: i32, j: i32, half: usize) -> bool {
 pub fn block_houses(b: &mut Builder, i: i32, j: i32, _seed: u32) {
     for lot in lots(i, j) {
         let k = lot.half;
+        b.vary((i * 5 + (j + 4) * 3) as usize + k as usize);
         let mut rng = Rng::new(lot.seed);
         // Первое число зерна ушло на зеркальность (как в `lots`).
         rng.f();
@@ -194,6 +195,7 @@ pub fn block_houses(b: &mut Builder, i: i32, j: i32, _seed: u32) {
             LotMode::Site => site(b, f, &mut rng),
         }
     }
+    b.variant = 0;
 }
 
 /// Узкий дом или обычный; уступ крыши; что вокруг участка и сколько этажей.
@@ -1048,8 +1050,10 @@ const ROW_ITEMS_KEEP: f32 = 0.85;
 /// Жилая застройка по плану города (см. [`super::plan`]).
 pub fn plan_houses(b: &mut Builder) {
     use super::plan::{LotKind, opposite, rotated, side_index};
-    for lot in &super::plan::plan().lots {
+    for (n, lot) in super::plan::plan().lots.iter().enumerate() {
         b.at(lot.r.cx(), lot.r.cz());
+        // У каждого участка свой вариант текстур: соседние дома не повторяют друг друга.
+        b.vary(n);
         match lot.kind {
             LotKind::Garden => {
                 garden(b, lot.r, lot.seed);
@@ -1125,6 +1129,7 @@ pub fn plan_houses(b: &mut Builder) {
             LotMode::Site => site(b, f, &mut rng),
         }
     }
+    b.variant = 0;
 }
 
 /// Площадь в жилых кварталах: утоптанная земля, колодец-цистерна под навесом, дерево,

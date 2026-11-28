@@ -15,9 +15,49 @@ pub struct MeshBuilder {
     nrm: Vec<[f32; 3]>,
     uv: Vec<[f32; 2]>,
     idx: Vec<u32>,
+    /// Вариант текстуры по отрезкам вершин: (с какой вершины, вариант). Вершины до первой
+    /// метки — вариант 0. См. [`MeshBuilder::mark`].
+    marks: Vec<(u32, u8)>,
 }
 
 impl MeshBuilder {
+    /// Всё, что добавится дальше, рисуется вариантом текстуры `variant` (у каждого дома свой:
+    /// другая черепица, кладка, штукатурка — см. `graphics::variant_layers`). Вариант едет
+    /// во втором наборе UV, сам материал и число вызовов отрисовки не меняются.
+    pub fn mark(&mut self, variant: u8) {
+        let at = self.pos.len() as u32;
+        match self.marks.last_mut() {
+            Some(last) if last.1 == variant => {}
+            Some(last) if last.0 == at => last.1 = variant,
+            None if variant == 0 => {}
+            _ => self.marks.push((at, variant)),
+        }
+    }
+
+    /// Вариант текстуры вершины `i`.
+    fn variant_at(&self, i: u32) -> u8 {
+        let k = self.marks.partition_point(|m| m.0 <= i);
+        if k == 0 { 0 } else { self.marks[k - 1].1 }
+    }
+
+    /// Сколько вершин у каждого варианта текстуры (для проверок).
+    #[cfg(test)]
+    pub fn variant_counts(&self) -> [usize; 16] {
+        let mut out = [0; 16];
+        let mut from = 0usize;
+        let mut cur = 0u8;
+        for (at, v) in self.marks.iter().copied().chain(std::iter::once((self.pos.len() as u32, 0))) {
+            out[cur as usize % 16] += at as usize - from;
+            (from, cur) = (at as usize, v);
+        }
+        out
+    }
+
+    /// Вариант, которым пойдут следующие вершины.
+    pub fn current_mark(&self) -> u8 {
+        self.marks.last().map_or(0, |m| m.1)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.idx.is_empty()
     }
@@ -335,12 +375,23 @@ impl MeshBuilder {
         self
     }
 
+    /// Вершины `other` без своих меток получают текущий вариант этого меша; после добавления
+    /// текущий вариант остаётся прежним.
     pub fn append(&mut self, other: MeshBuilder) {
         let base = self.pos.len() as u32;
+        let keep = self.current_mark();
+        for (at, v) in &other.marks {
+            if *at == 0 {
+                self.mark(*v);
+            } else {
+                self.marks.push((base + at, *v));
+            }
+        }
         self.pos.extend(other.pos);
         self.nrm.extend(other.nrm);
         self.uv.extend(other.uv);
         self.idx.extend(other.idx.into_iter().map(|i| i + base));
+        self.mark(keep);
     }
 
     /// Часть геометрии, где `keep(p) >= 0` (например, `h - p.y` — всё ниже высоты `h`).
@@ -348,6 +399,7 @@ impl MeshBuilder {
     pub fn clipped(&self, keep: impl Fn(Vec3) -> f32) -> MeshBuilder {
         let mut out = MeshBuilder::default();
         for t in self.idx.chunks_exact(3) {
+            out.mark(self.variant_at(t[0]));
             let v: [(Vec3, Vec3, Vec2, f32); 3] = [0, 1, 2].map(|k| {
                 let i = t[k] as usize;
                 let p = Vec3::from(self.pos[i]);
@@ -545,11 +597,25 @@ impl MeshBuilder {
     }
 
     pub fn build(self) -> Mesh {
-        Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+        // Вариант текстуры — во втором наборе UV (только если в меше есть не нулевой:
+        // у остальных мешей лишнего набора нет).
+        let variants: Option<Vec<[f32; 2]>> = self.marks.iter().any(|m| m.1 != 0).then(|| {
+            let mut out = vec![[0.0, 0.0]; self.pos.len()];
+            for (k, (at, v)) in self.marks.iter().enumerate() {
+                let end = self.marks.get(k + 1).map_or(self.pos.len(), |m| m.0 as usize);
+                out[*at as usize..end].fill([*v as f32, 0.0]);
+            }
+            out
+        });
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
             .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.pos)
             .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, self.nrm)
             .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, self.uv)
-            .with_inserted_indices(Indices::U32(self.idx))
+            .with_inserted_indices(Indices::U32(self.idx));
+        if let Some(v) = variants {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, v);
+        }
+        mesh
     }
 }
 
@@ -723,6 +789,39 @@ mod tests {
     use super::*;
 
     /// UV треугольника — в метрах: черепица на шпиле не тянется, вершина сверху (v = 0).
+    /// Вариант текстуры едет во втором наборе UV: у каждой вершины тот, что был помечен перед
+    /// её добавлением; добавленный меш без меток берёт текущий вариант, а со своими — хранит их.
+    #[test]
+    fn marks_become_second_uv_set() {
+        let quad = |m: &mut MeshBuilder| m.quad([Vec3::ZERO, Vec3::X, Vec3::new(1.0, 1.0, 0.0), Vec3::Y], Vec3::Z);
+        let mut m = MeshBuilder::default();
+        quad(&mut m);
+        m.mark(4);
+        quad(&mut m);
+        let mut plain = MeshBuilder::default();
+        quad(&mut plain);
+        m.append(plain);
+        let mut own = MeshBuilder::default();
+        own.mark(7);
+        quad(&mut own);
+        own.mark(0);
+        quad(&mut own);
+        m.append(own);
+        quad(&mut m);
+        // После обрезки у четырёхугольника 6 вершин (два отдельных треугольника), до неё — 4.
+        let clipped = m.clipped(|_| 1.0).build();
+        for (mesh, per_quad) in [(m.build(), 4), (clipped, 6)] {
+            let Some(bevy::mesh::VertexAttributeValues::Float32x2(uv)) = mesh.attribute(Mesh::ATTRIBUTE_UV_1) else { panic!("нет второго набора UV") };
+            let got: Vec<u8> = uv.chunks(per_quad).map(|q| q[0][0] as u8).collect();
+            assert_eq!(got, [0, 4, 4, 7, 0, 4]);
+            assert!(uv.chunks(per_quad).all(|q| q.iter().all(|v| v == &q[0])));
+        }
+        // Без меток второго набора нет: у остальных мешей лишних данных не появляется.
+        let mut none = MeshBuilder::default();
+        quad(&mut none);
+        assert!(none.build().attribute(Mesh::ATTRIBUTE_UV_1).is_none());
+    }
+
     #[test]
     fn tri_uv_is_metric_and_apex_is_up() {
         let mut mb = MeshBuilder::default();

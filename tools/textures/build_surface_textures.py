@@ -58,12 +58,41 @@ LAYERS = [
     ("rug", "Carpet015", 1.1, "тканый шерстяной ковёр"),
     ("wicker", "Wicker010B", 0.45, "плетёнка из лозы: корзины, плетни, верши"),
     ("limewash", "Plaster003", 2.2, "свежая известковая побелка: фасады жилых домов"),
+    # Варианты основных слоёв (см. VARIANTS): у каждого дома свой, чтобы потёртости черепицы,
+    # камни кладки и пятна штукатурки не повторялись от дома к дому.
+    ("roof_b", "MrpgByzRoof1", 1.5, "черепица, вариант 2: другой обжиг, сколы, потёки и лишайник (blender_byz_roof.py, MRPG_SEED=1)"),
+    ("roof_c", "MrpgByzRoof2", 1.5, "черепица, вариант 3 (blender_byz_roof.py, MRPG_SEED=2)"),
+    ("rubble_b", "yellow_stone_wall", 2.2, "бутовая кладка, вариант 2: ряды помельче, камень ровнее (фотоскан Poly Haven)"),
+    ("rubble_c", "castle_wall_varriation", 2.4, "бутовая кладка, вариант 3: плитняк на известковом растворе (фотоскан Poly Haven)"),
+    ("ashlar_b", "sandstone_blocks_05", 3.4, "тёсаные блоки, вариант 2: рваная лицевая сторона, ровные ряды (фотоскан Poly Haven)"),
+    ("ashlar_c", "seaworn_sandstone_brick", 3.4, "тёсаные блоки, вариант 3: гладкие, выветренные морем (фотоскан Poly Haven)"),
+    ("plaster_b", "Plaster007", 2.2, "старая штукатурка, вариант 2: белёсая, в разводах"),
+    ("plaster_c", "white_rough_plaster", 1.6, "старая штукатурка, вариант 3: облупилась до камня (фотоскан Poly Haven)"),
+    ("limewash_b", "PaintedPlaster017", 2.2, "побелка, вариант 2: гладкая, в волосяных трещинах"),
+    ("limewash_c", "Plaster007", 2.8, "побелка, вариант 3: с разводами от дождя"),
+    ("wood_b", "weathered_planks", 4.0, "доски, вариант 2: узкие, обветренные (фотоскан Poly Haven)"),
+    ("wood_c", "old_planks_02", 4.0, "доски, вариант 3: старые, с сучками (фотоскан Poly Haven)"),
 ]
 
 
 # Крупные пятна на фото (тёмный лишайник на одном блоке) при повторе тайла бросаются в глаза:
 # у этих слоёв гасим низкие частоты яркости (доля 0..1), мелкая фактура остаётся.
-FLATTEN = {"ashlar": 0.85, "plaster": 0.4}
+FLATTEN = {"ashlar": 0.85, "plaster": 0.4, "ashlar_b": 0.3, "ashlar_c": 0.5, "plaster_b": 0.4, "plaster_c": 0.25, "limewash_c": 0.5}
+
+# Вариант → (основной слой, поворот картинки на 90°, доля цветности). Средний цвет варианта
+# приводится к среднему основного слоя: шейдер перекрашивает фото по среднему основного, и
+# дом с другим вариантом кладки остаётся того же тона. Поворот — доски на фото идут сверху
+# вниз, а у основного слоя слева направо. Цветность < 1 гасит пестроту (сине-рыжий плитняк).
+# SOFTEN — во сколько раз ослабить нормали: рваный камень фотоскана вблизи рябил полосами.
+SOFTEN = {"ashlar_b": 0.6}
+VARIANTS = {
+    "roof_b": ("roof", False, 1.0), "roof_c": ("roof", False, 1.0),
+    "rubble_b": ("rubble", False, 1.0), "rubble_c": ("rubble", False, 0.45),
+    "ashlar_b": ("ashlar", False, 1.0), "ashlar_c": ("ashlar", False, 1.0),
+    "plaster_b": ("plaster", False, 1.0), "plaster_c": ("plaster", False, 0.7),
+    "limewash_b": ("limewash", False, 1.0), "limewash_c": ("limewash", False, 0.6),
+    "wood_b": ("wood", True, 1.0), "wood_c": ("wood", True, 1.0),
+}
 
 
 def flatten(lin, k):
@@ -176,17 +205,31 @@ def main():
             rows.append((i, layer, asset, meters, kept[layer], what))
             continue
         m = fetch(asset, src)
+        base, turn, chroma = VARIANTS.get(layer, (None, False, 1.0))
+        if turn:
+            m = {k: v.transpose(Image.ROTATE_90) for k, v in m.items()}
         color = arr(m["color"], "RGB")
         lin = to_lin(color)
+        if chroma != 1.0:
+            lum = lin.mean(-1, keepdims=True)
+            lin = lum + (lin - lum) * chroma
         if "ao" in m:
             # AO вносим в цвет мягко: прямой свет её не знает, а SSAO крупнее масштабом.
             ao = arr(m["ao"], "L")[..., None]
             lin = lin * (0.35 + 0.65 * ao)
         if layer in FLATTEN:
             lin = flatten(lin, FLATTEN[layer])
+        if base:
+            want = next(r[4] for r in rows if r[1] == base)
+            lin = lin * (want / lin.reshape(-1, 3).mean(0))
         alb = (np.clip(to_srgb(lin), 0, 1) * 255 + 0.5).astype(np.uint8)
         Image.fromarray(alb, "RGB").save(os.path.join(OUT, layer + "_albedo.jpg"), quality=93, subsampling=0)
         nrm = arr(m["normal"], "RGB")
+        if turn:
+            # Картинку повернули против часовой: вектор «вправо» теперь смотрит вверх.
+            nrm = np.stack([1.0 - nrm[..., 1], nrm[..., 0], nrm[..., 2]], -1)
+        if layer in SOFTEN:
+            nrm = np.concatenate([0.5 + (nrm[..., :2] - 0.5) * SOFTEN[layer], nrm[..., 2:]], -1)
         rough = arr(m["rough"], "L") if "rough" in m else np.full((SIZE, SIZE), 0.8, np.float32)
         pack = np.stack([nrm[..., 0], nrm[..., 1], rough], -1)
         Image.fromarray((pack * 255 + 0.5).astype(np.uint8), "RGB").save(os.path.join(OUT, layer + "_nrm.jpg"), quality=95, subsampling=0)

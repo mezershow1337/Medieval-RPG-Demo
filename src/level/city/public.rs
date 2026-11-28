@@ -1203,7 +1203,12 @@ pub fn citadel(b: &mut Builder) {
     for s in [-1.0f32, 1.0] {
         walls::rect_tower(b, Vec2::new(gate + s * 7.2, sz), Vec2::X, Vec2::Y);
     }
+    // Круглая башня, донжон и претория — каждая своей кладкой (прямоугольные башни лицом
+    // вровень со стеной, поэтому сложены как она).
+    let own = b.variant as usize;
+    b.vary(own + 1);
     walls::round_tower(b, Vec2::new(ex, sz), 5.2, 12.5);
+    b.vary(own);
     walls::rect_tower(b, Vec2::new(ex, c.cz() - 4.0), Vec2::Y, Vec2::X);
     // Створки ворот открыты внутрь.
     for s in [-1.0f32, 1.0] {
@@ -1218,7 +1223,9 @@ pub fn citadel(b: &mut Builder) {
     b.torch(gate - 3.0, 3.4, c.z1 - 0.3, Vec3::NEG_Z);
     // Лестница на стену — внутри, вдоль южной стены.
     kit::stairs(b, Vec3::new(gate - 21.0, 0.0, c.z1 - 0.8), Vec3::X, 1.6, WALL_H, Mat::Limestone);
+    b.vary(own + 3);
     keep(b);
+    b.vary(own + 5);
 
     // Претория.
     let pr = praetorium_rect();

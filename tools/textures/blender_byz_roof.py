@@ -9,11 +9,17 @@
 Тайл — 1.5×1.5 м: 3 ряда по скату × 3 колонны. Геометрия выходит за края тайла и повторяется
 с тем же «случайным» разбросом по модулю 3, поэтому текстура бесшовная. Верх картинки — конёк,
 низ — карниз (в шейдере v растёт вниз по скату). Всё своё, без чужих ассетов.
+
+Варианты одной и той же кровли (слои roof_b, roof_c): MRPG_SEED=1, 2… — та же раскладка
+3×3, но у каждой черепицы другой обжиг, сдвиг, выбоины, потёки и лишайник; файлы пишутся
+как MrpgByzRoof<SEED>_*.png.
 """
 import bpy, bmesh, math, os, random, sys, time
 
 OUT = globals().get("MRPG_OUT") or (sys.argv[sys.argv.index("--") + 1] if "--" in sys.argv else os.path.join(os.path.expanduser("~"), "mrpg_byz"))
 os.makedirs(OUT, exist_ok=True)
+SEED = int(globals().get("MRPG_SEED") or os.environ.get("MRPG_SEED") or 0)
+NAME = "MrpgByzRoof" + (str(SEED) if SEED else "")
 SIZE = 1024
 PERIOD = 1.5
 PITCH = 0.5   # шаг колонн поперёк ската и рядов по скату (тегула 0.58 м, нахлёст 0.08)
@@ -27,7 +33,7 @@ if bpy.context.window:
 
 
 def rnd(i, j, k):
-    return random.Random((i % N) * 7919 + (j % N) * 104729 + k * 31)
+    return random.Random((i % N) * 7919 + (j % N) * 104729 + k * 31 + SEED * 1000003)
 
 
 def box(bm, x0, x1, y0, y1, z0, z1):
@@ -323,7 +329,7 @@ for kind, btype, samples in (("Color", "DIFFUSE", 4), ("NormalGL", "NORMAL", 4),
     if btype == "DIFFUSE":
         kw["pass_filter"] = {'COLOR'}
     bpy.ops.object.bake(**kw)
-    path = os.path.join(OUT, "MrpgByzRoof_%s.png" % kind)
+    path = os.path.join(OUT, "%s_%s.png" % (NAME, kind))
     im.filepath_raw = path
     im.file_format = 'PNG'
     im.save(filepath=path)

@@ -55,7 +55,9 @@ def main():
         if only and layer not in only:
             continue
         nrm = np.asarray(Image.open(os.path.join(OUT, name)).convert("RGB"))
-        hm = height(nrm, HIGHPASS.get(layer, 0))
+        # Варианты (roof_b, wood_c…) — с настройкой основного слоя.
+        base = layer[:-2] if layer[-2:] in ("_b", "_c") else layer
+        hm = height(nrm, HIGHPASS.get(base, 0))
         Image.fromarray((hm * 255 + 0.5).astype(np.uint8), "L").convert("RGB").save(os.path.join(OUT, layer + "_h.jpg"), quality=90)
         print("%-10s средняя высота %.2f" % (layer, hm.mean()))
 

@@ -42,3 +42,13 @@ https://polyhaven.com/license): можно использовать, менят�
 | rug | [Carpet015](https://ambientcg.com/view?id=Carpet015) | тканый шерстяной ковёр |
 | wicker | [Wicker010B](https://ambientcg.com/view?id=Wicker010B) | плетёнка из лозы: корзины |
 | limewash | [Plaster003](https://ambientcg.com/view?id=Plaster003) | свежая известковая побелка фасадов |
+| roof_b, roof_c | свои (Blender, `tools/textures/blender_byz_roof.py`, `MRPG_SEED=1` и `2`) | варианты черепицы: другой обжиг, сколы, потёки, лишайник |
+| rubble_b | [yellow_stone_wall](https://polyhaven.com/a/yellow_stone_wall) (Poly Haven, Sơn Nguyễn) | вариант бутовой кладки: ряды помельче |
+| rubble_c | [castle_wall_varriation](https://polyhaven.com/a/castle_wall_varriation) (Poly Haven, Rob Tuytel) | вариант бутовой кладки: плитняк на известковом растворе |
+| ashlar_b | [sandstone_blocks_05](https://polyhaven.com/a/sandstone_blocks_05) (Poly Haven, Rob Tuytel) | вариант тёсаных блоков: рваная лицевая сторона |
+| ashlar_c | [seaworn_sandstone_brick](https://polyhaven.com/a/seaworn_sandstone_brick) (Poly Haven, Dimitrios Savva) | вариант тёсаных блоков: гладкие, выветренные морем |
+| plaster_b, limewash_c | [Plaster007](https://ambientcg.com/view?id=Plaster007) | варианты штукатурки и побелки: в разводах |
+| plaster_c | [white_rough_plaster](https://polyhaven.com/a/white_rough_plaster) (Poly Haven, Rob Tuytel) | вариант старой штукатурки: облупилась до камня |
+| limewash_b | [PaintedPlaster017](https://ambientcg.com/view?id=PaintedPlaster017) | вариант побелки: гладкая, в волосяных трещинах |
+| wood_b | [weathered_planks](https://polyhaven.com/a/weathered_planks) (Poly Haven, Dario Barresi, Dimitrios Savva) | вариант досок: узкие, обветренные |
+| wood_c | [old_planks_02](https://polyhaven.com/a/old_planks_02) (Poly Haven, Rob Tuytel) | вариант досок: старые, с сучками |

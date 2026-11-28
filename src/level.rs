@@ -151,6 +151,8 @@ pub struct Block {
     pub aabb: Aabb,
     pub mat: Mat,
     pub solid: bool,
+    /// Вариант текстуры (см. [`Builder::variant`]).
+    pub variant: u8,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -666,7 +668,14 @@ struct Builder {
     house: Option<u32>,
     /// Достаток дома: 0 — бедный, 1 — средний, 2 — зажиточный (больше серебра и стекла).
     wealth: u8,
+    /// Вариант текстур того, что сейчас строится (0..[`VARIANTS`]): у каждого дома, башни и
+    /// прясла стены свой, поэтому у соседей черепица потёрта в разных местах, а камни в
+    /// кладке выпирают по-разному. Какой слой фото за ним стоит — `graphics::variant_layers`.
+    variant: u8,
 }
+
+/// Сколько вариантов текстур различает шейдер: три для кровли × три для стен и дерева.
+pub const VARIANTS: u8 = 9;
 
 impl Builder {
     fn new() -> Self {
@@ -700,6 +709,7 @@ impl Builder {
             shops: Vec::new(),
             house: None,
             wealth: 1,
+            variant: 0,
         }
     }
 
@@ -767,6 +777,7 @@ impl Builder {
         t.loot = self.loot;
         t.house = self.house;
         t.wealth = self.wealth;
+        t.variant = self.variant;
         t.keep_clear = keep_clear;
         f(&mut t);
         let pt = |p: Vec3| quarter(p, turn) + offset;
@@ -841,7 +852,9 @@ impl Builder {
             mb.turn(turn);
             mb.translate(offset);
             let chunk = chunk.unwrap_or_else(|| chunk_of(pt(Vec3::new((c.0 as f32 + 0.5) * CHUNK, 0.0, (c.1 as f32 + 0.5) * CHUNK))));
-            self.decor.entry((mat, chunk)).or_default().append(mb);
+            let m = self.decor.entry((mat, chunk)).or_default();
+            m.mark(self.variant);
+            m.append(mb);
         }
     }
 
@@ -888,18 +901,28 @@ impl Builder {
     }
 
     fn solid(&mut self, min: [f32; 3], max: [f32; 3], mat: Mat) {
-        self.blocks.push(Block { aabb: Aabb::new(Vec3::from(min), Vec3::from(max)), mat, solid: true });
+        self.blocks.push(Block { aabb: Aabb::new(Vec3::from(min), Vec3::from(max)), mat, solid: true, variant: self.variant });
     }
     fn solid_v(&mut self, (min, max): (Vec3, Vec3), mat: Mat) {
         if (max - min).min_element() > 0.001 {
-            self.blocks.push(Block { aabb: Aabb::new(min, max), mat, solid: true });
+            self.blocks.push(Block { aabb: Aabb::new(min, max), mat, solid: true, variant: self.variant });
         }
     }
     fn decor(&mut self, min: [f32; 3], max: [f32; 3], mat: Mat) {
-        self.blocks.push(Block { aabb: Aabb::new(Vec3::from(min), Vec3::from(max)), mat, solid: false });
+        self.blocks.push(Block { aabb: Aabb::new(Vec3::from(min), Vec3::from(max)), mat, solid: false, variant: self.variant });
     }
     fn mesh(&mut self, mat: Mat) -> &mut MeshBuilder {
-        self.decor.entry((mat, self.chunk)).or_default()
+        let variant = self.variant;
+        let m = self.decor.entry((mat, self.chunk)).or_default();
+        m.mark(variant);
+        m
+    }
+
+    /// Вариант текстур для `i`-й по счёту постройки в ряду (см. [`Builder::variant`]): у двух
+    /// соседних по счёту разные и кровля (остаток от деления на 3), и стены (частное).
+    fn vary(&mut self, i: usize) {
+        self.variant = ((i % 3) + 3 * ((i + i / 3) % 3)) as u8;
+        debug_assert!(self.variant < VARIANTS);
     }
     /// Дерево, куст или камень-модель с основанием в `pos`.
     fn plant(&mut self, kind: PlantKind, pos: Vec3, height: f32, yaw: f32, variant: u32) {
@@ -965,7 +988,7 @@ impl Builder {
             let top = k as f32 * ROOF_Q;
             let min = Vec3::new(lo.x + x0 as f32 * cs.x, top - ROOF_SLAB, lo.y + z0 as f32 * cs.y);
             let max = Vec3::new(lo.x + (x1 + 1) as f32 * cs.x, top, lo.y + (z1 + 1) as f32 * cs.y);
-            self.roofs.push(Block { aabb: Aabb::new(min, max), mat, solid: true });
+            self.roofs.push(Block { aabb: Aabb::new(min, max), mat, solid: true, variant: self.variant });
         };
         // Ряды по X; одинаковые отрезки соседних рядов продлеваем по Z. `open`: (x0, x1, высота) → первый ряд.
         let mut open: std::collections::BTreeMap<(usize, usize, i32), usize> = Default::default();
@@ -1485,8 +1508,11 @@ pub fn spawn_level(
         let size = block.aabb.max - block.aabb.min;
         // Огромные плиты (пол на весь мир) — отдельно, иначе их участок будет виден всегда.
         let chunk = if size.x > CHUNK * 2.0 || size.z > CHUNK * 2.0 { (i16::MAX, i16::MAX) } else { chunk_of((block.aabb.min + block.aabb.max) / 2.0) };
-        decor.entry((block.mat, chunk)).or_default().cuboid(block.aabb.min, block.aabb.max);
+        let m = decor.entry((block.mat, chunk)).or_default();
+        m.mark(block.variant);
+        m.cuboid(block.aabb.min, block.aabb.max);
     }
+    decor.values_mut().for_each(|m| m.mark(0));
     if let Some(ground) = &layout.ground {
         terrain::terrain_meshes(ground, &mut decor);
     }
@@ -1529,10 +1555,14 @@ pub fn spawn_level(
     for (g, group) in layout.switches.iter().enumerate() {
         let mut by_mat: HashMap<Mat, MeshBuilder> = HashMap::new();
         for block in &group.blocks {
-            by_mat.entry(block.mat).or_default().cuboid(block.aabb.min, block.aabb.max);
+            let m = by_mat.entry(block.mat).or_default();
+            m.mark(block.variant);
+            m.cuboid(block.aabb.min, block.aabb.max);
         }
         for (mat, mb) in &group.decor {
-            by_mat.entry(*mat).or_default().append(mb.clone());
+            let m = by_mat.entry(*mat).or_default();
+            m.mark(0);
+            m.append(mb.clone());
         }
         for (mat, mb) in by_mat {
             if mb.is_empty() {
@@ -1712,6 +1742,33 @@ mod roof_tests {
         assert!(level.body_is_free(&Body::STANDING, Vec3::new(0.0, 1.0, r.z0 + 0.6)), "прыжок у стены упирается в крышу");
         // Плиты одной высоты слиты: по полосе на ряд клеток, а не по коробке на клетку.
         assert!(level.0.len() < 2 + 2 * (8.8f32 / ROOF_CELL).ceil() as usize + 2, "плит {}", level.0.len());
+    }
+
+    /// В городе в ходу все варианты текстур: у черепицы (остаток от деления номера на 3) и у
+    /// стен домов (частное) каждого из трёх — заметная доля, а не один на весь город.
+    #[test]
+    fn city_uses_every_texture_variant() {
+        let layout = city::city_layout();
+        let mut roofs = [0usize; 3];
+        for ((mat, _), mb) in &layout.decor {
+            if *mat == Mat::Tile {
+                for (v, n) in mb.variant_counts().iter().enumerate() {
+                    assert!(*n == 0 || v < VARIANTS as usize, "вариант {v} вне диапазона");
+                    roofs[v % 3] += n;
+                }
+            }
+        }
+        let mut walls = [0usize; 3];
+        for b in &layout.blocks {
+            assert!(b.variant < VARIANTS);
+            if b.mat == Mat::Rubble || b.mat.plastered() {
+                walls[(b.variant / 3) as usize] += 1;
+            }
+        }
+        for (what, n) in [("черепица", roofs), ("стены", walls)] {
+            let total: usize = n.iter().sum();
+            assert!(n.iter().all(|k| *k * 5 > total), "{what}: варианты распределены неровно: {n:?}");
+        }
     }
 
     /// Каждая крыша уровня (черепица, сланец, солома, войлок — всё, что не отвесно и не мелочь)

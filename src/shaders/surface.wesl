@@ -35,6 +35,11 @@ struct Surface {
     photo_mean: vec4<f32>,
     // rgb — средний цвет бокового слоя, w — сила нормалей фото.
     photo_mean_b: vec4<f32>,
+    // Варианты той же поверхности (другая потёртость черепицы, другие камни в кладке):
+    // слои для верхнего (x, y) и бокового (z, w) слоя; какой взять, говорит вершина (uv_b.x).
+    variants: vec4<f32>,
+    // 1/м для каждого из четырёх вариантов.
+    variant_inv: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100)
@@ -47,6 +52,17 @@ var photo_sampler: sampler;
 var photo_nrm: texture_2d_array<f32>;
 
 // ---------- фотоматериалы ----------
+
+// Варианты: у каждого дома свой (см. `Builder::variant`). Глубина рельефа, сетка швов и прочие
+// свойства берутся по основному слою, а сама картинка — из слоя-варианта.
+var<private> swap_from_a: i32;
+var<private> swap_to_a: i32;
+var<private> swap_from_b: i32;
+var<private> swap_to_b: i32;
+
+fn tex_layer(layer: i32) -> i32 {
+    return select(select(layer, swap_to_b, layer == swap_from_b), swap_to_a, layer == swap_from_a);
+}
 
 struct Photo {
     albedo: vec3<f32>, // линейный цвет
@@ -90,7 +106,7 @@ fn layer_depth(layer: i32) -> f32 {
 }
 
 fn photo_height(uv: vec2<f32>, layer: i32, lod: f32) -> f32 {
-    return textureSampleLevel(photo_albedo, photo_sampler, uv, layer, lod).a;
+    return textureSampleLevel(photo_albedo, photo_sampler, uv, tex_layer(layer), lod).a;
 }
 
 // Одна проекция: цвет, шероховатость и нормаль, развёрнутая в мир по осям t (u) и b (v вверх по картинке).
@@ -147,7 +163,8 @@ fn photo_plane(layer: i32, uv0: vec2<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f
             shade = 1.0 - clamp(occ * 8.0, 0.0, 1.0) * 0.55 * soft * smoothstep(0.35, 0.6, pom_k);
         }
     }
-    let tex = textureSampleGrad(photo_albedo, photo_sampler, uv, layer, dx, dy);
+    let tl = tex_layer(layer);
+    let tex = textureSampleGrad(photo_albedo, photo_sampler, uv, tl, dx, dy);
     // Швы и щели темнее выступов (туда не попадает рассеянный свет): рисунок кладки
     // читается и на ярком солнце, а не только в тени.
     let cavity = mix(1.0, smoothstep(-0.25, 0.55, tex.a), clamp(layer_depth(layer) * 22.0, 0.0, 0.75) * select(1.0, 0.4, layer == 9));
@@ -155,12 +172,12 @@ fn photo_plane(layer: i32, uv0: vec2<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f
     if layer == 19 {
         // Камыш: убираем «лоскуты» светлых и тёмных пучков (издали они читались подушками),
         // оставляем стебли и ряды снопов.
-        let low = textureSampleLevel(photo_albedo, photo_sampler, uv, layer, 5.0).rgb;
-        let mean = textureSampleLevel(photo_albedo, photo_sampler, uv, layer, 10.0).rgb;
+        let low = textureSampleLevel(photo_albedo, photo_sampler, uv, tl, 5.0).rgb;
+        let mean = textureSampleLevel(photo_albedo, photo_sampler, uv, tl, 10.0).rgb;
         let flat_c = tex.rgb / max(low, vec3<f32>(0.03)) * mean;
         o.albedo = mix(tex.rgb, flat_c, 0.7) * mix(1.0, shade * cavity, 0.6);
     }
-    let m = textureSampleGrad(photo_nrm, photo_sampler, uv, layer, dx, dy);
+    let m = textureSampleGrad(photo_nrm, photo_sampler, uv, tl, dx, dy);
     var xy = (m.xy * 2.0 - 1.0) * relief;
     // Мелкая фактура вблизи: тот же материал в 4,7 раза мельче (у кладки и плит — зерно скалы)
     // добавляет поры, зёрна и волокна, которых в текстуре 1024 при подходе вплотную не хватает.
@@ -706,6 +723,30 @@ fn fragment(
     pom_gate = 1.0;
     pom_near = 1.0 - smoothstep(3.5, 14.0, length(to_cam));
     pom_sun = vec3<f32>(0.0, -1.0, 0.0);
+    // Вариант текстуры постройки: 0..8, у кровли считается остаток от деления на 3, у стен и
+    // дерева — частное, так что черепица и кладка меняются независимо.
+    var vsel = 0;
+    @if(VERTEX_UVS_B) {
+        vsel = i32(in.uv_b.x + 0.5);
+    }
+    let vk = select(vsel / 3, vsel % 3, kind == 12 || kind == 20);
+    swap_from_a = i32(surface.photo.x + 0.5);
+    swap_from_b = i32(surface.photo.z + 0.5);
+    swap_to_a = swap_from_a;
+    swap_to_b = swap_from_b;
+    var inv_top = surface.photo.y;
+    var inv_side = surface.photo.w;
+    if vk == 1 {
+        swap_to_a = i32(surface.variants.x + 0.5);
+        swap_to_b = i32(surface.variants.z + 0.5);
+        inv_top = surface.variant_inv.x;
+        inv_side = surface.variant_inv.z;
+    } else if vk == 2 {
+        swap_to_a = i32(surface.variants.y + 0.5);
+        swap_to_b = i32(surface.variants.w + 0.5);
+        inv_top = surface.variant_inv.y;
+        inv_side = surface.variant_inv.w;
+    }
 @if(!PREPASS_PIPELINE) {
     if lights.n_directional_lights > 0u {
         pom_sun = lights.directional_lights[0].direction_to_light;
@@ -779,7 +820,7 @@ fn fragment(
                     let cell = select(teg, kal + vec2<f32>(311.0, 97.0), on_k > 0.5);
                     let id = hash21(cell);
                     let kiln = hash21(cell * 1.37 + vec2<f32>(3.1, 7.7));
-                    let ph = photo_plane(i32(surface.photo.x + 0.5), uvr * surface.photo.y, tt, bb, n, surface.photo_mean_b.w * 0.85, surface.photo.y);
+                    let ph = photo_plane(i32(surface.photo.x + 0.5), uvr * inv_top, tt, bb, n, surface.photo_mean_b.w * 0.85, inv_top);
                     color = retint(ph.albedo, surface.photo_mean.rgb, base_a, surface.photo_mean.w);
                     color *= (0.88 + id * 0.22) * vec3<f32>(1.0 + (kiln - 0.5) * 0.1, 1.0, 1.0 - (kiln - 0.5) * 0.14);
                     // Новые (краснее и светлее) и старые (бурые, серые) черепицы вперемешку.
@@ -790,8 +831,12 @@ fn fragment(
                     color *= 1.0 + (fbm(wp.xz * 0.09 + vec2<f32>(wp.y * 0.1, 4.2)) - 0.5) * 0.35;
                     // Издалека: у одних домов черепица новее и краснее, у других — старая,
                     // бурая и серая от копоти очагов и лишайника; пятнами, а не ровной заливкой.
-                    let age = smoothstep(0.38, 0.62, fbm(wp.xz * 0.035 + vec2<f32>(3.7, 9.1)));
+                    // Вариант кровли дома сдвигает возраст: у одного дома черепицу недавно
+                    // перекрыли, у соседа она лежит со времён деда.
+                    let age = clamp(smoothstep(0.38, 0.62, fbm(wp.xz * 0.035 + vec2<f32>(3.7, 9.1))) + select(select(0.0, 0.3, vk == 1), -0.3, vk == 2), 0.0, 1.0);
                     color *= mix(vec3<f32>(1.1, 1.03, 0.96), vec3<f32>(0.7, 0.66, 0.64), age);
+                    // И общий тон кровли дома: старая темнее и бурее, свежая светлее и краснее.
+                    color *= select(select(vec3<f32>(1.0), vec3<f32>(0.84, 0.82, 0.8), vk == 1), vec3<f32>(1.09, 1.03, 0.96), vk == 2);
                     let soot = smoothstep(0.52, 0.68, fbm(wp.xz * 0.32 + vec2<f32>(wp.y * 0.2, 1.3)));
                     color = mix(color, vec3<f32>(0.075, 0.068, 0.058), soot * (0.2 + 0.35 * age));
                     let lichen = smoothstep(0.62, 0.78, fbm(uv * 0.7 + wp.xz * 0.05)) * (0.5 + age);
@@ -839,7 +884,7 @@ fn fragment(
                 }
                 if surface.photo.x >= 0.0 {
                     let fr = uv_frame(n, dp_x, dp_y, duv_x, duv_y);
-                    let ph = photo_plane(i32(surface.photo.x + 0.5), uv * surface.photo.y, fr.t, fr.b, n, surface.photo_mean_b.w, surface.photo.y);
+                    let ph = photo_plane(i32(surface.photo.x + 0.5), uv * inv_top, fr.t, fr.b, n, surface.photo_mean_b.w, inv_top);
                     color = retint(ph.albedo, surface.photo_mean.rgb, base_a, surface.photo_mean.w);
                     // Каждое бревно своего тона, вдоль ствола — потёки и серые обветренные полосы.
                     let streak = fbm(vec2<f32>(uv.x * 0.35, uv.y * 2.2) + wp.xz * 0.07);
@@ -865,7 +910,7 @@ fn fragment(
                     // Своя солома из Blender (tools/textures/blender_thatch.py): ряды по 0.3 м,
                     // пучки стеблей с рваными комлями, верх картинки — конёк. Развёртка та же,
                     // что у черепицы: u — вдоль карниза, v — вниз по скату.
-                    let ph = photo_plane(i32(surface.photo.x + 0.5), uv * surface.photo.y, fr.t, fr.b, n, surface.photo_mean_b.w, surface.photo.y);
+                    let ph = photo_plane(i32(surface.photo.x + 0.5), uv * inv_top, fr.t, fr.b, n, surface.photo_mean_b.w, inv_top);
                     color = retint(ph.albedo, surface.photo_mean.rgb, base_a, surface.photo_mean.w);
                     // Тайл 1.5 м повторяется вдоль карниза — полосы по скату своей ширины и
                     // оттенка (не кратные тайлу) прячут повтор.
@@ -910,7 +955,7 @@ fn fragment(
             }
             case 7: {
                 if surface.photo.x >= 0.0 {
-                    let ph = photo_triplanar(i32(surface.photo.x + 0.5), i32(surface.photo.z + 0.5), surface.photo.y, surface.photo.w, wp, n, surface.photo_mean_b.w);
+                    let ph = photo_triplanar(i32(surface.photo.x + 0.5), i32(surface.photo.z + 0.5), inv_top, inv_side, wp, n, surface.photo_mean_b.w);
                     let rust = smoothstep(0.6, 0.85, fbm(wp.xy * 3.0 + wp.zz * 2.0));
                     color = mix(retint(ph.albedo, surface.photo_mean.rgb, base_a, surface.photo_mean.w), base_b, rust * variation * 1.5);
                     rough = clamp(ph.rough * 0.8 + rust * 0.4, 0.15, 1.0);
@@ -984,9 +1029,9 @@ fn fragment(
             // Рельеф: трава и сухая почва на пологих местах, скала на крутых, галька у воды.
             let slope = 1.0 - clamp(n.y, 0.0, 1.0);
             // Номера слоёв почвы и гальки — L_SOIL и L_GRAVEL из surface_layers.rs.
-            let grass = photo_top(top, surface.photo.y, wp, n, relief, 1.0);
+            let grass = photo_top(top, inv_top, wp, n, relief, 1.0);
             let soil = photo_top(8, 1.0 / 3.5, wp + vec3<f32>(17.0, 0.0, 5.0), n, relief, 1.0);
-            let rock = photo_triplanar(side, side, surface.photo.w, surface.photo.w, wp * 0.5, n, relief);
+            let rock = photo_triplanar(side, side, inv_side, inv_side, wp * 0.5, n, relief);
             let gravel = photo_top(18, 0.5, wp, n, relief, 1.0);
             let dry = smoothstep(0.5, 0.78, fbm(wp.xz * 0.045) + fbm(wp.xz * 0.4) * 0.25);
             // Вблизи это земля под пучками травы (тёмная, пучки растут поверх — vegetation.rs);
@@ -1095,8 +1140,8 @@ fn fragment(
         } else {
             if kind == 15 {
                 // Смешанная кладка (opus mixtum): камень, а через каждые 1,6 м — пояс плинфы.
-                ph = photo_triplanar(top, top, surface.photo.y, surface.photo.y, wp, n, relief);
-                let br = photo_triplanar(side, side, surface.photo.w, surface.photo.w, wp, n, relief);
+                ph = photo_triplanar(top, top, inv_top, inv_top, wp, n, relief);
+                let br = photo_triplanar(side, side, inv_side, inv_side, wp, n, relief);
                 // Край пояса сглажен на ширину пикселя: жёсткий step вдали «дёргался» лесенкой.
                 let yb = wp.y / 1.6;
                 let edge = abs(fract(yb - 0.135 + 0.5) - 0.5);
@@ -1108,7 +1153,7 @@ fn fragment(
                 ph.n = normalize(mix(ph.n, br.n, band));
                 ph.rough = mix(ph.rough, br.rough, band);
             } else {
-                ph = photo_triplanar(top, side, surface.photo.y, surface.photo.w, wp, n, relief);
+                ph = photo_triplanar(top, side, inv_top, inv_side, wp, n, relief);
                 // Средний цвет того слоя, что виден: сверху — верхнего, на стенах — бокового.
                 let m = mix(surface.photo_mean_b.rgb, mean, smoothstep(0.3, 0.9, n.y));
                 color = retint(ph.albedo, m, base_a, tint);
@@ -1118,7 +1163,7 @@ fn fragment(
                     // нечётные ряды сдвинуты на полплиты): в швах земля, у каждой плиты свой
                     // тон, края затёрты темнее середины.
                     // Края плит чуть гуляют: по линейке сетка читалась кафелем.
-                    let fuv = vec2<f32>(wp.x, -wp.z) * surface.photo.y * 6.0 + (vec2<f32>(fbm(wp.xz * 0.9), fbm(wp.zx * 0.9 + vec2<f32>(4.7, 1.3))) - 0.5) * 0.05;
+                    let fuv = vec2<f32>(wp.x, -wp.z) * inv_top * 6.0 + (vec2<f32>(fbm(wp.xz * 0.9), fbm(wp.zx * 0.9 + vec2<f32>(4.7, 1.3))) - 0.5) * 0.05;
                     let row = floor(fuv.y);
                     let fx = fuv.x + 0.5 * (row - 2.0 * floor(row * 0.5));
                     let fc = vec2<f32>(fract(fx), fract(fuv.y));

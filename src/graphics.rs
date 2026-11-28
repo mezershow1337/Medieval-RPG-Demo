@@ -463,6 +463,13 @@ pub struct SurfaceExt {
     /// rgb — средний линейный цвет слоя z, w — сила рельефа нормалей фото.
     #[uniform(100)]
     pub photo_mean_b: Vec4,
+    /// Варианты той же поверхности для разных построек (см. [`variant_layers`]): два слоя
+    /// взамен слоя x и два взамен слоя z. Какой брать, говорит вершина (второй набор UV).
+    #[uniform(100)]
+    pub variants: Vec4,
+    /// 1/метров на тайл для каждого из четырёх вариантов.
+    #[uniform(100)]
+    pub variant_inv: Vec4,
     /// Цвет фото (массив слоёв, sRGB).
     #[texture(101, dimension = "2d_array")]
     #[sampler(102)]
@@ -583,6 +590,8 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
     // рисунок мельче, доска ~0,45 м.
     let photo_zoom = if mat == Mat::Wood { 1.7 } else { 1.0 };
     let mean = |l: u32| Vec3::from_array(layer(l).mean);
+    let (vt, vs) = (variant_layers(top), variant_layers(side));
+    let inv = |l: u32| photo_zoom / layer(l).meters;
     ExtendedMaterial {
         base: StandardMaterial { base_color: a, perceptual_roughness: rough, metallic: metal, reflectance: 0.4, ..default() },
         extension: SurfaceExt {
@@ -593,6 +602,8 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
             // Воде вместо фото передаём солнце (для отражений неба и солнечной дорожки) и «день».
             photo_mean: if mat == Mat::Water { mood().sun.normalize().extend(0.0) } else { mean(top).extend(tint) },
             photo_mean_b: if mat == Mat::Water { Vec4::new(if mood().day { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0) } else { mean(side).extend(relief) },
+            variants: Vec4::new(vt[0] as f32, vt[1] as f32, vs[0] as f32, vs[1] as f32),
+            variant_inv: Vec4::new(inv(vt[0]), inv(vt[1]), inv(vs[0]), inv(vs[1])),
             albedo: tex.map(|t| t.0.clone()),
             nrm: tex.map(|t| t.1.clone()),
         },
@@ -705,6 +716,25 @@ fn photo_layers(mat: Mat) -> Option<(u32, u32, f32, f32)> {
         Mat::Timber => (L_BEAM, L_BEAM, 0.75, 1.0),
         _ => return None,
     })
+}
+
+/// Варианты слоя: та же поверхность, но другая картинка — черепица с другими сколами и
+/// потёками, кладка с другими камнями, штукатурка с другими пятнами. Постройка берёт основной
+/// слой или один из двух вариантов по своему номеру (`level::Builder::variant`), поэтому
+/// соседние дома не повторяют друг друга. У слоя без вариантов (или если файла варианта нет)
+/// оба места занимает он сам.
+pub fn variant_layers(base: u32) -> [u32; 2] {
+    use crate::surface_layers::*;
+    let v = match base {
+        L_ROOF => [L_ROOF_B, L_ROOF_C],
+        L_RUBBLE => [L_RUBBLE_B, L_RUBBLE_C],
+        L_ASHLAR => [L_ASHLAR_B, L_ASHLAR_C],
+        L_PLASTER => [L_PLASTER_B, L_PLASTER_C],
+        L_LIMEWASH => [L_LIMEWASH_B, L_LIMEWASH_C],
+        L_WOOD => [L_WOOD_B, L_WOOD_C],
+        _ => [base, base],
+    };
+    v.map(|l| if photo_layer_ok(l) { l } else { base })
 }
 
 static SURFACE_TEXTURES: std::sync::OnceLock<Option<(Handle<Image>, Handle<Image>)>> = std::sync::OnceLock::new();
