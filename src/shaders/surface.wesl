@@ -1094,6 +1094,29 @@ fn fragment(
                 // Средний цвет того слоя, что виден: сверху — верхнего, на стенах — бокового.
                 let m = mix(surface.photo_mean_b.rgb, mean, smoothstep(0.3, 0.9, n.y));
                 color = retint(ph.albedo, m, base_a, tint);
+                if top == 11 && n.y > 0.7 {
+                    // Плиты мостовой: на фото швы в волосок и все плиты одного тона — издали
+                    // площадь читалась ровным песком. Сетка та же, что на фото (6×6 плит,
+                    // нечётные ряды сдвинуты на полплиты): в швах земля, у каждой плиты свой
+                    // тон, края затёрты темнее середины.
+                    // Края плит чуть гуляют: по линейке сетка читалась кафелем.
+                    let fuv = vec2<f32>(wp.x, -wp.z) * surface.photo.y * 6.0 + (vec2<f32>(fbm(wp.xz * 0.9), fbm(wp.zx * 0.9 + vec2<f32>(4.7, 1.3))) - 0.5) * 0.05;
+                    let row = floor(fuv.y);
+                    let fx = fuv.x + 0.5 * (row - 2.0 * floor(row * 0.5));
+                    let fc = vec2<f32>(fract(fx), fract(fuv.y));
+                    let e = min(min(fc.x, 1.0 - fc.x), min(fc.y, 1.0 - fc.y));
+                    let aa = fwidth(fuv.x) + fwidth(fuv.y);
+                    let keep = 1.0 - smoothstep(0.25, 0.7, aa);
+                    let id = hash21(vec2<f32>(floor(fx), row));
+                    let joint = (1.0 - smoothstep(0.01, 0.035 + aa, e)) * keep;
+                    let worn = fbm(wp.xz * 1.7);
+                    color *= mix(1.0, mix(0.8, 1.12, id), 1.0 - smoothstep(0.6, 1.5, aa)) * mix(vec3<f32>(1.03, 1.0, 0.95), vec3<f32>(0.95, 0.99, 1.05), fract(id * 7.31));
+                    color *= 1.0 - 0.13 * (1.0 - smoothstep(0.0, 0.22, e + (worn - 0.5) * 0.2)) * keep;
+                    let dirt = vec3<f32>(0.1, 0.085, 0.06) * (0.7 + 0.6 * worn);
+                    let weed = smoothstep(0.62, 0.8, fbm(wp.xz * 0.35 + vec2<f32>(3.3, 8.1))) * moss_amount;
+                    color = mix(color, mix(dirt, vec3<f32>(0.1, 0.13, 0.05), weed), joint * mix(0.45, 0.85, smoothstep(0.3, 0.7, fbm(wp.xz * 0.6 + vec2<f32>(1.9, 6.4)))));
+                    ph.rough = mix(ph.rough, 0.95, joint);
+                }
             }
         }
         // Крупные пятна выцветания и потемнения — ломают повтор тайла.
