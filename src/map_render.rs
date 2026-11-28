@@ -528,10 +528,18 @@ mod tests {
             img.try_into_dynamic().unwrap().to_rgba8().save(path).unwrap();
         }
         if crate::level::active() == crate::level::LevelKind::Chersonesus {
-            // Море — у верхнего края карты (на юге карта тянется до гор, и точка у самого края
-            // попадает в поле листа): ищем зеленовато-голубое над городом.
-            let sea = (0..40).map(|k| px(Vec3::new(-150.0 + k as f32 * 8.0, 0.0, -200.0))).filter(|c| c[1] > c[0]).count();
-            assert!(sea > 20, "море должно быть зеленовато-голубым (ярь-медянка): {sea} точек из 40");
+            // Море ищем не в заранее заданной точке (город и берег перестраиваются), а там, где
+            // рельеф уходит под воду: у мыса, по сетке вокруг города.
+            use crate::level::{WATER_Y, height_at};
+            let deep: Vec<Vec3> = (0..30)
+                .flat_map(|i| (0..16).map(move |j| Vec3::new(-700.0 + i as f32 * 40.0, 0.0, -420.0 + j as f32 * 40.0)))
+                .filter(|p| height_at(p.x, p.z) < WATER_Y - 3.0)
+                // У кромки листа краска моря выцветает в пергамент: поле не считаем.
+                .filter(|p| { let uv = b.to_uv(p.x, p.z); uv.min_element() > 0.08 && uv.max_element() < 0.92 })
+                .collect();
+            assert!(deep.len() > 40, "у города должно быть море: {} точек под водой", deep.len());
+            let sea = deep.iter().filter(|p| { let c = px(**p); c[1] > c[0] }).count();
+            assert!(sea * 10 > deep.len() * 8, "море должно быть зеленовато-голубым (ярь-медянка): {sea} точек из {}", deep.len());
             let reds = r.rgba.chunks_exact(4).filter(|c| c[0] as i32 - c[2] as i32 > 70).count();
             assert!(reds > size * size / 400, "на карте должны быть черепичные крыши: {reds}");
         }
