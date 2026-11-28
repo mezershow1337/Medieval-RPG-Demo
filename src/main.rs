@@ -83,6 +83,7 @@ mod props_client;
 mod props_server;
 mod protocol;
 mod residents;
+mod crowd_lod;
 mod rig;
 mod self_body;
 mod server;
