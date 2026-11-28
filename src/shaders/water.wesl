@@ -419,7 +419,10 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     var refl = reflected_sky(wp, r, s, t);
     // Рябь смешивает в отражении синий зенит со светлым небом у горизонта: вода не синяя, а
     // серо-стальная с зеленцой.
-    refl = mix(vec3<f32>(dot(refl, vec3<f32>(0.25, 0.6, 0.15))) * vec3<f32>(0.96, 1.02, 1.0), refl, 0.62);
+    // Днём — сильнее: вблизи вода смотрит в синий зенит и без этого лежала синими пятнами (на
+    // закате краски неба в воде не трогаем).
+    let day_k = clamp(s.sun.w, 0.0, 1.0);
+    refl = mix(vec3<f32>(dot(refl, vec3<f32>(0.25, 0.6, 0.15))) * mix(vec3<f32>(0.96, 1.02, 1.0), vec3<f32>(0.98, 1.03, 0.94), day_k), refl, mix(0.62, 0.4, day_k));
     // Город, стены, корабли — трассировкой по кадру.
     if water.waves.z > 0.5 && water.params.w < 0.5 {
         let jitter = fract(sin(dot(in.position.xy, vec2<f32>(12.9898, 78.233))) * 43758.5453);

@@ -171,6 +171,11 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         pbr_input.material.base_color = vec4<f32>(pbr_input.material.base_color.rgb * mix(1.0, tone, foliage.shade.x), pbr_input.material.base_color.a);
     }
 }
+    // Испод ветки смотрит в землю, и рассеянный свет (карта неба) ему достаётся от тёмной земли:
+    // снизу, из-под дерева, ель в тени была чёрной. Хвоя и лист просвечивают, поэтому исподу
+    // отдаём почти тот же свет неба, что и верху.
+    let ny = pbr_input.N.y;
+    pbr_input.N = normalize(vec3<f32>(pbr_input.N.x, mix(ny, abs(ny), 0.6) + 0.1, pbr_input.N.z));
     // Крона ещё и светится насквозь: свет неба проходит через хвою и листья, поэтому теневой
     // бок дерева получает больше рассеянного света, чем глухая стена.
     pbr_input.diffuse_occlusion = max(pbr_input.diffuse_occlusion, vec3<f32>(0.8)) * (1.0 + foliage.dir.w);

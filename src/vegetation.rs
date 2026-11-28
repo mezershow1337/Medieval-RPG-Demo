@@ -235,13 +235,13 @@ fn look(kind: PlantKind) -> (&'static str, Color, [f32; 3]) {
         // Дуб пушистый: листья снизу опушённые — серовато-зелёная крона.
         PlantKind::Oak => ("broadleaf", Color::srgb(0.78, 0.78, 0.6), [0.9, 0.9, 0.9]),
         // Можжевельник высокий — сизый.
-        PlantKind::Juniper => ("scale", Color::linear_rgb(1.9, 1.25, 1.2), [1.0, 0.85, 0.8]),
+        PlantKind::Juniper => ("scale", Color::linear_rgb(1.2, 0.92, 0.9), [1.0, 0.85, 0.8]),
         PlantKind::Cypress => ("scale", Color::linear_rgb(0.98, 0.78, 0.72), [0.9, 0.8, 0.75]),
         // Инжир — светлая сочная листва, гладкая серая кора.
         PlantKind::Fig => ("broadleaf", Color::srgb(1.05, 1.12, 0.85), [1.25, 1.25, 1.25]),
         PlantKind::Shrub => ("broadleaf", Color::srgb(0.84, 0.76, 0.52), [0.9, 0.85, 0.8]),
         // Хвоя в бору тёмная, с сизым отливом; затенение кроны — в цвете вершин модели.
-        PlantKind::Fir => ("bough", Color::srgb(0.72, 0.73, 0.77), [0.74, 0.72, 0.74]),
+        PlantKind::Fir => ("bough", Color::srgb(0.66, 0.58, 0.64), [0.74, 0.72, 0.74]),
         PlantKind::Rock => ("broadleaf", Color::WHITE, [1.0, 1.0, 1.0]),
     }
 }
@@ -494,7 +494,7 @@ fn spawn_plants(
         let (Some(g0), Some(g1)) = (gltf_meshes.get(l0), gltf_meshes.get(l1)) else { continue };
         let (Some(p0), Some(p1)) = (g0.primitives.first(), g1.primitives.first()) else { continue };
         let mut sm = p0.material.as_ref().and_then(|m| gltf_materials.get(m)).map(bevy::pbr::gltf::standard_material_from_gltf_material).unwrap_or_default();
-        sm.base_color = Color::srgb(0.66, 0.8, 0.84);
+        sm.base_color = Color::linear_rgb(0.92, 1.0, 1.1);
         // Сетка в главном мире бывает уже выгружена (только для рендера) — тогда берём размер
         // скана из таблицы, иначе камни выходят то с гальку, то со скалу.
         let size = meshes.get(&p0.mesh).and_then(mesh_bounds).map(|(a, b)| (b - a).max_element()).filter(|s| *s > 0.0).unwrap_or_else(|| rock_scan_size(id));
