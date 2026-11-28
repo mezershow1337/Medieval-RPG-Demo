@@ -26,7 +26,7 @@ pub const CHARCOAL_CAMP: Vec2 = Vec2::new(-560.0, 715.0);
 /// Мочажина с болотной рудой: z — широта, x — по дну западной балки.
 pub const BOG_Z: (f32, f32) = (440.0, 476.0);
 pub const CLAY_PIT: Vec2 = Vec2::new(101.0, 250.0);
-pub const SAND_BEACH: Vec2 = Vec2::new(-421.0, 203.0);
+pub const SAND_BEACH: Vec2 = Vec2::new(-439.0, 203.0);
 pub const QUARRY: Vec2 = Vec2::new(terrain::QUARRY_FACE.0, terrain::QUARRY_FACE.1);
 
 /// Ось западной балки (к Песочной бухте) на широте z.

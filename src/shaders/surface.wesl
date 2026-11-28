@@ -22,6 +22,9 @@ import bevy_pbr::render::{
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
 };
 
+/// Уровень моря (`terrain::WATER_Y`): город стоит на обрыве высоко над водой.
+const SEA_Y: f32 = -26.0;
+
 struct Surface {
     color_b: vec4<f32>,
     params: vec4<f32>,
@@ -1077,15 +1080,15 @@ fn fragment(
             crag_n = normalize(crag_n + pom_sun * (max(wall_l * 0.5 - crag_l, 0.0) - max(crag_l - wall_l * 1.9 - 0.2 * smoothstep(0.0, 0.2, wall_l), 0.0)));
             ph.n = normalize(mix(ph.n, crag_n, rk));
             ph.rough = mix(ph.rough, rock.rough, rk);
-            let shore = 1.0 - smoothstep(-1.0, 0.4, wp.y + (fbm(wp.xz * 0.3) - 0.5) * 0.8);
+            let shore = 1.0 - smoothstep(SEA_Y + 0.4, SEA_Y + 1.8, wp.y + (fbm(wp.xz * 0.3) - 0.5) * 0.8);
             // Галька лежит только на пологом берегу: у подножия обрыва в воду уходит сама скала
             // (галька снята сверху и на крутом тянулась вдоль склона серой рябой полосой).
             let beach = shore * (1.0 - smoothstep(0.3, 0.5, slope));
             ph.albedo = mix(ph.albedo, gravel.albedo, beach);
             ph.n = normalize(mix(ph.n, gravel.n, beach));
             ph.rough = mix(ph.rough, gravel.rough * 0.7, beach);
-            // У самой воды берег мокрый: тёмная полоса с прозеленью (уровень воды — WATER_Y, −1,4 м).
-            let wet_edge = 1.0 - smoothstep(-1.3, -0.6, wp.y + (fbm(wp.xz * 0.7) - 0.5) * 0.5);
+            // У самой воды берег мокрый: тёмная полоса с прозеленью (уровень воды — SEA_Y).
+            let wet_edge = 1.0 - smoothstep(SEA_Y + 0.1, SEA_Y + 0.8, wp.y + (fbm(wp.xz * 0.7) - 0.5) * 0.5);
             ph.albedo = ph.albedo * mix(vec3<f32>(1.0), vec3<f32>(0.5, 0.54, 0.46), wet_edge);
             ph.rough = mix(ph.rough, 0.4, wet_edge * 0.7);
             color = ph.albedo;
@@ -1152,7 +1155,9 @@ fn fragment(
         let large = fbm(wp.xz * 0.15 + wp.y * 0.05);
         let moss = smoothstep(0.62, 0.82, large + up * 0.3 - clamp(wp.y - 1.0, 0.0, 6.0) * 0.08) * moss_amount;
         color = mix(color, vec3<f32>(0.10, 0.14, 0.05) * (0.8 + 0.4 * fbm(wp.xz * 3.0)), moss);
-        let ground = 1.0 - smoothstep(0.0, 1.4, wp.y + fbm(wp.xz * 0.8 + wp.zx) * 0.6);
+        // Земля — на уровне города (0) или, в порту под обрывом, на уровне берега.
+        let floor_y = select(0.0, SEA_Y + 1.4, wp.y < -12.0);
+        let ground = 1.0 - smoothstep(0.0, 1.4, wp.y - floor_y + fbm(wp.xz * 0.8 + wp.zx) * 0.6);
         let streaks = smoothstep(0.45, 0.85, fbm(vec2<f32>(wp.x + wp.z, wp.y * 0.08) * 1.7)) * (1.0 - up);
         color *= 1.0 - (ground * 0.35 + streaks * 0.2) * grime_amount;
     } else {
@@ -1203,7 +1208,7 @@ fn fragment(
             let rock = base_b * (0.8 + 0.4 * fbm(wp.xz * 0.5 + wp.y));
             color = mix(c, rock, smoothstep(0.35, 0.6, slope + (fbm(wp.xz * 0.08) - 0.5) * 0.3));
             // Галька у воды.
-            color = mix(color, vec3<f32>(0.55, 0.52, 0.46), (1.0 - smoothstep(-1.0, 0.3, wp.y)) * 0.7);
+            color = mix(color, vec3<f32>(0.55, 0.52, 0.46), (1.0 - smoothstep(SEA_Y + 0.4, SEA_Y + 1.7, wp.y)) * 0.7);
         }
         if kind == 17 {
             color *= 1.0 - s.joint * 0.45;

@@ -460,13 +460,14 @@ mod tests {
     fn climbs_out_on_quay_beach_and_pier() {
         let level = crate::level::colliders(crate::level::layout());
         let float = WATER_Y - FLOAT;
-        // Набережная Карантинной бухты: плывём на запад, к стенке.
-        let (feet, out) = swim_ashore(&level, Vec3::new(312.0, float, 20.0), std::f32::consts::FRAC_PI_2, 30.0);
+        // Набережная порта в Карантинной бухте: плывём на запад, к стенке.
+        let dz = crate::level::PORT_SHIFT.z;
+        let (feet, out) = swim_ashore(&level, Vec3::new(312.0, float, 20.0 + dz), std::f32::consts::FRAC_PI_2, 30.0);
         assert!(out && feet.x < 303.0, "не выбрались к набережной: {feet}");
         // Причал: плывём к его боку с севера и выбираемся на настил.
-        let (feet, out) = swim_ashore(&level, Vec3::new(318.0, float, 40.0), 0.0, 30.0);
-        assert!(out && feet.y > -0.3, "не выбрались на причал: {feet}");
-        // Северный пляж: плывём к берегу на юг.
+        let (feet, out) = swim_ashore(&level, Vec3::new(318.0, float, 40.0 + dz), 0.0, 30.0);
+        assert!(out && feet.y > crate::level::SHORE_Y - 0.3, "не выбрались на причал: {feet}");
+        // Полоса гальки под северным обрывом: плывём к берегу на юг.
         let (feet, out) = swim_ashore(&level, Vec3::new(-150.0, float, -215.0), std::f32::consts::PI, 60.0);
         assert!(out, "застряли у пляжа: {feet}");
         // Восточный берег бухты.

@@ -1151,31 +1151,81 @@ pub fn grave(b: &mut Builder, p: Vec3, rng: &mut Rng) {
 
 // ---------------- цитадель ----------------
 
-/// Цитадель: стены отделяют её от города, ворота с севера. Внутри — претория (дом командира),
-/// казармы вдоль южной стены, горреум (зернохранилище), бани гарнизона, плац с чучелом.
+/// Ворота цитадели (x): на южной стене замка, против улицы от главной.
+pub fn citadel_gate_x() -> f32 {
+    cross_x(1)
+}
+
+/// Донжон — главная башня цитадели (по наружным граням стен), в самом углу над обрывом.
+pub fn keep_rect() -> Rect {
+    let c = CITADEL;
+    Rect::new(c.x0 + 0.75, c.z0 + 1.0, c.x0 + 13.75, c.z0 + 14.0)
+}
+
+/// Высота этажа донжона и число перекрытий (последнее — боевая площадка).
+const KEEP_FLOOR: f32 = 4.8;
+const KEEP_LEVELS: usize = 4;
+
+/// Боевая площадка донжона: середина и высота.
+pub fn keep_top() -> Vec3 {
+    keep_rect().center(KEEP_FLOOR * KEEP_LEVELS as f32)
+}
+
+fn praetorium_rect() -> Rect {
+    let c = CITADEL;
+    Rect::new(c.x0 + 18.0, c.z0 + 1.0, c.x0 + 42.0, c.z0 + 21.0)
+}
+
+/// Двор претории.
+pub fn praetorium_point() -> Vec3 {
+    praetorium_rect().center(0.0)
+}
+
+/// Цитадель (кастрон) в северо-западном углу города, на скале над морем: с севера и запада её
+/// закрывают городские стены над обрывом, от города отделяют свои стены с воротами на юг.
+/// Внутри — донжон (башня в углу, с неё видно всё море), претория (дом командира), казармы
+/// вдоль восточной стены, зернохранилище, оружейная мастерская, плац с чучелом и цистерной.
 pub fn citadel(b: &mut Builder) {
     let c = CITADEL;
     b.at(c.cx(), c.cz());
-    let gate = cross_x(19);
-    // Северная и западная стены цитадели.
-    let wall_z = c.z0 - 2.0;
-    kit::wall(b, kit::fx(), c.x0 - 3.5, EAST_WALL_X - WALL_T / 2.0, wall_z - 2.0, wall_z + 2.0, 0.0, 8.0, &[Op::Arch { s: gate, w: 3.6, spring: 3.0 }], Mat::Limestone, Mat::Limestone);
-    kit::wall_z(b, c.z0, SOUTH_WALL_Z - WALL_T / 2.0, c.x0 - 1.75, 3.5, 8.0, &[], Mat::Limestone);
-    for x in [c.x0 + 2.0, c.x0 + 20.0, c.x0 + 40.0, c.x0 + 60.0, c.x1 - 2.0] {
-        if (x - gate).abs() < 4.0 {
-            continue;
-        }
-        let m = b.mesh(Mat::Limestone);
-        m.cuboid(Vec3::new(x - 0.6, 8.0, wall_z - 2.0), Vec3::new(x + 0.6, 9.4, wall_z - 1.4));
-    }
-    b.torch(gate - 2.8, 3.2, wall_z - 2.3, Vec3::NEG_Z);
-    b.torch(gate + 2.8, 3.2, wall_z - 2.3, Vec3::NEG_Z);
-    b.torch(gate - 2.8, 3.2, wall_z + 2.3, Vec3::Z);
-    // Претория.
-    let pr = Rect::new(c.x0 + 2.0, c.z0 + 2.0, c.x0 + 28.0, c.z0 + 24.0);
+    let gate = citadel_gate_x();
+    let t = WALL_T;
     let mut rng = Rng::new(488);
+    // Южная и восточная стены цитадели (в высоту — как городские: по стенам можно обойти кругом).
+    let (sz, ex) = (c.z1 + t / 2.0, c.x1 + t / 2.0);
+    kit::wall(b, kit::fx(), c.x0, c.x1 + t, c.z1, c.z1 + t, 0.0, WALL_H, &[Op::Arch { s: gate, w: 4.0, spring: 3.4 }], Mat::Limestone, Mat::Limestone);
+    kit::wall(b, kit::fz(), c.z0 - 3.5, c.z1, c.x1, c.x1 + t, 0.0, WALL_H, &[], Mat::Limestone, Mat::Limestone);
+    for (a, e) in [(gate - 2.4, c.x0), (c.x1 + t, gate + 2.4)] {
+        walls::battlements(b, Vec2::new(a.max(e), sz), Vec2::new(a.min(e), sz), WALL_H, t / 2.0);
+    }
+    walls::battlements(b, Vec2::new(ex, c.z0 - 3.5), Vec2::new(ex, c.z1), WALL_H, t / 2.0);
+    // Воротные башни наружу, к городу, и круглая башня на углу.
+    for s in [-1.0f32, 1.0] {
+        walls::rect_tower(b, Vec2::new(gate + s * 7.2, sz), Vec2::X, Vec2::Y);
+    }
+    walls::round_tower(b, Vec2::new(ex, sz), 5.2, 12.5);
+    walls::rect_tower(b, Vec2::new(ex, c.cz() - 4.0), Vec2::Y, Vec2::X);
+    // Створки ворот открыты внутрь.
+    for s in [-1.0f32, 1.0] {
+        let leaf = Vec3::new(gate + s * 1.94, 2.3, c.z1 - 1.0);
+        b.mesh(Mat::Wood).obox(leaf, Vec3::new(1.1, 2.3, 0.07), std::f32::consts::FRAC_PI_2);
+        for y in [0.6, 2.3, 4.0] {
+            b.mesh(Mat::Iron).obox(leaf + Vec3::new(-s * 0.02, y - 2.3, 0.0), Vec3::new(1.05, 0.06, 0.08), std::f32::consts::FRAC_PI_2);
+        }
+    }
+    b.torch(gate - 3.0, 3.4, c.z1 + t + 0.3, Vec3::Z);
+    b.torch(gate + 3.0, 3.4, c.z1 + t + 0.3, Vec3::Z);
+    b.torch(gate - 3.0, 3.4, c.z1 - 0.3, Vec3::NEG_Z);
+    // Лестница на стену — внутри, вдоль южной стены.
+    kit::stairs(b, Vec3::new(gate - 21.0, 0.0, c.z1 - 0.8), Vec3::X, 1.6, WALL_H, Mat::Limestone);
+    keep(b);
+
+    // Претория.
+    let pr = praetorium_rect();
+    b.at(pr.cx(), pr.cz());
     b.loot(L::Wealthy);
-    let peri = peristyle(b, pr, 6.0, 4.8, Mat::OpusMixtum, &[(Side::E, pr.cz())], [2, 2, 1, 1], true);
+    let peri = peristyle(b, pr, 6.0, 4.8, Mat::OpusMixtum, &[(Side::S, pr.cx() + 3.0)], [2, 2, 1, 1], true);
+    b.decor([peri.court.x0, 0.0, peri.court.z0], [peri.court.x1, 0.03, peri.court.z1], Mat::Paving);
     for (side, room) in &peri.rooms {
         if *side == Side::N {
             kit::table(b, Rect::new(room.cx() - 1.0, room.cz() - 0.5, room.cx() + 1.0, room.cz() + 0.5), 0.8);
@@ -1206,68 +1256,71 @@ pub fn citadel(b: &mut Builder) {
             _ => extras(b, *room, L::Kitchen, &["Корзина с припасами"], &[(Role::Cook, c, c + Vec3::X)], &mut rng),
         }
     }
-    // Казармы вдоль южной стены: длинный корпус с комнатами на 8 солдат.
-    let ba = Rect::new(c.x0 + 32.0, c.z1 - 9.0, c.x1 - 1.0, c.z1);
-    kit::wall_x(b, ba.x0, ba.x1, ba.z0 + 0.3, 0.6, 3.8, &(0..6).map(|k| Op::Door { s: ba.x0 + 5.0 + k as f32 * 10.0, w: 1.2, h: 2.4 }).collect::<Vec<_>>(), Mat::Rubble);
-    kit::wall_z(b, ba.z0 + 0.6, ba.z1, ba.x0 + 0.3, 0.6, 3.8, &[], Mat::Rubble);
-    for k in 1..6 {
-        kit::wall_z(b, ba.z0 + 0.6, ba.z1, ba.x0 + k as f32 * 10.0, 0.45, 3.8, &[], Mat::Rubble);
+
+    // Казармы вдоль восточной стены: длинный корпус с комнатами на 8 солдат, двери во двор.
+    let ba = Rect::new(c.x1 - 9.0, c.z0 + 2.0, c.x1, c.z1 - 2.0);
+    b.at(ba.cx(), ba.cz());
+    let rooms = 4;
+    let step = ba.d() / rooms as f32;
+    kit::wall_z(b, ba.z0, ba.z1, ba.x0 + 0.3, 0.6, 3.8, &(0..rooms).map(|k| Op::Door { s: ba.z0 + step * (k as f32 + 0.5), w: 1.2, h: 2.4 }).collect::<Vec<_>>(), Mat::Rubble);
+    for k in 0..=rooms {
+        let z = (ba.z0 + k as f32 * step).clamp(ba.z0 + 0.3, ba.z1 - 0.3);
+        kit::wall_x(b, ba.x0 + 0.6, ba.x1, z, if k == 0 || k == rooms { 0.6 } else { 0.45 }, 3.8, &[], Mat::Rubble);
     }
-    for k in 0..6 {
-        let room = Rect::new(ba.x0 + k as f32 * 10.0 + 0.6, ba.z0 + 0.8, ba.x0 + (k + 1) as f32 * 10.0 - 0.3, ba.z1 - 0.2);
-        if room.x1 > ba.x1 {
-            break;
-        }
+    for k in 0..rooms {
+        let room = Rect::new(ba.x0 + 0.8, ba.z0 + k as f32 * step + 0.5, ba.x1 - 0.2, ba.z0 + (k + 1) as f32 * step - 0.5);
         // Нары вдоль задней стены, стойка с копьями.
-        beds_along(b, Rect::new(room.x0, room.z1 - 2.2, room.x1, room.z1), &mut rng);
-        b.mesh(Mat::Wood).cuboid(Vec3::new(room.x0 + 0.2, 0.0, room.z0 + 0.3), Vec3::new(room.x0 + 0.3, 2.2, room.z0 + 0.4));
+        beds_along(b, Rect::new(room.x1 - 2.2, room.z0, room.x1, room.z1), &mut rng);
         for q in 0..4 {
-            let x = room.x0 + 0.5 + q as f32 * 0.25;
-            b.mesh(Mat::Wood).beam(Vec3::new(x, 0.0, room.z0 + 0.35), Vec3::new(x, 2.6, room.z0 + 0.35), 0.015, 0.015, Vec3::X);
-            b.mesh(Mat::Iron).spire(Vec3::new(x, 2.6, room.z0 + 0.35), 0.04, 0.25, 4);
+            let z = room.z0 + 0.5 + q as f32 * 0.25;
+            b.mesh(Mat::Wood).beam(Vec3::new(room.x0 + 0.35, 0.0, z), Vec3::new(room.x0 + 0.35, 2.6, z), 0.015, 0.015, Vec3::X);
+            b.mesh(Mat::Iron).spire(Vec3::new(room.x0 + 0.35, 2.6, z), 0.04, 0.25, 4);
         }
-        let c = room.center(0.0);
-        let soldiers: &[(Role, Vec3, Vec3)] = if k % 2 == 0 { &[(Role::Soldier, c, c + Vec3::X)] } else { &[] };
-        let soldiers: Vec<_> = soldiers.to_vec();
+        let rc = room.center(0.0);
+        let soldiers: Vec<(Role, Vec3, Vec3)> = if k % 2 == 0 { vec![(Role::Soldier, rc, rc - Vec3::X)] } else { vec![] };
         let mut rr = interior::Room::new(b, room.inset(0.05));
-        if let Some((f, _)) = rr.take(1.4, 0.7, &[Side::N, Side::W, Side::E], &mut rng) {
+        if let Some((f, _)) = rr.take(1.4, 0.7, &[Side::N, Side::S, Side::W], &mut rng) {
             kit::table(b, f, 0.75);
             interior::table_setting(b, f.inset(0.1), 0.75, &mut rng);
         }
         extras(b, room, L::Barracks, &["Сундук стратиота", "Сундук стратиота"], &soldiers, &mut rng);
     }
-    kit::lean_roof(b, ba, Side::S, 5.0, 3.85, 0.5);
-    // Высокий край — у стены цитадели; западный торец — до черепицы.
-    kit::lean_fill(b, ba, Side::S, 5.0, 3.85, 0.0, 0.0, &[(ba.x0, ba.x0 + 0.6, 3.8)], Mat::Rubble);
-    // Горреум — зернохранилище на подпорных стенках (пол приподнят от сырости).
-    let ho = Rect::new(c.x0 + 34.0, c.z0 + 3.0, c.x0 + 58.0, c.z0 + 15.0);
+    kit::lean_roof(b, ba, Side::E, 5.0, 3.85, 0.5);
+    // Высокий край — у стены цитадели; торцы — до черепицы.
+    kit::lean_fill(b, ba, Side::E, 5.0, 3.85, 0.0, 0.0, &[(ba.z0, ba.z0 + 0.6, 3.8), (ba.z1 - 0.6, ba.z1, 3.8)], Mat::Rubble);
+
+    // Горреум — зернохранилище.
+    let ho = Rect::new(c.x0 + 45.0, c.z0 + 1.5, c.x0 + 62.0, c.z0 + 12.5);
+    b.at(ho.cx(), ho.cz());
     kit::wall_x(b, ho.x0, ho.x1, ho.z0 + 0.4, 0.8, 5.0, &[], Mat::Limestone);
     kit::wall_x(b, ho.x0, ho.x1, ho.z1 - 0.4, 0.8, 5.0, &[Op::Door { s: ho.cx(), w: 2.2, h: 3.0 }], Mat::Limestone);
     kit::wall_z(b, ho.z0 + 0.8, ho.z1 - 0.8, ho.x0 + 0.4, 0.8, 5.0, &[], Mat::Limestone);
     kit::wall_z(b, ho.z0 + 0.8, ho.z1 - 0.8, ho.x1 - 0.4, 0.8, 5.0, &[], Mat::Limestone);
     kit::gable_roof(b, ho, 5.0, 2.2, true, 0.5, Mat::Limestone);
-    for k in 0..8 {
+    for k in 0..5 {
         let p = Vec3::new(ho.x0 + 2.0 + k as f32 * 2.7, 0.0, ho.z0 + 2.0);
         b.solid([p.x - 0.5, 0.0, p.z - 0.4], [p.x + 0.5, 0.8, p.z + 0.4], Mat::Canvas);
         kit::pithos(b, p + Vec3::Z * 2.4, 1.5, 0.0);
     }
     extras(b, ho.inset(0.85), L::Storehouse, &["Ларь с зерном", "Корзина"], &[(Role::Servant, ho.center(0.0) + Vec3::Z * 2.0, ho.center(0.0))], &mut rng);
-    // Бани гарнизона.
-    let th = Rect::new(c.x1 - 20.0, c.z0 + 3.0, c.x1 - 2.0, c.z0 + 15.0);
-    kit::wall_x(b, th.x0, th.x1, th.z0 + 0.4, 0.8, 4.5, &[], Mat::OpusMixtum);
-    kit::wall_x(b, th.x0, th.x1, th.z1 - 0.4, 0.8, 4.5, &[Op::Door { s: th.x0 + 4.0, w: 1.3, h: 2.4 }], Mat::OpusMixtum);
-    kit::wall_z(b, th.z0 + 0.8, th.z1 - 0.8, th.x0 + 0.4, 0.8, 4.5, &[], Mat::OpusMixtum);
-    kit::wall_z(b, th.z0 + 0.8, th.z1 - 0.8, th.x1 - 0.4, 0.8, 4.5, &[], Mat::OpusMixtum);
-    kit::wall_z(b, th.z0 + 0.8, th.z1 - 0.8, th.cx(), 0.6, 4.5, &[Op::Door { s: th.cz(), w: 1.2, h: 2.3 }], Mat::OpusMixtum);
-    b.mesh(Mat::Plaster).barrel_vault(Vec2::new(th.x0 + 0.8, th.z0 + 0.8), Vec2::new(th.x1 - 0.8, th.z1 - 0.8), 4.5, true, 0.0);
-    kit::gable_roof(b, th, 4.6, 3.0, true, 0.4, Mat::OpusMixtum);
-    pool(b, Rect::new(th.cx() + 1.5, th.z0 + 1.5, th.x1 - 1.5, th.z0 + 4.5));
-    // Плац: чучело для упражнений, цистерна, стойка с оружием.
-    let pell = Vec3::new(c.x0 + 45.0, 0.0, c.z0 + 30.0);
+
+    // Плац: чучело для упражнений, цистерна, поленница, коновязь.
+    let yard = garrison_point();
+    b.at(yard.x, yard.z);
+    let pell = yard + Vec3::new(5.0, 0.0, 2.0);
     b.solid([pell.x - 0.15, 0.0, pell.z - 0.15], [pell.x + 0.15, 1.9, pell.z + 0.15], Mat::Wood);
-    kit::cistern_mouth(b, Vec3::new(c.x0 + 62.0, 0.0, c.z0 + 30.0));
-    b.torch(c.x0 + 45.0, 3.0, c.z1 - 9.5, Vec3::NEG_Z);
-    // Оружейная мастерская гарнизона (фабрика): навес у восточной стены цитадели.
+    b.mesh(Mat::Wood).beam(pell + Vec3::new(-0.55, 1.45, 0.0), pell + Vec3::new(0.55, 1.45, 0.0), 0.05, 0.05, Vec3::Y);
+    kit::cistern_mouth(b, yard + Vec3::new(-12.0, 0.0, -3.0));
+    b.torch(yard.x, 3.0, c.z1 - 0.3, Vec3::NEG_Z);
+    let m = b.mesh(Mat::Wood);
+    let rail = yard + Vec3::new(14.0, 0.0, 6.0);
+    for dx in [0.0f32, 4.0] {
+        m.beam(rail + Vec3::X * dx, rail + Vec3::new(dx, 1.1, 0.0), 0.06, 0.06, Vec3::X);
+    }
+    m.beam(rail + Vec3::new(-0.3, 1.05, 0.0), rail + Vec3::new(4.3, 1.05, 0.0), 0.05, 0.05, Vec3::Y);
+    kit::hidden(b, rail - Vec3::new(0.1, 0.0, 0.1), rail + Vec3::new(4.1, 1.1, 0.1));
+
+    // Оружейная мастерская гарнизона (фабрика): навес к югу от донжона, открыт на плац.
     let ar = armoury_rect();
     b.at(ar.cx(), ar.cz());
     kit::wall_x(b, ar.x0, ar.x1, ar.z0 + 0.3, 0.6, 4.2, &[], Mat::Rubble);
@@ -1291,12 +1344,146 @@ pub fn citadel(b: &mut Builder) {
     kit::woodpile(b, Rect::new(ar.x1 - 4.0, ar.z1 - 2.0, ar.x1 - 1.0, ar.z1 - 1.0), 0.8);
 }
 
+/// Донжон: квадратная башня в четыре яруса с каменными лестницами вдоль стен и боевой
+/// площадкой наверху. Такие башни-пирги ставили в крепостях при Анастасии и Юстиниане:
+/// последний рубеж обороны, дозор и склад оружия.
+fn keep(b: &mut Builder) {
+    let k = keep_rect();
+    b.at(k.cx(), k.cz());
+    let t = 1.5;
+    let fh = KEEP_FLOOR;
+    let top = fh * KEEP_LEVELS as f32;
+    let inn = k.inset(t);
+    let lime = Mat::Limestone;
+    // Цоколь с откосом и угловые камни.
+    for (x, z) in [(k.x0, k.z0), (k.x1, k.z0), (k.x0, k.z1), (k.x1, k.z1)] {
+        let (sx, sz) = (if x > k.cx() { -1.0 } else { 1.0 }, if z > k.cz() { -1.0 } else { 1.0 });
+        kit::quoins(b, x + sx * 0.35, z + sz * 0.35, top, 0.7);
+    }
+    for level in 0..KEEP_LEVELS {
+        let (y0, y1) = (level as f32 * fh, (level + 1) as f32 * fh);
+        // Окна-бойницы: внизу узкие щели, выше — пошире, с подоконником на высоте груди.
+        let slit = |s: f32| Op::Window { s, w: if level == 0 { 0.35 } else { 0.6 }, sill: if level == 0 { 2.2 } else { 1.2 }, top: if level == 0 { 3.4 } else { 2.6 } };
+        let door = Op::Door { s: k.cx() + 2.5, w: 1.4, h: 2.5 };
+        let south: Vec<Op> = if level == 0 { vec![door] } else { vec![slit(k.cx() - 2.0), slit(k.cx() + 2.0)] };
+        kit::wall(b, kit::fx(), k.x0, k.x1, k.z0, k.z0 + t, y0, y1, &[slit(k.cx())], lime, lime);
+        kit::wall(b, kit::fx(), k.x0, k.x1, k.z1 - t, k.z1, y0, y1, &south, lime, lime);
+        kit::wall(b, kit::fz(), k.z0 + t, k.z1 - t, k.x0, k.x0 + t, y0, y1, &[slit(k.cz())], lime, lime);
+        kit::wall(b, kit::fz(), k.z0 + t, k.z1 - t, k.x1 - t, k.x1, y0, y1, &[slit(k.cz())], lime, lime);
+        // Пояс-карниз между ярусами.
+        b.mesh(lime).cuboid(Vec3::new(k.x0 - 0.12, y1 - 0.3, k.z0 - 0.12), Vec3::new(k.x1 + 0.12, y1 - 0.08, k.z0));
+        b.mesh(lime).cuboid(Vec3::new(k.x0 - 0.12, y1 - 0.3, k.z1), Vec3::new(k.x1 + 0.12, y1 - 0.08, k.z1 + 0.12));
+        b.mesh(lime).cuboid(Vec3::new(k.x0 - 0.12, y1 - 0.3, k.z0), Vec3::new(k.x0, y1 - 0.08, k.z1));
+        b.mesh(lime).cuboid(Vec3::new(k.x1, y1 - 0.3, k.z0), Vec3::new(k.x1 + 0.12, y1 - 0.08, k.z1));
+        // Лестница на следующий ярус: по чётным — вдоль западной стены на север, по нечётным —
+        // вдоль восточной на юг. Марш — 12 ступеней.
+        let west = level % 2 == 0;
+        let (sw, run) = (1.3, 7.2);
+        let (start, dir, hole) = if west {
+            (Vec3::new(inn.x0 + sw / 2.0, y0, inn.z1 - 0.8), Vec3::NEG_Z, Rect::new(inn.x0, inn.z1 - 0.8 - run, inn.x0 + sw + 0.1, inn.z1))
+        } else {
+            (Vec3::new(inn.x1 - sw / 2.0, y0, inn.z0 + 0.8), Vec3::Z, Rect::new(inn.x1 - sw - 0.1, inn.z0, inn.x1, inn.z0 + 0.8 + run))
+        };
+        kit::stairs(b, start, dir, sw, fh, lime);
+        // Перекрытие над ярусом — дубовый настил на балках, с проёмом над маршем.
+        let slab = if level + 1 == KEEP_LEVELS { lime } else { Mat::Wood };
+        let (ya, yb) = (y1 - 0.28, y1);
+        if west {
+            b.solid([hole.x1, ya, inn.z0], [inn.x1, yb, inn.z1], slab);
+            b.solid([inn.x0, ya, inn.z0], [hole.x1, yb, hole.z0], slab);
+            b.solid([hole.x1, yb, hole.z0 + 1.4], [hole.x1 + 0.14, yb + 0.95, inn.z1], Mat::Wood);
+        } else {
+            b.solid([inn.x0, ya, inn.z0], [hole.x0, yb, inn.z1], slab);
+            b.solid([hole.x0, ya, hole.z1], [inn.x1, yb, inn.z1], slab);
+            b.solid([hole.x0 - 0.14, yb, inn.z0], [hole.x0, yb + 0.95, hole.z1 - 1.4], Mat::Wood);
+        }
+        if level + 1 < KEEP_LEVELS {
+            let m = b.mesh(Mat::Wood);
+            let mut x = inn.x0 + 2.2;
+            while x < inn.x1 - 1.6 {
+                m.beam(Vec3::new(x, ya - 0.14, inn.z0), Vec3::new(x, ya - 0.14, inn.z1), 0.1, 0.14, Vec3::Y);
+                x += 2.2;
+            }
+        }
+        b.lamp(Vec3::new(k.cx(), y0 + 3.2, k.cz()), Color::srgb(1.0, 0.7, 0.42), 9_000.0, 9.0);
+    }
+    // Что хранят в башне: внизу — припасы на осаду, выше — оружейная и караульня.
+    let mut rng = Rng::new(0x51E6E);
+    for q in 0..4 {
+        kit::pithos(b, Vec3::new(inn.x1 - 1.0, 0.0, inn.z0 + 1.2 + q as f32 * 1.5), 1.45, 0.0);
+    }
+    interior::sacks(b, Rect::new(inn.x0 + 2.4, inn.z0 + 0.2, inn.x0 + 6.0, inn.z0 + 0.9), &mut rng);
+    b.loot(L::Storehouse);
+    kit::chest(b, Vec3::new(inn.cx() + 1.0, 0.0, inn.z0 + 0.6), true);
+    b.placed_in(Vec3::Y * fh, crate::level::chunk_of(k.center(0.0)), |b| {
+        interior::weapon_rack(b, Rect::new(inn.x0 + 2.6, inn.z0 + 0.05, inn.x0 + 4.4, inn.z0 + 0.5), Side::N);
+        interior::weapon_rack(b, Rect::new(inn.x0 + 5.0, inn.z0 + 0.05, inn.x0 + 6.8, inn.z0 + 0.5), Side::N);
+        b.loot(L::Barracks);
+        kit::chest(b, Vec3::new(inn.x0 + 3.2, 0.0, inn.z1 - 0.6), true);
+    });
+    b.placed_in(Vec3::Y * fh * 2.0, crate::level::chunk_of(k.center(0.0)), |b| {
+        kit::table(b, Rect::new(inn.cx() - 1.1, inn.cz() - 0.5, inn.cx() + 1.1, inn.cz() + 0.5), 0.8);
+        kit::bench(b, Rect::new(inn.cx() - 1.1, inn.cz() + 0.8, inn.cx() + 1.1, inn.cz() + 1.2));
+        kit::bed(b, Rect::new(inn.x0 + 2.0, inn.z0 + 0.15, inn.x0 + 3.0, inn.z0 + 2.1));
+        kit::bed(b, Rect::new(inn.x0 + 3.6, inn.z0 + 0.15, inn.x0 + 4.6, inn.z0 + 2.1));
+        b.loot(L::Barracks);
+        kit::chest(b, Vec3::new(inn.x0 + 5.6, 0.0, inn.z0 + 0.6), true);
+    });
+    b.placed_in(Vec3::Y * fh * 3.0, crate::level::chunk_of(k.center(0.0)), |b| {
+        b.loot(L::Wealthy);
+        kit::chest(b, Vec3::new(inn.x0 + 3.0, 0.0, inn.z1 - 0.6), true);
+        interior::desk_codex(b, Rect::new(inn.cx() - 0.6, inn.z0 + 0.2, inn.cx() + 0.6, inn.z0 + 0.9));
+    });
+    // Боевая площадка: зубцы по краю, жаровня сигнального огня.
+    let m = b.mesh(lime);
+    m.cuboid(Vec3::new(k.x0 - 0.2, top - 0.25, k.z0 - 0.2), Vec3::new(k.x1 + 0.2, top, k.z0 + 0.5));
+    m.cuboid(Vec3::new(k.x0 - 0.2, top - 0.25, k.z1 - 0.5), Vec3::new(k.x1 + 0.2, top, k.z1 + 0.2));
+    m.cuboid(Vec3::new(k.x0 - 0.2, top - 0.25, k.z0 + 0.5), Vec3::new(k.x0 + 0.5, top, k.z1 - 0.5));
+    m.cuboid(Vec3::new(k.x1 - 0.5, top - 0.25, k.z0 + 0.5), Vec3::new(k.x1 + 0.2, top, k.z1 - 0.5));
+    // Пол площадки над стенами и парапет.
+    for (lo, hi) in [
+        ([k.x0, top - 0.28, k.z0], [k.x1, top, k.z0 + t]),
+        ([k.x0, top - 0.28, k.z1 - t], [k.x1, top, k.z1]),
+        ([k.x0, top - 0.28, k.z0 + t], [k.x0 + t, top, k.z1 - t]),
+        ([k.x1 - t, top - 0.28, k.z0 + t], [k.x1, top, k.z1 - t]),
+    ] {
+        b.solid(lo, hi, lime);
+    }
+    for (lo, hi) in [
+        ([k.x0 - 0.2, top, k.z0 - 0.2], [k.x1 + 0.2, top + 0.9, k.z0 + 0.4]),
+        ([k.x0 - 0.2, top, k.z1 - 0.4], [k.x1 + 0.2, top + 0.9, k.z1 + 0.2]),
+        ([k.x0 - 0.2, top, k.z0 + 0.4], [k.x0 + 0.4, top + 0.9, k.z1 - 0.4]),
+        ([k.x1 - 0.4, top, k.z0 + 0.4], [k.x1 + 0.2, top + 0.9, k.z1 - 0.4]),
+    ] {
+        b.solid(lo, hi, lime);
+    }
+    let n = 5;
+    for i in 0..n {
+        let f = (i as f32 + 0.5) / n as f32;
+        let (x, z) = (k.x0 + k.w() * f, k.z0 + k.d() * f);
+        for (c, half) in [
+            (Vec3::new(x, top + 1.6, k.z0 + 0.1), Vec3::new(0.75, 0.7, 0.3)),
+            (Vec3::new(x, top + 1.6, k.z1 - 0.1), Vec3::new(0.75, 0.7, 0.3)),
+            (Vec3::new(k.x0 + 0.1, top + 1.6, z), Vec3::new(0.3, 0.7, 0.75)),
+            (Vec3::new(k.x1 - 0.1, top + 1.6, z), Vec3::new(0.3, 0.7, 0.75)),
+        ] {
+            b.mesh(lime).obox(c, half, 0.0);
+        }
+    }
+    let fire = Vec3::new(k.cx() - 2.0, top, k.cz() + 2.0);
+    b.mesh(Mat::Iron).lathe(fire, &[(0.08, 0.0), (0.06, 0.9), (0.42, 1.0), (0.48, 1.25), (0.4, 1.25), (0.36, 1.05), (0.0, 1.02)], 10);
+    b.mesh(Mat::Coals).disc(fire + Vec3::Y * 1.2, 0.38, 10, true);
+    kit::hidden(b, fire - Vec3::new(0.3, 0.0, 0.3), fire + Vec3::new(0.3, 1.25, 0.3));
+    b.torch(fire.x, top + 1.45, fire.z, Vec3::ZERO);
+}
+
 /// Оружейная мастерская гарнизона в цитадели.
 pub fn armoury_rect() -> Rect {
     let c = CITADEL;
-    Rect::new(c.x1 - 24.0, c.z0 + 19.0, c.x1 - 8.0, c.z0 + 29.0)
+    Rect::new(c.x0 + 0.25, c.z0 + 17.0, c.x0 + 16.25, c.z0 + 27.0)
 }
 
+/// Середина плаца цитадели.
 pub fn garrison_point() -> Vec3 {
-    Vec3::new(CITADEL.x0 + 52.0, 0.0, CITADEL.z0 + 28.0)
+    Vec3::new(CITADEL.x0 + 40.0, 0.0, CITADEL.z1 - 10.0)
 }

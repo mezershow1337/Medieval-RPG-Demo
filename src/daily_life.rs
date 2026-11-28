@@ -292,8 +292,8 @@ impl Nav {
 /// Пол под человеком в точке: самая нижняя опора (земля или верх коробки не выше колена над
 /// землёй), над которой человек помещается. Верхние этажи не считаются.
 fn standing_floor(level: &LevelColliders, x: f32, z: f32) -> Option<f32> {
-    // Над морем (причалы, набережная) мерило — уровень города, а не дно.
-    let natural = crate::level::ground_y(x, z).max(if crate::level::ground_y(x, z) < crate::level::WATER_Y { 0.0 } else { f32::MIN });
+    // Над морем (причалы, мостки) мерило — уровень берега, а не дно.
+    let natural = crate::level::ground_y(x, z).max(if crate::level::ground_y(x, z) < crate::level::WATER_Y { crate::level::SHORE_Y } else { f32::MIN });
     let hf = level.ground_height(x, z);
     // Выше 0,4 м над землёй — уже не пол, а лавка, ложе или стол.
     let probe = crate::collision::Aabb::new(Vec3::new(x - 0.01, natural - 1.5, z - 0.01), Vec3::new(x + 0.01, natural + 0.4, z + 0.01));
@@ -1918,8 +1918,9 @@ impl Town {
 
     /// Обход: ворота, агора, порт — каждому солдату со своего места.
     fn patrol_route(&self, i: usize) -> Vec<Dest> {
-        let all = [Dest::MainGate, Dest::Agora, Dest::Basilica, Dest::PortGate, Dest::Quay, Dest::Horrea, Dest::SouthGate, Dest::Thermae];
-        let mut r: Vec<Dest> = all.into_iter().filter(|d| self.dist_home(i, *d) < 500.0).collect();
+        // Обход — по ближним местам: от цитадели в углу города до дальних ворот за смену не обернуться.
+        let all = [Dest::Garrison, Dest::ChurchWest, Dest::MainGate, Dest::Agora, Dest::Basilica, Dest::PortGate, Dest::Horrea, Dest::SouthGate, Dest::Thermae];
+        let mut r: Vec<Dest> = all.into_iter().filter(|d| self.dist_home(i, *d) < 320.0).collect();
         if r.is_empty() {
             return r;
         }

@@ -30,18 +30,18 @@ pub fn fortifications(b: &mut Builder) {
         let a = Vec2::from(ring[i]);
         let c = Vec2::from(ring[(i + 1) % n]);
         b.at((a.x + c.x) / 2.0, (a.y + c.y) / 2.0);
-        if i == 8 {
+        if a.x == EAST_WALL_X && c.x == EAST_WALL_X {
             east_wall(b, a, c);
-        } else if i == 9 {
+        } else if a.y == SOUTH_WALL_Z && c.y == SOUTH_WALL_Z {
             south_wall(b, a, c);
         } else {
             diagonal_curtain(b, a, c);
         }
     }
     // Круглые башни на углах (кроме юго-восточного — там башня Зенона).
-    for (i, &(x, z)) in ring.iter().enumerate() {
+    for &(x, z) in ring.iter() {
         b.at(x, z);
-        if i == 9 {
+        if (x, z) == (EAST_WALL_X, SOUTH_WALL_Z) {
             zeno_tower(b, Vec2::new(x, z));
         } else {
             round_tower(b, Vec2::new(x, z), 5.5, TOWER_H);
@@ -78,7 +78,7 @@ fn oriented_solid(b: &mut Builder, a: Vec2, c: Vec2, d0: f32, d1: f32, y0: f32, 
 }
 
 /// Зубцы по наружному краю и пояс-карниз.
-fn battlements(b: &mut Builder, a: Vec2, c: Vec2, top: f32, half_t: f32) {
+pub(super) fn battlements(b: &mut Builder, a: Vec2, c: Vec2, top: f32, half_t: f32) {
     let dir = (c - a).normalize();
     let nrm = Vec2::new(dir.y, -dir.x);
     let len = a.distance(c);
@@ -120,7 +120,7 @@ fn diagonal_curtain(b: &mut Builder, a: Vec2, c: Vec2) {
 }
 
 /// Прямоугольная башня, выступающая наружу.
-fn rect_tower(b: &mut Builder, p: Vec2, _dir: Vec2, out: Vec2) {
+pub(super) fn rect_tower(b: &mut Builder, p: Vec2, _dir: Vec2, out: Vec2) {
     // Вдоль стены — так, чтобы нормаль `oriented_solid` смотрела наружу.
     let dir = Vec2::new(-out.y, out.x);
     let a = p - dir * TOWER_ALONG / 2.0;
@@ -149,7 +149,7 @@ fn rect_tower(b: &mut Builder, p: Vec2, _dir: Vec2, out: Vec2) {
     }
 }
 
-fn round_tower(b: &mut Builder, p: Vec2, r: f32, h: f32) {
+pub(super) fn round_tower(b: &mut Builder, p: Vec2, r: f32, h: f32) {
     let base = Vec3::new(p.x, 0.0, p.y);
     b.mesh(Mat::Limestone).lathe(base, &[(r + 0.4, 0.0), (r + 0.2, 1.2), (r, 1.4), (r, h - 0.4), (r + 0.2, h - 0.3), (r + 0.2, h), (0.0, h)], 20);
     for k in 0..10 {
@@ -236,8 +236,8 @@ fn straight_wall(b: &mut Builder, a: Vec2, c: Vec2, gates: &[f32], towers: &[f32
 
 fn east_wall(b: &mut Builder, a: Vec2, c: Vec2) {
     let towers = [-95.0, -50.0, 45.0, 90.0, 130.0];
-    straight_wall(b, a, c, &[0.0], &towers);
-    // Калитка из цитадели к бухте не делаем: в цитадель входят из города.
+    // Ворот тут нет: под стеной обрыв к бухте. В город входят только с суши, с юга.
+    straight_wall(b, a, c, &[], &towers);
 }
 
 fn south_wall(b: &mut Builder, a: Vec2, c: Vec2) {
@@ -278,7 +278,7 @@ fn stairs_to_walls(b: &mut Builder) {
     let (s, _) = gate_stairs_start();
     b.at(s.x, s.z);
     kit::stairs(b, Vec3::new(s.x - 0.3 + 0.3, 0.0, s.z), Vec3::X, 1.6, WALL_H, Mat::Limestone);
-    // У портовых ворот — вдоль восточной стены.
+    // У восточной стены, над бухтой.
     let x = EAST_WALL_X - WALL_T / 2.0 - 0.8;
     b.at(x, 12.0);
     kit::stairs(b, Vec3::new(x, 0.0, 12.0), Vec3::Z, 1.6, WALL_H, Mat::Limestone);

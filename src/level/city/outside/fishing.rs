@@ -1,4 +1,5 @@
-//! Рыбацкая лачуга на берегу Песочной бухты, за западной стеной Херсона.
+//! Рыбацкая лачуга на низком берегу Песочной бухты, к юго-западу от Херсона: город стоит
+//! на обрыве, а тут земля полого сходит к пляжу.
 //!
 //! Бутовая мазанка под камышом, перед ней — холщовый навес, под которым рыбак Евпл торгует
 //! снастями и покупает улов (trade.rs, место `fish_hut`). От лачуги в бухту уходят мостки
@@ -9,15 +10,15 @@
 use super::*;
 
 /// Лачуга (по наружным граням стен). Дверь — на запад, к воде.
-pub const HUT: Rect = Rect::new(-339.0, 101.5, -331.0, 108.5);
+pub const HUT: Rect = Rect::new(-485.0, 261.5, -477.0, 268.5);
 /// Ось мостков по Z (напротив двери).
-pub const JETTY_Z: f32 = 106.6;
+pub const JETTY_Z: f32 = 266.6;
 /// Ширина мостков.
 pub const JETTY_W: f32 = 2.4;
 /// Где кончаются мостки (x).
-pub const JETTY_END: f32 = -390.0;
+pub const JETTY_END: f32 = -536.0;
 /// Высота настила мостков.
-pub const JETTY_DECK: f32 = -0.2;
+pub const JETTY_DECK: f32 = WATER_Y + 1.2;
 
 /// Где мостки начинаются на берегу (x): первая точка от лачуги к воде, где земля ниже настила.
 pub fn jetty_start() -> f32 {
@@ -39,16 +40,16 @@ pub fn fishing_hut(b: &mut Builder) {
     jetty(b);
     // Лодка у мостков, вторая вытащена на берег к северу.
     skiff(b, Vec3::new(JETTY_END + 6.0, WATER_Y + 0.05, JETTY_Z + JETTY_W / 2.0 + 1.25), 0.06, 0.0);
-    let beach = Vec2::new(-347.5, 97.0);
+    let beach = Vec2::new(-493.5, 257.0);
     let by = ground_y(beach.x, beach.y).max(WATER_Y + 0.25);
     skiff(b, Vec3::new(beach.x, by + 0.42, beach.y), -0.65, 0.12);
-    oars_on_ground(b, g(-343.0, 98.8), Vec3::new(0.8, 0.0, -0.6).normalize());
+    oars_on_ground(b, g(-489.0, 258.8), Vec3::new(0.8, 0.0, -0.6).normalize());
     // Вешала с сетями к югу, рама с рыбой к северу.
-    net_rack(b, g(-339.5, 113.0), g(-333.5, 113.0), &mut rng);
-    net_rack(b, g(-346.0, 112.0), g(-342.5, 115.8), &mut rng);
-    fish_frame(b, Vec2::new(-335.0, 98.6), &mut rng);
+    net_rack(b, g(-485.5, 273.0), g(-479.5, 273.0), &mut rng);
+    net_rack(b, g(-492.0, 272.0), g(-488.5, 275.8), &mut rng);
+    fish_frame(b, Vec2::new(-481.0, 258.6), &mut rng);
     // Костёр с котлом ухи и чурбаки вокруг.
-    let fire = g(-343.6, 110.3);
+    let fire = g(-489.6, 270.3);
     b.at(fire.x, fire.z);
     b.mesh(Mat::Rubble).lathe(fire - Vec3::Y * 0.05, &[(0.55, 0.0), (0.62, 0.14), (0.55, 0.24), (0.45, 0.22), (0.45, 0.08)], 10);
     b.mesh(Mat::Coals).disc(fire + Vec3::Y * 0.09, 0.45, 10, true);
@@ -74,9 +75,14 @@ pub fn fishing_hut(b: &mut Builder) {
     b.mesh(Mat::Limestone).lathe(a - Vec3::Y * 0.05, &[(0.0, 0.0), (0.32, 0.02), (0.36, 0.2), (0.28, 0.38), (0.0, 0.4)], 9);
     b.mesh(Mat::Canvas).lathe(a + Vec3::new(0.9, 0.0, 0.3), &[(0.12, 0.0), (0.35, 0.0), (0.38, 0.06), (0.35, 0.12), (0.12, 0.12)], 14);
     kit::hidden(b, a - Vec3::new(0.4, 0.05, 0.4), a + Vec3::new(1.3, 0.4, 0.7));
-    // Тропа от дороги у главных ворот вдоль стены к лачуге.
-    path(b, &[Vec2::new(main_gate_x() - 3.0, 199.0), Vec2::new(-170.0, 188.0), Vec2::new(-226.0, 166.0), Vec2::new(-262.0, 140.0), Vec2::new(-296.0, 117.0), Vec2::new(-322.0, 108.0), Vec2::new(HUT.x1 + 0.5, HUT.cz())]);
+    // Тропа от дороги у главных ворот: по плато на запад и вниз, к низкому берегу.
+    path(b, &trail());
     path(b, &[Vec2::new(HUT.x0 - 0.5, JETTY_Z), Vec2::new(js, JETTY_Z)]);
+}
+
+/// Тропа от главных ворот к лачуге.
+pub fn trail() -> Vec<Vec2> {
+    vec![Vec2::new(main_gate_x() - 3.0, 199.0), Vec2::new(-170.0, 198.0), Vec2::new(-262.0, 206.0), Vec2::new(-340.0, 232.0), Vec2::new(-420.0, 256.0), Vec2::new(-458.0, 264.0), Vec2::new(HUT.x1 + 0.5, HUT.cz())]
 }
 
 /// Мазанка: бутовые стены, камышовая кровля, внутри — очаг, лежанка, ларь, сети на колышках.
@@ -419,7 +425,7 @@ mod tests {
         let deep = check_cast(end, end - Vec3::X * 15.0, r).expect("с конца мостков — в воду");
         assert!(Water::of_depth(deep) == Water::Deep, "с конца мостков глубоко: {deep}");
         let start = Vec3::new(jetty_start() - 1.0, JETTY_DECK, JETTY_Z);
-        let shallow = check_cast(start, start - Vec3::X * 4.0, r).expect("у берега — тоже вода");
+        let shallow = check_cast(start, start - Vec3::X * 7.0, r).expect("у берега — тоже вода");
         assert!(Water::of_depth(shallow) != Water::Deep, "у берега мелко: {shallow}");
         assert!(check_cast(p, p + Vec3::X * 10.0, r).is_err(), "в сторону суши — не вода");
         assert!(ground_y(HUT.cx(), HUT.cz()) > WATER_Y + 0.5, "лачуга на суше");

@@ -21,7 +21,7 @@ pub use places::*;
 /// Полуширина главной улицы Херсона.
 pub const MAIN_STREET_HALF: f32 = city::MAIN_HALF;
 pub use spawns::{SpawnChoice, pick_spawn, spawn_spot, spawn_spots};
-pub use terrain::{WATER_Y, city_distance as city_wall_distance, fbm, ground_y, height_at, inside_city, mesh_y};
+pub use terrain::{PORT_SHIFT, SHORE_Y, WATER_Y, city_distance as city_wall_distance, fbm, ground_y, height_at, inside_city, mesh_y};
 
 /// Расстояние от точки до ближайшей загородной дороги (для травы и т. п.).
 pub fn road_distance(x: f32, z: f32) -> f32 {
@@ -711,6 +711,17 @@ impl Builder {
 
     /// Как [`Builder::placed`], но декор идёт в участок `chunk` (для подъёма на этаж выше).
     fn placed_in(&mut self, offset: Vec3, chunk: Chunk, f: impl FnOnce(&mut Builder)) {
+        self.placed_with(offset, Some(chunk), f);
+    }
+
+    /// Как [`Builder::placed`], но для больших построек (порт): декор остаётся разложен по
+    /// участкам, как его раскладывала `f` через [`Builder::at`], — каждый участок сдвигается
+    /// вместе со своим содержимым.
+    fn moved(&mut self, offset: Vec3, f: impl FnOnce(&mut Builder)) {
+        self.placed_with(offset, None, f);
+    }
+
+    fn placed_with(&mut self, offset: Vec3, chunk: Option<Chunk>, f: impl FnOnce(&mut Builder)) {
         let mut t = Builder::new();
         t.loot = self.loot;
         t.house = self.house;
@@ -771,8 +782,9 @@ impl Builder {
             g.pts.iter_mut().for_each(|p| *p += offset);
             self.glass.push(g);
         }
-        for ((mat, _), mut mb) in t.decor {
+        for ((mat, c), mut mb) in t.decor {
             mb.translate(offset);
+            let chunk = chunk.unwrap_or_else(|| chunk_of(Vec3::new((c.0 as f32 + 0.5) * CHUNK, 0.0, (c.1 as f32 + 0.5) * CHUNK) + offset));
             self.decor.entry((mat, chunk)).or_default().append(mb);
         }
     }
