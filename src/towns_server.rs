@@ -154,11 +154,7 @@ pub struct TownWorld {
 }
 
 fn save_path() -> Option<std::path::PathBuf> {
-    match std::env::var("MRPG_SAVE").ok().as_deref() {
-        Some("off") | Some("0") => None,
-        Some(p) if !p.is_empty() => Some(p.into()),
-        _ => Some(data_dir().join("herson-world.json")),
-    }
+    crate::saves::world_path()
 }
 
 impl TownWorld {
@@ -893,25 +889,37 @@ fn save_world(time: Res<Time>, mut tw: ResMut<TownWorld>, loot: Res<LootWorld>) 
     tw.last_save = now;
     tw.dirty = false;
     let Some(path) = tw.save_path.clone() else { return };
-    let cat = estates();
-    let mut storage = Vec::new();
-    for spec in &cat.estates {
-        for c in &spec.containers {
-            let Some(inv) = loot.corpses.get(&(CONTAINER_ID_BASE + *c as u64)).map(|c| &c.inv) else { continue };
-            if inv.grid.items.is_empty() {
-                continue;
+    if let Some(json) = tw.save_text(&loot) {
+        let _ = crate::saves::write_atomic(&path, &json);
+    }
+}
+
+impl TownWorld {
+    /// Мир в файл сохранения (города, усадьбы, вещи в сундуках усадеб) — и для текущей игры,
+    /// и для слота (см. `saves.rs`).
+    pub fn save_text(&self, loot: &LootWorld) -> Option<String> {
+        let cat = estates();
+        let mut storage = Vec::new();
+        for spec in &cat.estates {
+            for c in &spec.containers {
+                let Some(inv) = loot.corpses.get(&(CONTAINER_ID_BASE + *c as u64)).map(|c| &c.inv) else { continue };
+                if inv.grid.items.is_empty() {
+                    continue;
+                }
+                storage.push((*c, inv.grid.items.iter().map(|p| SavedPlaced { name: p.item.info().name.to_string(), placed: p.clone() }).collect()));
             }
-            storage.push((*c, inv.grid.items.iter().map(|p| SavedPlaced { name: p.item.info().name.to_string(), placed: p.clone() }).collect()));
         }
+        // Сундуки ещё не разложены (сохраняют в первый же кадр) — пишем, что загрузили.
+        if storage.is_empty() && !self.pending_storage.is_empty() {
+            storage = self.pending_storage.clone();
+        }
+        let file = SaveFile { version: 1, towns: self.towns.clone(), estates: self.estates.clone(), storage };
+        serde_json::to_string(&file).ok()
     }
-    let file = SaveFile { version: 1, towns: tw.towns.clone(), estates: tw.estates.clone(), storage };
-    let Ok(json) = serde_json::to_string(&file) else { return };
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, json).is_ok() {
-        let _ = std::fs::rename(&tmp, &path);
+
+    /// Дата в мире текстом («вторая неделя октября 510 г.»).
+    pub fn date(&self) -> String {
+        date_text(self.towns.week)
     }
 }
 

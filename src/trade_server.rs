@@ -317,6 +317,22 @@ impl TradeWorld {
         self.merchant(id).grudges.insert(player, until);
     }
 
+    /// Репутация и штраф игрока для сохранения (`None` — ещё не заводили).
+    pub fn saved_standing(&self, player: u64) -> Option<(Reputation, u32)> {
+        self.reps.get(&player).map(|r| (r.clone(), self.fine(player)))
+    }
+
+    /// Вернуть репутацию и штраф из сохранения (и разослать игроку).
+    pub fn restore_standing(&mut self, player: u64, rep: Reputation, fine: u32) {
+        self.reps.insert(player, rep);
+        if fine > 0 {
+            self.fines.insert(player, fine);
+        } else {
+            self.fines.remove(&player);
+        }
+        self.standing_dirty.insert(player);
+    }
+
     pub fn fine(&self, player: u64) -> u32 {
         self.fines.get(&player).copied().unwrap_or(0)
     }

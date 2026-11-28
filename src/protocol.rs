@@ -6,7 +6,7 @@ use bevy_renet::renet::{ChannelConfig, ConnectionConfig, DefaultChannel, SendTyp
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Меняйте при несовместимых изменениях протокола, чтобы старые клиенты не подключались.
-pub const PROTOCOL_ID: u64 = 0x4D45_4449_0032;
+pub const PROTOCOL_ID: u64 = 0x4D45_4449_0033;
 pub const DEFAULT_PORT: u16 = 5000;
 pub const MAX_PLAYERS: usize = 16;
 
@@ -142,6 +142,9 @@ pub enum ClientMessage {
     Holster { on: bool },
     /// Ответ стражнику, который вас остановил.
     Law(crate::civilians::LawAnswer),
+    /// Сохранить игру (см. `saves.rs`). `slot` и секрет хозяина (`console_net::host_token`) —
+    /// мир и всех в слот; без них (или от друга) — только свой персонаж у хоста.
+    SaveGame { slot: Option<u8>, token: u64 },
 }
 
 /// Кто это: игрок или враг какого типа. Люди Херсонеса и его округи около 510 г.

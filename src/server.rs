@@ -186,6 +186,7 @@ pub fn run(socket: UdpSocket, with_logging: bool) {
         .add_plugins(crate::mining_server::MiningServerPlugin)
         .add_plugins(crate::fishing_server::FishingServerPlugin)
         .add_plugins(crate::towns_server::TownServerPlugin)
+        .add_plugins(crate::saves_server::SavesServerPlugin)
         .add_plugins(crate::console_server::ConsoleServerPlugin)
         .add_plugins(crate::swim::SwimServerPlugin)
         .add_systems(Update, (receive_client_messages, run_npcs, combat_tick, respawns, send_snapshots).chain());
@@ -296,6 +297,7 @@ fn on_server_event(
     mut names: ResMut<PlayerNames>,
     mut last_spawns: ResMut<LastSpawns>,
     level: Res<LevelColliders>,
+    store: Option<Res<crate::saves_server::CharacterStore>>,
 ) {
     match &event.0 {
         ServerEvent::ClientConnected { client_id } => {
@@ -303,10 +305,22 @@ fn on_server_event(
             world.joined_count += 1;
             let profile = transport.user_data(id).and_then(|d| crate::estates::unpack_profile(&d));
             let look = profile.as_ref().map(|p| p.look).unwrap_or_default();
+            // Вернувшийся персонаж встаёт, где стоял при выходе (или при сохранении).
+            let saved = profile.as_ref().and_then(|p| store.as_ref().and_then(|s| s.spawn_for(p.key)));
             let name = profile.map(|p| p.name).filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Странник {}", id % 1000));
-            let (spot, spawn, yaw) = choose_spawn(&mut world, &level, id, last_spawns.0.get(&name).copied());
-            last_spawns.0.insert(name.clone(), spot);
-            info!("Игрок «{name}» ({id}) подключился, появился: {}", level::spawn_spot(spot).map_or(spot, |s| s.name));
+            let (spawn, yaw) = match saved {
+                Some((feet, yaw, _)) => {
+                    let spawn = npc::find_free_spot(&level, feet);
+                    info!("Игрок «{name}» ({id}) подключился, вернулся на своё место");
+                    (spawn, yaw)
+                }
+                None => {
+                    let (spot, spawn, yaw) = choose_spawn(&mut world, &level, id, last_spawns.0.get(&name).copied());
+                    last_spawns.0.insert(name.clone(), spot);
+                    info!("Игрок «{name}» ({id}) подключился, появился: {}", level::spawn_spot(spot).map_or(spot, |s| s.name));
+                    (spawn, yaw)
+                }
+            };
             server.send_message(id, CH_RELIABLE, encode(&ServerMessage::Welcome { your_id: id, spawn: spawn.into(), yaw }));
             // Новичку — имена всех, кто уже в игре; всем — имя новичка.
             for (other, n) in &names.0 {
@@ -342,6 +356,12 @@ fn on_server_event(
                     gear: crate::gear_look::Gear { look, ..Default::default() },
                 },
             );
+            // Здоровье — как было (раненым и вернётся).
+            if let Some(hp) = saved.and_then(|(_, _, hp)| hp)
+                && let Some(a) = world.actors.get_mut(&id)
+            {
+                a.fighter.hp = hp.clamp(1.0, a.fighter.max_hp);
+            }
         }
         ServerEvent::ClientDisconnected { client_id, reason } => {
             let name = names.0.remove(client_id).unwrap_or_default();
@@ -352,7 +372,14 @@ fn on_server_event(
     }
 }
 
-fn receive_client_messages(mut server: ResMut<RenetServer>, mut world: ResMut<GameWorld>, mut civil: ResMut<crate::civil_server::CivilWorld>, level: Res<LevelColliders>, time: Res<Time>) {
+fn receive_client_messages(
+    mut server: ResMut<RenetServer>,
+    mut world: ResMut<GameWorld>,
+    mut civil: ResMut<crate::civil_server::CivilWorld>,
+    level: Res<LevelColliders>,
+    time: Res<Time>,
+    mut saves: ResMut<crate::saves_server::SaveRequests>,
+) {
     let now = time.elapsed_secs_f64();
     for id in server.clients_id() {
         // Боевые команды.
@@ -360,6 +387,11 @@ fn receive_client_messages(mut server: ResMut<RenetServer>, mut world: ResMut<Ga
             let Some(msg) = decode::<ClientMessage>(&bytes) else { continue };
             if let ClientMessage::Law(answer) = msg {
                 civil.answers.push((id, answer));
+                continue;
+            }
+            // Сохранить можно и мёртвым, и в карцере.
+            if let ClientMessage::SaveGame { slot, token } = msg {
+                saves.0.push(crate::saves_server::SaveRequest { player: id, slot, token });
                 continue;
             }
             let Some(actor) = world.actors.get_mut(&id) else { continue };
@@ -383,7 +415,7 @@ fn receive_client_messages(mut server: ResMut<RenetServer>, mut world: ResMut<Ga
                     actor.fighter.set_guard(on);
                 }
                 ClientMessage::Holster { on } => actor.holstered = on,
-                ClientMessage::Law(_) | ClientMessage::PlayerState { .. } => {}
+                ClientMessage::Law(_) | ClientMessage::PlayerState { .. } | ClientMessage::SaveGame { .. } => {}
             }
         }
         // Положение.
