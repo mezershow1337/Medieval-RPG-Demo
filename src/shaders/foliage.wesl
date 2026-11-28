@@ -152,6 +152,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 @if(VISIBILITY_RANGE_DITHER)
     visibility_range_dither(in.position, in.visibility_range_dither);
     var pbr_input = pbr_input_from_standard_material(in, is_front);
+    // Прозрачность до отсечения: по ней видно, где веточка плотная, а где просвет.
+    let leaf_a = pbr_input.material.base_color.a;
     pbr_input.material.base_color = alpha_discard(pbr_input.material.flags, pbr_input.material.alpha_cutoff, pbr_input.material.base_color);
 @if(VERTEX_OUTPUT_INSTANCE_INDEX) {
     if foliage.shade.x > 0.0 {
@@ -168,6 +170,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 @if(VERTEX_UVS_B) {
         tone *= mix(0.82, 1.1, fract(in.uv_b.y * 7.13));
 }
+        // Края веточек и просветы между ними темнее (там видна глубина кроны): издали мелкие
+        // веточки сливались в гладкое пятно, и можжевельник читался зелёной кляксой.
+        tone *= mix(0.6, 1.0, smoothstep(pbr_input.material.alpha_cutoff, pbr_input.material.alpha_cutoff + 0.4, leaf_a));
         pbr_input.material.base_color = vec4<f32>(pbr_input.material.base_color.rgb * mix(1.0, tone, foliage.shade.x), pbr_input.material.base_color.a);
     }
 }

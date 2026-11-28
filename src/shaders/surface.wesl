@@ -990,7 +990,7 @@ fn fragment(
             // дальше, чем растёт трава, — сам травяной ковёр, светлее и зеленее: иначе вокруг
             // игрока было бы видно кольцо, где трава кончается.
             let carpet = smoothstep(35.0, 75.0, length(view.world_position.xyz - wp));
-            let g_col = retint(grass.albedo, mean, base_a, tint) * mix(vec3<f32>(1.0), vec3<f32>(1.05, 1.02, 0.9), smoothstep(0.4, 0.85, fbm(wp.xz * 0.02))) * mix(vec3<f32>(0.17, 0.225, 0.56), vec3<f32>(0.215, 0.235, 0.7), carpet);
+            let g_col = retint(grass.albedo, mean, base_a, tint) * mix(vec3<f32>(1.0), vec3<f32>(1.05, 1.02, 0.9), smoothstep(0.4, 0.85, fbm(wp.xz * 0.02))) * mix(vec3<f32>(0.215, 0.185, 0.36), vec3<f32>(0.42, 0.42, 0.68), carpet);
             // Сухая почва под травой — тёмная, с прозеленью: светлая соломенная земля спорила
             // с зелёной травой и пересвечивала кадр.
             let soil_c = mix(soil.albedo * mix(vec3<f32>(0.4, 0.45, 0.36), vec3<f32>(0.5, 0.54, 0.46), carpet), g_col, 0.5);
