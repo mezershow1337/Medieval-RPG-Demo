@@ -111,8 +111,10 @@ pub fn village(b: &mut Builder) {
     memorial_chapel(b, Vec2::new(VILLAGE.x - 1.5, VILLAGE.z - 18.0));
     tavern(b, &mut rng);
     for (k, (plot, front)) in plots().into_iter().enumerate() {
+        b.vary(k + 1);
         farmhouse(b, plot, front, k, &mut rng);
     }
+    b.variant = 0;
     pottery(b, &mut rng);
     threshing_floor(b);
     apiary(b, &mut rng);

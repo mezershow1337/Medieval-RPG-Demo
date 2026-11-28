@@ -247,7 +247,7 @@ pub fn cupboard(b: &mut Builder, f: Rect, side: Side, name: &'static str, rng: &
 
 /// Плетёная корзина (может быть обыскиваемой).
 pub fn basket(b: &mut Builder, p: Vec3, r: f32, h: f32, fill: Mat, name: Option<&'static str>) {
-    b.mesh(Mat::Thatch).lathe(p, &[(0.0, 0.0), (r * 0.8, 0.0), (r, h * 0.8), (r * 1.05, h), (r * 0.95, h), (r * 0.85, h * 0.85)], 10);
+    b.mesh(Mat::Wicker).lathe(p, &[(0.0, 0.0), (r * 0.8, 0.0), (r, h * 0.8), (r * 1.05, h), (r * 0.95, h), (r * 0.85, h * 0.85)], 10);
     b.mesh(fill).lathe(p + Vec3::Y * (h * 0.8), &[(0.0, 0.0), (r * 0.85, 0.0), (r * 0.6, h * 0.2), (0.0, h * 0.25)], 8);
     kit::hidden(b, p - Vec3::new(r, 0.0, r), p + Vec3::new(r, h, r));
     if let Some(name) = name {

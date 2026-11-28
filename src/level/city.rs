@@ -24,6 +24,7 @@ pub(crate) mod cozy;
 pub(crate) mod interior;
 pub(crate) mod kit;
 pub(crate) mod outside;
+pub(crate) mod plan;
 pub(crate) mod port;
 pub(crate) mod public;
 pub(crate) mod ships;
@@ -65,8 +66,8 @@ pub fn cross_x(i: i32) -> f32 {
     X0 + i as f32 * (BX + CROSS_W) - CROSS_W / 2.0
 }
 
-/// Цитадель (внутренние грани стен).
-pub const CITADEL: Rect = Rect::new(185.5, 105.0, 283.25, 164.25);
+/// Цитадель в северо-западном углу, на скале над морем (внутренние грани стен).
+pub const CITADEL: Rect = Rect::new(-298.25, -158.0, -222.0, -114.0);
 /// Главные ворота (на южной стене) и южные ворота к некрополю.
 pub fn main_gate_x() -> f32 {
     cross_x(6)
@@ -122,7 +123,7 @@ pub fn block_use(i: i32, j: i32) -> Use {
         (18, 1) => PortMarket,
         (19, 1) => Customs,
         (17..=19, 2) => Horrea,
-        (17..=19, 3) => Citadel,
+        (0 | 1, -3) => Citadel,
         (16, 3) => Pottery,
         (5, 2) => Smithy,
         (9, 2) => Winery,
@@ -176,29 +177,49 @@ pub fn city_layout() -> Layout {
             let r = block(i, j);
             b.at(r.cx(), r.cz());
             let seed = (i as u32 * 131 + (j + 4) as u32 * 7919) ^ 0x5eed;
-            match block_use(i, j) {
-                Use::Houses => houses::block_houses(&mut b, i, j, seed),
-                Use::Garden => houses::garden(&mut b, r, seed),
-                _ => {}
+            // По-старому (две усадьбы на квартал) строятся только кварталы с именованными лавками;
+            // остальная жилая застройка — по плану (см. `plan`).
+            if block_use(i, j) == Use::Houses && plan::classic(i, j) {
+                houses::block_houses(&mut b, i, j, seed);
             }
         }
     }
+    houses::plan_houses(&mut b);
+    b.variant = 0;
+    // Общественные здания и мастерские: у каждого свой вариант кладки, черепицы и штукатурки.
+    b.vary(2);
     public::agora(&mut b);
+    b.vary(6);
     public::basilica(&mut b);
+    b.vary(10);
     public::episcopium(&mut b);
+    b.vary(14);
     public::didaskaleion(&mut b);
+    b.vary(18);
     public::exiles_house(&mut b);
+    b.vary(22);
     public::thermae(&mut b);
+    b.vary(26);
     public::theatre(&mut b);
+    b.vary(30);
     public::reservoir(&mut b);
+    b.vary(34);
     public::west_church(&mut b);
+    b.vary(38);
     public::citadel(&mut b);
+    b.vary(42);
     crafts::fish_salting(&mut b, block(18, -3).union(&block(19, -3)), 1);
+    b.vary(46);
     crafts::fish_salting(&mut b, block(8, -3), 2);
+    b.vary(50);
     crafts::glassworks(&mut b);
+    b.vary(54);
     crafts::pottery(&mut b);
+    b.vary(58);
     crafts::smithy(&mut b);
+    b.vary(62);
     crafts::winery(&mut b);
+    b.variant = 0;
     port::port(&mut b);
     outside::outside(&mut b);
 
@@ -549,7 +570,7 @@ mod tests {
     }
 
     /// От агоры по главной улице к главным воротам, через протейхизму наружу, к некрополю;
-    /// обратно — в южные ворота, к порту и на набережную.
+    /// обратно — в южные ворота и по главной улице к террасе над бухтой.
     #[test]
     fn walk_through_the_city() {
         let level = level();
@@ -563,7 +584,47 @@ mod tests {
             Vec3::new(gx, 0.0, 150.0),
             Vec3::new(gx, 0.0, 200.0),
         ]);
-        walk(&level, &[Vec3::new(sx, 0.0, 200.0), Vec3::new(sx, 0.0, 150.0), Vec3::new(sx, 0.0, 0.0), Vec3::new(272.0, 0.0, 0.0), Vec3::new(297.0, 0.0, 0.0), Vec3::new(297.0, 0.0, -60.0)]);
+        walk(&level, &[Vec3::new(sx, 0.0, 200.0), Vec3::new(sx, 0.0, 150.0), Vec3::new(sx, 0.0, 0.0), Vec3::new(272.0, 0.0, 0.0)]);
+    }
+
+    /// От южных ворот — по дороге к карнизу над бухтой и по нему вниз, в порт, до причала.
+    #[test]
+    fn walk_down_to_the_port() {
+        let level = level();
+        let road = outside::port_road();
+        let mut path: Vec<Vec3> = road.iter().map(|p| Vec3::new(p.x, terrain::ground_y(p.x, p.y), p.y)).collect();
+        let pier = port::on_map(Vec3::new(terrain::QUAY_EDGE + 10.0, 0.0, port::PIER_Z[1]));
+        path.push(port::on_map(Vec3::new(290.0, 0.0, port::PIER_Z[1])));
+        path.push(pier);
+        let end = walk(&level, &path);
+        assert!((end.y - terrain::SHORE_Y).abs() < 0.3, "причал не на уровне берега: {end}");
+        // Порт далеко от стен и под обрывом.
+        assert!(terrain::city_distance(pier.x, pier.z) > 200.0);
+        assert!(terrain::ground_y(212.0, pier.z) > terrain::SHORE_Y + 8.0, "над портом нет обрыва");
+    }
+
+    /// Город стоит на обрыве: под стенами с моря — десятки метров скалы, а с суши подход ровный.
+    #[test]
+    fn city_stands_on_a_cliff_with_land_approach_only() {
+        for (x, z) in [(0.0, -230.0), (-200.0, -235.0), (-372.0, -100.0), (-360.0, 0.0), (330.0, -60.0), (330.0, 100.0)] {
+            assert!(terrain::coast(x, z) < 0.0, "тут должно быть море: {x} {z}");
+        }
+        // Под северной, западной и восточной стенами земля держится на уровне города, дальше — обрыв.
+        for (x, z, dx, dz) in [(0.0, -166.0, 0.0, -1.0), (-300.5, -20.0, -1.0, 0.0), (285.0, 0.0, 1.0, 0.0)] {
+            let near = terrain::ground_y(x + dx * 7.0, z + dz * 7.0);
+            assert!(near.abs() < 0.6, "у стены ({x}, {z}) земля не ровная: {near}");
+            let far = (20..60).map(|k| terrain::ground_y(x + dx * k as f32, z + dz * k as f32)).fold(f32::MAX, f32::min);
+            assert!(far < WATER_Y + 1.5, "за стеной ({x}, {z}) нет обрыва к морю: {far}");
+        }
+        // С юга — плато: от ворот можно уйти на сотни метров, не спускаясь.
+        for z in [190.0, 230.0, 300.0] {
+            assert!(terrain::ground_y(main_gate_x(), z) > -1.0, "к югу от ворот провал: z = {z}");
+        }
+        // Ворота только на южной стене.
+        let level = level();
+        for z in (-110..160).step_by(3) {
+            assert!(!free(&level, Vec3::new(EAST_WALL_X, 0.1, z as f32)), "в восточной стене проход на z = {z}");
+        }
     }
 
     #[test]

@@ -262,7 +262,7 @@ fn roof_frame(tiles: &crate::level::geom::MeshBuilder) -> crate::level::geom::Me
 /// Штукатурка — последнее дело: на пепелище она обгорела и осыпалась, на стройке её ещё нет,
 /// видна бутовая кладка.
 fn bare(mat: Mat, stage: u8) -> Mat {
-    if stage < SITE_DONE && mat == Mat::Plaster { Mat::Rubble } else { mat }
+    if stage < SITE_DONE && mat.plastered() { Mat::Rubble } else { mat }
 }
 
 fn rubble(b: &mut Builder, r: Rect, rng: &mut Rng) {
@@ -332,7 +332,7 @@ fn supplies(b: &mut Builder, r: Rect, out: Vec3, along_x: bool, tiles: bool, rng
     b.mesh(Mat::Wood).lathe(lime, &[(0.95, 0.0), (0.95, 0.16), (0.9, 0.16), (0.9, 0.02)], 14);
     for k in 0..2 {
         let p = lime + axis * (1.4 + k as f32 * 0.6) + Vec3::Y * 0.0;
-        b.mesh(Mat::Thatch).lathe(p, &[(0.0, 0.0), (0.2, 0.0), (0.26, 0.4), (0.22, 0.42), (0.0, 0.42)], 8);
+        b.mesh(Mat::Wicker).lathe(p, &[(0.0, 0.0), (0.2, 0.0), (0.26, 0.4), (0.22, 0.42), (0.0, 0.42)], 8);
     }
     if tiles {
         let t0 = c - across * 2.2;

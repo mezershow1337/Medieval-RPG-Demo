@@ -52,7 +52,8 @@ pub fn outside(b: &mut Builder) {
 // ---------------- дороги ----------------
 
 /// Дороги: от главных ворот — на запад к готам и на юг к кочевникам (мимо родника);
-/// от южных ворот — через некрополь, вдоль бухты, к аланам.
+/// от южных ворот — через некрополь, по плато над бухтой и вокруг её вершины к аланам;
+/// от некрополя — к карнизу над бухтой и по нему вниз, в порт.
 pub fn roads() -> Vec<Vec<Vec2>> {
     let gx = main_gate_x();
     let sx = south_gate_x();
@@ -61,12 +62,28 @@ pub fn roads() -> Vec<Vec<Vec2>> {
     let mut all = vec![
         vec![v(gx, 183.4), v(gx, 200.0), v(-110.0, 262.0), fork, v(-200.0, 420.0), v(-330.0, 482.0), v(GOTH_VILLAGE.x + 24.0, GOTH_VILLAGE.z + 2.0)],
         vec![fork, v(-20.0, 455.0), v(30.0, 506.0), v(balka_x(548.0), 548.0), v(120.0, 600.0), v(STEPPE_CAMP.x - 20.0, STEPPE_CAMP.z - 4.0)],
-        vec![v(sx, 183.4), v(sx, 200.0), v(185.0, 240.0), v(205.0, 300.0), v(260.0, 400.0), v(330.0, 478.0), v(420.0, 600.0), v(ALAN_CAMP.x - 19.0, ALAN_CAMP.z - 8.0)],
+        vec![v(sx, 183.4), v(sx, 200.0), v(185.0, 240.0), v(205.0, 300.0), v(200.0, 400.0), v(200.0, 530.0), v(228.0, 600.0), v(275.0, 630.0), v(340.0, 648.0), v(420.0, 668.0), v(ALAN_CAMP.x - 19.0, ALAN_CAMP.z - 8.0)],
+        port_road(),
     ];
     // Тропы к руднику и к стану углежогов.
     all.extend(mines::mine_roads());
     all.extend(village::village_roads());
     all
+}
+
+/// Дорога в порт: от южных ворот к началу карниза и по нему вниз, до набережной.
+pub fn port_road() -> Vec<Vec2> {
+    let v = Vec2::new;
+    let x = terrain::DESCENT_X;
+    let mut pts = vec![v(south_gate_x(), 200.0), v(205.0, 197.0), v(x - 8.0, 202.0), v(x, 214.0)];
+    let mut z = 240.0;
+    while z < terrain::DESCENT_Z.1 + 14.0 {
+        pts.push(v(x, z));
+        z += 24.0;
+    }
+    pts.push(v(x + 6.0, terrain::DESCENT_Z.1 + 22.0));
+    pts.push(v(terrain::PORT_X.0 + 6.0, terrain::DESCENT_Z.1 + 34.0));
+    pts
 }
 
 fn seg_distance(p: Vec2, a: Vec2, c: Vec2) -> f32 {
@@ -235,8 +252,8 @@ pub fn thatch_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32, ridge_x: bool
 /// крестами, известняковые саркофаги, склепы с дромосом, маленькая поминальная церковь.
 fn necropolis(b: &mut Builder, roads: &[Vec<Vec2>]) {
     let c = Vec2::new(NECROPOLIS.x, NECROPOLIS.z);
-    let area = Rect::new(166.0, 206.0, 290.0, 300.0);
-    let chapel_c = Vec2::new(245.0, 268.0);
+    let area = Rect::new(160.0, 206.0, 219.0, 330.0);
+    let chapel_c = Vec2::new(208.0, 232.0);
     memorial_chapel(b, chapel_c);
     let mut rng = Rng::new(510);
     let mut z = area.z0 + 1.5;
@@ -521,8 +538,10 @@ fn goth_village(b: &mut Builder) {
         } else {
             kit::Side::N
         };
+        b.vary(k + 2);
         goth_house(b, p, front, k, &mut rng);
     }
+    b.variant = 0;
     // Ток — мощёный круг для обмолота, у центра.
     let tp = g(c.x - 2.0, c.z - 1.0);
     b.at(tp.x, tp.z);
@@ -825,7 +844,7 @@ fn cone_tent(b: &mut Builder, p: Vec2, r: f32, door_yaw: f32) {
 
 /// Логово разбойников в балке: шалаш из жердей и веток, костровище, награбленные амфоры.
 fn brigand_camps(b: &mut Builder) {
-    for (x, z) in [(-20.0f32, 525.0f32), (232.0, 330.0)] {
+    for (x, z) in [(-20.0f32, 525.0f32), (150.0, 372.0)] {
         let p = g(x + 5.0, z + 3.0);
         b.at(p.x, p.z);
         // Шалаш: наклонные жерди на коньковой перекладине, сверху ветки.
@@ -1027,6 +1046,7 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
     // Деревьям у стен нельзя (обзор для стражи), а низким кустам можно — с 14 м от стены.
     let blocked_low = |p: Vec2| {
         terrain::city_distance(p.x, p.y) < 14.0
+            || terrain::port_ground(p.x, p.y)
             || p.x.abs() > WORLD_HALF - 12.0
             || p.y.abs() > WORLD_HALF - 12.0
             || ground_y(p.x, p.y) < WATER_Y + 1.2
@@ -1035,6 +1055,7 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
     };
     let blocked = |p: Vec2| {
         terrain::city_distance(p.x, p.y) < 40.0
+            || terrain::port_ground(p.x, p.y)
             || p.x.abs() > WORLD_HALF - 12.0
             || p.y.abs() > WORLD_HALF - 12.0
             || ground_y(p.x, p.y) < WATER_Y + 1.6
@@ -1123,8 +1144,8 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
     let mut rng = Rng::new(9127);
     let near_water = |p: Vec2, r: f32| (0..8).any(|k| ground_y(p.x + (k as f32 * TAU / 8.0).cos() * r, p.y + (k as f32 * TAU / 8.0).sin() * r) < WATER_Y);
     let mut z = 140.0;
-    while z < 480.0 {
-        let mut x = 270.0;
+    while z < 640.0 {
+        let mut x = 250.0;
         while x < 540.0 {
             let p = Vec2::new(x + rng.range(-3.0, 3.0), z + rng.range(-3.0, 3.0));
             x += 7.0;
@@ -1135,7 +1156,7 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
             }
             if y < WATER_Y + 1.7 {
                 // Полоса прибоя: валуны, поодиночке и кучками.
-                if roll < 0.2 && terrain::city_distance(p.x, p.y) > 14.0 && road_distance(roads, p) > ROAD_W / 2.0 + 1.5 && near_water(p, 4.0) {
+                if roll < 0.2 && terrain::city_distance(p.x, p.y) > 14.0 && !terrain::port_ground(p.x, p.y) && road_distance(roads, p) > ROAD_W / 2.0 + 1.5 && near_water(p, 4.0) {
                     rock(b, p, 0.7 + size * size * 2.4, &mut rng);
                 }
                 continue;
@@ -1159,8 +1180,8 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
     // голой лентой, а на референсе лес спускается по скалам к самой воде. Свой счётчик.
     let mut rng = Rng::new(6203);
     let mut z = 140.0;
-    while z < 480.0 {
-        let mut x = 270.0;
+    while z < 640.0 {
+        let mut x = 250.0;
         while x < 540.0 {
             let p = Vec2::new(x + rng.range(-2.5, 2.5), z + rng.range(-2.5, 2.5));
             x += 5.0;
@@ -1188,8 +1209,8 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
     let mut rng = Rng::new(6204);
     let level = WATER_Y + 0.1;
     let mut z = 140.0;
-    while z < 480.0 {
-        let mut x = 270.0;
+    while z < 640.0 {
+        let mut x = 250.0;
         while x < 540.0 {
             let p = Vec2::new(x + rng.range(-2.0, 2.0), z + rng.range(-2.0, 2.0));
             x += 4.0;
@@ -1209,7 +1230,7 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
                 }
             }
             let s = (a + c) * 0.5;
-            if terrain::city_distance(s.x, s.y) < 40.0 || road_distance(roads, s) < ROAD_W / 2.0 + 2.5 || clear.iter().any(|(c, r)| s.distance(*c) < *r) {
+            if terrain::city_distance(s.x, s.y) < 40.0 || terrain::port_ground(s.x, s.y) || road_distance(roads, s) < ROAD_W / 2.0 + 2.5 || clear.iter().any(|(c, r)| s.distance(*c) < *r) {
                 continue;
             }
             // Сканы приземистые (высота — около трети размера), поэтому глыбы крупные и почти не
@@ -1255,7 +1276,7 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
             let (roll, size) = (rng.f(), rng.f());
             let y = ground_y(p.x, p.y);
             let rise = (ground_y(p.x + 1.5, p.y) - y).abs().max((ground_y(p.x, p.y + 1.5) - y).abs());
-            if roll > 0.7 || y < WATER_Y + 0.4 || !(0.6..3.2).contains(&rise) || terrain::city_distance(p.x, p.y) < 14.0 || road_distance(roads, p) < ROAD_W / 2.0 + 2.0 || clear.iter().any(|(c, r)| p.distance(*c) < *r) {
+            if roll > 0.7 || y < WATER_Y + 0.4 || !(0.6..3.2).contains(&rise) || terrain::city_distance(p.x, p.y) < 14.0 || terrain::port_ground(p.x, p.y) || road_distance(roads, p) < ROAD_W / 2.0 + 2.0 || clear.iter().any(|(c, r)| p.distance(*c) < *r) {
                 continue;
             }
             rock(b, p, 0.9 + size * size * 2.8, &mut rng);

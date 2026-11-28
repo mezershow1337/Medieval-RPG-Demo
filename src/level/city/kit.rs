@@ -178,7 +178,7 @@ pub fn wall(b: &mut Builder, f: WallFrame, s0: f32, s1: f32, d0: f32, d1: f32, y
 /// Цоколь: ряд тёсаных известняковых блоков у земли, чуть шире кладки стены
 /// (так строили в Херсонесе: бут на глине стоит на цоколе из тёсаного камня).
 fn socle(b: &mut Builder, f: WallFrame, s0: f32, s1: f32, y0: f32, d0: f32, d1: f32, mat: Mat) {
-    if s1 - s0 < 0.05 || y0.abs() > 0.3 || !matches!(mat, Mat::Rubble | Mat::Plaster | Mat::OpusMixtum | Mat::Signinum) {
+    if s1 - s0 < 0.05 || y0.abs() > 0.3 || !(mat.plastered() || matches!(mat, Mat::Rubble | Mat::OpusMixtum | Mat::Signinum)) {
         return;
     }
     let (a, c) = f.bounds((s0, s1), (y0 - 0.15, y0 + 0.42), (d0 - 0.05, d1 + 0.05));

@@ -21,16 +21,16 @@ pub use places::*;
 /// Полуширина главной улицы Херсона.
 pub const MAIN_STREET_HALF: f32 = city::MAIN_HALF;
 pub use spawns::{SpawnChoice, pick_spawn, spawn_spot, spawn_spots};
-pub use terrain::{WATER_Y, city_distance as city_wall_distance, fbm, ground_y, height_at, inside_city, mesh_y};
+pub use terrain::{PORT_SHIFT, SHORE_Y, WATER_Y, city_distance as city_wall_distance, fbm, ground_y, height_at, inside_city, mesh_y};
 
 /// Расстояние от точки до ближайшей загородной дороги (для травы и т. п.).
 pub fn road_distance(x: f32, z: f32) -> f32 {
     city::outside::road_distance_at(Vec2::new(x, z))
 }
 
-/// Голая земля без травы: кострища и натоптанные тропы рудника.
+/// Голая земля без травы: кострища и натоптанные тропы рудника, площадка порта под обрывом.
 pub fn bare_ground(x: f32, z: f32) -> bool {
-    city::outside::mines::bare_ground(Vec2::new(x, z))
+    city::outside::mines::bare_ground(Vec2::new(x, z)) || terrain::port_ground(x, z)
 }
 
 use crate::collision::{Aabb, HeightField, LevelColliders};
@@ -128,6 +128,22 @@ pub enum Mat {
     /// Круглый лес (окорённые брёвна крепи, срубов, воротов): волокна вдоль бревна по развёртке,
     /// на торцах — годичные кольца.
     Timber,
+    /// Плетёнка из лозы: корзины, плетни, верши.
+    Wicker,
+    /// Свежая известковая побелка: фасады домов побогаче.
+    Limewash,
+    /// Побелка, подкрашенная жёлтой охрой.
+    PlasterOchre,
+    /// Побелка с толчёной керамикой: тёплая розоватая.
+    PlasterRose,
+}
+
+impl Mat {
+    /// Оштукатуренная стена (любого тона): у неё гладкий цоколь, расписная панель, а на стройке
+    /// до отделки она ещё бутовая.
+    pub fn plastered(self) -> bool {
+        matches!(self, Mat::Plaster | Mat::Limewash | Mat::PlasterOchre | Mat::PlasterRose)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -135,6 +151,8 @@ pub struct Block {
     pub aabb: Aabb,
     pub mat: Mat,
     pub solid: bool,
+    /// Вариант текстуры (см. [`Builder::variant`]).
+    pub variant: u8,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -578,6 +596,17 @@ pub fn chunk_of(p: Vec3) -> Chunk {
     ((p.x / CHUNK).floor() as i16, (p.z / CHUNK).floor() as i16)
 }
 
+/// Поворот вокруг вертикали на `turn` четвертей оборота: 1 — то, что смотрело на север (−Z),
+/// смотрит на восток (+X), 2 — на юг, 3 — на запад.
+pub fn quarter(p: Vec3, turn: u8) -> Vec3 {
+    match turn % 4 {
+        0 => p,
+        1 => Vec3::new(-p.z, p.y, p.x),
+        2 => Vec3::new(-p.x, p.y, -p.z),
+        _ => Vec3::new(p.z, p.y, -p.x),
+    }
+}
+
 /// Проём в стене: дверь (sill = низ стены) или окно (sill выше, со стеклом).
 #[derive(Clone, Copy, Debug)]
 struct Opening {
@@ -639,7 +668,14 @@ struct Builder {
     house: Option<u32>,
     /// Достаток дома: 0 — бедный, 1 — средний, 2 — зажиточный (больше серебра и стекла).
     wealth: u8,
+    /// Вариант текстур того, что сейчас строится (0..[`VARIANTS`]): у каждого дома, башни и
+    /// прясла стены свой, поэтому у соседей черепица потёрта в разных местах, а камни в
+    /// кладке выпирают по-разному. Какой слой фото за ним стоит — `graphics::variant_layers`.
+    variant: u8,
 }
+
+/// Сколько вариантов текстур различает шейдер: три для кровли × три для стен и дерева.
+pub const VARIANTS: u8 = 9;
 
 impl Builder {
     fn new() -> Self {
@@ -673,6 +709,7 @@ impl Builder {
             shops: Vec::new(),
             house: None,
             wealth: 1,
+            variant: 0,
         }
     }
 
@@ -711,34 +748,72 @@ impl Builder {
 
     /// Как [`Builder::placed`], но декор идёт в участок `chunk` (для подъёма на этаж выше).
     fn placed_in(&mut self, offset: Vec3, chunk: Chunk, f: impl FnOnce(&mut Builder)) {
+        self.placed_with(offset, Some(chunk), f);
+    }
+
+    /// Как [`Builder::placed`], но для больших построек (порт): декор остаётся разложен по
+    /// участкам, как его раскладывала `f` через [`Builder::at`], — каждый участок сдвигается
+    /// вместе со своим содержимым.
+    fn moved(&mut self, offset: Vec3, f: impl FnOnce(&mut Builder)) {
+        self.placed_with(offset, None, f);
+    }
+
+    /// Как [`Builder::placed`], но построенное ещё и повёрнуто вокруг вертикали на `turn`
+    /// четвертей оборота (см. [`quarter`]): так дом, который умеет строиться фасадом на север,
+    /// ставится фасадом на любую из четырёх улиц. Точки, которые нельзя занимать
+    /// ([`Builder::keep_clear`]), видны `f` в её собственных координатах.
+    fn turned(&mut self, offset: Vec3, turn: u8, f: impl FnOnce(&mut Builder)) {
+        let back = (4 - turn % 4) % 4;
+        let keep: Vec<Vec3> = self.keep_clear.iter().map(|p| quarter(*p - offset, back)).collect();
+        self.placed_xf(offset, turn % 4, Some(chunk_of(offset)), keep, f);
+    }
+
+    fn placed_with(&mut self, offset: Vec3, chunk: Option<Chunk>, f: impl FnOnce(&mut Builder)) {
+        self.placed_xf(offset, 0, chunk, Vec::new(), f);
+    }
+
+    fn placed_xf(&mut self, offset: Vec3, turn: u8, chunk: Option<Chunk>, keep_clear: Vec<Vec3>, f: impl FnOnce(&mut Builder)) {
         let mut t = Builder::new();
         t.loot = self.loot;
         t.house = self.house;
         t.wealth = self.wealth;
+        t.variant = self.variant;
+        t.keep_clear = keep_clear;
         f(&mut t);
-        let shift = |a: Aabb| Aabb::new(a.min + offset, a.max + offset);
+        let pt = |p: Vec3| quarter(p, turn) + offset;
+        let dir = |d: Vec3| quarter(d, turn);
+        let shift = |a: Aabb| {
+            let (p, q) = (pt(a.min), pt(a.max));
+            Aabb::new(p.min(q), p.max(q))
+        };
+        // Поворот в плане как у игрока: 0 — взгляд на −Z.
+        let yaw = |y: f32| {
+            let d = dir(Vec3::new(-y.sin(), 0.0, -y.cos()));
+            (-d.x).atan2(-d.z)
+        };
+        let odd = turn % 2 == 1;
         self.blocks.extend(t.blocks.into_iter().map(|b| Block { aabb: shift(b.aabb), ..b }));
         self.invisible.extend(t.invisible.into_iter().map(shift));
         self.roofs.extend(t.roofs.into_iter().map(|b| Block { aabb: shift(b.aabb), ..b }));
         self.windows.extend(t.windows.into_iter().map(shift));
-        self.torches.extend(t.torches.into_iter().map(|x| Torch { pos: x.pos + offset, ..x }));
-        self.lamps.extend(t.lamps.into_iter().map(|x| Lamp { pos: x.pos + offset, ..x }));
-        self.hearths.extend(t.hearths.into_iter().map(|p| p + offset));
-        self.forges.extend(t.forges.into_iter().map(|f| ForgeSpec { fire: f.fire + offset, anvil: f.anvil + offset, trough: f.trough + offset, grind: f.grind + offset, ..f }));
+        self.torches.extend(t.torches.into_iter().map(|x| Torch { pos: pt(x.pos), out: dir(x.out) }));
+        self.lamps.extend(t.lamps.into_iter().map(|x| Lamp { pos: pt(x.pos), ..x }));
+        self.hearths.extend(t.hearths.into_iter().map(pt));
+        self.forges.extend(t.forges.into_iter().map(|f| ForgeSpec { fire: pt(f.fire), anvil: pt(f.anvil), trough: pt(f.trough), grind: pt(f.grind), ..f }));
         let (d0, c0) = (self.doors.len() as u32, self.containers.len() as u32);
-        self.doors.extend(t.doors.into_iter().map(|d| DoorSpec { center: d.center + offset, ..d }));
-        self.beds.extend(t.beds.into_iter().map(|d| Bed { pos: d.pos + offset, ..d }));
-        self.containers.extend(t.containers.into_iter().map(|c| ContainerSpec { pos: c.pos + offset, ..c }));
+        self.doors.extend(t.doors.into_iter().map(|d| DoorSpec { center: pt(d.center), along_x: d.along_x != odd, ..d }));
+        self.beds.extend(t.beds.into_iter().map(|d| Bed { pos: pt(d.pos), along: dir(d.along) }));
+        self.containers.extend(t.containers.into_iter().map(|c| ContainerSpec { pos: pt(c.pos), ..c }));
         let e0 = self.estates.len() as u16;
         for mut e in t.estates {
-            e.min += offset;
-            e.max += offset;
-            e.entrance += offset;
+            let a = shift(Aabb::new(e.min, e.max));
+            (e.min, e.max) = (a.min, a.max);
+            e.entrance = pt(e.entrance);
             e.doors.iter_mut().for_each(|d| *d += d0);
             e.containers.iter_mut().for_each(|c| *c += c0);
             for r in &mut e.rooms {
-                r.min += offset;
-                r.max += offset;
+                let a = shift(Aabb::new(r.min, r.max));
+                (r.min, r.max) = (a.min, a.max);
             }
             self.estates.push(e);
         }
@@ -747,33 +822,39 @@ impl Builder {
                 b.aabb = shift(b.aabb);
             }
             g.invisible.iter_mut().for_each(|a| *a = shift(*a));
-            g.decor.iter_mut().for_each(|(_, mb)| mb.translate(offset));
-            g.lamps.iter_mut().for_each(|l| l.pos += offset);
+            g.decor.iter_mut().for_each(|(_, mb)| {
+                mb.turn(turn);
+                mb.translate(offset)
+            });
+            g.lamps.iter_mut().for_each(|l| l.pos = pt(l.pos));
             if let SwitchKey::Furnish { estate, room, kind } = g.key {
                 g.key = SwitchKey::Furnish { estate: estate + e0, room, kind };
             }
             self.switches.push(g);
         }
-        self.residents.extend(t.residents.into_iter().map(|r| Resident { pos: r.pos + offset, ..r }));
-        self.house_items.extend(t.house_items.into_iter().map(|h| HouseItemSpec { pos: h.pos + offset, ..h }));
-        self.shops.extend(t.shops.into_iter().map(|s| ShopSpec {
-            room_min: s.room_min + offset,
-            room_max: s.room_max + offset,
-            counter_min: s.counter_min + offset,
-            counter_max: s.counter_max + offset,
-            seller: s.seller + offset,
-            goods: s.goods.map(|g| g.map(|(a, c)| (a + offset, c + offset))),
-            door: s.door.map(|d| d + d0),
-            ..s
+        self.residents.extend(t.residents.into_iter().map(|r| Resident { pos: pt(r.pos), yaw: yaw(r.yaw), ..r }));
+        self.house_items.extend(t.house_items.into_iter().map(|h| HouseItemSpec { pos: pt(h.pos), yaw: yaw(h.yaw), ..h }));
+        self.shops.extend(t.shops.into_iter().map(|s| {
+            let pair = |(a, c): (Vec3, Vec3)| {
+                let b = shift(Aabb::new(a, c));
+                (b.min, b.max)
+            };
+            let (room, counter) = (pair((s.room_min, s.room_max)), pair((s.counter_min, s.counter_max)));
+            ShopSpec { room_min: room.0, room_max: room.1, counter_min: counter.0, counter_max: counter.1, facing: dir(s.facing), seller: pt(s.seller), goods: s.goods.map(|g| g.map(pair)), door: s.door.map(|d| d + d0), ..s }
         }));
-        self.plants.extend(t.plants.into_iter().map(|p| Plant { pos: p.pos + offset, ..p }));
+        self.plants.extend(t.plants.into_iter().map(|p| Plant { pos: pt(p.pos), yaw: yaw(p.yaw), ..p }));
         for mut g in t.glass {
-            g.pts.iter_mut().for_each(|p| *p += offset);
+            g.pts.iter_mut().for_each(|p| *p = pt(*p));
+            g.normal = dir(g.normal);
             self.glass.push(g);
         }
-        for ((mat, _), mut mb) in t.decor {
+        for ((mat, c), mut mb) in t.decor {
+            mb.turn(turn);
             mb.translate(offset);
-            self.decor.entry((mat, chunk)).or_default().append(mb);
+            let chunk = chunk.unwrap_or_else(|| chunk_of(pt(Vec3::new((c.0 as f32 + 0.5) * CHUNK, 0.0, (c.1 as f32 + 0.5) * CHUNK))));
+            let m = self.decor.entry((mat, chunk)).or_default();
+            m.mark(self.variant);
+            m.append(mb);
         }
     }
 
@@ -820,18 +901,28 @@ impl Builder {
     }
 
     fn solid(&mut self, min: [f32; 3], max: [f32; 3], mat: Mat) {
-        self.blocks.push(Block { aabb: Aabb::new(Vec3::from(min), Vec3::from(max)), mat, solid: true });
+        self.blocks.push(Block { aabb: Aabb::new(Vec3::from(min), Vec3::from(max)), mat, solid: true, variant: self.variant });
     }
     fn solid_v(&mut self, (min, max): (Vec3, Vec3), mat: Mat) {
         if (max - min).min_element() > 0.001 {
-            self.blocks.push(Block { aabb: Aabb::new(min, max), mat, solid: true });
+            self.blocks.push(Block { aabb: Aabb::new(min, max), mat, solid: true, variant: self.variant });
         }
     }
     fn decor(&mut self, min: [f32; 3], max: [f32; 3], mat: Mat) {
-        self.blocks.push(Block { aabb: Aabb::new(Vec3::from(min), Vec3::from(max)), mat, solid: false });
+        self.blocks.push(Block { aabb: Aabb::new(Vec3::from(min), Vec3::from(max)), mat, solid: false, variant: self.variant });
     }
     fn mesh(&mut self, mat: Mat) -> &mut MeshBuilder {
-        self.decor.entry((mat, self.chunk)).or_default()
+        let variant = self.variant;
+        let m = self.decor.entry((mat, self.chunk)).or_default();
+        m.mark(variant);
+        m
+    }
+
+    /// Вариант текстур для `i`-й по счёту постройки в ряду (см. [`Builder::variant`]): у двух
+    /// соседних по счёту разные и кровля (остаток от деления на 3), и стены (частное).
+    fn vary(&mut self, i: usize) {
+        self.variant = ((i % 3) + 3 * ((i + i / 3) % 3)) as u8;
+        debug_assert!(self.variant < VARIANTS);
     }
     /// Дерево, куст или камень-модель с основанием в `pos`.
     fn plant(&mut self, kind: PlantKind, pos: Vec3, height: f32, yaw: f32, variant: u32) {
@@ -897,7 +988,7 @@ impl Builder {
             let top = k as f32 * ROOF_Q;
             let min = Vec3::new(lo.x + x0 as f32 * cs.x, top - ROOF_SLAB, lo.y + z0 as f32 * cs.y);
             let max = Vec3::new(lo.x + (x1 + 1) as f32 * cs.x, top, lo.y + (z1 + 1) as f32 * cs.y);
-            self.roofs.push(Block { aabb: Aabb::new(min, max), mat, solid: true });
+            self.roofs.push(Block { aabb: Aabb::new(min, max), mat, solid: true, variant: self.variant });
         };
         // Ряды по X; одинаковые отрезки соседних рядов продлеваем по Z. `open`: (x0, x1, высота) → первый ряд.
         let mut open: std::collections::BTreeMap<(usize, usize, i32), usize> = Default::default();
@@ -1417,8 +1508,11 @@ pub fn spawn_level(
         let size = block.aabb.max - block.aabb.min;
         // Огромные плиты (пол на весь мир) — отдельно, иначе их участок будет виден всегда.
         let chunk = if size.x > CHUNK * 2.0 || size.z > CHUNK * 2.0 { (i16::MAX, i16::MAX) } else { chunk_of((block.aabb.min + block.aabb.max) / 2.0) };
-        decor.entry((block.mat, chunk)).or_default().cuboid(block.aabb.min, block.aabb.max);
+        let m = decor.entry((block.mat, chunk)).or_default();
+        m.mark(block.variant);
+        m.cuboid(block.aabb.min, block.aabb.max);
     }
+    decor.values_mut().for_each(|m| m.mark(0));
     if let Some(ground) = &layout.ground {
         terrain::terrain_meshes(ground, &mut decor);
     }
@@ -1461,10 +1555,14 @@ pub fn spawn_level(
     for (g, group) in layout.switches.iter().enumerate() {
         let mut by_mat: HashMap<Mat, MeshBuilder> = HashMap::new();
         for block in &group.blocks {
-            by_mat.entry(block.mat).or_default().cuboid(block.aabb.min, block.aabb.max);
+            let m = by_mat.entry(block.mat).or_default();
+            m.mark(block.variant);
+            m.cuboid(block.aabb.min, block.aabb.max);
         }
         for (mat, mb) in &group.decor {
-            by_mat.entry(*mat).or_default().append(mb.clone());
+            let m = by_mat.entry(*mat).or_default();
+            m.mark(0);
+            m.append(mb.clone());
         }
         for (mat, mb) in by_mat {
             if mb.is_empty() {
@@ -1644,6 +1742,33 @@ mod roof_tests {
         assert!(level.body_is_free(&Body::STANDING, Vec3::new(0.0, 1.0, r.z0 + 0.6)), "прыжок у стены упирается в крышу");
         // Плиты одной высоты слиты: по полосе на ряд клеток, а не по коробке на клетку.
         assert!(level.0.len() < 2 + 2 * (8.8f32 / ROOF_CELL).ceil() as usize + 2, "плит {}", level.0.len());
+    }
+
+    /// В городе в ходу все варианты текстур: у черепицы (остаток от деления номера на 3) и у
+    /// стен домов (частное) каждого из трёх — заметная доля, а не один на весь город.
+    #[test]
+    fn city_uses_every_texture_variant() {
+        let layout = city::city_layout();
+        let mut roofs = [0usize; 3];
+        for ((mat, _), mb) in &layout.decor {
+            if *mat == Mat::Tile {
+                for (v, n) in mb.variant_counts().iter().enumerate() {
+                    assert!(*n == 0 || v < VARIANTS as usize, "вариант {v} вне диапазона");
+                    roofs[v % 3] += n;
+                }
+            }
+        }
+        let mut walls = [0usize; 3];
+        for b in &layout.blocks {
+            assert!(b.variant < VARIANTS);
+            if b.mat == Mat::Rubble || b.mat.plastered() {
+                walls[(b.variant / 3) as usize] += 1;
+            }
+        }
+        for (what, n) in [("черепица", roofs), ("стены", walls)] {
+            let total: usize = n.iter().sum();
+            assert!(n.iter().all(|k| *k * 5 > total), "{what}: варианты распределены неровно: {n:?}");
+        }
     }
 
     /// Каждая крыша уровня (черепица, сланец, солома, войлок — всё, что не отвесно и не мелочь)

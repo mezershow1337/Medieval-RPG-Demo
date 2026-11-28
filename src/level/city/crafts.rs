@@ -565,7 +565,7 @@ pub fn iron_yard(b: &mut Builder, f: super::houses::Frame) {
     cart(b, Vec3::new(r.x0 + 13.5, 0.0, r.z1 - 4.0), Vec3::new(-0.6, 0.0, -0.8).normalize(), &mut rng);
     for (dx, dz) in [(9.4f32, -2.2f32), (9.9, -1.6), (10.5, -2.4)] {
         let p = Vec3::new(r.x0 + dx, 0.0, r.z1 + dz);
-        b.mesh(Mat::Thatch).lathe(p, &[(0.22, 0.0), (0.3, 0.3), (0.33, 0.5), (0.0, 0.5)], 10);
+        b.mesh(Mat::Wicker).lathe(p, &[(0.22, 0.0), (0.3, 0.3), (0.33, 0.5), (0.0, 0.5)], 10);
         b.mesh(Mat::Limonite).lathe(p + Vec3::Y * 0.45, &[(0.3, 0.0), (0.15, 0.1), (0.0, 0.14)], 8);
         kit::hidden(b, p - Vec3::new(0.3, 0.0, 0.3), p + Vec3::new(0.3, 0.5, 0.3));
     }

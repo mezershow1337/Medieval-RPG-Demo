@@ -50,6 +50,44 @@ pub const LAYERS: &[Layer] = &[
     Layer { name: "gravel", source: "Gravel041", meters: 2.00, mean: [0.2675, 0.2581, 0.1830] },
     // 19 — солома и камыш: ряды пучков стеблей внахлёст (своя, Blender: tools/textures/blender_thatch.py)
     Layer { name: "thatch", source: "MrpgThatch", meters: 1.50, mean: [0.2185, 0.1518, 0.0633] },
+    // 20 — обожжённая глина: амфоры, пифосы, горшки, миски
+    Layer { name: "ceramic", source: "Clay002", meters: 0.90, mean: [0.2990, 0.1198, 0.0648] },
+    // 21 — дублёная кожа: мехи, ремни, сёдла, переплёты
+    Layer { name: "leather", source: "Leather014", meters: 0.70, mean: [0.0800, 0.0378, 0.0331] },
+    // 22 — небелёный лён: навесы, паруса, мешки, занавеси
+    Layer { name: "linen", source: "Fabric061", meters: 0.50, mean: [0.2511, 0.2289, 0.2062] },
+    // 23 — валяная шерсть: войлок юрт, кошмы, подстилки
+    Layer { name: "felt", source: "Fabric034", meters: 0.70, mean: [0.3598, 0.3497, 0.3800] },
+    // 24 — тканый шерстяной ковёр
+    Layer { name: "rug", source: "Carpet015", meters: 1.10, mean: [0.3205, 0.1043, 0.0589] },
+    // 25 — плетёнка из лозы: корзины, плетни, верши
+    Layer { name: "wicker", source: "Wicker010B", meters: 0.45, mean: [0.1464, 0.1066, 0.0750] },
+    // 26 — свежая известковая побелка: фасады жилых домов
+    Layer { name: "limewash", source: "Plaster003", meters: 2.20, mean: [0.6870, 0.6629, 0.6407] },
+    // 27 — черепица, вариант 2: другой обжиг, сколы, потёки и лишайник (blender_byz_roof.py, MRPG_SEED=1)
+    Layer { name: "roof_b", source: "MrpgByzRoof1", meters: 1.50, mean: [0.1762, 0.0766, 0.0430] },
+    // 28 — черепица, вариант 3 (blender_byz_roof.py, MRPG_SEED=2)
+    Layer { name: "roof_c", source: "MrpgByzRoof2", meters: 1.50, mean: [0.1762, 0.0766, 0.0430] },
+    // 29 — бутовая кладка, вариант 2: ряды помельче, камень ровнее (фотоскан Poly Haven)
+    Layer { name: "rubble_b", source: "yellow_stone_wall", meters: 2.20, mean: [0.3079, 0.2013, 0.1142] },
+    // 30 — бутовая кладка, вариант 3: плитняк на известковом растворе (фотоскан Poly Haven)
+    Layer { name: "rubble_c", source: "castle_wall_varriation", meters: 2.40, mean: [0.3079, 0.2013, 0.1142] },
+    // 31 — тёсаные блоки, вариант 2: рваная лицевая сторона, ровные ряды (фотоскан Poly Haven)
+    Layer { name: "ashlar_b", source: "sandstone_blocks_05", meters: 3.40, mean: [0.1955, 0.1598, 0.0974] },
+    // 32 — тёсаные блоки, вариант 3: гладкие, выветренные морем (фотоскан Poly Haven)
+    Layer { name: "ashlar_c", source: "seaworn_sandstone_brick", meters: 3.40, mean: [0.1955, 0.1598, 0.0974] },
+    // 33 — старая штукатурка, вариант 2: белёсая, в разводах
+    Layer { name: "plaster_b", source: "Plaster007", meters: 2.20, mean: [0.2385, 0.2176, 0.1798] },
+    // 34 — старая штукатурка, вариант 3: облупилась до камня (фотоскан Poly Haven)
+    Layer { name: "plaster_c", source: "white_rough_plaster", meters: 1.60, mean: [0.2385, 0.2176, 0.1798] },
+    // 35 — побелка, вариант 2: гладкая, в волосяных трещинах
+    Layer { name: "limewash_b", source: "PaintedPlaster017", meters: 2.20, mean: [0.6879, 0.6639, 0.6405] },
+    // 36 — побелка, вариант 3: с разводами от дождя
+    Layer { name: "limewash_c", source: "Plaster007", meters: 2.80, mean: [0.6870, 0.6629, 0.6407] },
+    // 37 — доски, вариант 2: узкие, обветренные (фотоскан Poly Haven)
+    Layer { name: "wood_b", source: "weathered_planks", meters: 4.00, mean: [0.4729, 0.3092, 0.1390] },
+    // 38 — доски, вариант 3: старые, с сучками (фотоскан Poly Haven)
+    Layer { name: "wood_c", source: "old_planks_02", meters: 4.00, mean: [0.4729, 0.3091, 0.1390] },
 ];
 
 pub const L_ASHLAR: u32 = 0;
@@ -72,3 +110,22 @@ pub const L_BRONZE: u32 = 16;
 pub const L_GOLD: u32 = 17;
 pub const L_GRAVEL: u32 = 18;
 pub const L_THATCH: u32 = 19;
+pub const L_CERAMIC: u32 = 20;
+pub const L_LEATHER: u32 = 21;
+pub const L_LINEN: u32 = 22;
+pub const L_FELT: u32 = 23;
+pub const L_RUG: u32 = 24;
+pub const L_WICKER: u32 = 25;
+pub const L_LIMEWASH: u32 = 26;
+pub const L_ROOF_B: u32 = 27;
+pub const L_ROOF_C: u32 = 28;
+pub const L_RUBBLE_B: u32 = 29;
+pub const L_RUBBLE_C: u32 = 30;
+pub const L_ASHLAR_B: u32 = 31;
+pub const L_ASHLAR_C: u32 = 32;
+pub const L_PLASTER_B: u32 = 33;
+pub const L_PLASTER_C: u32 = 34;
+pub const L_LIMEWASH_B: u32 = 35;
+pub const L_LIMEWASH_C: u32 = 36;
+pub const L_WOOD_B: u32 = 37;
+pub const L_WOOD_C: u32 = 38;

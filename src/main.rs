@@ -142,25 +142,51 @@ fn parse_addr(s: &str) -> SocketAddr {
 fn dump_map(path: &str) {
     use level::PlantKind as K;
     const N: usize = 900;
+    // `MRPG_MAP="x,z,полуширина"` — крупный план куска карты (по умолчанию — вся карта).
+    let view: Vec<f32> = std::env::var("MRPG_MAP").ok().map(|v| v.split(',').filter_map(|t| t.trim().parse().ok()).collect()).unwrap_or_default();
+    let (cx, cz, half) = if let [x, z, h] = view[..] { (x, z, h) } else { (0.0, 0.0, 900.0) };
+    let step = half * 2.0 / N as f32;
+    let world = |i: usize, j: usize| (cx - half + i as f32 * step, cz - half + j as f32 * step);
+    let pixel = |x: f32, z: f32| (((x - cx + half) / step) as i32, ((z - cz + half) / step) as i32);
     let mut px = vec![0u8; N * N * 3];
     for j in 0..N {
         for i in 0..N {
-            let (x, z) = (i as f32 * 2.0 - 900.0, j as f32 * 2.0 - 900.0);
+            let (x, z) = world(i, j);
             let y = level::ground_y(x, z);
+            // Свет с северо-запада: склоны читаются.
+            let shade = (1.0 + ((level::ground_y(x + 2.0, z + 2.0) - level::ground_y(x - 2.0, z - 2.0)) * -0.22)).clamp(0.35, 1.6);
             let c = if y < level::WATER_Y {
-                [40, 70, 120]
+                [40.0, 70.0, 120.0]
             } else if level::inside_city(x, z) {
-                [170, 150, 120]
+                [170.0, 150.0, 120.0]
             } else if level::road_distance(x, z) < 2.6 {
-                [120, 95, 60]
+                [150.0 * shade, 120.0 * shade, 80.0 * shade]
             } else {
-                let k = (60.0 + y * 4.0).clamp(40.0, 200.0) as u8;
-                [k, k.saturating_add(25), k / 2 + 20]
+                let k = (95.0 + y * 1.6).clamp(40.0, 200.0) * shade;
+                [k, k + 25.0, k / 2.0 + 20.0]
             };
-            px[(j * N + i) * 3..][..3].copy_from_slice(&c);
+            px[(j * N + i) * 3..][..3].copy_from_slice(&c.map(|v| v.clamp(0.0, 255.0) as u8));
         }
     }
-    for p in &level::layout().plants {
+    // Постройки: стены — тёмные, крыши — красные (чем выше, тем светлее).
+    let mut paint = |a: &crate::collision::Aabb, c: [u8; 3]| {
+        let (i0, j0) = pixel(a.min.x, a.min.z);
+        let (i1, j1) = pixel(a.max.x, a.max.z);
+        for j in j0.max(0)..=j1.min(N as i32 - 1) {
+            for i in i0.max(0)..=i1.min(N as i32 - 1) {
+                px[(j as usize * N + i as usize) * 3..][..3].copy_from_slice(&c);
+            }
+        }
+    };
+    let layout = level::layout();
+    for b in layout.blocks.iter().filter(|b| b.solid && b.aabb.max.y - b.aabb.min.y > 1.6) {
+        paint(&b.aabb, [70, 60, 55]);
+    }
+    for r in &layout.roofs {
+        let k = ((r.aabb.max.y - level::ground_y(r.aabb.min.x, r.aabb.min.z)) * 9.0).clamp(0.0, 110.0) as u8;
+        paint(&r.aabb, [120 + k, 50 + k / 2, 40 + k / 3]);
+    }
+    for p in &layout.plants {
         let c = match p.kind {
             K::Fir => [0, 60, 20],
             K::Pine => [20, 110, 30],
@@ -170,7 +196,7 @@ fn dump_map(path: &str) {
             K::Fig => [200, 60, 160],
             _ => continue,
         };
-        let (i, j) = (((p.pos.x + 900.0) / 2.0) as i32, ((p.pos.z + 900.0) / 2.0) as i32);
+        let (i, j) = pixel(p.pos.x, p.pos.z);
         if i >= 0 && j >= 0 && (i as usize) < N && (j as usize) < N {
             px[(j as usize * N + i as usize) * 3..][..3].copy_from_slice(&c);
         }

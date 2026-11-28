@@ -19,8 +19,22 @@ const PIER_W: f32 = 4.0;
 /// Сходни: причал, сторона (−1 — к меньшему z), отступ от края набережной.
 const GANGWAYS: [(f32, f32, f32); 4] = [(PIER_Z[1], -1.0, 16.0), (PIER_Z[1], 1.0, 18.0), (PIER_Z[0], 1.0, 18.0), (PIER_Z[2], -1.0, 17.0)];
 
+/// Тыльный край мощения набережной (в своих координатах порта): дальше к обрыву — утоптанная
+/// земля со складами и навесами.
+const QUAY_BACK: f32 = 271.0;
+/// Уровень воды в своих координатах порта.
+const WATER: f32 = terrain::WATER_Y - terrain::PORT_SHIFT.y;
+
+/// Точка порта (в его своих координатах) на карте.
+pub fn on_map(p: Vec3) -> Vec3 {
+    p + terrain::PORT_SHIFT
+}
+
 pub fn port(b: &mut Builder) {
-    quay(b);
+    b.moved(terrain::PORT_SHIFT, |b| {
+        quay(b);
+        backyard(b);
+    });
     market(b);
     customs(b);
     horrea(b);
@@ -36,7 +50,7 @@ fn quay(b: &mut Builder) {
         b.at(edge - 6.0, (z + zz) / 2.0);
         // Лицевая стенка набережной из крупных блоков и мощение.
         b.solid([edge - 1.2, -6.0, z], [edge, QUAY_TOP, zz], Mat::Limestone);
-        b.decor([EAST_WALL_X + WALL_T / 2.0, QUAY_TOP, z], [edge - 1.2, QUAY_TOP + 0.04, zz], Mat::Paving);
+        b.decor([QUAY_BACK, QUAY_TOP, z], [edge - 1.2, QUAY_TOP + 0.04, zz], Mat::Paving);
         b.mesh(Mat::Limestone).cuboid(Vec3::new(edge - 1.3, QUAY_TOP, z), Vec3::new(edge + 0.05, QUAY_TOP + 0.2, zz));
         // Края нет: с набережной можно спрыгнуть в воду (выбраться — Пробел у стенки).
         z = zz;
@@ -108,9 +122,100 @@ fn quay(b: &mut Builder) {
     }
 }
 
+/// Склады-навесы под обрывом (в своих координатах порта): номер 0..5 с севера на юг.
+fn shed_rect(k: usize) -> Rect {
+    let z0 = -140.0 + k as f32 * 26.0;
+    Rect::new(QUAY_BACK - 6.4, z0, QUAY_BACK - 0.4, z0 + 18.0)
+}
+
+/// Куда носильщики складывают груз: у среднего склада под обрывом.
+pub fn sheds_point() -> Vec3 {
+    let r = shed_rect(3);
+    on_map(Vec3::new(r.x1 + 1.2, QUAY_TOP, r.cz()))
+}
+
+/// Задворки порта под обрывом: склады-навесы вдоль скалы, южнее — лодочный двор, где чинят
+/// лодки, сушат сети и сложен корабельный лес.
+fn backyard(b: &mut Builder) {
+    let mut rng = Rng::new(2710);
+    for k in 0..5 {
+        let r = shed_rect(k);
+        b.at(r.cx(), r.cz());
+        let (t, h) = (0.6, 3.0);
+        let (yh, yl) = (4.1, 3.05);
+        // Три стены из бута, спереди — столбы с прогоном: грузы заносят прямо с набережной.
+        kit::wall_z(b, r.z0, r.z1, r.x0 + t / 2.0, t, h, &[], Mat::Rubble);
+        kit::wall_x(b, r.x0 + t, r.x1, r.z0 + t / 2.0, t, h, &[], Mat::Rubble);
+        kit::wall_x(b, r.x0 + t, r.x1, r.z1 - t / 2.0, t, h, &[], Mat::Rubble);
+        kit::lean_roof(b, r, Side::W, yh, yl, 0.7);
+        kit::lean_fill(b, r, Side::W, yh, yl, t, h, &[(r.z0, r.z0 + t, h), (r.z1 - t, r.z1, h)], Mat::Rubble);
+        for z in [r.z0 + 6.0, r.z1 - 6.0] {
+            column(b, Vec3::new(r.x1 - 0.2, 0.0, z), h, 0.14, Mat::Wood);
+        }
+        b.mesh(Mat::Wood).beam(Vec3::new(r.x1 - 0.2, h - 0.08, r.z0 + t), Vec3::new(r.x1 - 0.2, h - 0.08, r.z1 - t), 0.1, 0.12, Vec3::Y);
+        b.decor([r.x0 + t, 0.0, r.z0 + t], [r.x1, 0.03, r.z1 - t], Mat::Earth);
+        // Внутри: пифосы у задней стены, штабель амфор, мешки, ларь.
+        let mut z = r.z0 + 1.6;
+        while z < r.z1 - 1.2 {
+            match (k + (z * 0.37) as usize) % 3 {
+                0 => kit::pithos(b, Vec3::new(r.x0 + t + 0.9, 0.0, z), 1.4, 0.0),
+                1 => {
+                    for q in 0..3 {
+                        kit::amphora(b, Vec3::new(r.x0 + t + 0.4 + q as f32 * 0.45, 0.0, z + rng.range(-0.15, 0.15)), 1.0, rng.int(3) as u32);
+                    }
+                }
+                _ => interior::sacks(b, Rect::new(r.x0 + t + 0.1, z - 0.8, r.x0 + t + 0.75, z + 0.8), &mut rng),
+            }
+            z += 2.3;
+        }
+        b.loot(L::Storehouse);
+        interior::chest(b, Rect::new(r.x0 + t + 1.9, r.z1 - t - 0.7, r.x0 + t + 3.0, r.z1 - t - 0.1), "Портовый ларь");
+        b.lamp(r.center(2.5), Color::srgb(1.0, 0.72, 0.45), 4_000.0, 8.0);
+        if k % 2 == 1 {
+            b.torch(r.x1 + 0.05, 2.4, r.z0 + 0.3, Vec3::X);
+        }
+    }
+    // Лодочный двор: там, где карниз дороги сходит на берег, площадка под скалой шире.
+    let yard = Rect::new(246.0, 62.0, QUAY_BACK - 2.0, 166.0);
+    b.at(yard.cx(), yard.z0 + 12.0);
+    ships::skiff(b, Vec3::new(yard.x0 + 8.0, 0.38, yard.z0 + 6.0), 0.5);
+    for (dx, dz) in [(-1.2f32, -1.5f32), (1.4, -1.3), (-1.3, 1.6), (1.3, 1.7)] {
+        let p = Vec3::new(yard.x0 + 8.0 + dx, 0.0, yard.z0 + 6.0 + dz);
+        b.solid([p.x - 0.12, 0.0, p.z - 0.12], [p.x + 0.12, 0.5, p.z + 0.12], Mat::Wood);
+    }
+    kit::woodpile(b, Rect::new(yard.x0 + 2.0, yard.z0 + 16.0, yard.x0 + 6.5, yard.z0 + 17.4), 1.1);
+    for k in 0..4 {
+        let z = yard.z0 + 22.0 + k as f32 * 0.55;
+        kit::log(b, Vec3::new(yard.x0 + 2.0, 0.22, z), Vec3::new(yard.x0 + 10.5, 0.22, z + 0.1), 0.2, 0.17, 40 + k);
+    }
+    kit::hidden(b, Vec3::new(yard.x0 + 2.0, 0.0, yard.z0 + 21.7), Vec3::new(yard.x0 + 10.5, 0.45, yard.z0 + 24.0));
+    b.at(yard.cx(), yard.z0 + 44.0);
+    ships::skiff(b, Vec3::new(yard.x0 + 12.0, 0.38, yard.z0 + 40.0), -0.3);
+    kit::hearth(b, Vec3::new(yard.x0 + 16.0, 0.0, yard.z0 + 30.0));
+    for k in 0..5 {
+        kit::amphora(b, Vec3::new(yard.x0 + 3.0 + k as f32 * 0.5, 0.0, yard.z0 + 48.0), 1.0, k as u32 % 3);
+    }
+    for (k, z) in [yard.z0 + 60.0, yard.z0 + 78.0].into_iter().enumerate() {
+        b.at(yard.cx(), z);
+        let m = b.mesh(Mat::Wood);
+        let x0 = yard.x0 + 5.0 + k as f32 * 4.0;
+        for x in [x0, x0 + 5.0] {
+            m.beam(Vec3::new(x, 0.0, z), Vec3::new(x, 2.0, z), 0.05, 0.05, Vec3::X);
+        }
+        m.beam(Vec3::new(x0 - 0.2, 1.97, z), Vec3::new(x0 + 5.2, 1.97, z), 0.035, 0.035, Vec3::Y);
+        let c = b.mesh(Mat::Leather);
+        let q = [Vec3::new(x0, 1.95, z), Vec3::new(x0 + 5.0, 1.95, z), Vec3::new(x0 + 5.0, 0.5, z + 0.12), Vec3::new(x0, 0.5, z + 0.12)];
+        c.quad(q, Vec3::Z);
+        c.quad(q, Vec3::NEG_Z);
+        for x in [x0, x0 + 5.0] {
+            kit::hidden(b, Vec3::new(x - 0.08, 0.0, z - 0.08), Vec3::new(x + 0.08, 2.0, z + 0.08));
+        }
+    }
+}
+
 /// Суда у причалов и на рейде; сходни с причалов на палубы.
 fn moored_ships(b: &mut Builder, edge: f32) {
-    let w = terrain::WATER_Y;
+    let w = WATER;
     let gap = 0.7;
     // Средний причал: с юга — навикулярий из Синопы, с севера — большой александриец с отданным парусом.
     let nav = ships::NAVICULARIUS;
@@ -264,9 +369,9 @@ pub fn market_stalls() -> [(Vec3, Vec3); 4] {
 pub fn quay_stalls() -> [(Vec3, Vec3); 3] {
     let x = terrain::QUAY_EDGE - 1.0 - super::super::places::SELLER_BEHIND;
     [
-        (Vec3::new(x, QUAY_TOP, PIER_Z[1] + 4.5), Vec3::NEG_X),
-        (Vec3::new(x, QUAY_TOP, PIER_Z[2] - 5.5), Vec3::NEG_X),
-        (Vec3::new(x, QUAY_TOP, PIER_Z[0] + 5.0), Vec3::NEG_X),
+        (on_map(Vec3::new(x, QUAY_TOP, PIER_Z[1] + 4.5)), Vec3::NEG_X),
+        (on_map(Vec3::new(x, QUAY_TOP, PIER_Z[2] - 5.5)), Vec3::NEG_X),
+        (on_map(Vec3::new(x, QUAY_TOP, PIER_Z[0] + 5.0)), Vec3::NEG_X),
     ]
 }
 

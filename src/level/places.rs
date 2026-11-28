@@ -104,7 +104,7 @@ fn on_ground(x: f32, z: f32) -> Vec3 {
 
 // ---------------- места за стенами ----------------
 
-pub const NECROPOLIS: Vec3 = Vec3::new(215.0, 0.0, 250.0);
+pub const NECROPOLIS: Vec3 = Vec3::new(198.0, 0.0, 252.0);
 pub const KLEROS_FARM: Vec3 = Vec3::new(-178.0, 0.0, 300.0);
 pub const STEPPE_CAMP: Vec3 = Vec3::new(200.0, 0.0, 640.0);
 pub const GOTH_VILLAGE: Vec3 = Vec3::new(-465.0, 0.0, 515.0);
@@ -132,7 +132,6 @@ fn city_places() -> Vec<Place> {
     let tr = public::thermae_rect();
     let rr = public::reservoir_rect();
     let wc = public::west_church_rect();
-    let cit = city::CITADEL;
     let gw = crafts::glassworks_rect();
     let pt = crafts::pottery_rect();
     let sm = crafts::smithy_rect();
@@ -167,10 +166,10 @@ fn city_places() -> Vec<Place> {
         p("theatre", "Заброшенный театр", "θέατρον", Theatre, public::theatre_center(), 25.0),
         p("reservoir", "Резервуар водопровода", "δεξαμενή", Cistern, flat(rr.cx(), rr.z0 - 2.5), 15.0),
         p("garrison", "Цитадель, плац гарнизона", "κάστρον", Garrison, public::garrison_point(), 15.0),
-        p("praetorium", "Претория", "πραιτώριον", Praetorium, flat(cit.x0 + 15.0, cit.z0 + 13.0), 8.0),
+        p("praetorium", "Претория", "πραιτώριον", Praetorium, public::praetorium_point(), 8.0),
         p("main_gate", "Главные ворота", "πύλη", Gate, flat(gx + 3.0, 157.0), 6.0),
         p("south_gate", "Южные ворота", "πύλη", Gate, flat(sx, 157.0), 6.0),
-        p("port_gate", "Портовые ворота", "πύλη", Gate, flat(276.0, -6.0), 5.0),
+        p("port_gate", "Терраса над бухтой", "ἄποψις", Gate, flat(276.0, -6.0), 5.0),
         p("port_market", "Портовый торг (эмпорий)", "ἐμπόριον", PortMarket, port::market_point(), 10.0),
         p("customs", "Таможня (коммеркиарий)", "κομμερκιάριον", Customs, port::customs_point(), 6.0),
         p("horrea", "Склады (горреи)", "ὅρρεα", Warehouse, flat(hr.cx(), hr.z0 - 2.0), 20.0),
@@ -183,7 +182,7 @@ fn city_places() -> Vec<Place> {
         p("armoury", "Оружейная мастерская гарнизона", "φαβρίκα", Smithy, flat(ar.x0 + 7.0, ar.z0 + 6.5), 8.0),
         p("winery", "Винодельня (тарапан)", "ληνός", Winery, flat(wn.cx(), wn.z0 + 3.0), 10.0),
         p("church_west", "Западная церковь", "ἐκκλησία", Church, flat(wc.x0 + 4.0, wc.cz()), 8.0),
-        p("quay", "Набережная Карантинной бухты", "λιμήν", Quay, flat(293.0, 60.0), 30.0),
+        p("quay", "Порт в Карантинной бухте", "λιμήν", Quay, port::on_map(Vec3::new(293.0, 0.0, 60.0)), 30.0),
         p("necropolis", "Некрополь", "νεκρόπολις", Necropolis, on_ground(NECROPOLIS.x, NECROPOLIS.z), 45.0),
         p("kleros", "Клер (усадьба с виноградником)", "κλῆρος", Vineyard, Vec3::new(KLEROS_FARM.x + 7.0, city::outside::kleros_floor(), KLEROS_FARM.z + 7.5), 60.0),
         p("spring", "Родник в балке", "κρήνη", Spring, on_ground(sp.x + 3.0, sp.z), 6.0),
@@ -315,16 +314,16 @@ pub fn herb_patches() -> &'static [HerbPatch] {
             ("salvia", (-300.0, 425.0), 7.0),
             ("thymus", (40.0, 262.0), 8.0),
             ("thymus", (-225.0, 385.0), 6.0),
-            ("thymus", (262.0, 335.0), 6.0),
+            ("thymus", (212.0, 345.0), 6.0),
             ("hypericum", (-150.0, 455.0), 6.0),
-            ("hypericum", (300.0, 560.0), 6.0),
+            ("hypericum", (255.0, 640.0), 6.0),
             ("hyoscyamus", (128.0, 212.0), 4.0),
             ("hyoscyamus", (-440.0, 545.0), 4.0),
             ("juniperus", (-380.0, 440.0), 8.0),
             ("juniperus", (385.0, 600.0), 8.0),
             ("artemisia", (0.0, 360.0), 9.0),
             ("artemisia", (-80.0, 520.0), 8.0),
-            ("artemisia", (240.0, 470.0), 8.0),
+            ("artemisia", (190.0, 470.0), 8.0),
             ("achillea", (-20.0, 232.0), 6.0),
             ("achillea", (180.0, 545.0), 6.0),
             ("plantago", (-100.0, 268.0), 5.0),
@@ -401,17 +400,17 @@ pub fn npc_posts() -> Vec<NpcPost> {
     let flat = |x: f32, z: f32| Vec3::new(x, 0.0, z);
     let post = |pos: Vec3, group, yaw, wander| NpcPost { pos, group, yaw, wander };
     let mut v = vec![
-        // Стража у ворот смотрит наружу (на +Z), у портовых — на бухту (+X).
+        // Стража у ворот смотрит наружу (на +Z), на террасе над бухтой — на море (+X).
         post(flat(gx - 3.0, 157.5), Garrison, PI, 2.0),
         post(flat(gx + 3.0, 157.5), Garrison, PI, 2.0),
         post(flat(sx - 3.0, 157.5), Garrison, PI, 2.0),
         post(flat(276.0, 3.0), Garrison, -PI / 2.0, 2.0),
         post(public::garrison_point() + Vec3::new(4.0, 0.0, 0.0), Garrison, 0.0, 10.0),
-        post(flat(city::cross_x(19), 98.0), Garrison, 0.0, 2.0),
+        post(flat(public::citadel_gate_x() + 2.6, city::CITADEL.z1 + city::WALL_T + 7.5), Garrison, PI, 2.0),
         post(flat(public::agora_rect().x1 - 4.0, -20.0), Garrison, PI / 2.0, 15.0),
         post(flat(gx + 20.0, 174.0), Garrison, 0.0, 30.0),
     ];
-    for (x, z) in [(232.0, 330.0), (168.0, 388.0), (terrain::balka_x(452.0), 452.0), (-90.0, 362.0), (-20.0, 525.0), (300.0, 470.0)] {
+    for (x, z) in [(150.0, 372.0), (168.0, 388.0), (terrain::balka_x(452.0), 452.0), (-90.0, 362.0), (-20.0, 525.0), (184.0, 566.0)] {
         v.push(post(on_ground(x, z), Brigands, 0.0, 20.0));
     }
     for (c, group, n) in [(STEPPE_CAMP, Nomads, 4), (GOTH_VILLAGE, Goths, 4), (ALAN_CAMP, Alans, 4)] {
