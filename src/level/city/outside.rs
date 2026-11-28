@@ -1181,6 +1181,55 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
         }
         z += 5.0;
     }
+    // Глыбы у кромки воды в бухте: наполовину в воде, поодиночке и кучками — на референсе берег
+    // озера каменистый, а у нас вода встречалась с гладким склоном. Кромку ищем на отрезке в
+    // случайную сторону от узла сетки (под обрывом она слишком узкая, чтобы попасть в неё узлом).
+    // Свой счётчик.
+    let mut rng = Rng::new(6204);
+    let level = WATER_Y + 0.1;
+    let mut z = 140.0;
+    while z < 480.0 {
+        let mut x = 270.0;
+        while x < 540.0 {
+            let p = Vec2::new(x + rng.range(-2.0, 2.0), z + rng.range(-2.0, 2.0));
+            x += 4.0;
+            let (roll, size, turn) = (rng.f(), rng.f(), rng.range(0.0, TAU));
+            let q = p + Vec2::from_angle(turn) * 5.0;
+            let ya = ground_y(p.x, p.y) - level;
+            if roll > 0.5 || ya * (ground_y(q.x, q.y) - level) >= 0.0 {
+                continue;
+            }
+            let (mut a, mut c) = (p, q);
+            for _ in 0..6 {
+                let m = (a + c) * 0.5;
+                if (ground_y(m.x, m.y) - level) * ya > 0.0 {
+                    a = m;
+                } else {
+                    c = m;
+                }
+            }
+            let s = (a + c) * 0.5;
+            if terrain::city_distance(s.x, s.y) < 40.0 || road_distance(roads, s) < ROAD_W / 2.0 + 2.5 || clear.iter().any(|(c, r)| s.distance(*c) < *r) {
+                continue;
+            }
+            // Сканы приземистые (высота — около трети размера), поэтому глыбы крупные и почти не
+            // утоплены: иначе над водой остаётся одна макушка.
+            b.at(s.x, s.y);
+            let big = 1.6 + size * size * 2.6;
+            for k in 0..1 + rng.int(3) {
+                let off = if k == 0 { Vec2::ZERO } else { Vec2::new(rng.range(-1.0, 1.0), rng.range(-1.0, 1.0)) * big * 0.9 };
+                let h = big * if k == 0 { 1.0 } else { rng.range(0.35, 0.7) };
+                let q = s + off;
+                let c = Vec3::new(q.x, ground_y(q.x, q.y).max(WATER_Y - 0.5) - h * 0.08, q.y);
+                b.plant(PlantKind::Rock, c, h, rng.range(0.0, TAU), rng.int(64) as u32);
+                if h > 0.7 {
+                    let r = h * 0.4;
+                    b.invisible.push(Aabb::new(Vec3::new(c.x - r, c.y - 0.3, c.z - r), Vec3::new(c.x + r, c.y + h * 0.3, c.z + r)));
+                }
+            }
+        }
+        z += 4.0;
+    }
     // На обрыве большие деревья не держатся: их место занимает можжевельник (дубы на отвесной
     // скале издали торчали зелёными шарами на палочках). Счётчик случайных чисел не трогаем.
     for p in b.plants.iter_mut().skip(first_plant) {

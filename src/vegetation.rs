@@ -286,9 +286,9 @@ fn column_of(kind: PlantKind) -> f32 {
 /// листья, и теневой бок дерева тёмно-зелёный, а не чёрный. У тёмных хвойных добавка больше.
 fn fill_of(kind: PlantKind) -> f32 {
     match kind {
-        PlantKind::Fir => 1.6,
+        PlantKind::Fir => 1.25,
         // Кипарис — плотная тёмная колонна: без большой добавки теневая сторона уходит в черноту.
-        PlantKind::Cypress => 2.6,
+        PlantKind::Cypress => 2.1,
         PlantKind::Pine | PlantKind::Juniper => 1.2,
         _ => 0.8,
     }
@@ -874,5 +874,15 @@ mod tests {
         for kind in [PlantKind::Pine, PlantKind::Oak, PlantKind::Juniper, PlantKind::Cypress, PlantKind::Fig, PlantKind::Shrub, PlantKind::Fir, PlantKind::Rock] {
             assert!(layout.plants.iter().any(|p| p.kind == kind), "нет растений {kind:?}");
         }
+    }
+
+    /// Берег бухты каменистый: у кромки воды лежат глыбы (на гладком склоне вода встречалась с
+    /// землёй без единого камня).
+    #[test]
+    fn bay_shore_has_boulders_at_the_waterline() {
+        use crate::level::{WATER_Y, ground_y};
+        let layout = crate::level::layout();
+        let n = layout.plants.iter().filter(|p| p.kind == PlantKind::Rock && (270.0..540.0).contains(&p.pos.x) && (140.0..480.0).contains(&p.pos.z) && (ground_y(p.pos.x, p.pos.z) - WATER_Y).abs() < 0.8).count();
+        assert!(n >= 40, "глыб у воды в бухте: {n}");
     }
 }

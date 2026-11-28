@@ -427,7 +427,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     if water.waves.z > 0.5 && water.params.w < 0.5 {
         let jitter = fract(sin(dot(in.position.xy, vec2<f32>(12.9898, 78.233))) * 43758.5453);
         let h = trace_reflection(wp, normalize(r), jitter);
-        refl = mix(refl, h.rgb, h.a);
+        // Рябь подмешивает к отражению берега немного неба: тёмные ели не ложатся в воду
+        // чёрными пятнами.
+        refl = mix(refl, h.rgb, h.a * 0.85);
     }
 
     // Солнечная дорожка: GGX-блик, шероховатость растёт с расстоянием.
