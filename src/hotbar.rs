@@ -147,6 +147,21 @@ impl Hotbar {
                 }
             }
         }
+        // Вещи сменили номера (персонаж вернулся из сохранения, новый набор после смерти) —
+        // слот переходит на такую же вещь в сумке.
+        for i in 1..SLOTS {
+            let Some(Bind::Item { uid, base }) = self.slots[i] else { continue };
+            if inv.find(uid).is_some() {
+                continue;
+            }
+            let bound: Vec<ItemUid> = self.slots.iter().filter_map(|b| match b {
+                Some(Bind::Item { uid, .. }) => Some(*uid),
+                _ => None,
+            }).collect();
+            if let Some(same) = inv.all_items().find(|it| it.base == base && !bound.contains(&it.uid)) {
+                self.slots[i] = Some(Bind::Item { uid: same.uid, base });
+            }
+        }
         let main = inv.equipped(EquipSlot::MainHand);
         let main_uid = main.map(|i| i.uid);
         if main_uid != self.last_main {

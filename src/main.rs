@@ -84,6 +84,8 @@ mod props_server;
 mod protocol;
 mod residents;
 mod rig;
+mod saves;
+mod saves_server;
 mod self_body;
 mod server;
 mod settings;
@@ -219,7 +221,15 @@ fn main() {
             let addr = parse_addr(args.get(1).map(String::as_str).unwrap_or("127.0.0.1"));
             client::run(menu::Start::Join(addr));
         }
-        Some("host") => client::run(menu::Start::Host(args.get(1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT))),
+        Some("host") => {
+            let port = args.get(1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
+            // `host 5000 --load 3` — начать с сохранения (так игра перезапускается из «Загрузить игру»).
+            let load = args.iter().position(|a| a == "--load").and_then(|i| args.get(i + 1)).and_then(|s| s.parse().ok());
+            client::run(match load {
+                Some(slot) => menu::Start::Load(port, slot),
+                None => menu::Start::Host(port),
+            })
+        }
         None => client::run(menu::Start::Menu),
         Some(other) => {
             eprintln!("Неизвестная команда «{other}». Используйте: host | join <адрес> | server");

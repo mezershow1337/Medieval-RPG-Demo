@@ -29,6 +29,8 @@ use std::time::SystemTime;
 pub enum Start {
     Menu,
     Host(u16),
+    /// Загрузить слот сохранения и стать хостом (так игра перезапускается из «Загрузить игру»).
+    Load(u16, u8),
     Join(SocketAddr),
 }
 
@@ -43,6 +45,10 @@ pub enum Screen {
     /// Облик персонажа (до входа в игру).
     Look,
     Pause,
+    /// Выбор слота: сохранить игру (хозяин).
+    Save,
+    /// Выбор слота: загрузить игру (главное меню или хозяин в игре).
+    Load,
     /// Сервер пропал посреди игры.
     Lost,
 }
@@ -68,6 +74,10 @@ pub struct MenuState {
     look_zoom: bool,
     /// Открыта вкладка стартового набора (`MRPG_KIT=1` — сразу на ней).
     kit_tab: bool,
+    /// «Новый мир» нажат один раз — ждём подтверждения.
+    confirm_new: bool,
+    /// Когда сохранены слоты (чтобы окно слотов обновилось, как только сервер запишет слот).
+    slots_seen: Vec<u64>,
 }
 
 impl MenuState {
@@ -91,10 +101,12 @@ impl Plugin for MenuPlugin {
             pending_address: String::new(),
             look_zoom: std::env::var("MRPG_LOOK_ZOOM").is_ok(),
             kit_tab: std::env::var("MRPG_KIT").is_ok(),
+            confirm_new: false,
+            slots_seen: Vec::new(),
         })
         .add_systems(Startup, begin.after(crate::inventory_ui::setup_fonts))
-        .add_systems(PreUpdate, escape_key.after(bevy::input::InputSystems))
-        .add_systems(Update, (sync_name, highlight_focused_field, handle_buttons, submit_on_enter, poll_resolve, watch_connection, rebuild, orbit_camera, hud_visibility, cursor_in_menu).chain())
+        .add_systems(PreUpdate, (escape_key, quick_save_key).after(bevy::input::InputSystems))
+        .add_systems(Update, (sync_name, highlight_focused_field, handle_buttons, submit_on_enter, poll_resolve, watch_connection, watch_slots, rebuild, orbit_camera, hud_visibility, cursor_in_menu).chain())
         .add_systems(Update, look_preview.in_set(crate::rig::PoseSet));
     }
 }
@@ -112,10 +124,12 @@ fn begin(mut commands: Commands, start: Res<Start>, mut menu: ResMut<MenuState>,
                 Ok("settings") => Screen::Settings,
                 Ok("join") => Screen::Join,
                 Ok("look") => Screen::Look,
+                Ok("load") => Screen::Load,
                 _ => Screen::Main,
             }
         }
-        Start::Host(port) => host(&mut commands, &mut menu, &mut net, &time, port, &name, (settings.look, settings.kit)),
+        Start::Host(port) => host(&mut commands, &mut menu, &mut net, &time, port, &name, (settings.look, settings.kit), None),
+        Start::Load(port, slot) => host(&mut commands, &mut menu, &mut net, &time, port, &name, (settings.look, settings.kit), Some(slot)),
         Start::Join(addr) => {
             menu.screen = Screen::Join;
             connect(&mut commands, &mut menu, &mut net, &time, addr, &name, (settings.look, settings.kit));
@@ -123,11 +137,27 @@ fn begin(mut commands: Commands, start: Res<Start>, mut menu: ResMut<MenuState>,
     }
 }
 
-/// Запустить сервер в этом процессе и подключиться к нему.
-fn host(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time: &Time, port: u16, name: &str, look: (Look, StartKit)) {
+/// Запустить сервер в этом процессе и подключиться к нему. `load` — сначала положить на место
+/// текущей игры файлы этого слота сохранения (см. `saves.rs`).
+#[allow(clippy::too_many_arguments)]
+fn host(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time: &Time, port: u16, name: &str, look: (Look, StartKit), load: Option<u8>) {
     if !menu.hosting {
-        match crate::server::bind_socket(port) {
+        // После «Загрузить игру» прежнее окно ещё закрывается и держит порт — ждём его.
+        let mut bound = crate::server::bind_socket(port);
+        let started = std::time::Instant::now();
+        while load.is_some() && bound.is_err() && started.elapsed().as_secs() < 20 {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            bound = crate::server::bind_socket(port);
+        }
+        match bound {
             Ok(socket) => {
+                // Порт свободен — значит, прежний сервер уже не пишет свои файлы: кладём слот.
+                if let Some(slot) = load {
+                    match crate::saves::load_slot(slot) {
+                        Ok(meta) => info!("Загружено: {} ({} {})", crate::saves::slot_name(slot), meta.date, meta.time),
+                        Err(e) => warn!("Не удалось загрузить: {e}"),
+                    }
+                }
                 // Секрет хозяина: консоль разработчика даёт читы только этому окну (см. console_net.rs).
                 crate::console_net::make_host_token();
                 std::thread::Builder::new()
@@ -140,6 +170,7 @@ fn host(commands: &mut Commands, menu: &mut MenuState, net: &mut NetState, time:
             Err(e) => {
                 menu.screen = Screen::Main;
                 menu.error = Some(format!("Порт {port} занят ({e}). Возможно, игра или сервер уже запущены."));
+                let _ = load;
                 return;
             }
         }
@@ -255,7 +286,14 @@ fn watch_connection(
 ) {
     if menu.screen == Screen::Connecting {
         if net.my_id.is_some() {
-            menu.screen = if std::env::var("MRPG_MENU").as_deref() == Ok("pause") { Screen::Pause } else { Screen::None };
+            // MRPG_MENU=pause|save|reload — сразу открыть паузу или слоты (снимки меню в облаке).
+            menu.screen = match std::env::var("MRPG_MENU").as_deref() {
+                Ok("pause") => Screen::Pause,
+                Ok("save") => Screen::Save,
+                Ok("reload") => Screen::Load,
+                _ => Screen::None,
+            };
+            menu.back = Screen::Pause;
             menu.in_game = true;
             cursor.grab_mode = CursorGrabMode::Locked;
             cursor.visible = false;
@@ -291,10 +329,45 @@ fn escape_key(keys: Res<ButtonInput<KeyCode>>, mut menu: ResMut<MenuState>, curs
         // Esc в игре открывает паузу, только если мышь захвачена (не открыт инвентарь, торговля…).
         Screen::None if menu.in_game && cursor.grab_mode != CursorGrabMode::None => Screen::Pause,
         Screen::Pause => Screen::None,
-        Screen::Settings => menu.back,
+        Screen::Settings | Screen::Save | Screen::Load => menu.back,
         Screen::Join | Screen::Look => Screen::Main,
         other => other,
     };
+}
+
+/// Сохранить: хозяин — в слот (`None` — только персонажа), друг — свой персонаж у хоста.
+fn send_save(client: Option<&mut RenetClient>, menu: &MenuState, slot: Option<u8>) {
+    let Some(client) = client.filter(|c| c.is_connected()) else { return };
+    let (slot, token) = if menu.hosting { (slot, crate::console_net::host_token()) } else { (None, 0) };
+    client.send_message(crate::protocol::CH_RELIABLE, crate::protocol::encode(&crate::protocol::ClientMessage::SaveGame { slot, token }));
+}
+
+/// F5 — быстрое сохранение.
+fn quick_save_key(keys: Res<ButtonInput<KeyCode>>, menu: Res<MenuState>, mut client: Option<ResMut<RenetClient>>) {
+    if keys.just_pressed(KeyCode::F5) && menu.in_game && matches!(menu.screen, Screen::None | Screen::Pause | Screen::Save) {
+        send_save(client.as_deref_mut(), &menu, Some(crate::saves::QUICK_SLOT));
+    }
+}
+
+/// Пока открыто окно слотов — раз в секунду смотрим, не появилось ли новое сохранение.
+fn watch_slots(time: Res<Time>, mut menu: ResMut<MenuState>, mut next: Local<f32>) {
+    if !matches!(menu.screen, Screen::Save | Screen::Load) || time.elapsed_secs() < *next {
+        return;
+    }
+    *next = time.elapsed_secs() + 1.0;
+    let seen: Vec<u64> = crate::saves::all_slots().iter().map(|(_, m)| m.as_ref().map_or(0, |m| m.saved_at)).collect();
+    if seen != menu.slots_seen {
+        menu.slots_seen = seen;
+    }
+}
+
+/// Загрузить слот посреди игры: перезапустить игру хостом с этим слотом (сервер со всем миром
+/// живёт в этом процессе, и честнее всего начать его заново).
+fn restart_with_slot(slot: u8, exit: &mut MessageWriter<AppExit>) {
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = std::process::Command::new(exe).args(["host", &DEFAULT_PORT.to_string(), "--load", &slot.to_string()]).spawn();
+    }
+    exit.write(AppExit::Success);
 }
 
 /// Enter в поле адреса — подключиться.
@@ -370,6 +443,13 @@ enum Act {
     /// Вкладка окна персонажа: облик или стартовый набор.
     LookTab(bool),
     KitStep(KitField, i32),
+    OpenSave,
+    OpenLoad,
+    SaveSlot(u8),
+    LoadSlot(u8),
+    /// Друг сохраняет своего персонажа (у хоста).
+    SaveCharacter,
+    NewWorld,
 }
 
 #[derive(Component)]
@@ -414,6 +494,7 @@ fn handle_buttons(
     field: Query<&EditableText, With<AddressField>>,
     time: Res<Time>,
     mut exit: MessageWriter<AppExit>,
+    mut client: Option<ResMut<RenetClient>>,
 ) {
     for (i, act) in &buttons {
         if *i != Interaction::Pressed {
@@ -423,7 +504,52 @@ fn handle_buttons(
             Act::Host => {
                 settings.save();
                 let name = settings.nickname.clone();
-                host(&mut commands, &mut menu, &mut net, &time, DEFAULT_PORT, &name, (settings.look, settings.kit));
+                host(&mut commands, &mut menu, &mut net, &time, DEFAULT_PORT, &name, (settings.look, settings.kit), None);
+            }
+            Act::OpenSave => {
+                menu.back = menu.screen;
+                menu.screen = Screen::Save;
+            }
+            Act::OpenLoad => {
+                settings.save();
+                menu.back = menu.screen;
+                menu.confirm_new = false;
+                menu.error = None;
+                menu.screen = Screen::Load;
+            }
+            Act::SaveSlot(slot) => {
+                send_save(client.as_deref_mut(), &menu, Some(slot));
+                menu.screen = Screen::None;
+            }
+            Act::SaveCharacter => {
+                send_save(client.as_deref_mut(), &menu, None);
+                menu.screen = Screen::None;
+            }
+            Act::LoadSlot(slot) => {
+                if menu.in_game {
+                    if menu.hosting {
+                        restart_with_slot(slot, &mut exit);
+                    }
+                } else {
+                    let name = settings.nickname.clone();
+                    host(&mut commands, &mut menu, &mut net, &time, DEFAULT_PORT, &name, (settings.look, settings.kit), Some(slot));
+                }
+            }
+            Act::NewWorld => {
+                if menu.in_game {
+                    continue;
+                }
+                if !menu.confirm_new {
+                    menu.confirm_new = true;
+                    continue;
+                }
+                menu.confirm_new = false;
+                if let Err(e) = crate::saves::start_new_world() {
+                    menu.error = Some(format!("Не удалось начать новый мир: {e}"));
+                    continue;
+                }
+                let name = settings.nickname.clone();
+                host(&mut commands, &mut menu, &mut net, &time, DEFAULT_PORT, &name, (settings.look, settings.kit), None);
             }
             Act::OpenJoin => {
                 settings.save();
@@ -447,7 +573,7 @@ fn handle_buttons(
             }
             Act::Back => {
                 menu.screen = match menu.screen {
-                    Screen::Settings => menu.back,
+                    Screen::Settings | Screen::Save | Screen::Load => menu.back,
                     _ => Screen::Main,
                 };
             }
@@ -625,10 +751,10 @@ fn rebuild(
     net: Res<NetState>,
     fonts: Option<Res<UiFonts>>,
     roots: Query<Entity, With<MenuRoot>>,
-    mut built: Local<Option<(Screen, Option<String>, bool, bool, bool)>>,
+    mut built: Local<Option<(Screen, Option<String>, bool, bool, bool, bool, Vec<u64>)>>,
 ) {
     let Some(fonts) = fonts else { return };
-    let key = (menu.screen, menu.error.clone(), menu.resolving.is_some(), menu.look_zoom, menu.kit_tab);
+    let key = (menu.screen, menu.error.clone(), menu.resolving.is_some(), menu.look_zoom, menu.kit_tab, menu.confirm_new, menu.slots_seen.clone());
     let settings_changed = matches!(menu.screen, Screen::Settings | Screen::Look) && settings.is_changed();
     if built.as_ref() == Some(&key) && !settings_changed {
         return;
@@ -659,6 +785,7 @@ fn rebuild(
             });
             small_button(p, &fonts, "Облик персонажа…", Act::OpenLook, 384.0);
             button(p, &fonts, "Создать игру", Act::Host);
+            button(p, &fonts, "Загрузить игру", Act::OpenLoad);
             button(p, &fonts, "Подключиться", Act::OpenJoin);
             button(p, &fonts, "Настройки", Act::OpenSettings);
             button(p, &fonts, "Выход", Act::Quit);
@@ -669,7 +796,7 @@ fn rebuild(
             label(
                 p,
                 &fonts,
-                &format!("«Создать игру» — вы хост: игра слушает UDP-порт {DEFAULT_PORT}. Друзьям дайте адрес своего туннеля playit.gg (вида xxx.at.ply.gg:12345) или свой IP, если порт открыт на роутере."),
+                &format!("«Создать игру» — вы хост: игра слушает UDP-порт {DEFAULT_PORT} и продолжает ваш мир с того места, где вы вышли (он сохраняется сам). Друзьям дайте адрес своего туннеля playit.gg (вида xxx.at.ply.gg:12345) или свой IP, если порт открыт на роутере."),
                 14.0,
                 INK_SOFT,
             );
@@ -709,6 +836,12 @@ fn rebuild(
         }),
         Screen::Pause => center_panel(&mut commands, &fonts, "Пауза", 440.0, |p| {
             button(p, &fonts, "Продолжить", Act::Resume);
+            if menu.hosting {
+                button(p, &fonts, "Сохранить игру", Act::OpenSave);
+                button(p, &fonts, "Загрузить игру", Act::OpenLoad);
+            } else {
+                button(p, &fonts, "Сохранить персонажа", Act::SaveCharacter);
+            }
             button(p, &fonts, "Настройки", Act::OpenSettings);
             button(p, &fonts, "В главное меню", Act::MainMenu);
             button(p, &fonts, "Выйти из игры", Act::Quit);
@@ -722,8 +855,62 @@ fn rebuild(
             button(p, &fonts, "Выйти из игры", Act::Quit);
         }),
         Screen::Settings => center_panel(&mut commands, &fonts, "Настройки", 1000.0, |p| settings_body(p, &fonts, &settings)),
+        Screen::Save => center_panel(&mut commands, &fonts, "Сохранить игру", 780.0, |p| {
+            slots_body(p, &fonts, true);
+            label(p, &fonts, "Сохраняется весь мир и все персонажи, кто сейчас в игре и кто заходил раньше. F5 — быстрое сохранение.", 14.0, INK_SOFT);
+            button(p, &fonts, "Назад", Act::Back);
+        }),
+        Screen::Load => center_panel(&mut commands, &fonts, "Загрузить игру", 780.0, |p| {
+            slots_body(p, &fonts, false);
+            if menu.in_game {
+                label(p, &fonts, "Игра перезапустится с выбранного сохранения. Друзьям нужно будет подключиться заново.", 14.0, INK_SOFT);
+            } else {
+                let text = if menu.confirm_new { "Точно начать с нуля? Нажмите ещё раз" } else { "Новый мир (с нуля)" };
+                small_button(p, &fonts, text, Act::NewWorld, 360.0);
+                label(p, &fonts, "Текущий мир при этом не пропадёт: он уйдёт в копию в папке сохранений.", 13.0, INK_SOFT);
+            }
+            if let Some(err) = &menu.error {
+                label(p, &fonts, err, 16.0, ERROR);
+            }
+            button(p, &fonts, "Назад", Act::Back);
+        }),
         Screen::Look => side_panel(&mut commands, &fonts, |p| if menu.kit_tab { kit_body(p, &fonts, &settings.kit) } else { look_body(p, &fonts, &settings.look, menu.look_zoom) }),
     }
+}
+
+/// Список слотов: слева кнопка слота, справа — когда в мире, кто играл и когда сохранили.
+fn slots_body(p: &mut ChildSpawnerCommands, fonts: &UiFonts, saving: bool) {
+    let now = crate::saves::now_unix();
+    for (slot, meta) in crate::saves::all_slots() {
+        p.spawn(Node { width: percent(100), column_gap: px(16), align_items: AlignItems::Center, min_height: px(46), ..default() }).with_children(|r| {
+            let title = if slot == crate::saves::QUICK_SLOT { "Быстрое (F5)".to_string() } else { crate::saves::slot_name(slot) };
+            let node = Node { width: px(200), min_height: px(40), flex_shrink: 0.0, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() };
+            if saving || meta.is_some() {
+                let act = if saving { Act::SaveSlot(slot) } else { Act::LoadSlot(slot) };
+                theme().button_sized(r, &title, 17.0, act, true).insert(node);
+            } else {
+                theme().button_sized(r, &title, 17.0, (), false).insert(node);
+            }
+            r.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, row_gap: px(2), ..default() }).with_children(|c| match &meta {
+                Some(m) => {
+                    let when = [m.date.as_str(), m.time.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(", ");
+                    let when = if when.is_empty() { m.level.clone() } else { when };
+                    label(c, fonts, &when, 17.0, PARCHMENT);
+                    let mut who: Vec<String> = Vec::new();
+                    if !m.players.is_empty() {
+                        who.push(m.players.join(", "));
+                    }
+                    if !m.purse.is_empty() {
+                        who.push(m.purse.clone());
+                    }
+                    who.push(format!("сохранено {}", crate::saves::ago_text(m.saved_at, now)));
+                    label(c, fonts, &who.join(" · "), 14.0, INK_SOFT);
+                }
+                None => label(c, fonts, if saving { "пусто — сохранить сюда" } else { "пусто" }, 15.0, INK_SOFT),
+            });
+        });
+    }
+    ornament(p);
 }
 
 /// Окно облика: причёска, борода, цвет волос и кожи, сложение, лицо. Справа — сам персонаж.

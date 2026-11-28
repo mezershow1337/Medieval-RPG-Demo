@@ -116,7 +116,7 @@ fn guild_of<'a>(guild: &'a mut HashMap<u64, GuildView>, rng: &mut Rng, player: u
     g
 }
 
-fn send_guild(server: &mut RenetServer, world: &mut SmithWorld, player: u64) {
+pub(crate) fn send_guild(server: &mut RenetServer, world: &mut SmithWorld, player: u64) {
     let view = guild_of(&mut world.guild, &mut world.rng, player).clone();
     send(server, player, &SmithServerMessage::Guild(view));
 }

@@ -219,6 +219,13 @@ impl LootWorld {
     }
 
     /// «Нищий старт»: выбранные игроком простое оружие и доспех, бинт, уксус и две серебряные монеты.
+    /// Стартовый набор для проверок (сохранения и пр.).
+    #[cfg(test)]
+    pub fn test_starter(&mut self, kit: crate::start_kit::StartKit) -> Inventory {
+        self.kits.insert(1, kit);
+        self.starter_inventory(1)
+    }
+
     fn starter_inventory(&mut self, player: u64) -> Inventory {
         let mut inv = Inventory::new(PLAYER_GRID);
         let chosen = self.kits.get(&player).copied().unwrap_or_default();
