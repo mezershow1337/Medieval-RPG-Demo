@@ -58,7 +58,7 @@ impl HeightField {
     }
 
     /// Билинейная выборка сетки значений по узлам (высот или весов скругления).
-    fn sample(&self, data: &[f32], x: f32, z: f32) -> f32 {
+    pub(crate) fn sample(&self, data: &[f32], x: f32, z: f32) -> f32 {
         let fx = ((x - self.origin.x) / self.cell).clamp(0.0, (self.nx - 1) as f32 - 0.001);
         let fz = ((z - self.origin.y) / self.cell).clamp(0.0, (self.nz - 1) as f32 - 0.001);
         let (ix, iz) = (fx as usize, fz as usize);

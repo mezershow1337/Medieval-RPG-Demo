@@ -275,8 +275,11 @@ fn sky_radiance_cover(dir_in: vec3<f32>, s: SkyParams, t: f32, disc: bool, cover
     return sky_radiance_cover_k(dir_in, s, t, disc, cover, 1.0);
 }
 
-// Горы Таврики на юге и юго-востоке (+Z — суша). Это настоящий рельеф, только далёкий: луч
-// взгляда идёт над картой высот (гребневой шум) от 2,5 до 42 км и ищет, где упрётся в склон.
+// Горы Таврики на юге и юго-востоке (+Z — суша). Это настоящий рельеф: луч взгляда идёт над
+// картой высот (гребневой шум) до 42 км и ищет, где упрётся в склон. Ближние предгорья есть и в
+// игре — по ним ходят (`level/mountains.rs` считает ту же карту высот, теми же числами); луч
+// панорамы начинается от игрока там, где кончается нарисованная земля (край прорисовки или
+// край карты), и горы на небе продолжают склоны под ногами.
 // Поэтому гряды сами заслоняют друг друга, у склонов есть освещённая и теневая сторона, а
 // дальние тонут в голубой дымке. Ближе — лесистые предгорья, за ними главная гряда: лес
 // понизу, выше тёмные скальные стены, на полках и макушках снег. На закате горы розовеют,
@@ -291,8 +294,16 @@ const MOUNT_H: f32 = 4600.0;
 // Панорама гор: половина охвата по азимуту (рад) и высота над горизонтом у нижнего и
 // верхнего края (рад).
 const MOUNT_AZ: f32 = 1.62;
-const MOUNT_EL0: f32 = -0.02;
-const MOUNT_EL1: f32 = 0.56;
+// Из предгорий главная гряда ближе и выше над горизонтом, а с гривы видно и вниз.
+const MOUNT_EL0: f32 = -0.06;
+const MOUNT_EL1: f32 = 0.8;
+// Предгорья: начинаются в стольких метрах от города (по MOUNT_L), полную высоту гребней FOOT_H
+// набирают к FOOT_U1. Те же числа — в mountains.rs.
+const FOOT_U0: f32 = 1100.0;
+const FOOT_U1: f32 = 2300.0;
+const FOOT_H: f32 = 600.0;
+// Плато, на котором стоят предгорья (средняя высота земли на юге карты), м.
+const MOUNT_BASE: f32 = 43.0;
 
 // Направление для точки панорамы гор.
 fn mountain_map_dir(uv: vec2<f32>) -> vec3<f32> {
@@ -310,7 +321,7 @@ fn mountain_map_uv(dir: vec3<f32>) -> vec3<f32> {
     let az = atan2(MOUNT_L.x * hd.y - MOUNT_L.y * hd.x, dot(MOUNT_L, hd));
     let el = asin(clamp(dir.y, -1.0, 1.0));
     let uv = vec2<f32>(az / MOUNT_AZ * 0.5 + 0.5, (MOUNT_EL1 - el) / (MOUNT_EL1 - MOUNT_EL0));
-    let inside = step(abs(az), MOUNT_AZ) * step(el, MOUNT_EL1) * step(0.0, el);
+    let inside = step(abs(az), MOUNT_AZ) * step(el, MOUNT_EL1) * step(MOUNT_EL0, el);
     return vec3<f32>(uv, inside);
 }
 
@@ -323,7 +334,8 @@ fn mountain_ridged(p0: vec2<f32>, octs: i32) -> f32 {
         let r = 1.0 - abs(2.0 * vnoise(p + vec2<f32>(17.1, 9.3) * f32(i)) - 1.0);
         h += a * r * r;
         sum += a;
-        p = p * 2.07 + vec2<f32>(3.1, 1.7);
+        // Каждый слой повёрнут: иначе гребни ложатся по осям сетки шума (вблизи — прямые валы).
+        p = vec2<f32>(0.8 * p.x - 0.6 * p.y, 0.6 * p.x + 0.8 * p.y) * 2.07 + vec2<f32>(3.1, 1.7);
         a *= 0.5;
     }
     return h / sum;
@@ -334,27 +346,60 @@ fn mountain_height(p: vec2<f32>, octs: i32) -> f32 {
     let q = p / 9000.0;
     let warp = (vec2<f32>(vnoise(q + vec2<f32>(3.3, 0.0)), vnoise(q + vec2<f32>(0.0, 7.1))) - 0.5) * 0.875;
     let r = mountain_ridged(p / 3600.0 + warp, octs);
-    let env = MOUNT_H * smoothstep(3600.0, 8200.0, u) * (1.0 - 0.35 * smoothstep(15000.0, 30000.0, u)) + 420.0 * smoothstep(2400.0, 3600.0, u);
+    let env = MOUNT_H * smoothstep(3600.0, 8200.0, u) * (1.0 - 0.35 * smoothstep(15000.0, 30000.0, u)) + FOOT_H * smoothstep(FOOT_U0, FOOT_U1, u);
     return env * (0.32 + 0.68 * pow(r, 1.1));
+}
+
+// Высота земли под горами над уровнем моря: горы плюс плато под ними.
+fn mountain_ground(p: vec2<f32>, octs: i32) -> f32 {
+    return mountain_height(p, octs) + MOUNT_BASE * smoothstep(FOOT_U0 - 300.0, FOOT_U0 + 300.0, dot(p, MOUNT_L));
+}
+
+// Откуда смотреть на горы. eye.xyz — глаз (в мире), eye.w — с какого расстояния начинать луч
+// (дальше края прорисовки: ближе горы — настоящая земля). edge — прямоугольник нарисованной
+// земли (xmin, xmax, zmin, zmax): за ним луч начинается сразу. fade.xy — где дымка у ближних
+// гор (полная до x, сходит к y): склон сразу за краем прорисовки тонет в той же дымке, что
+// и земля перед ним, а не стоит чёткой стеной.
+struct MountainView {
+    eye: vec4<f32>,
+    edge: vec4<f32>,
+    fade: vec4<f32>,
+}
+
+// Вид из середины города, как раньше: луч от 2,5 км.
+fn mountain_view_origin() -> MountainView {
+    return MountainView(vec4<f32>(0.0, 0.0, 0.0, 2500.0), vec4<f32>(-1e6, 1e6, -1e6, 1e6), vec4<f32>(0.0));
 }
 
 // Гора в направлении `dir`: rgb — её цвет (со светом и дымкой), a — 1, если луч упёрся в склон.
 // `steps` — шагов луча, `octs` — слоёв шума в форме гребней, `nocts` — в мелком рельефе склона.
 fn mountain_shade_q(dir_in: vec3<f32>, s: SkyParams, steps: i32, octs: i32, nocts: i32) -> vec4<f32> {
+    return mountain_shade_view(dir_in, s, mountain_view_origin(), steps, octs, nocts);
+}
+
+fn mountain_shade_view(dir_in: vec3<f32>, s: SkyParams, v: MountainView, steps: i32, octs: i32, nocts: i32) -> vec4<f32> {
     let dir = normalize(dir_in);
     let e = dir.y;
     let flat_len = length(dir.xz);
     let hd = dir.xz / max(flat_len, 1e-5);
-    // Выше 31° гор нет; в сторону моря — тоже.
-    if e < 0.0 || e > 0.52 || dot(hd, MOUNT_L) < 0.05 {
+    // Выше панорамы гор нет; в сторону моря — тоже.
+    if e < MOUNT_EL0 || e > MOUNT_EL1 - 0.02 || dot(hd, MOUNT_L) < 0.05 {
         return vec4<f32>(0.0);
     }
     let te = e / max(flat_len, 1e-5);
-    var t_prev = 2500.0;
+    let o = v.eye.xz;
+    let oy = v.eye.y;
+    // Где луч выходит за край нарисованной земли.
+    let inv = vec2<f32>(1.0) / select(hd, vec2<f32>(1e-6), abs(hd) < vec2<f32>(1e-6));
+    let tx = max((v.edge.x - o.x) * inv.x, (v.edge.y - o.x) * inv.x);
+    let tz = max((v.edge.z - o.y) * inv.y, (v.edge.w - o.y) * inv.y);
+    let t0 = clamp(min(v.eye.w, min(tx, tz)), 20.0, v.eye.w);
+    let t_far = 42000.0;
+    var t_prev = t0;
     var t_hit = -1.0;
     for (var i = 0; i < steps; i++) {
-        let t = 2500.0 * pow(16.8, f32(i + 1) / f32(steps));
-        if te * t < mountain_height(hd * t, octs) {
+        let t = t0 * pow(t_far / t0, f32(i + 1) / f32(steps));
+        if oy + te * t < mountain_ground(o + hd * t, octs) {
             t_hit = t;
             break;
         }
@@ -365,14 +410,14 @@ fn mountain_shade_q(dir_in: vec3<f32>, s: SkyParams, steps: i32, octs: i32, noct
     }
     for (var i = 0; i < 6; i++) {
         let mid = 0.5 * (t_prev + t_hit);
-        if te * mid < mountain_height(hd * mid, octs) {
+        if oy + te * mid < mountain_ground(o + hd * mid, octs) {
             t_hit = mid;
         } else {
             t_prev = mid;
         }
     }
     let t = t_hit;
-    let p = hd * t;
+    let p = o + hd * t;
     // Склон: нормаль по соседним высотам (с мелким рельефом — он даёт скальные грани).
     let st = 25.0 + t * 0.004;
     let h0 = mountain_height(p, nocts);
@@ -416,11 +461,15 @@ fn mountain_shade_q(dir_in: vec3<f32>, s: SkyParams, steps: i32, octs: i32, noct
     // светлели на фоне тёмных предгорий, как вырезанные из бумаги.
     let low = 1.0 - smoothstep(0.0, 0.2, e);
     mc = mix(mc, hor, low * sqrt(low) * 0.9);
+    // Ближние склоны сразу за краем прорисовки — в той же дымке, что земля перед ними.
+    if v.fade.y > v.fade.x {
+        mc = mix(mc, hor, (1.0 - smoothstep(v.fade.x, v.fade.y, t)) * 0.97);
+    }
     return vec4<f32>(mc, 1.0);
 }
 
-fn mountain_shade(dir: vec3<f32>, s: SkyParams) -> vec4<f32> {
-    return mountain_shade_q(dir, s, 40, 5, 8);
+fn mountain_shade(dir: vec3<f32>, s: SkyParams, v: MountainView) -> vec4<f32> {
+    return mountain_shade_view(dir, s, v, 40, 5, 8);
 }
 
 // Горы поверх неба `col_in`, расчётом на месте (упрощённым).

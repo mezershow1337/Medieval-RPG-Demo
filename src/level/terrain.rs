@@ -199,7 +199,8 @@ fn land(x: f32, z: f32) -> f32 {
     let east = (-((x - balka_x(z)) / 26.0).powi(2)).exp();
     let r = ravine(-480.0, -0.25, 30.0) * 12.0 + east * smoothstep(320.0, 420.0, z) * 10.0;
     let l = k * (hills + rise - r - 4.0 + knoll(x, z) + quarry_rise(x, z)).max(-k * 2.0) + (1.0 - k) * 0.0;
-    village_flat(x, z, l)
+    // На юге за плато встают предгорья (см. `mountains.rs`).
+    village_flat(x, z, l) + super::mountains::lift(x, z)
 }
 
 /// Под селом Святого Фоки земля выровнена (селяне веками срывали бугры и засыпали ямы под дворы):
@@ -242,27 +243,29 @@ pub fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
 /// Карта высот на всю карту. `holes` — прямоугольники (кратные 6 м), где земли нет
 /// (там стоят свои коробки: рыбозасолочные цистерны и т. п.).
 pub fn heightfield(holes: Vec<(Vec2, Vec2)>) -> HeightField {
-    let n = (WORLD_HALF * 2.0 / CELL) as usize + 1;
+    // По X — ±WORLD_HALF, по Z — от моря на севере до гор на юге (`mountains::MESH_SOUTH`).
+    let nx = (WORLD_HALF * 2.0 / CELL) as usize + 1;
+    let nz = ((WORLD_HALF + super::mountains::MESH_SOUTH) / CELL) as usize + 1;
     let origin = Vec2::splat(-WORLD_HALF);
-    let mut data = Vec::with_capacity(n * n);
-    for iz in 0..n {
-        for ix in 0..n {
+    let mut data = Vec::with_capacity(nx * nz);
+    for iz in 0..nz {
+        for ix in 0..nx {
             data.push(height_at(origin.x + ix as f32 * CELL, origin.y + iz as f32 * CELL));
         }
     }
-    let mut hf = HeightField { origin, cell: CELL, nx: n, nz: n, data, holes, round: Vec::new() };
+    let mut hf = HeightField { origin, cell: CELL, nx, nz, data, holes, round: Vec::new() };
     // Скругление изломов — там, где все четыре клетки вокруг узла мелкие (см. `fine_cell`):
     // на границе с обычными клетками вес нулевой, и меши сходятся без щелей. У города, на
     // набережной и в каменоломне земля остаётся как была: там к ней подогнаны постройки.
-    let mut round = vec![0.0; n * n];
-    for iz in 1..n - 1 {
-        for ix in 1..n - 1 {
+    let mut round = vec![0.0; nx * nz];
+    for iz in 1..nz - 1 {
+        for ix in 1..nx - 1 {
             if (0..4).all(|k| fine_cell(&hf, ix - 1 + k % 2, iz - 1 + k / 2)) {
                 let (x, z) = (origin.x + ix as f32 * CELL, origin.y + iz as f32 * CELL);
                 let (qx, qz) = QUARRY_FACE;
                 let quarry = (x - qx).abs() < 60.0 && (z - qz).abs() < 70.0;
                 let built = quarry || on_quay(x, z) || hf.holes.iter().any(|(a, b)| x > a.x - 2.0 * CELL && x < b.x + 2.0 * CELL && z > a.y - 2.0 * CELL && z < b.y + 2.0 * CELL);
-                round[iz * n + ix] = if built { 0.0 } else { smoothstep(6.0, 24.0, city_distance(x, z)) };
+                round[iz * nx + ix] = if built { 0.0 } else { smoothstep(6.0, 24.0, city_distance(x, z)) };
             }
         }
     }
@@ -292,6 +295,14 @@ pub fn ground_y(x: f32, z: f32) -> f32 {
 fn shared_field() -> &'static HeightField {
     static HF: std::sync::OnceLock<HeightField> = std::sync::OnceLock::new();
     HF.get_or_init(|| heightfield(Vec::new()))
+}
+
+/// Высота земли без скругления изломов: так её рисуют и по ней ходят у «дыр» в рельефе (там
+/// скругление выключено, см. [`heightfield`]). Своя поверхность в дыре, посчитанная по этой
+/// высоте в узлах через 1,5 м, сходится с землёй вокруг без щелей.
+pub fn plain_y(x: f32, z: f32) -> f32 {
+    let hf = shared_field();
+    hf.sample(&hf.data, x, z)
 }
 
 /// Высота нарисованной земли: по тем же треугольникам, что строит [`terrain_meshes`].
@@ -324,7 +335,7 @@ pub fn mesh_y(x: f32, z: f32) -> f32 {
 /// Меши земли по участкам: внутри стен — утоптанная земля, снаружи — трава и камень.
 /// Клетки глубоко под водой и в «дырах» пропускаются.
 pub fn terrain_meshes(hf: &HeightField, out: &mut HashMap<(Mat, Chunk), MeshBuilder>) {
-    let n = hf.nx;
+    let (n, nz) = (hf.nx, hf.nz);
     let pos = |ix: usize, iz: usize| Vec3::new(hf.origin.x + ix as f32 * hf.cell, hf.node(ix, iz), hf.origin.y + iz as f32 * hf.cell);
     // Нормаль узла — по более крутой из двух соседних клеток по каждой оси, а не по разности
     // через две клетки (12 м): короткий откос в одну клетку по средней разности выходил
@@ -334,13 +345,13 @@ pub fn terrain_meshes(hf: &HeightField, out: &mut HashMap<(Mat, Chunk), MeshBuil
         let l = hf.node(ix.saturating_sub(1), iz);
         let r = hf.node((ix + 1).min(n - 1), iz);
         let d = hf.node(ix, iz.saturating_sub(1));
-        let u = hf.node(ix, (iz + 1).min(n - 1));
+        let u = hf.node(ix, (iz + 1).min(nz - 1));
         let steeper = |a: f32, b: f32| if a.abs() > b.abs() { a } else { b };
         Vec3::new(-steeper(c - l, r - c), hf.cell, -steeper(c - d, u - c)).normalize()
     };
     // Вершины одного участка переиспользуются: индекс узла -> индекс вершины в меше участка.
     let mut maps: HashMap<(Mat, Chunk), HashMap<usize, u32>> = HashMap::new();
-    for iz in 0..n - 1 {
+    for iz in 0..nz - 1 {
         for ix in 0..n - 1 {
             let corners = [pos(ix, iz), pos(ix + 1, iz), pos(ix + 1, iz + 1), pos(ix, iz + 1)];
             if corners.iter().all(|c| c.y < WATER_Y - 2.0) {
@@ -448,6 +459,7 @@ mod tests {
         assert!(gap < 1.5, "нарисованная земля ушла от гладкой на {gap} м");
         println!("мелких клеток {fine}, точек со сдвигом {moved}, наибольший сдвиг {worst:.2} м");
         assert!(moved > 100, "скругление нигде не сработало");
-        assert!(worst < 4.0, "скругление сдвинуло землю на {worst} м");
+        // Больше всего — на бровках отвесных уступов-куэст в горах (стены в десятки метров).
+        assert!(worst < 6.0, "скругление сдвинуло землю на {worst} м");
     }
 }

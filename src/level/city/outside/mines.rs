@@ -617,7 +617,7 @@ fn mine(b: &mut Builder) {
 
 /// Натоптанная тропа по рельефу (лента шириной `w`): края рваные (каждый — свой шум),
 /// к концам тропа сходит на нет, без тупых прямоугольных торцов.
-fn path_ribbon(b: &mut Builder, pts: &[Vec2], w: f32) {
+pub(crate) fn path_ribbon(b: &mut Builder, pts: &[Vec2], w: f32) {
     let mut samples: Vec<(Vec2, Vec2)> = Vec::new();
     for seg in pts.windows(2) {
         let (a, c) = (seg[0], seg[1]);

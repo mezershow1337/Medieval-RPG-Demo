@@ -202,13 +202,15 @@ pub fn city_layout() -> Layout {
     port::port(&mut b);
     outside::outside(&mut b);
 
-    // Край карты.
+    // Край карты. На юге он дальше — за предгорьями (`mountains::WORLD_SOUTH`), и стены там
+    // выше: склоны поднимаются на сотни метров.
     let e = WORLD_HALF - 4.0;
+    let s = super::mountains::WORLD_SOUTH - 4.0;
     for (min, max) in [
         (Vec3::new(-e - 2.0, -20.0, -e - 2.0), Vec3::new(e + 2.0, 200.0, -e)),
-        (Vec3::new(-e - 2.0, -20.0, e), Vec3::new(e + 2.0, 200.0, e + 2.0)),
-        (Vec3::new(-e - 2.0, -20.0, -e), Vec3::new(-e, 200.0, e)),
-        (Vec3::new(e, -20.0, -e), Vec3::new(e + 2.0, 200.0, e)),
+        (Vec3::new(-e - 2.0, -20.0, s), Vec3::new(e + 2.0, 1500.0, s + 2.0)),
+        (Vec3::new(-e - 2.0, -20.0, -e), Vec3::new(-e, 1500.0, s)),
+        (Vec3::new(e, -20.0, -e), Vec3::new(e + 2.0, 1500.0, s)),
     ] {
         b.invisible.push(crate::collision::Aabb::new(min, max));
     }

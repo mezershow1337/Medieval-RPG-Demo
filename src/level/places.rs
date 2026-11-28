@@ -64,6 +64,10 @@ pub enum PlaceKind {
     ClayPit,
     Beach,
     Quarry,
+    /// Пастуший кош в горах.
+    Pasture,
+    /// Грот в горах.
+    Cave,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -147,6 +151,7 @@ fn city_places() -> Vec<Place> {
     let hr = city::block(18, 2);
     let sp = spring_pos();
     let flat = |x: f32, z: f32| Vec3::new(x, 0.0, z);
+    let hl = city::outside::highlands::sites();
     let p = |id, name, greek, kind, pos: Vec3, radius| Place { id, name, greek, kind, pos, radius };
     vec![
         p("agora", "Агора", "ἀγορά", Agora, flat(a.cx() - 6.0, a.cz() + 2.0), 22.0),
@@ -204,6 +209,8 @@ fn city_places() -> Vec<Place> {
         p("sand_beach", "Песок у Песочной бухты", "—", Beach, on_ground(mines::SAND_BEACH.x + 2.0, mines::SAND_BEACH.y + 3.0), 10.0),
         p("quarry", "Каменоломня за бухтой", "λατομεῖον", Quarry, on_ground(mines::QUARRY.x, mines::QUARRY.y - 9.0), 14.0),
         p("fish_hut", "Рыбацкая лачуга у Песочной бухты", "καλύβη", Quay, city::outside::fishing::trader_point(), 8.0),
+        p("shepherd_camp", "Пастуший кош в горах", "μάνδρα", Pasture, on_ground(hl.camp.x - 2.0, hl.camp.y - 2.0), 30.0),
+        p("grotto", "Разбойничий грот", "σπήλαιον", Cave, hl.grotto.hall(), 10.0),
     ]
 }
 
@@ -309,7 +316,7 @@ pub fn herb_patches() -> &'static [HerbPatch] {
     }
     H.get_or_init(|| {
         let wet = |z: f32, dx: f32| (terrain::balka_x(z) + dx, z);
-        let list: [(&str, (f32, f32), f32); 36] = [
+        let mut list: Vec<(&str, (f32, f32), f32)> = vec![
             ("salvia", (-60.0, 300.0), 7.0),
             ("salvia", (125.0, 380.0), 6.0),
             ("salvia", (-300.0, 425.0), 7.0),
@@ -347,6 +354,8 @@ pub fn herb_patches() -> &'static [HerbPatch] {
             ("inula", wet(560.0, 3.0), 4.0),
             ("inula", wet(545.0, -4.0), 3.0),
         ];
+        // Горные травы — в конце списка (номера прежних зарослей не сдвигаются).
+        list.extend(city::outside::highlands::herb_spots().into_iter().map(|(h, p, r)| (h, (p.x, p.y), r)));
         list.iter().map(|&(herb, (x, z), radius)| HerbPatch { herb, pos: on_ground(x, z), radius }).collect()
     })
 }
@@ -420,6 +429,10 @@ pub fn npc_posts() -> Vec<NpcPost> {
             let (x, z) = (c.x + a.cos() * 6.0, c.z + a.sin() * 6.0);
             v.push(post(on_ground(x, z), group, (-a.cos()).atan2(-a.sin()), 12.0));
         }
+    }
+    // Горы: пастухи-готы у коша, разбойники в гроте.
+    for (pos, group, yaw, wander) in city::outside::highlands::posts() {
+        v.push(post(pos, group, yaw, wander));
     }
     v
 }
