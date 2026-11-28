@@ -184,6 +184,6 @@ fn view_from(eye: Vec3, settings: &crate::settings::Settings) -> MountainView {
     MountainView {
         eye: eye.extend(dome),
         edge: Vec4::new(-half, half, -half, crate::level::mountains::MESH_SOUTH),
-        fade: Vec4::new(dome, dome + 1400.0, 0.0, 0.0),
+        fade: Vec4::new(dome, dome + 700.0, 0.0, 0.0),
     }
 }

@@ -142,10 +142,8 @@ fn parse_addr(s: &str) -> SocketAddr {
 fn dump_map(path: &str) {
     use level::PlantKind as K;
     const N: usize = 900;
-    // По Z — до южного края гор.
-    let nz = ((900.0 + level::mountains::MESH_SOUTH) / 2.0) as usize;
-    let mut px = vec![0u8; N * nz * 3];
-    for j in 0..nz {
+    let mut px = vec![0u8; N * N * 3];
+    for j in 0..N {
         for i in 0..N {
             let (x, z) = (i as f32 * 2.0 - 900.0, j as f32 * 2.0 - 900.0);
             let y = level::ground_y(x, z);
@@ -156,10 +154,7 @@ fn dump_map(path: &str) {
             } else if level::road_distance(x, z) < 2.6 {
                 [120, 95, 60]
             } else {
-                // Горы — тенью склона, чтобы были видны гривы и уступы.
-                let (dx, dz) = (level::ground_y(x + 2.0, z) - y, level::ground_y(x, z + 2.0) - y);
-                let shade = (1.0 - (dx + dz) * 0.35).clamp(0.4, 1.4);
-                let k = ((60.0 + y.min(35.0) * 4.0 + (y - 35.0).max(0.0) * 0.25) * shade).clamp(30.0, 230.0) as u8;
+                let k = (60.0 + y * 4.0).clamp(40.0, 200.0) as u8;
                 [k, k.saturating_add(25), k / 2 + 20]
             };
             px[(j * N + i) * 3..][..3].copy_from_slice(&c);
@@ -176,7 +171,7 @@ fn dump_map(path: &str) {
             _ => continue,
         };
         let (i, j) = (((p.pos.x + 900.0) / 2.0) as i32, ((p.pos.z + 900.0) / 2.0) as i32);
-        if i >= 0 && j >= 0 && (i as usize) < N && (j as usize) < nz {
+        if i >= 0 && j >= 0 && (i as usize) < N && (j as usize) < N {
             px[(j as usize * N + i as usize) * 3..][..3].copy_from_slice(&c);
         }
     }
@@ -191,7 +186,7 @@ fn dump_map(path: &str) {
             }
         }
     }
-    let mut out = format!("P6\n{N} {nz}\n255\n").into_bytes();
+    let mut out = format!("P6\n{N} {N}\n255\n").into_bytes();
     out.extend_from_slice(&px);
     std::fs::write(path, out).expect("не записать карту");
 }

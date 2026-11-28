@@ -198,10 +198,6 @@ fn find_grotto(camp: Vec2) -> Grotto {
                 })
             });
             let inside = (-850.0..850.0).contains(&foot.x) && foot.y < WORLD_SOUTH - 70.0 && g.at(GROTTO_LEN + 8.0, 0.0).y < WORLD_SOUTH - 20.0;
-            if std::env::var("GROTTO_DEBUG").is_ok() {
-                let prof: Vec<i32> = (0..10).map(|k| { let q = g.at(k as f32 * 2.0, 0.0); (ground_y(q.x, q.y) - floor) as i32 }).collect();
-                eprintln!("{foot:?} apron {apron} rock {rock} inside {inside} {prof:?}");
-            }
             if !(apron && rock && inside) {
                 continue;
             }
@@ -546,35 +542,67 @@ fn grotto(b: &mut Builder) {
     let hole = Rect::new(snap_lo(lo.x), snap_lo(lo.y), snap_hi(hi.x), snap_hi(hi.y));
     b.holes.push((Vec2::new(hole.x0, hole.z0), Vec2::new(hole.x1, hole.z1)));
     let surf = |x: f32, z: f32| terrain::plain_y(x, z);
-    // Внутри ли полости точка поверхности (тогда её не рисуем — там устье).
-    let in_void = |p: Vec3| {
-        let (t, s) = g.local(Vec2::new(p.x, p.z));
-        t > -3.0 && t < GROTTO_LEN && s.abs() < Grotto::half_w(t.max(0.0)) + 0.15 && p.y < fl + Grotto::height(t.max(0.0)) + 0.15
+    // Поверхность склона над гротом. Карта высот не умеет навесов, поэтому над полостью
+    // склон поднят выше свода («крыша» устья), а у подошвы остаётся землёй площадки; грани
+    // между тем и другим выброшены — это и есть устье. Нижнюю часть навеса даёт сама арка
+    // (у устья она двусторонняя), стыки закрывают глыбы.
+    #[derive(Clone, Copy, PartialEq)]
+    enum V {
+        Out,
+        Low,
+        Lifted,
+    }
+    let classify = |x: f32, z: f32| {
+        let y = surf(x, z);
+        let (t, s) = g.local(Vec2::new(x, z));
+        if t > -3.0 && t < GROTTO_LEN + 0.5 && s.abs() < Grotto::half_w(t.clamp(0.0, GROTTO_LEN)) + 0.45 {
+            if y < fl + 0.5 {
+                (y, V::Low)
+            } else {
+                (y.max(fl + Grotto::height(t.clamp(0.0, GROTTO_LEN)) + 0.6), V::Lifted)
+            }
+        } else {
+            (y, V::Out)
+        }
     };
-    let step = 1.5;
+    let step = 0.75;
     let nx = (hole.w() / step).round() as usize;
     let nz = (hole.d() / step).round() as usize;
     b.at(hole.cx(), hole.cz());
     {
-        let mut verts = vec![(0u32, Vec3::ZERO); (nx + 1) * (nz + 1)];
+        let grid: Vec<(Vec3, V)> = (0..=nz)
+            .flat_map(|j| (0..=nx).map(move |i| (i, j)))
+            .map(|(i, j)| {
+                let (x, z) = (hole.x0 + i as f32 * step, hole.z0 + j as f32 * step);
+                let (y, v) = classify(x, z);
+                (Vec3::new(x, y, z), v)
+            })
+            .collect();
+        let at = |i: usize, j: usize| grid[j.min(nz) * (nx + 1) + i.min(nx)].0;
         let m = b.mesh(Mat::Terrain);
+        let mut ids = Vec::with_capacity(grid.len());
         for j in 0..=nz {
             for i in 0..=nx {
-                let (x, z) = (hole.x0 + i as f32 * step, hole.z0 + j as f32 * step);
-                let p = Vec3::new(x, surf(x, z), z);
-                let e = 0.75;
-                let n = Vec3::new(surf(x - e, z) - surf(x + e, z), 2.0 * e, surf(x, z - e) - surf(x, z + e)).normalize();
-                verts[j * (nx + 1) + i] = (m.vert(p, n, Vec2::new(x, z)), p);
+                let p = at(i, j);
+                let dx = at(i + 1, j) - at(i.saturating_sub(1), j);
+                let dz = at(i, j + 1) - at(i, j.saturating_sub(1));
+                let mut n = dz.cross(dx).normalize_or_zero();
+                if n.y < 0.0 {
+                    n = -n;
+                }
+                ids.push(m.vert(p, n, Vec2::new(p.x, p.z)));
             }
         }
         for j in 0..nz {
             for i in 0..nx {
-                let q = [verts[j * (nx + 1) + i], verts[j * (nx + 1) + i + 1], verts[(j + 1) * (nx + 1) + i + 1], verts[(j + 1) * (nx + 1) + i]];
-                if q.iter().all(|(_, p)| in_void(*p)) {
+                let c = [j * (nx + 1) + i, j * (nx + 1) + i + 1, (j + 1) * (nx + 1) + i + 1, (j + 1) * (nx + 1) + i];
+                let low = c.iter().any(|&k| grid[k].1 == V::Low);
+                let high = c.iter().any(|&k| grid[k].0.y > fl + 1.2);
+                if low && high {
                     continue;
                 }
-                m.index_tri(q[0].0, q[2].0, q[1].0);
-                m.index_tri(q[0].0, q[3].0, q[2].0);
+                m.index_tri(ids[c[0]], ids[c[2]], ids[c[1]]);
+                m.index_tri(ids[c[0]], ids[c[3]], ids[c[2]]);
             }
         }
     }
@@ -601,14 +629,18 @@ fn grotto(b: &mut Builder) {
         }
     }
     // Скала: кольца сечения через 1 м, каждое — арка из 12 точек с неровностью камня.
-    let rings: Vec<f32> = (0..=((GROTTO_LEN + 2.5) as usize)).map(|k| -2.5 + k as f32).collect();
+    let mut rings: Vec<f32> = (0..=((GROTTO_LEN + 2.5) as usize)).map(|k| -2.5 + k as f32).collect();
+    // Последнее кольцо — ровно у дальней стены, без щели.
+    if *rings.last().unwrap() < GROTTO_LEN - 0.01 {
+        rings.push(GROTTO_LEN);
+    }
     let arc = 12;
     let point = |t: f32, k: usize| {
         let a = k as f32 / arc as f32 * PI;
         let (w, h) = (Grotto::half_w(t.clamp(0.0, GROTTO_LEN)), Grotto::height(t.clamp(0.0, GROTTO_LEN)));
         let c = a.cos();
         let lat = c.signum() * c.abs().powf(0.55) * w;
-        let y = a.sin().powf(0.7) * h;
+        let y = a.sin().max(0.0).powf(0.7) * h;
         // Камень неровный: стены то выпирают, то уходят в ниши, свод — буграми.
         let q = g.at(t, lat);
         let bump = (terrain::fbm(q.x * 0.9 + y * 0.7, q.y * 0.9 - y * 0.5, 811) - 0.47) * 0.8;
@@ -638,6 +670,8 @@ fn grotto(b: &mut Builder) {
         for k in 0..arc {
             m.tri(point(t, k), point(t, k + 1), c, -Vec3::new(g.dir.x, 0.0, g.dir.y));
         }
+        // И низ стены — от пола до середины.
+        m.tri(point(t, arc), point(t, 0), c, -Vec3::new(g.dir.x, 0.0, g.dir.y));
     }
     // Пол: утоптанная земля с золой у костра.
     {
@@ -667,15 +701,19 @@ fn grotto(b: &mut Builder) {
         let size = rng.range(1.4, 2.2);
         b.plant(PlantKind::Rock, Vec3::new(p.x, fl + y - size * 0.45, p.y), size, rng.range(0.0, TAU), rng.int(64) as u32);
     }
-    // Логово: кострище в зале (копоть на своде), лежанки из соломы и шкур, сундук с добычей,
+    // И по бокам устья, где склон сходится с аркой.
+    for (t, side) in [(-1.2f32, -1.0f32), (-1.2, 1.0), (0.6, -1.0), (0.6, 1.0), (2.0, -1.0), (2.0, 1.0)] {
+        let p = g.at(t, side * (Grotto::half_w(t.max(0.0)) + rng.range(0.9, 1.4)));
+        let size = rng.range(1.3, 2.0);
+        b.plant(PlantKind::Rock, Vec3::new(p.x, surf(p.x, p.y).max(fl) - size * 0.3, p.y), size, rng.range(0.0, TAU), rng.int(64) as u32);
+    }
+    // Логово: кострище в зале, лежанки из соломы и шкур, сундук с добычей,
     // амфоры с краденым вином, кости и черепки.
     let hall = g.hall();
     let fire = Vec3::new(hall.x, fl, hall.z);
     kit::hearth(b, fire);
     b.lamp(fire + Vec3::Y * 0.9, Color::srgb(1.0, 0.58, 0.28), 6_000.0, 9.0);
     b.torch(fire.x, fire.y + 0.45, fire.z, Vec3::ZERO);
-    let roof = fl + Grotto::height(8.0) - 0.05;
-    b.mesh(Mat::Soot).disc(Vec3::new(hall.x, roof, hall.z), 1.6, 12, false);
     let at = |t: f32, s: f32| {
         let p = g.at(t, s);
         Vec3::new(p.x, fl, p.y)
@@ -862,6 +900,16 @@ mod tests {
         for t in [2.0f32, 5.0, 10.0, 14.0] {
             let p = g.at(t, 0.0);
             assert!(ground_y(p.x, p.y) > g.floor + Grotto::height(t) + 1.0, "свод грота наружу на глубине {t}");
+        }
+    }
+
+    /// Ни одной вершины NaN: меш с NaN получает рамку NaN и отсекается целиком (так однажды
+    /// пропал весь свод грота — `sin(π)` чуть меньше нуля, а дробная степень от него — NaN).
+    #[test]
+    fn level_meshes_are_finite() {
+        let layout = crate::level::layout();
+        for ((mat, chunk), mb) in &layout.decor {
+            assert!(mb.triangles().flatten().all(|p| p.is_finite()), "NaN в меше {mat:?} {chunk:?}");
         }
     }
 }
