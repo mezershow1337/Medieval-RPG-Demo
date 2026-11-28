@@ -20,7 +20,13 @@ import bevy_pbr::render::{
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
     view_transformations::{depth_ndc_to_view_z, position_world_to_view, position_world_to_clip},
 };
-import medieval_rpg::shaders::sky_common::{SkyParams, sky_radiance, vnoise, fbm3};
+import medieval_rpg::shaders::sky_common::{SkyParams, sky_radiance, sky_radiance_parts, mountain_map_uv, dome_uv, vnoise, fbm3};
+@if(DISTANCE_FOG)
+import bevy_pbr::render::mesh_view_bindings::fog;
+@if(DISTANCE_FOG)
+import bevy_pbr::render::pbr_functions::apply_fog;
+@if(DISTANCE_FOG)
+import bevy_pbr::render::pbr_types::STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;
 @if(DEPTH_PREPASS)
 import bevy_pbr::prepass::utils::prepass_depth;
 @if(DEPTH_PREPASS)
@@ -49,6 +55,44 @@ var<uniform> water: Water;
 var water_map: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(102)
 var water_map_sampler: sampler;
+// Карта объёмных облаков (cloud_map.wesl) — та же, что читает купол неба.
+@group(constants::MATERIAL_BIND_GROUP) @binding(103)
+var cloud_map: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(104)
+var cloud_map_sampler: sampler;
+// Как в sky.wesl: origin.xyz — откуда снята карта, w — готова ли; drift.xy — снос ветром.
+struct CloudDome {
+    origin: vec4<f32>,
+    drift: vec4<f32>,
+}
+@group(constants::MATERIAL_BIND_GROUP) @binding(105)
+var<uniform> cloud_dome: CloudDome;
+// Панорама дальних гор (mountain_map.wesl); готова ли она — cloud_dome.drift.z.
+@group(constants::MATERIAL_BIND_GROUP) @binding(106)
+var mountain_map: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(107)
+var mountain_map_sampler: sampler;
+
+// Небо в отражении — как на куполе: днём кучевые из карты облаков, поверх них горы.
+fn reflected_sky(wp: vec3<f32>, r: vec3<f32>, s: SkyParams, t: f32) -> vec3<f32> {
+    let vol_k = clamp(s.sun.w, 0.0, 1.0) * (1.0 - clamp(s.extra.x, 0.0, 1.0)) * cloud_dome.origin.w;
+    var cover = 0.0;
+    var col = sky_radiance_parts(r, s, t, false, &cover, 1.0 - vol_k, false);
+    if vol_k > 0.001 && r.y > 0.004 {
+        let tc = (1500.0 - wp.y) / max(r.y, 0.03);
+        let pc = wp + r * tc + vec3<f32>(cloud_dome.drift.x, 0.0, cloud_dome.drift.y);
+        let c = textureSampleLevel(cloud_map, cloud_map_sampler, dome_uv(normalize(pc - cloud_dome.origin.xyz)), 0.0);
+        col = col * (1.0 - c.a * vol_k) + c.rgb * 3.0 * vol_k;
+    }
+    if r.y >= 0.0 && cloud_dome.drift.z > 0.5 {
+        let muv = mountain_map_uv(r);
+        if muv.z > 0.5 {
+            let m = textureSampleLevel(mountain_map, mountain_map_sampler, muv.xy, 0.0);
+            col = col * (1.0 - m.a) + m.rgb * 2.0;
+        }
+    }
+    return col;
+}
 
 const MAP_HALF: f32 = 900.0;
 const N_WAVES: u32 = 6u;
@@ -140,18 +184,26 @@ fn wave_grad(p: vec2<f32>, dir: vec2<f32>, len: f32, steep: f32, t: f32) -> vec2
 }
 
 fn ripples(p: vec2<f32>, t: f32) -> vec2<f32> {
+    // Рябь вытянута гребнями поперёк ветра: под малым углом такие гребни растягивают отражения
+    // в светлые и тёмные дорожки, а круглая «крупа» давала ровный шум.
+    let w = vec2<f32>(0.6, 0.8);
+    let c = vec2<f32>(0.8, -0.6);
+    let q = vec2<f32>(dot(p, c), dot(p, w));
     let e = 0.15;
-    let a = p * 1.6 + vec2<f32>(t * 0.35, t * 0.21);
-    let b = p * 3.7 - vec2<f32>(t * 0.27, -t * 0.4);
-    let h0 = vnoise(a) + vnoise(b) * 0.5;
-    let hx = vnoise(a + vec2<f32>(e, 0.0)) + vnoise(b + vec2<f32>(e * 2.3, 0.0)) * 0.5;
-    let hz = vnoise(a + vec2<f32>(0.0, e)) + vnoise(b + vec2<f32>(0.0, e * 2.3)) * 0.5;
-    return vec2<f32>(hx - h0, hz - h0) / e;
+    let a = vec2<f32>(q.x * 0.6, q.y * 1.7) + vec2<f32>(t * 0.1, t * 0.4);
+    let b = vec2<f32>(q.x * 1.5, q.y * 3.9) - vec2<f32>(t * 0.27, -t * 0.4);
+    // Третья, мелкая октава: без неё вода у ног гладкая, как масло.
+    let d = vec2<f32>(q.x * 3.6, q.y * 8.5) + vec2<f32>(t * 0.5, t * 0.75);
+    let h0 = vnoise(a) + vnoise(b) * 0.5 + vnoise(d) * 0.2;
+    let hx = vnoise(a + vec2<f32>(e * 0.375, 0.0)) + vnoise(b + vec2<f32>(e * 0.94, 0.0)) * 0.5 + vnoise(d + vec2<f32>(e * 2.25, 0.0)) * 0.2;
+    let hz = vnoise(a + vec2<f32>(0.0, e * 1.06)) + vnoise(b + vec2<f32>(0.0, e * 2.44)) * 0.5 + vnoise(d + vec2<f32>(0.0, e * 5.3)) * 0.2;
+    let g = vec2<f32>(hx - h0, hz - h0) / e;
+    return c * g.x + w * g.y;
 }
 
 // Поглощение света в воде, 1/м (красный — сильнее всего): вода Понта зеленовато-синяя.
 fn sigma() -> vec3<f32> {
-    return vec3<f32>(0.55, 0.2, 0.21) * water.deep.w;
+    return vec3<f32>(0.34, 0.25, 0.28) * water.deep.w;
 }
 
 // Блики на дне (каустика): свет, собранный в сетку волнами наверху. 0..~1.
@@ -264,14 +316,16 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
     // Нормаль: крупные волны — из вершин, мелкие и рябь — здесь. Вдали мелочь гаснет
     // (иначе мерцает), её заменяет шероховатость блика. Простая вода — без ряби.
-    let fade_small = (1.0 - smoothstep(25.0, 160.0, dist)) * (1.0 - water.params.w);
+    let fade_small = (1.0 - smoothstep(40.0, 220.0, dist)) * (1.0 - water.params.w);
     var g = vec2<f32>(0.0);
-    let small = mix(0.45, 1.0, calm);
-    g += wave_grad(p, normalize(vec2<f32>(0.95, -0.3)), 1.45, 0.06, t) * fade_small * small;
+    // В бухте больших волн нет, зато мелкая рябь видна вся: она дробит отражение леса и неба
+    // на светлые и тёмные штрихи.
+    g += wave_grad(p, normalize(vec2<f32>(0.95, -0.3)), 1.45, 0.06, t) * fade_small;
     if water.params.w < 0.5 {
-        g += wave_grad(p, normalize(vec2<f32>(-0.4, 0.9)), 0.9, 0.05, t) * fade_small * small;
-        g += wave_grad(p, normalize(vec2<f32>(0.6, -0.8)), 0.55, 0.04, t) * fade_small * small;
-        g += ripples(p, t) * 0.04 * fade_small;
+        g += wave_grad(p, normalize(vec2<f32>(-0.4, 0.9)), 0.9, 0.05, t) * fade_small;
+        g += wave_grad(p, normalize(vec2<f32>(0.6, -0.8)), 0.55, 0.04, t) * fade_small;
+        // У самых ног рябь мельче: крупные блики вплотную выглядели масляными кольцами.
+        g += ripples(p, t) * mix(0.065, 0.04, calm) * fade_small * mix(0.6, 1.0, smoothstep(2.0, 14.0, dist));
     }
     let big = normalize(in.world_normal);
     var N = normalize(vec3<f32>(big.x - g.x, big.y, big.z - g.y));
@@ -343,26 +397,39 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
     // Френель (Шлик, n = 1.33).
     let nv = max(dot(N, v), 0.0);
-    var fres = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
+    // В бухте рябь мельче точки экрана: её склоны повёрнуты к зрителю круче средней
+    // поверхности, поэтому тихая вода отражает небо и лес сильнее, чем гладкое зеркало под
+    // тем же углом. В открытом море (calm = 1) крупная волна уже в нормали — там по Шлику.
+    var fres = mix(0.03, 0.02, calm) + 0.97 * pow(1.0 - nv, mix(3.6, 5.0, calm));
     // Вдали рябь не рисуется, но она есть: склоны мелких волн повёрнуты к зрителю, поэтому
     // настоящее море у горизонта не зеркало — оно темнее неба и отражает небо повыше.
     // Полосы порывов (вытянуты по ветру) дают тёмные и светлые дорожки на воде.
     let far_k = smoothstep(30.0, 350.0, dist) * (1.0 - water.params.w);
     let gust = smoothstep(0.3, 0.7, fbm3(vec2<f32>(wp.x * 0.004 + t * 0.004, wp.z * 0.022 - t * 0.002)));
-    fres = mix(fres, min(fres, mix(0.26, 0.5, gust)), far_k);
+    // В закрытой бухте ряби мало — вода ближе к зеркалу и отражает светлое небо у горизонта.
+    let cap = mix(mix(0.5, 0.8, gust), mix(0.16, 0.34, gust), calm);
+    fres = mix(fres, min(fres, cap), far_k);
 
     // Отражение неба (луч не ниже горизонта — там море видит само себя).
     var r = reflect(-v, N);
-    r.y = max(r.y, 0.004) + mix(0.24, 0.08, gust) * far_k;
+    r.y = max(r.y, 0.004) + mix(0.24, 0.08, gust) * far_k * mix(0.35, 1.0, calm);
     r = normalize(r);
     var s = water.sky;
     s.zenith.w = t;
-    var refl = sky_radiance(r, s, t, false);
+    var refl = reflected_sky(wp, r, s, t);
+    // Рябь смешивает в отражении синий зенит со светлым небом у горизонта: вода не синяя, а
+    // серо-стальная с зеленцой.
+    // Днём — сильнее: вблизи вода смотрит в синий зенит и без этого лежала синими пятнами (на
+    // закате краски неба в воде не трогаем).
+    let day_k = clamp(s.sun.w, 0.0, 1.0);
+    refl = mix(vec3<f32>(dot(refl, vec3<f32>(0.25, 0.6, 0.15))) * mix(vec3<f32>(0.96, 1.02, 1.0), vec3<f32>(0.98, 1.03, 0.94), day_k), refl, mix(0.62, 0.4, day_k));
     // Город, стены, корабли — трассировкой по кадру.
     if water.waves.z > 0.5 && water.params.w < 0.5 {
         let jitter = fract(sin(dot(in.position.xy, vec2<f32>(12.9898, 78.233))) * 43758.5453);
         let h = trace_reflection(wp, normalize(r), jitter);
-        refl = mix(refl, h.rgb, h.a);
+        // Рябь подмешивает к отражению берега немного неба: тёмные ели не ложатся в воду
+        // чёрными пятнами.
+        refl = mix(refl, h.rgb, h.a * 0.85);
     }
 
     // Солнечная дорожка: GGX-блик, шероховатость растёт с расстоянием.
@@ -453,6 +520,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
             let ck = caustic(bp.xz + N.xz * 0.6, t) * exp(-d * 0.22) * smoothstep(0.05, 0.6, d) * sun_k * (1.0 - smoothstep(40.0, 120.0, dist));
             bottom *= 1.0 + ck * 1.6;
         }
+        // Мокрый камень под водой темнее сухого (иначе светлая галька светится бирюзой).
+        bottom *= mix(1.0, 0.5, smoothstep(0.0, 0.25, len));
         // Свет идёт до дна сверху и потом от дна к глазу: гаснет на обоих отрезках.
         let tr = exp(-sigma() * (len + len * max(v.y, 0.05)));
         let through = bottom * tr + inscatter * (vec3<f32>(1.0) - tr);
@@ -471,6 +540,18 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     alpha = max(alpha, foam);
 
     var out: FragmentOutput;
-    out.color = main_pass_post_lighting_processing(pbr_input, vec4<f32>(col, alpha));
+    var c4 = vec4<f32>(col, alpha);
+@if(DISTANCE_FOG) {
+    // Дымка над водой — по дальности видимости погоды, а не по краю прорисовки: суша дальше
+    // края не рисуется и прячется в дымке, а море уходит до горизонта — с общей дымкой оно за
+    // краем прорисовки было сплошной белёсой пеленой.
+    if water.waves.w > fog.be.y && fog.be.y > 1.0 {
+        var f = fog;
+        f.be = vec3<f32>(fog.be.x * water.waves.w / fog.be.y, water.waves.w, fog.be.z);
+        c4 = apply_fog(f, c4, wp, view.world_position.xyz, in.position.xy);
+        pbr_input.material.flags = pbr_input.material.flags & ~STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;
+    }
+}
+    out.color = main_pass_post_lighting_processing(pbr_input, c4);
     return out;
 }

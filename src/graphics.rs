@@ -48,8 +48,6 @@ pub struct Mood {
     pub tint: Vec3,
     /// Сила подсветки облаков снизу низким солнцем.
     pub cloud_glow: f32,
-    /// Цвета поглощения и рассеяния дымки (см. `FogFalloff::from_visibility_colors`).
-    pub fog_far: (Color, Color),
     pub visibility: f32,
     pub shadow_distance: f32,
     pub day: bool,
@@ -147,7 +145,6 @@ fn castle_mood() -> Mood {
         glow: Vec3::new(1.0, 0.66, 0.46),
         tint: Vec3::new(0.34, 0.40, 0.66),
         cloud_glow: 1.5,
-        fog_far: (Color::srgb(0.36, 0.36, 0.46), Color::srgb(0.62, 0.56, 0.60)),
         visibility: 380.0,
         shadow_distance: 160.0,
         day: false,
@@ -178,7 +175,6 @@ struct Key {
     glow: Vec3,
     tint: Vec3,
     cloud_glow: f32,
-    fog_far: (Vec3, Vec3),
     visibility: f32,
     sky_light: f32,
     haze: f32,
@@ -199,7 +195,6 @@ impl Key {
             glow: v(self.glow, o.glow),
             tint: v(self.tint, o.tint),
             cloud_glow: f(self.cloud_glow, o.cloud_glow),
-            fog_far: (v(self.fog_far.0, o.fog_far.0), v(self.fog_far.1, o.fog_far.1)),
             visibility: f(self.visibility, o.visibility),
             sky_light: f(self.sky_light, o.sky_light),
             haze: f(self.haze, o.haze),
@@ -212,16 +207,16 @@ impl Key {
 const DAY: Key = Key {
     sun_color: Vec3::new(1.0, 0.93, 0.8),
     lux: 15_000.0,
-    ambient: (Vec3::new(0.55, 0.68, 0.95), 170.0),
+    // Рассеянного света днём много (как на референсе: тени тёмные, но не чёрные).
+    ambient: (Vec3::new(0.55, 0.68, 0.95), 400.0),
     horizon: Vec3::new(0.62, 0.72, 0.86),
     horizon_sun: (Vec3::new(0.35, 0.28, 0.15), 8.0),
-    zenith: Vec3::new(0.07, 0.2, 0.62),
+    zenith: Vec3::new(0.11, 0.25, 0.6),
     glow: Vec3::new(1.0, 0.66, 0.46),
     tint: Vec3::new(0.34, 0.40, 0.66),
     cloud_glow: 1.5,
-    fog_far: (Vec3::new(0.50, 0.62, 0.80), Vec3::new(0.78, 0.78, 0.74)),
-    visibility: 850.0,
-    sky_light: 760.0,
+    visibility: 2600.0,
+    sky_light: 980.0,
     haze: 0.0003,
     exposure: 0.0,
 };
@@ -238,7 +233,6 @@ const GOLD: Key = Key {
     glow: Vec3::new(1.0, 0.66, 0.46),
     tint: Vec3::new(0.34, 0.40, 0.66),
     cloud_glow: 1.5,
-    fog_far: (Vec3::new(0.5, 0.5, 0.56), Vec3::new(0.8, 0.77, 0.74)),
     visibility: 1600.0,
     sky_light: 950.0,
     haze: 0.0007,
@@ -259,7 +253,6 @@ const SET: Key = Key {
     glow: Vec3::new(0.55, 0.1, 0.14),
     tint: Vec3::new(0.38, 0.32, 0.49),
     cloud_glow: 5.2,
-    fog_far: (Vec3::new(0.25, 0.2, 0.3), Vec3::new(0.48, 0.27, 0.33)),
     visibility: 1500.0,
     sky_light: 550.0,
     haze: 0.0013,
@@ -277,7 +270,6 @@ const DUSK: Key = Key {
     glow: Vec3::new(0.24, 0.05, 0.07),
     tint: Vec3::new(0.10, 0.09, 0.19),
     cloud_glow: 1.6,
-    fog_far: (Vec3::new(0.14, 0.13, 0.22), Vec3::new(0.28, 0.2, 0.26)),
     visibility: 1300.0,
     sky_light: 900.0,
     haze: 0.0016,
@@ -295,7 +287,6 @@ const NIGHT: Key = Key {
     glow: Vec3::new(0.02, 0.022, 0.04),
     tint: Vec3::new(0.012, 0.016, 0.035),
     cloud_glow: 0.0,
-    fog_far: (Vec3::new(0.025, 0.032, 0.06), Vec3::new(0.04, 0.05, 0.08)),
     visibility: 900.0,
     sky_light: 900.0,
     haze: 0.0018,
@@ -366,7 +357,6 @@ pub fn mood_at(game: f64) -> Mood {
         (moon, Vec3::new(0.62, 0.72, 1.0), moon_lux)
     };
     let fog = w.fog;
-    let fog_tint = |c: Vec3| c.lerp(horizon * 1.1, 0.6 * fog.max(overcast * 0.5));
     let visibility = (key.visibility * (1.0 - 0.94 * fog) * (1.0 - 0.55 * w.rain)).max(55.0);
     let c = |v: Vec3| Color::linear_rgb(v.x, v.y, v.z);
     Mood {
@@ -382,7 +372,6 @@ pub fn mood_at(game: f64) -> Mood {
         glow: grey(key.glow, 0.8 * overcast) * dim,
         tint: grey(key.tint, 0.6 * overcast) * dim,
         cloud_glow: key.cloud_glow * (1.0 - 0.8 * overcast),
-        fog_far: (c(fog_tint(key.fog_far.0)), c(fog_tint(key.fog_far.1))),
         visibility,
         shadow_distance: 240.0,
         day: e > 0.3,
@@ -415,6 +404,7 @@ impl Plugin for GraphicsPlugin {
         embedded_asset!(app, "shaders/smoke.wesl");
         // Общая функция неба — модуль, который импортируют небо, море и дым.
         bevy::shader::load_shader_library!(app, "shaders/sky_common.wesl");
+        app.add_plugins((crate::cloud_map::CloudMapPlugin, crate::mountain_map::MountainMapPlugin));
         app.add_plugins((
             MaterialPlugin::<SurfaceMaterial>::default(),
             MaterialPlugin::<GlassMaterial>::default(),
@@ -522,12 +512,12 @@ fn lin(c: Color) -> Vec4 {
 pub fn surface_material(mat: Mat) -> SurfaceMaterial {
     // (основной цвет, второй цвет, узор, масштаб, разброс, рельеф, шероховатость, металл, мох, грязь, свечение)
     let (a, b, pattern, scale, var, bump, rough, metal, moss, grime, glow) = match mat {
-        Mat::Grass => (Color::srgb(0.13, 0.22, 0.08), Color::srgb(0.24, 0.26, 0.12), P_GRASS, 1.0, 0.5, 0.4, 0.95, 0.0, 0.0, 0.0, 0.0),
+        Mat::Grass => (Color::srgb(0.15, 0.21, 0.125), Color::srgb(0.24, 0.26, 0.15), P_GRASS, 1.0, 0.5, 0.4, 0.95, 0.0, 0.0, 0.0, 0.0),
         Mat::Cobble => (Color::srgb(0.36, 0.34, 0.32), Color::srgb(0.12, 0.11, 0.10), P_COBBLE, 1.0, 0.35, 1.0, 0.85, 0.0, 0.35, 0.0, 0.0),
         Mat::Stone => (Color::srgb(0.52, 0.51, 0.49), Color::srgb(0.22, 0.21, 0.20), P_ASHLAR, 0.8, 0.25, 1.0, 0.88, 0.0, 0.5, 0.6, 0.0),
         Mat::DarkStone => (Color::srgb(0.38, 0.37, 0.38), Color::srgb(0.14, 0.13, 0.14), P_ASHLAR, 0.9, 0.25, 1.0, 0.85, 0.0, 0.4, 0.6, 0.0),
         Mat::Floor => (Color::srgb(0.42, 0.38, 0.34), Color::srgb(0.16, 0.14, 0.13), P_FLAGSTONE, 1.0, 0.3, 0.8, 0.55, 0.0, 0.0, 0.2, 0.0),
-        Mat::Wood => (Color::srgb(0.34, 0.22, 0.12), Color::srgb(0.18, 0.11, 0.06), P_WOOD, 1.0, 0.35, 0.6, 0.75, 0.0, 0.0, 0.0, 0.0),
+        Mat::Wood => (Color::srgb(0.27, 0.19, 0.12), Color::srgb(0.15, 0.10, 0.06), P_WOOD, 1.0, 0.35, 0.6, 0.75, 0.0, 0.0, 0.0, 0.0),
         Mat::Banner => (Color::srgb(0.50, 0.04, 0.05), Color::srgb(0.85, 0.62, 0.20), P_CLOTH, 1.0, 0.2, 0.3, 0.9, 0.0, 0.0, 0.0, 0.0),
         Mat::Gold => (Color::srgb(0.90, 0.68, 0.30), Color::srgb(0.55, 0.38, 0.12), P_METAL, 1.0, 0.2, 0.3, 0.3, 1.0, 0.0, 0.0, 0.0),
         Mat::Trim => (Color::srgb(0.62, 0.58, 0.52), Color::srgb(0.30, 0.28, 0.25), P_ASHLAR, 1.6, 0.15, 0.5, 0.8, 0.0, 0.3, 0.4, 0.0),
@@ -536,7 +526,7 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         Mat::Coals => (Color::srgb(0.08, 0.05, 0.04), Color::srgb(1.0, 0.35, 0.08), P_COALS, 1.0, 0.5, 0.5, 0.9, 0.0, 0.0, 0.0, 6.0),
         Mat::Water => (Color::srgb(0.06, 0.13, 0.16), Color::srgb(0.10, 0.2, 0.22), P_WATER, 1.0, 0.0, 0.3, 0.05, 0.0, 0.0, 0.0, 0.0),
         Mat::Leaves => (Color::srgb(0.07, 0.15, 0.07), Color::srgb(0.16, 0.24, 0.09), P_LEAVES, 1.0, 0.4, 1.0, 0.9, 0.0, 0.0, 0.0, 0.0),
-        Mat::Paving => (Color::srgb(0.66, 0.61, 0.52), Color::srgb(0.36, 0.33, 0.28), P_FLAGSTONE, 0.8, 0.3, 0.9, 0.8, 0.0, 0.1, 0.0, 0.0),
+        Mat::Paving => (Color::srgb(0.54, 0.50, 0.42), Color::srgb(0.30, 0.27, 0.23), P_FLAGSTONE, 0.8, 0.3, 0.9, 0.8, 0.0, 0.1, 0.0, 0.0),
         Mat::Limestone => (Color::srgb(0.70, 0.64, 0.52), Color::srgb(0.42, 0.38, 0.31), P_ASHLAR, 0.62, 0.22, 1.0, 0.9, 0.0, 0.25, 0.55, 0.0),
         Mat::Rubble => (Color::srgb(0.62, 0.57, 0.47), Color::srgb(0.55, 0.50, 0.42), P_RUBBLE, 1.0, 0.35, 1.2, 0.92, 0.0, 0.15, 0.6, 0.0),
         Mat::Plaster => (Color::srgb(0.86, 0.83, 0.76), Color::srgb(0.66, 0.60, 0.50), P_PLASTER, 1.0, 0.18, 0.3, 0.9, 0.0, 0.05, 0.8, 0.0),
@@ -546,7 +536,7 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
         Mat::Marble => (Color::srgb(0.88, 0.87, 0.84), Color::srgb(0.52, 0.55, 0.60), P_MARBLE, 1.0, 0.1, 0.25, 0.3, 0.0, 0.0, 0.2, 0.0),
         Mat::Mosaic => (Color::srgb(0.85, 0.80, 0.70), Color::srgb(0.58, 0.18, 0.12), P_MOSAIC, 1.0, 0.1, 0.4, 0.55, 0.0, 0.0, 0.0, 0.0),
         Mat::Earth => (Color::srgb(0.48, 0.41, 0.32), Color::srgb(0.66, 0.62, 0.55), P_EARTH, 1.0, 0.3, 0.7, 0.95, 0.0, 0.0, 0.0, 0.0),
-        Mat::Terrain => (Color::srgb(0.30, 0.33, 0.15), Color::srgb(0.60, 0.57, 0.50), P_TERRAIN, 1.0, 0.3, 0.8, 0.95, 0.0, 0.0, 0.0, 0.0),
+        Mat::Terrain => (Color::srgb(0.26, 0.31, 0.215), Color::srgb(0.60, 0.57, 0.50), P_TERRAIN, 1.0, 0.3, 0.8, 0.95, 0.0, 0.0, 0.0, 0.0),
         Mat::Signinum => (Color::srgb(0.68, 0.45, 0.38), Color::srgb(0.50, 0.33, 0.28), P_PLASTER, 1.6, 0.25, 0.4, 0.8, 0.0, 0.1, 0.6, 0.0),
         Mat::Canvas => (Color::srgb(0.78, 0.72, 0.60), Color::srgb(0.6, 0.55, 0.45), P_PLAIN, 1.0, 0.15, 0.2, 0.95, 0.0, 0.0, 0.0, 0.0),
         Mat::Felt => (Color::srgb(0.62, 0.56, 0.47), Color::srgb(0.4, 0.34, 0.28), P_PLAIN, 1.0, 0.25, 0.4, 1.0, 0.0, 0.0, 0.4, 0.0),
@@ -585,6 +575,9 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
     let has_photo = tex.is_some() && extra_ok && photo.is_some_and(|(top, side, ..)| photo_layer_ok(top) && photo_layer_ok(side));
     let (top, side, tint, relief) = photo.unwrap_or((0, 0, 0.0, 0.0));
     let layer = |l: u32| &crate::surface_layers::LAYERS[l as usize];
+    // Доски на фото шириной 0,8 м — для дверей, ящиков и мостков это бревно, а не доска:
+    // рисунок мельче, доска ~0,45 м.
+    let photo_zoom = if mat == Mat::Wood { 1.7 } else { 1.0 };
     let mean = |l: u32| Vec3::from_array(layer(l).mean);
     ExtendedMaterial {
         base: StandardMaterial { base_color: a, perceptual_roughness: rough, metallic: metal, reflectance: 0.4, ..default() },
@@ -592,7 +585,7 @@ pub fn surface_material(mat: Mat) -> SurfaceMaterial {
             color_b: lin(b).truncate().extend(wet_capacity(mat)),
             params: Vec4::new(pattern, scale, var, bump),
             params2: Vec4::new(moss, grime, glow, 0.0),
-            photo: if has_photo { Vec4::new(top as f32, 1.0 / layer(top).meters, side as f32, 1.0 / layer(side).meters) } else { Vec4::new(-1.0, 1.0, -1.0, 1.0) },
+            photo: if has_photo { Vec4::new(top as f32, photo_zoom / layer(top).meters, side as f32, photo_zoom / layer(side).meters) } else { Vec4::new(-1.0, 1.0, -1.0, 1.0) },
             // Воде вместо фото передаём солнце (для отражений неба и солнечной дорожки) и «день».
             photo_mean: if mat == Mat::Water { mood().sun.normalize().extend(0.0) } else { mean(top).extend(tint) },
             photo_mean_b: if mat == Mat::Water { Vec4::new(if mood().day { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0) } else { mean(side).extend(relief) },
@@ -953,7 +946,7 @@ fn setup_environment(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, m
     let sun = m.sun.normalize();
     commands.spawn((
         Mesh3d(meshes.add(sky_mesh(SKY_RADIUS))),
-        MeshMaterial3d(skies.add(SkyMaterial { sky: m.sky_uniform() })),
+        MeshMaterial3d(skies.add(SkyMaterial { sky: m.sky_uniform(), clouds: images.add(Image::default()), dome: default(), mountains: images.add(Image::default()) })),
         Transform::IDENTITY,
         SkyDome,
         NotShadowCaster,
@@ -1062,20 +1055,34 @@ pub fn distance_fog(m: &Mood, draw_distance: f32) -> DistanceFog {
         // Свечение дымки к солнцу — слабее, чем у неба: иначе город против солнца тонет в оранжевом.
         directional_light_color: Color::linear_rgba(m.horizon_sun.0.x * 0.55, m.horizon_sun.0.y * 0.55, m.horizon_sun.0.z * 0.55, 1.0),
         directional_light_exponent: m.horizon_sun.1,
-        falloff: FogFalloff::from_visibility_colors(m.visibility.min(draw_distance), m.fog_far.0, m.fog_far.1),
+        falloff: fog_falloff(m, draw_distance),
     }
+}
+
+/// Как дымка густеет с расстоянием. В ясную погоду видно дальше, чем рисует камера, и дымка
+/// нужна только затем, чтобы край прорисовки не обрывался: ближняя треть чистая (деревья и
+/// стены в сотне метров — в полную силу, без молока), дальше дымка линейно густеет до края.
+/// В дождь чистая полоса короче, в туман дымка стоит от самой камеры и до края видимости.
+fn fog_falloff(m: &Mood, draw_distance: f32) -> FogFalloff {
+    let end = m.visibility.min(draw_distance);
+    let clear = ((m.visibility / draw_distance - 1.0) / 0.5).clamp(0.0, 1.0) * (m.visibility / 2200.0).min(1.0);
+    FogFalloff::Linear { start: end * 0.32 * clear * (0.6 + 0.4 * m.dayness), end }
 }
 
 /// Цветокоррекция: чуть больше контраста в средних тонах, насыщенные света (закатное
 /// золото), чуть приглушённые тени — как на плёнке.
 pub fn color_grading(m: &Mood) -> ColorGrading {
     let section = |saturation: f32, contrast: f32| ColorGradingSection { saturation, contrast, ..default() };
+    // Днём — глубже тени и плотнее средние тона (как на референсе); на закате и ночью
+    // цветокоррекция прежняя: закаты и так контрастные, лишний контраст топит землю в черноте.
+    let k = ((m.sun.y - 0.2) / 0.3).clamp(0.0, 1.0) * (1.0 - m.night);
+    let l = |a: f32, b: f32| a + (b - a) * k;
     ColorGrading {
         // Ночью глаз привыкает к темноте, но краски уходят (сумеречное зрение).
-        global: ColorGradingGlobal { exposure: m.exposure, post_saturation: 1.0 - 0.3 * m.night - 0.15 * m.overcast, ..default() },
-        shadows: section(0.9, 1.12),
-        midtones: section(1.02, 1.2),
-        highlights: section(1.06, 1.0),
+        global: ColorGradingGlobal { exposure: m.exposure, post_saturation: l(1.0, 0.87) - 0.3 * m.night - 0.15 * m.overcast, ..default() },
+        shadows: section(l(0.9, 0.86), l(1.0, 1.08)),
+        midtones: section(l(1.02, 0.94), l(1.14, 1.2)),
+        highlights: section(l(1.06, 1.04), l(1.0, 1.08)),
     }
 }
 

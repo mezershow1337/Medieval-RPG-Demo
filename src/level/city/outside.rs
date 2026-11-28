@@ -167,20 +167,56 @@ pub fn thatch_roof(b: &mut Builder, r: Rect, eave: f32, rise: f32, ridge_x: bool
     let mut under = crate::level::geom::MeshBuilder::default();
     under.gable_roof_slopes(Vec2::new(ro.x0, ro.z0), Vec2::new(ro.x1, ro.z1), e - 0.25, top - 0.25, ridge_x);
     b.mesh(Mat::Thatch).append(under.flipped());
-    // Толстый срез кровли по свесу и конёк, прижатый жердями (по ним тоже можно ступить).
+    // Кровля — толстый пласт камыша, а не лист: торцы над фронтонами закрыты срезом снопов,
+    // по свесу — округлый валик, конёк — толстый жгут, прижатый жердями (по ним можно ступить).
+    let th = 0.25;
+    {
+        let m = b.mesh(Mat::Thatch);
+        let (lo, hi, c) = if ridge_x { (ro.z0, ro.z1, r.cz()) } else { (ro.x0, ro.x1, r.cx()) };
+        let (e0, e1) = if ridge_x { (ro.x0, ro.x1) } else { (ro.z0, ro.z1) };
+        let pt = |along: f32, across: f32, y: f32| if ridge_x { Vec3::new(along, y, across) } else { Vec3::new(across, y, along) };
+        for (end, sgn) in [(e0, -1.0f32), (e1, 1.0)] {
+            let out = pt(sgn, 0.0, 0.0) - pt(0.0, 0.0, 0.0);
+            for side in [lo, hi] {
+                m.quad([pt(end, side, e), pt(end, c, top), pt(end, c, top - th), pt(end, side, e - th)], out);
+            }
+        }
+    }
     b.roof(Mat::Thatch, |m| {
         if ridge_x {
             for z in [ro.z0, ro.z1] {
-                m.beam(Vec3::new(ro.x0, e - 0.12, z), Vec3::new(ro.x1, e - 0.12, z), 0.12, 0.13, Vec3::Y);
+                m.ridge_pipe(Vec3::new(ro.x0, e - 0.13, z), Vec3::new(ro.x1, e - 0.13, z), 0.14, 6);
+                m.beam(Vec3::new(ro.x0, e - 0.19, z), Vec3::new(ro.x1, e - 0.19, z), 0.14, 0.06, Vec3::Y);
             }
-            m.beam(Vec3::new(ro.x0, top, r.cz()), Vec3::new(ro.x1, top, r.cz()), 0.25, 0.12, Vec3::Y);
+            m.ridge_pipe(Vec3::new(ro.x0 - 0.04, top - 0.1, r.cz()), Vec3::new(ro.x1 + 0.04, top - 0.1, r.cz()), 0.26, 7);
         } else {
             for x in [ro.x0, ro.x1] {
-                m.beam(Vec3::new(x, e - 0.12, ro.z0), Vec3::new(x, e - 0.12, ro.z1), 0.12, 0.13, Vec3::Y);
+                m.ridge_pipe(Vec3::new(x, e - 0.13, ro.z0), Vec3::new(x, e - 0.13, ro.z1), 0.14, 6);
+                m.beam(Vec3::new(x, e - 0.19, ro.z0), Vec3::new(x, e - 0.19, ro.z1), 0.14, 0.06, Vec3::Y);
             }
-            m.beam(Vec3::new(r.cx(), top, ro.z0), Vec3::new(r.cx(), top, ro.z1), 0.25, 0.12, Vec3::Y);
+            m.ridge_pipe(Vec3::new(r.cx(), top - 0.1, ro.z0 - 0.04), Vec3::new(r.cx(), top - 0.1, ro.z1 + 0.04), 0.26, 7);
         }
     });
+    // Жерди-прижимы поперёк конька (каждые ~1.1 м) и стропила под свесом.
+    {
+        let m = b.mesh(Mat::Wood);
+        let len = if ridge_x { ro.w() } else { ro.d() };
+        let n = (len / 1.1).round().max(2.0) as usize;
+        let slope = Vec2::new(half + over, top - e).normalize();
+        for i in 0..=n {
+            let t = i as f32 / n as f32;
+            for sgn in [-1.0f32, 1.0] {
+                let (a, c) = if ridge_x {
+                    let x = ro.x0 + 0.15 + (len - 0.3) * t;
+                    (Vec3::new(x, top + 0.2, r.cz()), Vec3::new(x, top + 0.2 - slope.y * 0.75, r.cz() + sgn * slope.x * 0.75))
+                } else {
+                    let z = ro.z0 + 0.15 + (len - 0.3) * t;
+                    (Vec3::new(r.cx(), top + 0.2, z), Vec3::new(r.cx() + sgn * slope.x * 0.75, top + 0.2 - slope.y * 0.75, z))
+                };
+                m.beam(a, c, 0.025, 0.025, Vec3::Y);
+            }
+        }
+    }
     let m = b.mesh(gable);
     if ridge_x {
         for (x, s) in [(r.x0, -1.0f32), (r.x1, 1.0)] {
@@ -459,14 +495,11 @@ fn spring(b: &mut Builder) {
     }
 }
 
-/// Ива у воды.
+/// Ива у воды: настоящее дерево с кроной из листвы (модель лиственного дерева), а не
+/// прежние гранёные «шары» на столбе.
 fn willow(b: &mut Builder, p: Vec3, h: f32, rng: &mut Rng) {
-    b.mesh(Mat::Wood).lathe(p - Vec3::Y * 0.2, &[(0.3, 0.0), (0.22, h * 0.45), (0.12, h * 0.6)], 7);
-    for k in 0..6 {
-        let a = k as f32 / 6.0 * TAU + rng.range(0.0, 0.8);
-        let c = p + Vec3::new(a.cos() * h * 0.25, h * rng.range(0.6, 0.8), a.sin() * h * 0.25);
-        b.mesh(Mat::HerbSilver).lathe(c, &[(0.0, -h * 0.35), (h * 0.18, -h * 0.25), (h * 0.22, 0.0), (h * 0.12, h * 0.1), (0.0, h * 0.12)], 7);
-    }
+    let (yaw, v) = (rng.range(0.0, TAU), (rng.range(0.0, 3.0)) as u32);
+    b.plant(PlantKind::Oak, p - Vec3::Y * 0.15, h * 1.35, yaw, v);
     kit::hidden(b, p - Vec3::new(0.3, 0.2, 0.3), p + Vec3::new(0.3, h * 0.5, 0.3));
 }
 
@@ -848,8 +881,31 @@ fn stems(b: &mut Builder, p: Vec3, n: usize, h: f32, spread: f32, flower: Mat, h
     }
 }
 
+/// Кустик травы: пучок узких листьев, расходящихся от корня и поникающих на концах
+/// (раньше был гладкий гранёный «холмик»). Раскладка листьев — от положения куста.
 fn mound(b: &mut Builder, p: Vec3, r: f32, h: f32, mat: Mat) {
-    b.mesh(mat).lathe(p, &[(0.0, 0.0), (r * 0.8, 0.0), (r, h * 0.45), (r * 0.6, h * 0.9), (0.0, h)], 7);
+    let hash = |k: f32| {
+        let v = ((p.x * 12.9898 + p.z * 78.233 + k * 37.719).sin() * 43758.547).abs();
+        v - v.floor()
+    };
+    let m = b.mesh(mat);
+    let n = 11;
+    for k in 0..n {
+        let f = k as f32;
+        let a = (f + hash(f)) / n as f32 * TAU * 1.9;
+        let dir = Vec3::new(a.cos(), 0.0, a.sin());
+        // Внутренние листья стоят круче и выше, наружные лежат шире.
+        let out = 0.35 + 0.65 * (f / n as f32);
+        let len = r * (0.75 + 0.5 * hash(f + 20.0)) * out;
+        let top = h * (1.15 - 0.55 * out) * (0.8 + 0.4 * hash(f + 40.0));
+        let root = p + dir * (r * 0.08);
+        let mid = root + dir * (len * 0.65) + Vec3::Y * top;
+        let tip = mid + dir * (len * 0.5) - Vec3::Y * (top * 0.3);
+        let w = (r * 0.11).clamp(0.015, 0.05);
+        let up = Vec3::Y.cross(dir).cross(mid - root).normalize_or(Vec3::Y);
+        m.beam(root, mid, w, 0.006, up);
+        m.beam(mid, tip, w * 0.6, 0.005, up);
+    }
 }
 
 /// Розетка прикорневых листьев (подорожник).
@@ -949,6 +1005,7 @@ fn herb_plant(b: &mut Builder, p: Vec3, herb: &str, rng: &mut Rng) {
 /// Шибляк и редколесье плато: можжевельник высокий, крымская сосна на гребнях,
 /// дуб пушистый ближе к предгорьям; известняковые выходы. Вокруг стен — чисто (обзор для стражи).
 fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
+    let first_plant = b.plants.len();
     let mut clear: Vec<(Vec2, f32)> = vec![
         (Vec2::new(NECROPOLIS.x + 10.0, NECROPOLIS.z + 2.0), 72.0),
         (Vec2::new(-197.0, 270.0), 80.0),
@@ -963,11 +1020,21 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
     for h in places::herb_patches() {
         clear.push((Vec2::new(h.pos.x, h.pos.z), h.radius + 2.0));
     }
+    // Рыбацкая хижина с причалом и подход к ней.
+    clear.push((Vec2::new(fishing::HUT.cx(), fishing::HUT.cz()), 20.0));
     clear.extend(mines::clearings());
     clear.push(village::clearing());
+    // Деревьям у стен нельзя (обзор для стражи), а низким кустам можно — с 14 м от стены.
+    let blocked_low = |p: Vec2| {
+        terrain::city_distance(p.x, p.y) < 14.0
+            || p.x.abs() > WORLD_HALF - 12.0
+            || p.y.abs() > WORLD_HALF - 12.0
+            || ground_y(p.x, p.y) < WATER_Y + 1.2
+            || road_distance(roads, p) < ROAD_W / 2.0 + 1.5
+            || clear.iter().any(|(c, r)| p.distance(*c) < *r)
+    };
     let blocked = |p: Vec2| {
         terrain::city_distance(p.x, p.y) < 40.0
-            || p.y < 186.0 && p.x < 330.0
             || p.x.abs() > WORLD_HALF - 12.0
             || p.y.abs() > WORLD_HALF - 12.0
             || ground_y(p.x, p.y) < WATER_Y + 1.6
@@ -975,44 +1042,225 @@ fn wilderness(b: &mut Builder, roads: &[Vec<Vec2>]) {
             || clear.iter().any(|(c, r)| p.distance(*c) < *r)
     };
     let mut rng = Rng::new(1783);
-    let step = 21.0;
+    // Зелени много: рощи сливаются в редколесье, между ними — одиночные деревья и кусты.
+    let step = 15.0;
     let mut z = -WORLD_HALF + 10.0;
     while z < WORLD_HALF {
         let mut x = -WORLD_HALF + 10.0;
         while x < WORLD_HALF {
-            let p = Vec2::new(x + rng.range(-8.0, 8.0), z + rng.range(-8.0, 8.0));
+            let p = Vec2::new(x + rng.range(-6.5, 6.5), z + rng.range(-6.5, 6.5));
             x += step;
             let density = terrain::fbm(p.x * 0.007, p.y * 0.007, 77);
-            let chance = ((density - 0.42) * 3.0).clamp(0.0, 0.85);
+            let chance = ((density - 0.34) * 2.6).clamp(0.07, 0.92);
             if !rng.chance(chance) || blocked(p) {
-                // Камни — на открытых местах.
-                if rng.chance(0.12) && !blocked(p) {
+                if blocked(p) {
+                    // Полоса у стен и у берега: только кусты, зато чаще — не голая земля.
+                    if !blocked_low(p) && rng.chance(0.45) {
+                        b.at(p.x, p.y);
+                        for _ in 0..1 + rng.int(3) {
+                            let s = p + Vec2::new(rng.range(-3.5, 3.5), rng.range(-3.5, 3.5));
+                            if !blocked_low(s) {
+                                kit::shrub(b, g(s.x, s.y) - Vec3::Y * 0.05, rng.range(0.6, 1.5));
+                            }
+                        }
+                    }
+                    continue;
+                }
+                // На открытых местах — камни и куртины кустов.
+                if rng.chance(0.11) {
                     rock(b, p, rng.range(0.5, 1.8), &mut rng);
+                } else if rng.chance(0.27) {
+                    b.at(p.x, p.y);
+                    for _ in 0..1 + rng.int(2) {
+                        let s = p + Vec2::new(rng.range(-2.5, 2.5), rng.range(-2.5, 2.5));
+                        if !blocked(s) {
+                            kit::shrub(b, g(s.x, s.y) - Vec3::Y * 0.05, rng.range(0.7, 1.8));
+                        }
+                    }
                 }
                 continue;
             }
             b.at(p.x, p.y);
-            let q = g(p.x, p.y) - Vec3::Y * 0.1;
             let up = ((p.y - 300.0) / 400.0).clamp(0.0, 1.0);
-            let roll = rng.f();
-            // На самом плато сосна редка (крымская сосна — дерево гор), больше можжевельника,
-            // дуба пушистого и диких груш (их изображает тот же лиственный вид).
-            if roll < 0.55 - up * 0.3 {
-                kit::juniper(b, q, rng.range(2.0, 4.5), &mut rng);
-            } else if roll < 0.64 - up * 0.1 {
-                kit::pine(b, q, rng.range(7.0, 12.0), &mut rng);
-            } else {
-                kit::oak(b, q, rng.range(6.0, 10.0), &mut rng);
+            // В густой роще деревья стоят по два-три.
+            let grove = density > 0.55;
+            let trees = if grove { 3 + rng.int(3) } else if density > 0.48 { 2 + rng.int(2) } else { 1 + rng.chance(0.25) as usize };
+            for k in 0..trees {
+                let tp = if k == 0 { p } else { p + Vec2::new(rng.range(-7.0, 7.0), rng.range(-7.0, 7.0)) };
+                if k > 0 && (blocked(tp) || tp.distance(p) < 2.5) {
+                    continue;
+                }
+                let q = g(tp.x, tp.y) - Vec3::Y * 0.1;
+                let roll = rng.f();
+                // На самом плато сосна редка (крымская сосна — дерево гор), больше можжевельника,
+                // дуба пушистого и диких груш (их изображает тот же лиственный вид).
+                if grove && roll > 0.9 {
+                    // Тёмные свечи кипарисов среди бора.
+                    kit::cypress(b, q, rng.range(7.0, 11.0));
+                } else if roll < 0.5 - up * 0.3 {
+                    kit::juniper(b, q, rng.range(2.0, 4.5), &mut rng);
+                } else if roll < 0.6 - up * 0.1 + if grove { 0.2 } else { 0.0 } {
+                    // В сердце рощи — сосновый бор: тёмная стена хвои.
+                    kit::pine(b, q, rng.range(7.0, 13.0), &mut rng);
+                } else {
+                    kit::oak(b, q, rng.range(6.0, 10.0), &mut rng);
+                }
             }
             // Подлесок: кусты шибляка вокруг деревьев.
-            for _ in 0..1 + rng.int(4) {
+            for _ in 0..1 + rng.int(3) {
                 let a = rng.range(0.0, TAU);
                 let d = rng.range(1.8, 5.0);
-                let s = g(p.x + a.cos() * d, p.y + a.sin() * d);
-                kit::shrub(b, s - Vec3::Y * 0.05, rng.range(0.9, 2.0));
+                let s = Vec2::new(p.x + a.cos() * d, p.y + a.sin() * d);
+                if !blocked(s) {
+                    kit::shrub(b, g(s.x, s.y) - Vec3::Y * 0.05, rng.range(0.9, 2.0));
+                }
             }
         }
         z += step;
+    }
+    // Берега Карантинной бухты: хвойный бор стеной по кромке обрывов и валуны у самой воды.
+    // Свой счётчик случайных чисел — остальная зелень от этого не сдвигается.
+    let mut rng = Rng::new(9127);
+    let near_water = |p: Vec2, r: f32| (0..8).any(|k| ground_y(p.x + (k as f32 * TAU / 8.0).cos() * r, p.y + (k as f32 * TAU / 8.0).sin() * r) < WATER_Y);
+    let mut z = 140.0;
+    while z < 480.0 {
+        let mut x = 270.0;
+        while x < 540.0 {
+            let p = Vec2::new(x + rng.range(-3.0, 3.0), z + rng.range(-3.0, 3.0));
+            x += 7.0;
+            let (roll, size, yaw, variant) = (rng.f(), rng.f(), rng.range(0.0, TAU), rng.int(64) as u32);
+            let y = ground_y(p.x, p.y);
+            if y < WATER_Y - 0.3 {
+                continue;
+            }
+            if y < WATER_Y + 1.7 {
+                // Полоса прибоя: валуны, поодиночке и кучками.
+                if roll < 0.2 && terrain::city_distance(p.x, p.y) > 14.0 && road_distance(roads, p) > ROAD_W / 2.0 + 1.5 && near_water(p, 4.0) {
+                    rock(b, p, 0.7 + size * size * 2.4, &mut rng);
+                }
+                continue;
+            }
+            let chance = if near_water(p, 22.0) { 0.7 } else if near_water(p, 48.0) { 0.5 } else if near_water(p, 75.0) { 0.22 } else { 0.0 };
+            // На отвесной скале деревья не растут.
+            let steep = (ground_y(p.x + 1.5, p.y) - y).abs().max((ground_y(p.x, p.y + 1.5) - y).abs()) > 1.6;
+            if roll >= chance || steep || blocked(p) {
+                continue;
+            }
+            b.at(p.x, p.y);
+            let q = g(p.x, p.y) - Vec3::Y * 0.15;
+            // Каждая четвёртая ель — великан: бор с ровной кромкой издали похож на забор.
+            let h = 9.0 + size * 8.5 + if variant % 4 == 0 { 3.0 + size * 5.0 } else { 0.0 };
+            b.plant(PlantKind::Fir, q, h, yaw, variant);
+            b.invisible.push(Aabb::new(q - Vec3::new(0.25, 0.0, 0.25), q + Vec3::new(0.25, h * 0.5, 0.25)));
+        }
+        z += 7.0;
+    }
+    // Ёлки на уступах обрывов бухты: невысокие, редко — без них стена через бухту читалась
+    // голой лентой, а на референсе лес спускается по скалам к самой воде. Свой счётчик.
+    let mut rng = Rng::new(6203);
+    let mut z = 140.0;
+    while z < 480.0 {
+        let mut x = 270.0;
+        while x < 540.0 {
+            let p = Vec2::new(x + rng.range(-2.5, 2.5), z + rng.range(-2.5, 2.5));
+            x += 5.0;
+            let (roll, size, yaw, variant) = (rng.f(), rng.f(), rng.range(0.0, TAU), rng.int(64) as u32);
+            let y = ground_y(p.x, p.y);
+            if y < WATER_Y + 0.5 || !near_water(p, 40.0) || blocked(p) {
+                continue;
+            }
+            // У самой воды, под стеной, — изредка; на уступах стены — гуще.
+            let rise = (ground_y(p.x + 1.5, p.y) - y).abs().max((ground_y(p.x, p.y + 1.5) - y).abs());
+            let chance = if (1.3..=5.0).contains(&rise) { 0.38 } else if y < WATER_Y + 1.7 { 0.12 } else { 0.0 };
+            if roll >= chance {
+                continue;
+            }
+            b.at(p.x, p.y);
+            let q = g(p.x, p.y) - Vec3::Y * 0.6;
+            b.plant(PlantKind::Fir, q, 4.5 + size * 5.5, yaw, variant);
+        }
+        z += 5.0;
+    }
+    // Глыбы у кромки воды в бухте: наполовину в воде, поодиночке и кучками — на референсе берег
+    // озера каменистый, а у нас вода встречалась с гладким склоном. Кромку ищем на отрезке в
+    // случайную сторону от узла сетки (под обрывом она слишком узкая, чтобы попасть в неё узлом).
+    // Свой счётчик.
+    let mut rng = Rng::new(6204);
+    let level = WATER_Y + 0.1;
+    let mut z = 140.0;
+    while z < 480.0 {
+        let mut x = 270.0;
+        while x < 540.0 {
+            let p = Vec2::new(x + rng.range(-2.0, 2.0), z + rng.range(-2.0, 2.0));
+            x += 4.0;
+            let (roll, size, turn) = (rng.f(), rng.f(), rng.range(0.0, TAU));
+            let q = p + Vec2::from_angle(turn) * 5.0;
+            let ya = ground_y(p.x, p.y) - level;
+            if roll > 0.5 || ya * (ground_y(q.x, q.y) - level) >= 0.0 {
+                continue;
+            }
+            let (mut a, mut c) = (p, q);
+            for _ in 0..6 {
+                let m = (a + c) * 0.5;
+                if (ground_y(m.x, m.y) - level) * ya > 0.0 {
+                    a = m;
+                } else {
+                    c = m;
+                }
+            }
+            let s = (a + c) * 0.5;
+            if terrain::city_distance(s.x, s.y) < 40.0 || road_distance(roads, s) < ROAD_W / 2.0 + 2.5 || clear.iter().any(|(c, r)| s.distance(*c) < *r) {
+                continue;
+            }
+            // Сканы приземистые (высота — около трети размера), поэтому глыбы крупные и почти не
+            // утоплены: иначе над водой остаётся одна макушка.
+            b.at(s.x, s.y);
+            let big = 1.6 + size * size * 2.6;
+            for k in 0..1 + rng.int(3) {
+                let off = if k == 0 { Vec2::ZERO } else { Vec2::new(rng.range(-1.0, 1.0), rng.range(-1.0, 1.0)) * big * 0.9 };
+                let h = big * if k == 0 { 1.0 } else { rng.range(0.35, 0.7) };
+                let q = s + off;
+                let c = Vec3::new(q.x, ground_y(q.x, q.y).max(WATER_Y - 0.5) - h * 0.08, q.y);
+                b.plant(PlantKind::Rock, c, h, rng.range(0.0, TAU), rng.int(64) as u32);
+                if h > 0.7 {
+                    let r = h * 0.4;
+                    b.invisible.push(Aabb::new(Vec3::new(c.x - r, c.y - 0.3, c.z - r), Vec3::new(c.x + r, c.y + h * 0.3, c.z + r)));
+                }
+            }
+        }
+        z += 4.0;
+    }
+    // На обрыве большие деревья не держатся: их место занимает можжевельник (дубы на отвесной
+    // скале издали торчали зелёными шарами на палочках). Счётчик случайных чисел не трогаем.
+    for p in b.plants.iter_mut().skip(first_plant) {
+        if !matches!(p.kind, PlantKind::Oak | PlantKind::Pine | PlantKind::Cypress) {
+            continue;
+        }
+        let y = ground_y(p.pos.x, p.pos.z);
+        let rise = (ground_y(p.pos.x + 1.5, p.pos.z) - y).abs().max((ground_y(p.pos.x, p.pos.z + 1.5) - y).abs()).max((ground_y(p.pos.x - 1.5, p.pos.z) - y).abs()).max((ground_y(p.pos.x, p.pos.z - 1.5) - y).abs());
+        if rise > 1.3 {
+            p.kind = PlantKind::Juniper;
+            p.height = (p.height * 0.35).clamp(1.8, 3.4);
+        }
+    }
+    // Каменные выходы на крутых склонах по всему плато: глыбы и осыпь вместо голой земли.
+    // Опять свой счётчик: деревья и кусты остаются на своих местах.
+    let mut rng = Rng::new(4471);
+    let mut z = -WORLD_HALF + 14.0;
+    while z < WORLD_HALF - 14.0 {
+        let mut x = -WORLD_HALF + 14.0;
+        while x < WORLD_HALF - 14.0 {
+            let p = Vec2::new(x + rng.range(-2.6, 2.6), z + rng.range(-2.6, 2.6));
+            x += 5.5;
+            let (roll, size) = (rng.f(), rng.f());
+            let y = ground_y(p.x, p.y);
+            let rise = (ground_y(p.x + 1.5, p.y) - y).abs().max((ground_y(p.x, p.y + 1.5) - y).abs());
+            if roll > 0.7 || y < WATER_Y + 0.4 || !(0.6..3.2).contains(&rise) || terrain::city_distance(p.x, p.y) < 14.0 || road_distance(roads, p) < ROAD_W / 2.0 + 2.0 || clear.iter().any(|(c, r)| p.distance(*c) < *r) {
+                continue;
+            }
+            rock(b, p, 0.9 + size * size * 2.8, &mut rng);
+        }
+        z += 5.5;
     }
 }
 

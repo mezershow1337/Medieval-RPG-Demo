@@ -21,7 +21,7 @@ pub use places::*;
 /// Полуширина главной улицы Херсона.
 pub const MAIN_STREET_HALF: f32 = city::MAIN_HALF;
 pub use spawns::{SpawnChoice, pick_spawn, spawn_spot, spawn_spots};
-pub use terrain::{WATER_Y, city_distance as city_wall_distance, fbm, ground_y, height_at, inside_city};
+pub use terrain::{WATER_Y, city_distance as city_wall_distance, fbm, ground_y, height_at, inside_city, mesh_y};
 
 /// Расстояние от точки до ближайшей загородной дороги (для травы и т. п.).
 pub fn road_distance(x: f32, z: f32) -> f32 {
@@ -169,6 +169,8 @@ pub enum PlantKind {
     Fig,
     /// Куст шибляка (шиповник, боярышник, держидерево).
     Shrub,
+    /// Стройная коническая сосна в бору (ярусы ветвей, хвоя до земли).
+    Fir,
     /// Глыба известняка (фотоскан).
     Rock,
 }

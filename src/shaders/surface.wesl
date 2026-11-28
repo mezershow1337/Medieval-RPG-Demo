@@ -62,6 +62,8 @@ var<private> pom_view: vec3<f32>;
 var<private> pom_sun: vec3<f32>;
 var<private> pom_k: f32;
 var<private> pom_gate: f32;
+// Близость к камере для мелкой фактуры: 1 — вплотную, 0 — дальше 14 м.
+var<private> pom_near: f32;
 
 // Глубина рельефа слоя, м. Номера — из surface_layers.rs.
 fn layer_depth(layer: i32) -> f32 {
@@ -72,7 +74,7 @@ fn layer_depth(layer: i32) -> f32 {
         case 0 { return 0.03; }           // тёсаные блоки
         case 13 { return 0.022; }         // кирпич
         case 11 { return 0.02; }          // плиты
-        case 19 { return 0.06; }          // солома
+        case 19 { return 0.035; }         // солома
         case 9 { return 0.07; }           // скала
         case 18 { return 0.04; }          // галька
         case 6, 8 { return 0.03; }        // земля
@@ -137,13 +139,40 @@ fn photo_plane(layer: i32, uv0: vec2<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f
                 occ = max(occ, (hh - ray_h) * (1.3 - f));
             }
             // На мягком (трава, земля) тени от «выступов» слабые: там рельеф — комки и стебли, не камень.
-            let soft = select(1.0, 0.3, layer == 7 || layer == 6 || layer == 8);
+            // У скалы щели широкие: в полную силу тень от них ложилась чёрными кляксами.
+            let soft = select(select(1.0, 0.45, layer == 9), 0.3, layer == 7 || layer == 6 || layer == 8);
             shade = 1.0 - clamp(occ * 8.0, 0.0, 1.0) * 0.55 * soft * smoothstep(0.35, 0.6, pom_k);
         }
     }
-    o.albedo = textureSampleGrad(photo_albedo, photo_sampler, uv, layer, dx, dy).rgb * shade;
+    let tex = textureSampleGrad(photo_albedo, photo_sampler, uv, layer, dx, dy);
+    // Швы и щели темнее выступов (туда не попадает рассеянный свет): рисунок кладки
+    // читается и на ярком солнце, а не только в тени.
+    let cavity = mix(1.0, smoothstep(-0.25, 0.55, tex.a), clamp(layer_depth(layer) * 22.0, 0.0, 0.75) * select(1.0, 0.4, layer == 9));
+    o.albedo = tex.rgb * shade * cavity;
+    if layer == 19 {
+        // Камыш: убираем «лоскуты» светлых и тёмных пучков (издали они читались подушками),
+        // оставляем стебли и ряды снопов.
+        let low = textureSampleLevel(photo_albedo, photo_sampler, uv, layer, 5.0).rgb;
+        let mean = textureSampleLevel(photo_albedo, photo_sampler, uv, layer, 10.0).rgb;
+        let flat_c = tex.rgb / max(low, vec3<f32>(0.03)) * mean;
+        o.albedo = mix(tex.rgb, flat_c, 0.7) * mix(1.0, shade * cavity, 0.6);
+    }
     let m = textureSampleGrad(photo_nrm, photo_sampler, uv, layer, dx, dy);
-    let xy = (m.xy * 2.0 - 1.0) * relief;
+    var xy = (m.xy * 2.0 - 1.0) * relief;
+    // Мелкая фактура вблизи: тот же материал в 4,7 раза мельче (у кладки и плит — зерно скалы)
+    // добавляет поры, зёрна и волокна, которых в текстуре 1024 при подходе вплотную не хватает.
+    let metal = layer == 14 || layer == 15 || layer == 16 || layer == 17;
+    if pom_near > 0.02 && !metal && layer != 19 {
+        let dl = select(layer, 9, layer_has_grid(layer) || layer == 3);
+        let duv = uv * 4.7 + vec2<f32>(0.37, 0.11);
+        let fine = textureSampleGrad(photo_albedo, photo_sampler, duv, dl, dx * 4.7, dy * 4.7).rgb;
+        let coarse = textureSampleLevel(photo_albedo, photo_sampler, duv, dl, 5.0).rgb;
+        let lw = vec3<f32>(0.3, 0.5, 0.2);
+        let ratio = clamp(dot(fine, lw) / max(dot(coarse, lw), 0.02), 0.55, 1.6);
+        o.albedo *= mix(1.0, ratio, 0.6 * pom_near);
+        let fn2 = textureSampleGrad(photo_nrm, photo_sampler, duv, dl, dx * 4.7, dy * 4.7).xy * 2.0 - 1.0;
+        xy += fn2 * relief * 0.7 * pom_near;
+    }
     let z = sqrt(max(1.0 - dot(xy, xy), 0.0));
     o.n = t * xy.x + b * xy.y + n * z;
     o.rough = m.z;
@@ -663,6 +692,8 @@ fn fragment(
     var color = base_a;
     var rough = pbr_input.material.perceptual_roughness;
     var N = pbr_input.N;
+    // Добавка рассеянного света на скале обрывов (см. рельеф, вид 19).
+    var rock_fill = 0.0;
     var emissive = vec3<f32>(0.0);
     var water = false;
     // Объёмный рельеф: в полную силу вблизи, к 45 м сходит на нет (дальше его не разглядеть).
@@ -670,6 +701,7 @@ fn fragment(
     pom_view = normalize(to_cam);
     pom_k = 1.0 - smoothstep(18.0, 45.0, length(to_cam));
     pom_gate = 1.0;
+    pom_near = 1.0 - smoothstep(3.5, 14.0, length(to_cam));
     pom_sun = vec3<f32>(0.0, -1.0, 0.0);
 @if(!PREPASS_PIPELINE) {
     if lights.n_directional_lights > 0u {
@@ -837,8 +869,17 @@ fn fragment(
                     let streak = fbm(vec2<f32>(uv.x * 2.3, uv.y * 0.45) + wp.xz * 0.05);
                     color *= 0.84 + 0.32 * streak;
                     // Старая солома сереет и темнеет пятнами, свежие заплаты светлее и желтее.
-                    let age = smoothstep(0.35, 0.75, fbm(wp.xz * 0.18 + vec2<f32>(wp.y * 0.1, 2.3)));
-                    color = mix(color * vec3<f32>(1.08, 1.04, 0.9), color * vec3<f32>(0.72, 0.71, 0.72), age);
+                    let age = smoothstep(0.35, 0.7, fbm(wp.xz * 0.18 + vec2<f32>(wp.y * 0.1, 2.3)) * 0.55 + fbm(vec2<f32>(uv.x * 0.9, uv.y * 0.5) + wp.xz * 0.11) * 0.5);
+                    color = mix(color * vec3<f32>(0.54, 0.5, 0.42), color * vec3<f32>(0.33, 0.33, 0.35), age);
+                    // Ряды снопов видны и издали: под рваным срезом верхнего ряда лежит тень, у
+                    // каждого ряда свой тон. Без этого скат издали — ровный жёлтый лист.
+                    let rj = uv.y / 0.3 + (fbm(vec2<f32>(uv.x * 4.0, uv.y * 0.8)) - 0.5) * 0.45;
+                    let row_fade = 1.0 - smoothstep(0.1, 0.35, fwidth(rj));
+                    let lip = (1.0 - smoothstep(0.0, 0.3, fract(rj))) * row_fade;
+                    color *= (1.0 - 0.5 * lip) * mix(1.0, 0.84 + 0.3 * hash21(vec2<f32>(floor(rj), 3.1)), row_fade);
+                    // Потёки от дождей вниз по скату — тёмные серые дорожки.
+                    let run = smoothstep(0.5, 0.8, fbm(vec2<f32>(uv.x * 1.4, uv.y * 0.12) + wp.xz * 0.03 + vec2<f32>(7.0, 1.0)));
+                    color = mix(color, color * vec3<f32>(0.66, 0.67, 0.7), run * 0.8);
                     let moss = smoothstep(0.62, 0.8, fbm(uv * 0.9 + wp.xz * 0.04)) * moss_amount * (0.4 + age);
                     color = mix(color, vec3<f32>(0.17, 0.19, 0.08), moss * 0.7);
                     rough = clamp(ph.rough + moss * 0.1, 0.6, 1.0);
@@ -944,22 +985,109 @@ fn fragment(
             let soil = photo_top(8, 1.0 / 3.5, wp + vec3<f32>(17.0, 0.0, 5.0), n, relief, 1.0);
             let rock = photo_triplanar(side, side, surface.photo.w, surface.photo.w, wp * 0.5, n, relief);
             let gravel = photo_top(18, 0.5, wp, n, relief, 1.0);
-            let dry = smoothstep(0.42, 0.7, fbm(wp.xz * 0.045) + fbm(wp.xz * 0.4) * 0.25);
-            let g_col = retint(grass.albedo, mean, base_a, tint) * mix(vec3<f32>(1.0), vec3<f32>(1.1, 1.02, 0.82), smoothstep(0.3, 0.8, fbm(wp.xz * 0.02)));
+            let dry = smoothstep(0.5, 0.78, fbm(wp.xz * 0.045) + fbm(wp.xz * 0.4) * 0.25);
+            // Вблизи это земля под пучками травы (тёмная, пучки растут поверх — vegetation.rs);
+            // дальше, чем растёт трава, — сам травяной ковёр, светлее и зеленее: иначе вокруг
+            // игрока было бы видно кольцо, где трава кончается.
+            let carpet = smoothstep(35.0, 75.0, length(view.world_position.xyz - wp));
+            let g_col = retint(grass.albedo, mean, base_a, tint) * mix(vec3<f32>(1.0), vec3<f32>(1.05, 1.02, 0.9), smoothstep(0.4, 0.85, fbm(wp.xz * 0.02))) * mix(vec3<f32>(0.215, 0.185, 0.36), vec3<f32>(0.42, 0.42, 0.68), carpet);
             // Сухая почва под травой — тёмная, с прозеленью: светлая соломенная земля спорила
             // с зелёной травой и пересвечивала кадр.
-            let soil_c = mix(soil.albedo * vec3<f32>(0.5, 0.54, 0.46), g_col, 0.4);
+            let soil_c = mix(soil.albedo * mix(vec3<f32>(0.4, 0.45, 0.36), vec3<f32>(0.5, 0.54, 0.46), carpet), g_col, 0.5);
             ph.albedo = mix(g_col, soil_c, dry);
             ph.n = normalize(mix(grass.n, soil.n, dry));
             ph.rough = mix(grass.rough, soil.rough, dry);
-            let rk = smoothstep(0.38, 0.62, slope + (fbm(wp.xz * 0.08) - 0.5) * 0.35);
-            ph.albedo = mix(ph.albedo, retint(rock.albedo, surface.photo_mean_b.rgb, base_b, 0.5), rk);
-            ph.n = normalize(mix(ph.n, rock.n, rk));
+            // На крутом трава не держится: сначала голая земля с осыпью, круче — скала.
+            let bare = smoothstep(0.24, 0.33, slope + (fbm(wp.xz * 0.3) - 0.5) * 0.1 + (fbm(wp.xz * 0.9) - 0.5) * 0.05);
+            // Осыпь: голая земля вперемешку с щебнем, пятнами.
+            let scree = smoothstep(0.42, 0.62, fbm(wp.xz * 0.55 + vec2<f32>(7.3, 1.9))) * 0.75;
+            let bare_c = mix(mix(vec3<f32>(dot(soil.albedo, vec3<f32>(0.3, 0.6, 0.1))), soil.albedo, 0.45) * vec3<f32>(0.33, 0.32, 0.3), gravel.albedo * vec3<f32>(0.5, 0.5, 0.49), scree);
+            // На крутом проекция сверху растягивает рисунок земли полосами вдоль склона. Там
+            // рисунок берём со скалы (она снята с трёх сторон и не тянется): выходит плотный
+            // каменистый грунт, как на осыпающемся берегу.
+            let tilt_k = smoothstep(0.2, 0.42, slope);
+            let stony = clamp(rock.albedo / max(surface.photo_mean_b.rgb, vec3<f32>(0.02)), vec3<f32>(0.45), vec3<f32>(1.9)) * vec3<f32>(0.17, 0.155, 0.132) * mix(0.85, 1.12, fbm(wp.xz * 0.37 + vec2<f32>(wp.y, 2.7)));
+            // Щебень на каменистом грунте: мелкие камни разного тона с тёмными щелями между ними
+            // (вблизи; дальше 45 м они мельче пиксела и только рябят).
+            let peb_far = 1.0 - smoothstep(18.0, 45.0, length(view.world_position.xyz - wp));
+            let peb = voronoi(vec2<f32>(wp.x + wp.y * 0.7, wp.z + wp.y * 0.6) * 3.3);
+            let peb_gap = 1.0 - smoothstep(0.02, 0.14, peb.y - peb.x);
+            let pebbles = mix(1.0, mix(0.78, 1.22, peb.z) * (1.0 - 0.45 * peb_gap), peb_far * smoothstep(0.3, 0.6, fbm(wp.xz * 0.8 + vec2<f32>(wp.y, 5.5))));
+            let bare_cc = mix(bare_c, stony * pebbles, tilt_k);
+            ph.albedo = mix(ph.albedo, bare_cc, bare);
+            ph.n = normalize(mix(ph.n, mix(mix(soil.n, gravel.n, scree), normalize(mix(n, rock.n, 0.6)), tilt_k), bare));
+            ph.rough = mix(ph.rough, mix(soil.rough, gravel.rough, scree), bare);
+            let rk = smoothstep(0.31, 0.5, slope + (fbm(wp.xz * 0.08) - 0.5) * 0.3 + (fbm(wp.xz * 0.6) - 0.5) * 0.12);
+            // Скала обрывов: серый обветренный известняк пластами (светлый на солнце выгорал в белое
+            // пятно), сверху по уступам — тёмные потёки.
+            let strata = fbm(vec2<f32>((wp.x + wp.z) * 0.05, wp.y * 0.9));
+            let drip = smoothstep(0.45, 0.8, fbm(vec2<f32>((wp.x - wp.z) * 0.7, wp.y * 0.12)));
+            // Чёрные щели скана на солнце выглядят кляксами — контраст картинки убавлен.
+            let rock_flat = 0.5 * (surface.photo_mean_b.rgb + base_b);
+            // Самые чёрные щели скана подняты к среднему тону: на солнце они лежали кляксами.
+            let rock_a = mix(rock.albedo, max(rock.albedo, surface.photo_mean_b.rgb * 0.6), 0.5);
+            let rock_c = mix(rock_flat, retint(rock_a, surface.photo_mean_b.rgb, base_b, 0.5), mix(0.6, 0.9, pom_k)) * vec3<f32>(0.47, 0.455, 0.42) * mix(0.72, 1.12, strata) * (1.0 - 0.3 * drip);
+            // Скала ломается на блоки по пластам и трещинам: у каждого блока свой наклон грани
+            // и тон, между блоками — тёмные щели. Без этого обрыв читался гладкой «подушкой».
+            // Вблизи рельеф скалы в полную силу (резкие грани и трещинки), вдали мягче — там он рябит.
+            var crag_n = normalize(mix(n, rock.n, mix(0.4, 0.7, pom_k)));
+            var crag = 1.0;
+            if rk > 0.01 {
+                // Пласты лежат почти горизонтально и длинные; трещины идут не сплошной сеткой, а
+                // местами (сплошная сетка читалась каменной кладкой).
+                let warp = fbm(wp.xz * 0.21 + vec2<f32>(wp.y * 0.3, 4.1)) - 0.5;
+                let ly = wp.y * 0.5 + fbm(wp.xz * 0.06) * 2.2 + warp * 0.9;
+                let wx = smoothstep(0.3, 0.7, n.x * n.x / max(n.x * n.x + n.z * n.z, 1e-4));
+                let va = voronoi(vec2<f32>(wp.z * 0.17 + ly * 0.2 + warp, ly));
+                let vb = voronoi(vec2<f32>(wp.x * 0.17 - ly * 0.2 + warp, ly + 3.7));
+                let far = 1.0 - smoothstep(250.0, 500.0, length(view.world_position.xyz - wp));
+                let open = smoothstep(0.38, 0.62, fbm(vec2<f32>(wp.x + wp.z, wp.y * 2.0) * 0.23 + vec2<f32>(9.2, 3.3)));
+                let gap = mix(1.0 - smoothstep(0.02, 0.13, vb.y - vb.x), 1.0 - smoothstep(0.02, 0.13, va.y - va.x), wx) * far * mix(0.25, 1.0, open);
+                let id = mix(vb.z, va.z, step(0.5, wx));
+                crag = mix(0.82, 1.12, id) * (1.0 - 0.5 * gap);
+                let tilt = vec3<f32>(fract(id * 17.3) - 0.5, (fract(id * 5.1) - 0.5) * 0.5, fract(id * 29.7) - 0.5);
+                crag_n = normalize(crag_n + tilt * 0.7 * far * (1.0 - gap));
+                // Уступы пластов: низ каждого пласта выступает полочкой и ловит свет, верх уходит под
+                // карниз следующего и лежит в тени — на отвесной стене это главный рисунок (без него
+                // обрыв через бухту был ровной светлой лентой). Сила у каждого пласта своя.
+                let lp = ly * 1.3 + fbm(vec2<f32>(wp.x - wp.z, wp.y) * 0.13) * 0.8;
+                let lf = fract(lp);
+                let ledge_k = far * (1.0 - smoothstep(0.2, 0.5, fwidth(lp))) * mix(0.3, 1.0, smoothstep(0.35, 0.65, fbm(vec2<f32>((wp.x + wp.z) * 0.07, floor(lp) * 1.7))));
+                let under = smoothstep(0.5, 0.97, lf) * ledge_k;
+                crag = crag * (1.0 - 0.42 * under);
+                crag_n = normalize(crag_n + vec3<f32>(0.0, (0.42 - lf) * 0.9 * ledge_k, 0.0));
+            }
+            // Живой камень: серо-оливковый лишайник пятнами и тёмный мох на гранях, глядящих вверх.
+            let lichen = smoothstep(0.52, 0.74, fbm(vec2<f32>(wp.x + wp.y * 0.6, wp.z - wp.y * 0.5) * 0.9)) * smoothstep(0.3, 0.62, fbm(wp.xz * 3.1 + vec2<f32>(wp.y * 2.0, 1.3)));
+            // Мох — по наклону самой скалы (не по полочкам пластов: с ними он лез на всю стену) и
+            // мягкими пятнами; цвет тёмно-оливковый: почти чёрный мох в тени читался синими кляксами.
+            let moss = smoothstep(0.66, 0.86, normalize(mix(n, rock.n, 0.5)).y) * smoothstep(0.35, 0.75, fbm(wp.xz * 1.3 + vec2<f32>(3.1, wp.y)));
+            var rock_cc = rock_c * crag;
+            rock_cc = mix(rock_cc, (rock_cc * 0.55 + vec3<f32>(0.035, 0.04, 0.022)) * vec3<f32>(0.9, 1.0, 0.72), lichen * 0.6);
+            rock_cc = mix(rock_cc, vec3<f32>(0.06, 0.075, 0.03) * (0.6 + rock_a.g / max(surface.photo_mean_b.g, 0.02) * 0.5), moss * 0.6);
+            ph.albedo = mix(ph.albedo, rock_cc, rk);
+            // Светлая скала сама подсвечивает свои тени отражённым светом: без добавки тени елей
+            // лежали на обрыве иссиня-чёрными кляксами (на референсе тень на камне серая).
+            rock_fill = rk;
+            // Свет вскользь: грани рельефа, отвернувшиеся от солнца, гасли целиком и на светлой
+            // стене лежали сине-чёрными кляксами (а на теневой стене загорались белыми). Грань
+            // рельефа получает не меньше половины и не больше двух долей света самой стены.
+            let wall_l = max(dot(n, pom_sun), 0.0);
+            let crag_l = dot(crag_n, pom_sun);
+            crag_n = normalize(crag_n + pom_sun * (max(wall_l * 0.5 - crag_l, 0.0) - max(crag_l - wall_l * 1.9 - 0.2 * smoothstep(0.0, 0.2, wall_l), 0.0)));
+            ph.n = normalize(mix(ph.n, crag_n, rk));
             ph.rough = mix(ph.rough, rock.rough, rk);
             let shore = 1.0 - smoothstep(-1.0, 0.4, wp.y + (fbm(wp.xz * 0.3) - 0.5) * 0.8);
-            ph.albedo = mix(ph.albedo, gravel.albedo, shore);
-            ph.n = normalize(mix(ph.n, gravel.n, shore));
-            ph.rough = mix(ph.rough, gravel.rough * 0.7, shore);
+            // Галька лежит только на пологом берегу: у подножия обрыва в воду уходит сама скала
+            // (галька снята сверху и на крутом тянулась вдоль склона серой рябой полосой).
+            let beach = shore * (1.0 - smoothstep(0.3, 0.5, slope));
+            ph.albedo = mix(ph.albedo, gravel.albedo, beach);
+            ph.n = normalize(mix(ph.n, gravel.n, beach));
+            ph.rough = mix(ph.rough, gravel.rough * 0.7, beach);
+            // У самой воды берег мокрый: тёмная полоса с прозеленью (уровень воды — WATER_Y, −1,4 м).
+            let wet_edge = 1.0 - smoothstep(-1.3, -0.6, wp.y + (fbm(wp.xz * 0.7) - 0.5) * 0.5);
+            ph.albedo = ph.albedo * mix(vec3<f32>(1.0), vec3<f32>(0.5, 0.54, 0.46), wet_edge);
+            ph.rough = mix(ph.rough, 0.4, wet_edge * 0.7);
             color = ph.albedo;
         } else {
             if kind == 15 {
@@ -981,6 +1109,29 @@ fn fragment(
                 // Средний цвет того слоя, что виден: сверху — верхнего, на стенах — бокового.
                 let m = mix(surface.photo_mean_b.rgb, mean, smoothstep(0.3, 0.9, n.y));
                 color = retint(ph.albedo, m, base_a, tint);
+                if top == 11 && n.y > 0.7 {
+                    // Плиты мостовой: на фото швы в волосок и все плиты одного тона — издали
+                    // площадь читалась ровным песком. Сетка та же, что на фото (6×6 плит,
+                    // нечётные ряды сдвинуты на полплиты): в швах земля, у каждой плиты свой
+                    // тон, края затёрты темнее середины.
+                    // Края плит чуть гуляют: по линейке сетка читалась кафелем.
+                    let fuv = vec2<f32>(wp.x, -wp.z) * surface.photo.y * 6.0 + (vec2<f32>(fbm(wp.xz * 0.9), fbm(wp.zx * 0.9 + vec2<f32>(4.7, 1.3))) - 0.5) * 0.05;
+                    let row = floor(fuv.y);
+                    let fx = fuv.x + 0.5 * (row - 2.0 * floor(row * 0.5));
+                    let fc = vec2<f32>(fract(fx), fract(fuv.y));
+                    let e = min(min(fc.x, 1.0 - fc.x), min(fc.y, 1.0 - fc.y));
+                    let aa = fwidth(fuv.x) + fwidth(fuv.y);
+                    let keep = 1.0 - smoothstep(0.25, 0.7, aa);
+                    let id = hash21(vec2<f32>(floor(fx), row));
+                    let joint = (1.0 - smoothstep(0.01, 0.035 + aa, e)) * keep;
+                    let worn = fbm(wp.xz * 1.7);
+                    color *= mix(1.0, mix(0.8, 1.12, id), 1.0 - smoothstep(0.6, 1.5, aa)) * mix(vec3<f32>(1.03, 1.0, 0.95), vec3<f32>(0.95, 0.99, 1.05), fract(id * 7.31));
+                    color *= 1.0 - 0.13 * (1.0 - smoothstep(0.0, 0.22, e + (worn - 0.5) * 0.2)) * keep;
+                    let dirt = vec3<f32>(0.1, 0.085, 0.06) * (0.7 + 0.6 * worn);
+                    let weed = smoothstep(0.62, 0.8, fbm(wp.xz * 0.35 + vec2<f32>(3.3, 8.1))) * moss_amount;
+                    color = mix(color, mix(dirt, vec3<f32>(0.1, 0.13, 0.05), weed), joint * mix(0.45, 0.85, smoothstep(0.3, 0.7, fbm(wp.xz * 0.6 + vec2<f32>(1.9, 6.4)))));
+                    ph.rough = mix(ph.rough, 0.95, joint);
+                }
             }
         }
         // Крупные пятна выцветания и потемнения — ломают повтор тайла.
@@ -988,6 +1139,13 @@ fn fragment(
         color *= 1.0 + macro_v * variation * 1.2;
         rough = clamp(mix(rough, ph.rough, 0.85), 0.05, 1.0);
         N = ph.n;
+        if kind == 19 {
+            // Земля и трава матовые: против солнца блик на мелких нормалях давал белёсую рябь
+            // с чёрными точками.
+            rough = max(rough, 0.93);
+            pbr_input.material.reflectance = vec3<f32>(0.12);
+            N = normalize(mix(n, N, 0.6));
+        }
 
         // Мох у земли и на верхних гранях, грязь и подтёки снизу.
         let up = clamp(n.y, 0.0, 1.0);
@@ -1078,8 +1236,11 @@ fn fragment(
         let runs = smoothstep(0.35, 0.75, fbm(vec2<f32>(wp.x + wp.z, wp.y * 0.15) * 2.3)) * (1.0 - up);
         color *= 1.0 - wet * (0.22 + 0.18 * up + 0.12 * runs);
         color = mix(color, color * 0.6 + vec3<f32>(0.004, 0.005, 0.007), puddle);
-        rough = mix(rough, rough * mix(0.65, 0.3, up), wet);
-        rough = mix(rough, 0.04, puddle);
+        // Мокрый камень блестит, но не зеркалит целиком: против солнца склон и стена
+        // превращались в белый лист. Земля под травой (рельеф) почти не блестит, лужи на ней редки.
+        let ground19 = select(0.0, 1.0, kind == 19);
+        rough = mix(rough, rough * mix(mix(0.8, 0.5, up), 0.9, ground19), wet);
+        rough = mix(rough, 0.04, puddle * (1.0 - 0.8 * ground19));
         // В луже рельеф камня тонет: поверхность ровная, как зеркало.
         N = normalize(mix(N, n, puddle * 0.92 + wet * up * 0.25));
     }
@@ -1100,6 +1261,7 @@ fn fragment(
 @if(PREPASS_PIPELINE) {
     out = deferred_output(in, pbr_input);
 } @else {
+    pbr_input.diffuse_occlusion = pbr_input.diffuse_occlusion * (1.0 + 0.8 * rock_fill);
     out.color = apply_pbr_lighting(pbr_input);
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
 }

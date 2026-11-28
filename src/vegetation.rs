@@ -44,6 +44,7 @@ const TREES: &[(PlantKind, &str, u32)] = &[
     (PlantKind::Cypress, "cypress", 2),
     (PlantKind::Fig, "fig", 2),
     (PlantKind::Shrub, "shrub", 3),
+    (PlantKind::Fir, "fir", 3),
 ];
 
 /// Фотосканы камней (Poly Haven, CC0), `models/rocks/<id>.glb`.
@@ -62,6 +63,10 @@ pub struct FoliageExt {
     /// xy — направление ветра, z — гибкость (1 — листва, 0.3 — кора), w — запас.
     #[uniform(100)]
     pub dir: Vec4,
+    /// x — сила объёмного затенения кроны (тёмный низ и сердцевина, светлая макушка),
+    /// y — крона-колонна (0 — шар, 1 — нормали от оси ствола); остальное — запас.
+    #[uniform(100)]
+    pub shade: Vec4,
 }
 
 impl MaterialExtension for FoliageExt {
@@ -69,6 +74,9 @@ impl MaterialExtension for FoliageExt {
         "embedded://medieval_rpg/shaders/foliage.wesl".into()
     }
     fn prepass_vertex_shader() -> ShaderRef {
+        "embedded://medieval_rpg/shaders/foliage.wesl".into()
+    }
+    fn fragment_shader() -> ShaderRef {
         "embedded://medieval_rpg/shaders/foliage.wesl".into()
     }
 }
@@ -185,7 +193,7 @@ fn load_vegetation(mut commands: Commands, server: Res<AssetServer>, mut images:
     }
     let rocks = ROCKS.iter().map(|r| (r.to_string(), server.load(format!("models/rocks/{r}.glb")))).collect();
     let mut atlases = HashMap::new();
-    for a in ["broadleaf", "pine", "scale"] {
+    for a in ["broadleaf", "pine", "scale", "bough", "grass"] {
         atlases.insert(a, load_image(&mut images, &format!("textures/vegetation/{a}_atlas.png"), true, true));
     }
     let bark = (
@@ -223,22 +231,72 @@ struct RockModel {
 fn look(kind: PlantKind) -> (&'static str, Color, [f32; 3]) {
     match kind {
         // Хвоя крымской сосны тёмная, кора серо-бурая.
-        PlantKind::Pine => ("pine", Color::srgb(0.95, 1.0, 0.9), [0.92, 0.84, 0.84]),
+        PlantKind::Pine => ("pine", Color::linear_rgb(1.5, 1.45, 1.2), [0.92, 0.84, 0.84]),
         // Дуб пушистый: листья снизу опушённые — серовато-зелёная крона.
-        PlantKind::Oak => ("broadleaf", Color::srgb(0.88, 0.92, 0.8), [0.9, 0.9, 0.9]),
+        PlantKind::Oak => ("broadleaf", Color::srgb(0.78, 0.78, 0.6), [0.9, 0.9, 0.9]),
         // Можжевельник высокий — сизый.
-        PlantKind::Juniper => ("scale", Color::srgb(0.95, 1.0, 1.0), [1.0, 0.85, 0.8]),
-        PlantKind::Cypress => ("scale", Color::srgb(0.75, 0.85, 0.75), [0.9, 0.8, 0.75]),
+        PlantKind::Juniper => ("scale", Color::linear_rgb(1.2, 0.92, 0.9), [1.0, 0.85, 0.8]),
+        PlantKind::Cypress => ("scale", Color::linear_rgb(0.98, 0.78, 0.72), [0.9, 0.8, 0.75]),
         // Инжир — светлая сочная листва, гладкая серая кора.
         PlantKind::Fig => ("broadleaf", Color::srgb(1.05, 1.12, 0.85), [1.25, 1.25, 1.25]),
-        PlantKind::Shrub => ("broadleaf", Color::srgb(1.05, 1.05, 0.85), [0.9, 0.85, 0.8]),
+        PlantKind::Shrub => ("broadleaf", Color::srgb(0.84, 0.76, 0.52), [0.9, 0.85, 0.8]),
+        // Хвоя в бору тёмная, с сизым отливом; затенение кроны — в цвете вершин модели.
+        PlantKind::Fir => ("bough", Color::srgb(0.66, 0.58, 0.64), [0.74, 0.72, 0.74]),
         PlantKind::Rock => ("broadleaf", Color::WHITE, [1.0, 1.0, 1.0]),
+    }
+}
+
+/// Скругление нормалей листвы по кроне: (доля, высота середины кроны в единицах модели —
+/// см. высоты пород в tools/vegetation/blender_trees.py). У конической сосны нормали уже
+/// такие в самой модели.
+fn crown_of(kind: PlantKind) -> Option<(f32, f32)> {
+    match kind {
+        PlantKind::Pine => Some((0.85, 8.0)),
+        PlantKind::Oak => Some((0.85, 4.9)),
+        PlantKind::Juniper => Some((0.8, 2.2)),
+        PlantKind::Cypress => Some((0.7, 4.6)),
+        PlantKind::Fig => Some((0.85, 2.8)),
+        PlantKind::Shrub => Some((0.8, 0.8)),
+        PlantKind::Fir | PlantKind::Rock => None,
+    }
+}
+
+/// Сила объёмного затенения кроны (`FoliageExt::shade.x`). Шейдер считает крону шаром вокруг её
+/// середины; у узкой колонны кипариса шара нет — с полной силой нижняя половина уходила в черноту.
+fn shade_of(kind: PlantKind) -> f32 {
+    match kind {
+        PlantKind::Cypress => 0.3,
+        PlantKind::Fir | PlantKind::Rock => 0.0,
+        _ => 1.0,
+    }
+}
+
+/// Насколько крона — колонна, а не шар (`FoliageExt::shade.y`): у кипариса нормали «от середины
+/// кроны» ниже середины смотрели в землю, и вся нижняя половина дерева стояла без солнца —
+/// чёрной, с резкой границей посередине. У колонны нормали идут от оси ствола.
+fn column_of(kind: PlantKind) -> f32 {
+    match kind {
+        PlantKind::Cypress => 0.88,
+        PlantKind::Juniper => 0.4,
+        _ => 0.0,
+    }
+}
+
+/// Добавка рассеянного света в кроне (`FoliageExt::dir.w`): свет неба проходит сквозь хвою и
+/// листья, и теневой бок дерева тёмно-зелёный, а не чёрный. У тёмных хвойных добавка больше.
+fn fill_of(kind: PlantKind) -> f32 {
+    match kind {
+        PlantKind::Fir => 1.25,
+        // Кипарис — плотная тёмная колонна: без большой добавки теневая сторона уходит в черноту.
+        PlantKind::Cypress => 2.1,
+        PlantKind::Pine | PlantKind::Juniper => 1.2,
+        _ => 0.8,
     }
 }
 
 fn foliage_material(base: StandardMaterial, kind: WindKind) -> FoliageMaterial {
     let (s, flutter, flex) = wind_of(kind);
-    ExtendedMaterial { base, extension: FoliageExt { wind: Vec4::new(0.0, s, flutter, 0.0), dir: Vec4::new(0.8, 0.45, flex, 0.0) } }
+    ExtendedMaterial { base, extension: FoliageExt { wind: Vec4::new(0.0, s, flutter, 0.0), dir: Vec4::new(0.8, 0.45, flex, 0.0), shade: Vec4::ZERO } }
 }
 
 fn mesh_named(gltf: &Gltf, gltf_meshes: &Assets<GltfMesh>, name: &str) -> Option<Handle<Mesh>> {
@@ -269,6 +327,31 @@ fn mesh_bounds(mesh: &Mesh) -> Option<(Vec3, Vec3)> {
     Some((min, max))
 }
 
+/// Стволы в моделях гранёные (нормали по граням восьмиугольника): тонкому стволу это не вредит,
+/// а толстый ствол ели вблизи выходил тёсаным брусом. Усредняем нормали вершин, стоящих в одной
+/// точке, — ствол круглый.
+fn smooth_bark(mesh: &mut Mesh) {
+    let (Some(pos), Some(nrm)) = (mesh.attribute(Mesh::ATTRIBUTE_POSITION).and_then(|a| a.as_float3()).map(<[_]>::to_vec), mesh.attribute(Mesh::ATTRIBUTE_NORMAL).and_then(|a| a.as_float3()).map(<[_]>::to_vec)) else { return };
+    let key = |p: &[f32; 3]| [(p[0] * 2000.0).round() as i32, (p[1] * 2000.0).round() as i32, (p[2] * 2000.0).round() as i32];
+    let mut sum: HashMap<[i32; 3], Vec3> = HashMap::new();
+    for (p, n) in pos.iter().zip(&nrm) {
+        *sum.entry(key(p)).or_default() += Vec3::from(*n);
+    }
+    let out: Vec<[f32; 3]> = pos.iter().zip(&nrm).map(|(p, n)| sum[&key(p)].try_normalize().unwrap_or(Vec3::from(*n)).to_array()).collect();
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, out);
+}
+
+/// Во сколько раз притушить импостор, чтобы он совпал с живой кроной: у лиственных запечённая
+/// картинка светлее кроны, у хвойных она уже выровнена (fix_impostors.py) — лишнее затемнение
+/// превращало дальние можжевельники и кипарисы в чёрные кляксы.
+fn imp_gain(kind: PlantKind) -> f32 {
+    match kind {
+        PlantKind::Fir => 0.75,
+        PlantKind::Pine | PlantKind::Juniper | PlantKind::Cypress => 1.0,
+        _ => 0.55,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn spawn_plants(
     mut commands: Commands,
@@ -278,7 +361,7 @@ fn spawn_plants(
     gltfs: Res<Assets<Gltf>>,
     gltf_meshes: Res<Assets<GltfMesh>>,
     gltf_materials: Res<Assets<bevy::gltf::GltfMaterial>>,
-    meshes: Res<Assets<Mesh>>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut foliage: ResMut<Assets<FoliageMaterial>>,
     mut standard: ResMut<Assets<StandardMaterial>>,
     mut wind: Option<ResMut<WindMaterials>>,
@@ -308,22 +391,33 @@ fn spawn_plants(
             },
             WindKind::Bark,
         ));
-        let leaf = foliage.add(foliage_material(
+        let crown = crown_of(kind);
+        let mut leaf = foliage_material(
             StandardMaterial {
                 base_color: tint,
                 base_color_texture: assets.atlases.get(atlas).cloned(),
                 alpha_mode: AlphaMode::Mask(0.45),
-                double_sided: true,
+                // Со скруглёнными нормалями изнанку листа не переворачиваем: нормаль уже
+                // смотрит наружу кроны с обеих сторон карточки.
+                double_sided: crown.is_none(),
                 cull_mode: None,
-                perceptual_roughness: 0.8,
-                reflectance: 0.25,
+                perceptual_roughness: 0.9,
+                reflectance: 0.12,
                 // Свет сквозь листву (контровое солнце просвечивает крону). Больше не ставим:
                 // в Bevy пропускание отнимает столько же у отражённого света и крона темнеет.
                 diffuse_transmission: 0.15,
                 ..default()
             },
             WindKind::Leaves,
-        ));
+        );
+        if let Some((round, center)) = crown {
+            leaf.extension.wind.x = round;
+            leaf.extension.wind.w = center;
+            leaf.extension.shade.x = shade_of(kind);
+            leaf.extension.shade.y = column_of(kind);
+        }
+        leaf.extension.dir.w = fill_of(kind);
+        let leaf = foliage.add(leaf);
         wind.0.push((bark.clone(), WindKind::Bark));
         wind.0.push((leaf.clone(), WindKind::Leaves));
         bark_mats.insert(kind, bark);
@@ -342,21 +436,39 @@ fn spawn_plants(
             warn!("в модели {id} не все LOD");
             continue;
         };
+        for h in [&b0, &b1] {
+            if let Some(mut mesh) = meshes.get_mut(h) {
+                smooth_bark(&mut mesh);
+            }
+        }
         let height = [&b0, &l0].iter().filter_map(|h| meshes.get(*h)).filter_map(mesh_bounds).map(|(_, max)| max.y).fold(0.5f32, f32::max);
         let (_, tint, _) = look(*kind);
-        let imp_mat = foliage.add(foliage_material(
+        let mut imp_m = foliage_material(
             StandardMaterial {
-                base_color: tint,
+                // Запечённый импостор светлее живой кроны — вдали деревья выходили бледными «призраками».
+                // (У хвойных импостер уже выровнен под затенённую крону — fix_impostors.py.)
+                base_color: Color::from((tint.to_linear() * imp_gain(*kind)).with_alpha(1.0)),
                 base_color_texture: assets.impostors.get(id).cloned(),
                 alpha_mode: AlphaMode::Mask(0.45),
-                double_sided: true,
+                // Изнанку не переворачиваем: нормали импостора смотрят вверх, и перевёрнутая
+                // изнанка смотрела бы в землю — плоскость, видимая с тыла, выходила чёрной.
+                double_sided: false,
                 cull_mode: None,
                 perceptual_roughness: 0.9,
                 reflectance: 0.2,
                 ..default()
             },
             WindKind::Leaves,
-        ));
+        );
+        // Свет на импосторе — как на живой кроне: по «круглым» нормалям от середины кроны.
+        if let Some((round, center)) = crown_of(*kind) {
+            imp_m.extension.wind.x = round;
+            imp_m.extension.wind.w = center;
+            imp_m.extension.shade.x = shade_of(*kind);
+            imp_m.extension.shade.y = column_of(*kind);
+        }
+        imp_m.extension.dir.w = fill_of(*kind);
+        let imp_mat = foliage.add(imp_m);
         wind.0.push((imp_mat.clone(), WindKind::Leaves));
         models.entry(*kind).or_default().push(TreeModel {
             kind: *kind,
@@ -370,7 +482,8 @@ fn spawn_plants(
         });
     }
 
-    // Камни: материал из скана, чуть высветленный под местный известняк.
+    // Камни: материал из скана, приглушённый под серый местный известняк (в скане розоватые
+    // и рыжие пятна — на сером откосе глыбы выходили «кирпичами»).
     let mut rocks: Vec<RockModel> = Vec::new();
     for (id, h) in &assets.rocks {
         let Some(gltf) = gltfs.get(h) else { continue };
@@ -381,7 +494,7 @@ fn spawn_plants(
         let (Some(g0), Some(g1)) = (gltf_meshes.get(l0), gltf_meshes.get(l1)) else { continue };
         let (Some(p0), Some(p1)) = (g0.primitives.first(), g1.primitives.first()) else { continue };
         let mut sm = p0.material.as_ref().and_then(|m| gltf_materials.get(m)).map(bevy::pbr::gltf::standard_material_from_gltf_material).unwrap_or_default();
-        sm.base_color = Color::srgb(1.12, 1.08, 1.0);
+        sm.base_color = Color::linear_rgb(0.7, 0.75, 0.8);
         // Сетка в главном мире бывает уже выгружена (только для рендера) — тогда берём размер
         // скана из таблицы, иначе камни выходят то с гальку, то со скалу.
         let size = meshes.get(&p0.mesh).and_then(mesh_bounds).map(|(a, b)| (b - a).max_element()).filter(|s| *s > 0.0).unwrap_or_else(|| rock_scan_size(id));
@@ -404,7 +517,9 @@ fn spawn_plants(
         let Some(list) = models.get(&plant.kind).filter(|l| !l.is_empty()) else { continue };
         let m = &list[plant.variant as usize % list.len()];
         let s = plant.height / m.height;
-        let t = Transform::from_translation(plant.pos).with_rotation(Quat::from_rotation_y(plant.yaw)).with_scale(Vec3::splat(s));
+        // Высокая ель стройнее низкой: растёт вверх, а не вширь.
+        let slim = if plant.kind == PlantKind::Fir { 1.0 - 0.25 * ((plant.height - 10.0) / 14.0).clamp(0.0, 1.0) } else { 1.0 };
+        let t = Transform::from_translation(plant.pos).with_rotation(Quat::from_rotation_y(plant.yaw)).with_scale(Vec3::new(s * slim, s, s * slim));
         // Дальности LOD растут с размером растения: кусты переходят на импостор раньше деревьев.
         let k = (plant.height / 8.0).clamp(0.35, 1.5);
         let (d0, d1, d2) = (40.0 * k, 120.0 * k, 900.0 * k.min(1.0));
@@ -485,8 +600,9 @@ fn update_grass(
     mut commands: Commands,
     time: Res<Time>,
     mut grass: ResMut<Grass>,
-    cameras: Query<&GlobalTransform, With<Camera3d>>,
+    cameras: Query<(&GlobalTransform, &Camera), With<Camera3d>>,
     colliders: Option<Res<crate::collision::LevelColliders>>,
+    assets: Option<Res<VegetationAssets>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut foliage: ResMut<Assets<FoliageMaterial>>,
     mut wind: Option<ResMut<WindMaterials>>,
@@ -499,13 +615,27 @@ fn update_grass(
         return;
     }
     grass.next = now + 0.2;
-    let (Some(cam), Some(colliders)) = (cameras.iter().next(), colliders) else { return };
+    // Трава растёт вокруг той камеры, что сейчас рисует (для снимков это камера `MRPG_CAM`).
+    let cam = cameras.iter().find(|(_, c)| c.is_active).or_else(|| cameras.iter().next()).map(|(t, _)| t);
+    let (Some(cam), Some(colliders), Some(assets)) = (cam, colliders, assets) else { return };
     let Some(wind) = wind.as_mut() else { return };
     let material = grass
         .material
         .get_or_insert_with(|| {
             let h = foliage.add(foliage_material(
-                StandardMaterial { base_color: Color::WHITE, double_sided: true, cull_mode: None, perceptual_roughness: 0.85, reflectance: 0.25, diffuse_transmission: 0.3, ..default() },
+                StandardMaterial {
+                    base_color: Color::WHITE,
+                    base_color_texture: assets.atlases.get("grass").cloned(),
+                    alpha_mode: AlphaMode::Mask(0.42),
+                    // Обе стороны карточки светятся одинаково (нормаль вверх): без `double_sided`
+                    // Bevy не переворачивает нормаль у изнанки, и половина пучков не чернеет.
+                    double_sided: false,
+                    cull_mode: None,
+                    perceptual_roughness: 0.95,
+                    reflectance: 0.08,
+                    diffuse_transmission: 0.25,
+                    ..default()
+                },
                 WindKind::Grass,
             ));
             wind.0.push((h.clone(), WindKind::Grass));
@@ -552,15 +682,12 @@ fn update_grass(
 }
 
 fn hash2(x: i32, z: i32, s: u32) -> f32 {
-    let mut h = (x as u32).wrapping_mul(374761393) ^ (z as u32).wrapping_mul(668265263) ^ s.wrapping_mul(2246822519);
-    h = (h ^ (h >> 13)).wrapping_mul(1274126177);
+    // Перемешиваем как следует: при слабом хеше пучки травы ложились рядами.
+    let mut h = (x as u32).wrapping_mul(374761393).rotate_left(13) ^ (z as u32).wrapping_mul(668265263) ^ s.wrapping_mul(2246822519).rotate_left(7);
+    h = (h ^ (h >> 16)).wrapping_mul(0x85eb_ca6b);
+    h = (h ^ (h >> 13)).wrapping_mul(0xc2b2_ae35);
     h ^= h >> 16;
     (h & 0xFFFFFF) as f32 / 16777216.0
-}
-
-fn srgb(r: f32, g: f32, b: f32) -> Vec3 {
-    let l = Color::srgb(r, g, b).to_linear();
-    Vec3::new(l.red, l.green, l.blue)
 }
 
 /// Можно ли тут расти траве: за стенами, не на дороге, не в воде, не под постройкой.
@@ -579,10 +706,13 @@ pub fn grass_allowed(x: f32, z: f32, y: f32, colliders: &crate::collision::Level
     !colliders.point_solid(Vec3::new(x, y + 0.06, z)) && !colliders.point_solid(Vec3::new(x, y + 0.6, z))
 }
 
-/// Меш травы на участке: пучки тонких изогнутых травинок (ковыль, типчак, полынь) с цветами.
+/// Меш травы на участке: скрещённые карточки с пучками из атласа (луговой пучок, ковыль,
+/// разнотравье, низкая дернина — tools/vegetation/build_grass_atlas.py). На одной карточке
+/// десятки тонких травин, поэтому ковёр густой и мелкий, а треугольников на порядок меньше,
+/// чем когда каждая травина была своей полоской.
 fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelColliders) -> Option<Mesh> {
     let density = grass_density();
-    let step = if dense { 0.36 } else { 0.8 } / density.sqrt().max(0.2);
+    let step = if dense { 0.4 } else { 0.85 } / density.sqrt().max(0.2);
     let x0 = k.0 as f32 * GRASS_CHUNK;
     let z0 = k.1 as f32 * GRASS_CHUNK;
     let n = (GRASS_CHUNK / step).ceil() as i32;
@@ -592,13 +722,12 @@ fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelCo
     let mut uv0: Vec<[f32; 2]> = Vec::new();
     let mut uv1: Vec<[f32; 2]> = Vec::new();
     let mut idx: Vec<u32> = Vec::new();
-    // Цвета степи в конце лета: соломенный ковыль, оливковый типчак, сизая полынь, зелень у воды.
-    // Тон подобран под фототекстуру земли — иначе трава читается тёмной щетиной на светлом склоне.
-    let straw = srgb(0.44, 0.42, 0.21);
-    let olive = srgb(0.26, 0.34, 0.12);
-    let green = srgb(0.17, 0.30, 0.09);
-    let sage = srgb(0.32, 0.38, 0.25);
-    let flowers = [srgb(0.90, 0.75, 0.20), srgb(0.88, 0.86, 0.78), srgb(0.52, 0.40, 0.62), srgb(0.75, 0.18, 0.12)];
+    // Оттенки (множители к цвету атласа): сочная зелень у воды, оливковый типчак, соломенный
+    // ковыль на сухих местах, сизая полынь.
+    let green = Vec3::new(0.56, 0.69, 0.5);
+    let olive = Vec3::new(0.62, 0.66, 0.46);
+    let straw = Vec3::new(0.9, 0.84, 0.5);
+    let sage = Vec3::new(0.56, 0.65, 0.6);
     for iz in 0..n {
         for ix in 0..n {
             let gx = (x0 / step) as i32 + ix;
@@ -607,79 +736,86 @@ fn grass_chunk(k: (i32, i32), dense: bool, colliders: &crate::collision::LevelCo
             let z = z0 + (iz as f32 + hash2(gx, gz, 2)) * step;
             // Пятна: где-то густо, где-то проплешины с камнями.
             let patch = crate::level::fbm(x * 0.045, z * 0.045, 91);
-            let keep = ((patch - 0.2) * 3.6).clamp(0.0, 1.0);
+            let keep = ((patch - 0.14) * 5.0).clamp(0.0, 1.0);
             if hash2(gx, gz, 3) > keep {
                 continue;
             }
             let y = crate::level::ground_y(x, z);
             // Слишком круто — голый склон.
-            let slope = (crate::level::ground_y(x + 1.0, z) - y).abs().max((crate::level::ground_y(x, z + 1.0) - y).abs());
-            if slope > 0.7 || !grass_allowed(x, z, y, colliders) {
+            let (sx, sz) = (crate::level::ground_y(x + 1.0, z) - y, crate::level::ground_y(x, z + 1.0) - y);
+            let slope = sx.abs().max(sz.abs());
+            // На откосе трава редеет постепенно: отдельные пучки держатся и на осыпи.
+            if slope > 0.8 + 0.75 * hash2(gx, gz, 11) * hash2(gx, gz, 12) || !grass_allowed(x, z, y, colliders) {
                 continue;
             }
             let mix = crate::level::fbm(x * 0.02 + 3.0, z * 0.02, 17);
+            let dry = ((0.42 - mix) * 4.0).clamp(0.0, 1.0);
             let wet = (-(y - crate::level::WATER_Y - 2.0) * 0.3).clamp(0.0, 1.0);
-            let base_col = straw.lerp(olive, ((mix - 0.35) * 3.0).clamp(0.0, 1.0)).lerp(sage, ((0.4 - mix) * 4.0).clamp(0.0, 1.0)).lerp(green, wet * 0.7);
-            let tall = 0.75 + keep * 0.5;
-            let blades = if dense { 9 + (hash2(gx, gz, 4) * 8.0) as i32 } else { 7 + (hash2(gx, gz, 4) * 5.0) as i32 };
+            let lush = ((mix - 0.5) * 4.0).clamp(0.0, 1.0).max(wet);
+            let tint = olive.lerp(green, lush).lerp(straw, dry * 0.7).lerp(sage, ((crate::level::fbm(x * 0.07, z * 0.07, 23) - 0.62) * 6.0).clamp(0.0, 0.6));
+            // Какой пучок: под ногами больше всего низкой дернины, над ней — луговые пучки,
+            // на сухих местах ковыль, изредка разнотравье с цветами.
+            let roll = hash2(gx, gz, 4);
+            let (cell, w, h, quads) = if roll < 0.05 + 0.05 * lush {
+                (2usize, 0.55 + hash2(gx, gz, 6) * 0.3, 0.5 + hash2(gx, gz, 7) * 0.35, 2)
+            } else if roll < 0.12 + 0.3 * dry {
+                (1, 0.6 + hash2(gx, gz, 6) * 0.4, 0.5 + hash2(gx, gz, 7) * 0.4, 2)
+            } else if roll < 0.5 + 0.1 * lush || keep < 0.7 || slope > 0.6 {
+                // На проплешинах и откосах — только стоячие пучки: низкая дернина поодиночке
+                // лежит «звёздами».
+                (0, 0.55 + hash2(gx, gz, 6) * 0.4, (0.34 + hash2(gx, gz, 7) * 0.36) * (0.8 + 0.4 * keep), 2)
+            } else {
+                (3, 0.7 + hash2(gx, gz, 6) * 0.45, (0.2 + hash2(gx, gz, 7) * 0.16) * (0.85 + 0.3 * keep), if dense { 3 } else { 2 })
+            };
+            // Вдали пучков меньше — они крупнее, чтобы ковёр не редел.
+            let (w, h) = if dense { (w, h) } else { (w * 1.7, h * 1.2) };
+            let (cu, cv) = ((cell % 2) as f32 * 0.5, (cell / 2) as f32 * 0.5);
             let phase = hash2(gx, gz, 5);
-            for b in 0..blades {
-                let hb = |s: u32| hash2(gx * 13 + b, gz * 7 - b, s);
-                let a = hb(6) * std::f32::consts::TAU;
-                let r = hb(7).sqrt() * if dense { 0.26 } else { 0.5 };
-                let bx = x + a.cos() * r;
-                let bz = z + a.sin() * r;
-                let h = (0.16 + hb(8) * hb(8) * 0.5) * tall * if dense { 1.0 } else { 1.15 };
-                let w = if dense { 0.014 + hb(9) * 0.02 } else { 0.035 + hb(9) * 0.04 };
-                let lean_dir = Vec2::new(a.cos(), a.sin()) * (0.15 + hb(10) * 0.45);
-                let face = a + std::f32::consts::FRAC_PI_2 + (hb(11) - 0.5);
-                let side = Vec3::new(face.cos(), 0.0, face.sin()) * w * 0.5;
-                let tint = 0.8 + hb(12) * 0.35;
-                // У корня темно: стебли затеняют друг друга — ковёр выглядит объёмным.
-                let bottom = base_col * 0.38 * tint;
-                let top = base_col.lerp(straw, hb(13) * 0.35) * (1.0 + hb(13) * 0.15) * tint;
+            let yaw0 = hash2(gx, gz, 8) * std::f32::consts::TAU;
+            let shade = 0.82 + hash2(gx, gz, 9) * 0.36;
+                    // Общий тон: приглушённая зелень, без желтизны.
+            let c = tint * shade * Vec3::new(0.45, 0.37, 0.67);
+            for q in 0..quads {
+                let a = yaw0 + q as f32 * std::f32::consts::PI / quads as f32 + (hash2(gx + q, gz - q, 10) - 0.5) * 0.5;
+                let dir = Vec3::new(a.cos(), 0.0, a.sin());
+                // Карточка слегка завалена назад: сверху ковёр не превращается в палочки.
+                // Низкая дернина и дальние пучки завалены сильнее: сверху (со стены, с холма)
+                // они закрывают землю, а не торчат «палочками».
+                let lean = if cell == 3 { 2.6 } else if dense { 0.5 } else { 1.3 };
+                let back = Vec3::new(-a.sin(), 0.0, a.cos()) * (hash2(gx - q, gz + q, 11) - 0.5) * lean * h;
+                let flip = hash2(gx + 3 * q, gz, 12) < 0.5;
+                // Полосы низкой дернины не сходятся в одной точке: сверху пучок выглядел
+                // «звездой» из скрещённых лент, а так они лежат вразброс, как кочки.
+                let off = if cell == 3 { Vec3::new(-a.sin(), 0.0, a.cos()) * (hash2(gx + 5 * q, gz - 2 * q, 13) - 0.5) * 0.7 } else { Vec3::ZERO };
                 let start = pos.len() as u32;
-                let segs = if dense { 3 } else { 2 };
-                for s in 0..=segs {
-                    let t = s as f32 / segs as f32;
-                    let bend = Vec3::new(lean_dir.x, 0.0, lean_dir.y) * h * t * t;
-                    let c = Vec3::new(bx, y - 0.03, bz) + Vec3::Y * h * t + bend;
-                    let wd = 1.0 - t * 0.85;
-                    for sign in [-1.0f32, 1.0] {
-                        pos.push((c + side * sign * wd).to_array());
-                        // Нормаль почти вверх — трава освещается мягко, без чёрных граней.
-                        let n = (Vec3::Y * 0.85 + Vec3::new(-face.sin(), 0.0, face.cos()) * 0.25 * sign).normalize();
-                        nrm.push(n.to_array());
-                        // Лист сложен вдоль жилки: одна половина в тени, другая на свету.
-                        let cc = bottom.lerp(top, t.powf(0.7)) * if sign < 0.0 { 0.78 } else { 1.1 };
-                        col.push([cc.x, cc.y, cc.z, 1.0]);
-                        uv0.push([(sign + 1.0) * 0.5, t]);
+                for row in 0..3 {
+                    let t = row as f32 * 0.5;
+                    for (side, u) in [(-0.5f32, 0.0f32), (0.5, 1.0)] {
+                        let px = x + off.x + dir.x * side * w + back.x * t * t;
+                        let pz = z + off.z + dir.z * side * w + back.z * t * t;
+                        // Низ карточки идёт по нарисованной земле, по её треугольникам: посаженный
+                        // по гладкой высоте или по наклону в центре пучок на крутом и неровном
+                        // тонул краем в ребре треугольника, и земля срезала его прямой линией.
+                        let gy = crate::level::mesh_y(px, pz);
+                        // Комель пучка на картинке тёмный и плотный: на светлой земле (склон, осыпь,
+                        // проплешина) он лежал тёмной полосой с прямым нижним краем — «ямкой» под
+                        // каждым пучком. Самый низ прячем в землю, остальной комель высветляем.
+                        let root = if cell == 3 { 0.16 } else { 0.11 };
+                        pos.push([px, gy - 0.04 + h * (t - root * (1.0 - t)), pz]);
+                        // Нормаль вверх — трава освещается мягко, как ковёр, а не как забор.
+                        let nn = (Vec3::Y + Vec3::new(-a.sin(), 0.0, a.cos()) * 0.2).normalize();
+                        nrm.push(nn.to_array());
+                        let lift = 1.0 + (if cell == 3 { 0.75 } else { 0.5 }) * (1.0 - t) * (1.0 - t);
+                        col.push([c.x * lift, c.y * lift, c.z * lift, 1.0]);
+                        let uu = if flip { 1.0 - u } else { u };
+                        uv0.push([cu + 0.006 + uu * 0.488, cv + 0.497 - t * 0.49]);
                         uv1.push([t.powf(1.5) * (h / 0.5).min(1.5), phase]);
                     }
                 }
-                for s in 0..segs {
-                    let i = start + s * 2;
+                for row in 0..2 {
+                    let i = start + row * 2;
                     idx.extend_from_slice(&[i, i + 1, i + 3, i, i + 3, i + 2]);
                 }
-            }
-            // Изредка — цветок (жёлтый девясил, белый тысячелистник, шалфей, мак).
-            if dense && hash2(gx, gz, 14) < 0.02 {
-                let fc = flowers[(hash2(gx, gz, 15) * 4.0) as usize % 4];
-                let h = 0.35 + hash2(gx, gz, 16) * 0.3;
-                let top = Vec3::new(x, y + h, z);
-                let start = pos.len() as u32;
-                for (dx, dz) in [(0.03f32, 0.0f32), (0.0, 0.03)] {
-                    let s = pos.len() as u32;
-                    for (px, py) in [(-1.0f32, -1.0f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
-                        pos.push((top + Vec3::new(dx * px, 0.03 * py * 0.6, dz * px)).to_array());
-                        nrm.push([0.0, 1.0, 0.0]);
-                        col.push([fc.x, fc.y, fc.z, 1.0]);
-                        uv0.push([0.5, 1.0]);
-                        uv1.push([1.0, phase]);
-                    }
-                    idx.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
-                }
-                let _ = start;
             }
         }
     }
@@ -726,7 +862,7 @@ mod tests {
         for r in ROCKS {
             assert!(root.join(format!("models/rocks/{r}.glb")).exists(), "нет камня {r}");
         }
-        for a in ["broadleaf", "pine", "scale"] {
+        for a in ["broadleaf", "pine", "scale", "bough", "grass"] {
             assert!(root.join(format!("textures/vegetation/{a}_atlas.png")).exists());
         }
     }
@@ -735,8 +871,18 @@ mod tests {
     #[test]
     fn city_has_plants_of_every_kind() {
         let layout = crate::level::layout();
-        for kind in [PlantKind::Pine, PlantKind::Oak, PlantKind::Juniper, PlantKind::Cypress, PlantKind::Fig, PlantKind::Shrub, PlantKind::Rock] {
+        for kind in [PlantKind::Pine, PlantKind::Oak, PlantKind::Juniper, PlantKind::Cypress, PlantKind::Fig, PlantKind::Shrub, PlantKind::Fir, PlantKind::Rock] {
             assert!(layout.plants.iter().any(|p| p.kind == kind), "нет растений {kind:?}");
         }
+    }
+
+    /// Берег бухты каменистый: у кромки воды лежат глыбы (на гладком склоне вода встречалась с
+    /// землёй без единого камня).
+    #[test]
+    fn bay_shore_has_boulders_at_the_waterline() {
+        use crate::level::{WATER_Y, ground_y};
+        let layout = crate::level::layout();
+        let n = layout.plants.iter().filter(|p| p.kind == PlantKind::Rock && (270.0..540.0).contains(&p.pos.x) && (140.0..480.0).contains(&p.pos.z) && (ground_y(p.pos.x, p.pos.z) - WATER_Y).abs() < 0.8).count();
+        assert!(n >= 40, "глыб у воды в бухте: {n}");
     }
 }
