@@ -10,7 +10,8 @@
 use crate::appearance::{Folk, Look, Shape};
 use crate::combat::WeaponKind;
 use crate::protocol::ActorKind;
-use bevy::camera::visibility::{DynamicSkinnedMeshBounds, NoFrustumCulling};
+use bevy::camera::primitives::Aabb;
+use bevy::camera::visibility::{DynamicSkinnedMeshBounds, NoAutoAabb, NoFrustumCulling};
 use bevy::gltf::{Gltf, GltfMaterial, GltfMesh, GltfSkin};
 use bevy::mesh::morph::MeshMorphWeights;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
@@ -466,6 +467,12 @@ fn keep_view_arm_drawn(
 #[derive(Component, Clone)]
 pub struct Blade(pub Handle<StandardMaterial>);
 
+/// Рамка человека в любой позе (в системе корня скелета, ноги на нуле): руки вверх и в
+/// стороны, шаг, присед, поклон. Лежащих и плывущих поворачивает корень — рамка за ним.
+pub fn person_bounds() -> Aabb {
+    Aabb::from_min_max(Vec3::new(-1.05, -0.35, -1.05), Vec3::new(1.05, 2.3, 1.05))
+}
+
 impl CharacterModels {
     /// Создаёт примитивы детали как дочерние сущности. `skin` — суставы для скинованной детали.
     fn spawn_part(&mut self, parent: &mut ChildSpawnerCommands, materials: &mut Assets<StandardMaterial>, name: &str, outfit: Option<&Outfit>, skin: Option<&[Entity]>, blade: bool) {
@@ -485,10 +492,20 @@ impl CharacterModels {
                 e.insert(MeshMorphWeights::Value { weights: targets.iter().map(|t| shape.weight(t)).collect() });
             }
             if let Some(joints) = skin {
-                // Рамка для отсечения считается по суставам каждый кадр. Раньше здесь стояло
-                // NoFrustumCulling, и все люди города рисовались всегда — и за спиной, и в каждом
-                // каскаде теней.
-                e.insert((SkinnedMesh { inverse_bindposes: self.bindposes.clone(), joints: joints.to_vec() }, DynamicSkinnedMeshBounds));
+                // Рамка для отсечения — одна на все позы, в системе корня скелета (суставы —
+                // его дети). Раньше здесь стояло NoFrustumCulling (все люди города рисовались
+                // всегда), потом рамка по суставам, которую Bevy пересчитывал каждый кадр для
+                // каждой из ~10 тыс. деталей всех жителей, даже спрятанных.
+                e.insert(SkinnedMesh { inverse_bindposes: self.bindposes.clone(), joints: joints.to_vec() });
+                if crate::crowd_lod::enabled() {
+                    let lod = crate::crowd_lod::PartLod::of(name, &mat_name);
+                    e.insert((person_bounds(), NoAutoAabb, lod));
+                    if !lod.casts_shadow() {
+                        e.insert(bevy::light::NotShadowCaster);
+                    }
+                } else {
+                    e.insert(DynamicSkinnedMeshBounds);
+                }
             }
             if blade {
                 e.insert(Blade(mat));
@@ -1148,6 +1165,7 @@ pub struct ApplyPoseSet;
 impl Plugin for RigPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BladeTints>()
+            .add_plugins(crate::crowd_lod::CrowdLodPlugin)
             .add_systems(Startup, load_models)
             .add_systems(Update, finish_models.run_if(resource_exists::<ModelsHandle>))
             .add_systems(PostUpdate, (apply_look_tints, keep_view_arm_drawn.before(crate::settings::SettingsSet)))
@@ -1159,6 +1177,51 @@ impl Plugin for RigPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Мировые точки суставов позы (плюс концы кистей и стоп) — в системе корня скелета.
+    fn joint_points(pose: &RigPose) -> Vec<Vec3> {
+        let mut at = [Vec3::ZERO; BONES];
+        let mut rot = [Quat::IDENTITY; BONES];
+        for b in 0..BONES {
+            let (p, r) = match PARENT[b] {
+                None => (pose.pelvis, Quat::IDENTITY),
+                Some(q) => (at[q] + rot[q] * REST[b], rot[q]),
+            };
+            at[b] = p;
+            rot[b] = r * pose.rot[b];
+        }
+        let mut pts = at.to_vec();
+        for b in [Bone::HandR, Bone::HandL, Bone::FootR, Bone::FootL, Bone::Head] {
+            // Кисть с пальцами, стопа с носком, макушка: ~0,25 м за суставом.
+            let tip = if b == Bone::Head { Vec3::Y * 0.3 } else { Vec3::NEG_Y * 0.22 };
+            pts.push(at[b as usize] + rot[b as usize] * tip);
+        }
+        pts
+    }
+
+    #[test]
+    fn person_bounds_hold_every_pose() {
+        // Рамку отсечения больше не пересчитывают по суставам: она обязана вмещать любую позу,
+        // иначе человек пропадёт у края кадра.
+        let b = person_bounds();
+        let (lo, hi) = (Vec3::from(b.min()), Vec3::from(b.max()));
+        let mut poses = vec![RigPose::default(), dead_pose(3), swim_pose(0.0), swim_pose(1.4)];
+        let reach = [Vec3::new(0.3, 2.0, -0.6), Vec3::new(-0.9, 1.4, 0.0), Vec3::new(0.2, 0.3, -0.7), Vec3::new(0.0, 1.3, 0.9)];
+        for k in 0..24 {
+            let u = k as f32 / 24.0;
+            for grip in reach {
+                poses.push(
+                    solve_pose(&PoseInput { walk: 1.0, speed: 6.5, walk_phase: u * TAU, crouch: u, lean: -0.6 + 1.2 * u, twist: -1.0 + 2.0 * u, pitch: -1.0 + 2.0 * u, right_grip: Some(grip), left_grip: Some(grip * Vec3::new(-1.0, 1.0, 1.0)), time: u * 9.0, ..default() })
+                        .pose,
+                );
+            }
+        }
+        for pose in &poses {
+            for p in joint_points(pose) {
+                assert!(p.cmpgt(lo).all() && p.cmplt(hi).all(), "точка {p} вне рамки {lo}..{hi}");
+            }
+        }
+    }
 
     #[test]
     fn rest_pose_stands_on_ground() {
